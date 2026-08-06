@@ -1,0 +1,8 @@
+{
+  "name": "NExt Academy Dashboard",
+  "description": "An interactive management dashboard and AI co-pilot for NEXT Academy. Features cohort student rosters, academic risk modeling, career placement funnels, scheduling, and custom AI progress report generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

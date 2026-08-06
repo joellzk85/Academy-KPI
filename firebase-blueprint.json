@@ -1,0 +1,35 @@
+{
+  "entities": {
+    "Representative": {
+      "title": "Representative",
+      "description": "Sales representative profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "kpi": { "type": "number" }
+      }
+    },
+    "Event": {
+      "title": "Event",
+      "description": "Calendar event entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "reps": {
+      "schema": "Representative",
+      "description": "Sales representatives collection"
+    },
+    "events": {
+      "schema": "Event",
+      "description": "Calendar events collection"
+    }
+  }
+}

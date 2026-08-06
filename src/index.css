@@ -1,0 +1,107 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Archivo", sans-serif;
+  --font-mono: "Archivo", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Light theme for Next Academy Sales & Ops dashboard */
+body {
+  font-family: var(--font-sans);
+  background-color: #f8fafc;
+  color: #0f172a;
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+@keyframes flash-red {
+  0%, 100% {
+    background-color: #fee2e2;
+    border-color: #f87171;
+    color: #991b1b;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    background-color: #ef4444;
+    border-color: #dc2626;
+    color: #ffffff;
+    box-shadow: 0 0 8px 4px rgba(239, 68, 68, 0.2);
+  }
+}
+
+.animate-flash-red {
+  animation: flash-red 1s infinite;
+}
+
+/* Printing styling to produce high-fidelity PDFs and physical pages */
+@media print {
+  /* Hide all elements that are not print-friendly */
+  .no-print,
+  button,
+  input,
+  select,
+  textarea,
+  .sidebar,
+  nav,
+  header,
+  footer,
+  aside {
+    display: none !important;
+  }
+
+  /* Reset layout for body and main container to take full width */
+  body, html, #root {
+    background: white !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Hide other parts of the application when printing the quotation */
+  body * {
+    visibility: hidden;
+  }
+  
+  /* Make only the print-paper and its contents visible */
+  .print-paper,
+  .print-paper * {
+    visibility: visible;
+  }
+
+  /* Position the print-paper nicely at the top of the page */
+  .print-paper {
+    visibility: visible !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+    color: black !important;
+  }
+}
