@@ -32,6 +32,40 @@ import ManagementDashboard from './components/ManagementDashboard';
 import { INITIAL_REPRESENTATIVES, INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, ChatMessage } from './types';
 
+// Firestore does not support arrays nested inside arrays (e.g. string[][]).
+// These two fields on Representative.kpi are arrays-of-arrays in memory
+// (indexed by week number), so we serialize them to a JSON string before
+// writing to Firestore, and parse them back when reading.
+const NESTED_ARRAY_KPI_FIELDS = ['taggedRepIdsList', 'completedTagsList'] as const;
+
+function toFirestoreRep(rep: Representative): any {
+  // Deep clone so we never mutate React state in place
+  const clone: any = JSON.parse(JSON.stringify(rep));
+  if (clone.kpi) {
+    for (const field of NESTED_ARRAY_KPI_FIELDS) {
+      if (Array.isArray(clone.kpi[field])) {
+        clone.kpi[field] = JSON.stringify(clone.kpi[field]);
+      }
+    }
+  }
+  return clone;
+}
+
+function fromFirestoreRep(data: any): any {
+  if (data && data.kpi) {
+    for (const field of NESTED_ARRAY_KPI_FIELDS) {
+      if (typeof data.kpi[field] === 'string') {
+        try {
+          data.kpi[field] = JSON.parse(data.kpi[field]);
+        } catch {
+          data.kpi[field] = [];
+        }
+      }
+    }
+  }
+  return data;
+}
+
 export default function App() {
   // Passwords mapping state (tied to localStorage for persistence)
   const [passwords, setPasswords] = useState<Record<string, string>>(() => {
@@ -279,7 +313,7 @@ export default function App() {
     // Push updated representatives with targets / details to Firestore
     for (const r of updatedReps) {
       try {
-        await setDoc(doc(db, 'reps', r.id), r);
+        await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
       } catch (err) {
         console.error("Firestore rep update failed on month change:", err);
       }
@@ -292,7 +326,7 @@ export default function App() {
     const unsubscribe = onSnapshot(collection(db, 'reps'), async (snapshot) => {
       const firestoreReps: any[] = [];
       snapshot.forEach((docSnap) => {
-        firestoreReps.push({ ...docSnap.data(), id: docSnap.id });
+        firestoreReps.push(fromFirestoreRep({ ...docSnap.data(), id: docSnap.id }));
       });
 
       if (firestoreReps.length > 0) {
@@ -301,7 +335,7 @@ export default function App() {
         if (missingReps.length > 0) {
           for (const r of missingReps) {
             try {
-              await setDoc(doc(db, 'reps', r.id), r);
+              await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
             } catch (err) {
               console.error("Firestore seeding of missing rep failed:", err);
             }
@@ -350,7 +384,7 @@ export default function App() {
         }
         if (repsList && repsList.length > 0) {
           for (const r of repsList) {
-            await setDoc(doc(db, 'reps', r.id), r);
+            await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
           }
         }
       }
@@ -642,7 +676,7 @@ export default function App() {
     };
     setRepresentatives(prev => [...prev, newRep]);
     try {
-      await setDoc(doc(db, 'reps', id), newRep);
+      await setDoc(doc(db, 'reps', id), toFirestoreRep(newRep));
     } catch (err) {
       console.error("Firestore add rep failed:", err);
     }
@@ -663,7 +697,7 @@ export default function App() {
     localStorage.setItem('next_reps', JSON.stringify(updatedReps));
     for (const r of updatedReps) {
       try {
-        await setDoc(doc(db, 'reps', r.id), r);
+        await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
       } catch (err) {
         console.error("Firestore update reps list failed:", err);
       }
@@ -762,7 +796,7 @@ export default function App() {
       const updatedRep = { ...targetRep, kpi: updatedKpi };
       setRepresentatives(prev => prev.map(rep => rep.id === repId ? updatedRep : rep));
       try {
-        await setDoc(doc(db, 'reps', repId), updatedRep);
+        await setDoc(doc(db, 'reps', repId), toFirestoreRep(updatedRep));
         
         // Also update month_kpis collection to maintain historical month integrity across all devices
         const key = `${repId}_${selectedMonth}`;
@@ -779,7 +813,7 @@ export default function App() {
       const updatedRep = { ...targetRep, targets: updatedTargets };
       setRepresentatives(prev => prev.map(rep => rep.id === repId ? updatedRep : rep));
       try {
-        await setDoc(doc(db, 'reps', repId), updatedRep);
+        await setDoc(doc(db, 'reps', repId), toFirestoreRep(updatedRep));
       } catch (err) {
         console.error("Firestore update rep targets failed:", err);
       }
