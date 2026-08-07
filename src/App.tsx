@@ -33,10 +33,10 @@ import { INITIAL_REPRESENTATIVES, INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTI
 import { Representative, CalendarEvent, ChatMessage } from './types';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
-// These two fields on Representative.kpi are arrays-of-arrays in memory
+// These fields on Representative.kpi are arrays-of-arrays in memory
 // (indexed by week number), so we serialize them to a JSON string before
 // writing to Firestore, and parse them back when reading.
-const NESTED_ARRAY_KPI_FIELDS = ['taggedRepIdsList', 'completedTagsList'] as const;
+const NESTED_ARRAY_KPI_FIELDS = ['taggedRepIdsList', 'completedTagsList', 'collaborationCommentsList'] as const;
 
 function toFirestoreRep(rep: Representative): any {
   // Deep clone so we never mutate React state in place
