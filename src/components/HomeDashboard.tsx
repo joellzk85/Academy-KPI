@@ -27,12 +27,23 @@ interface HomeDashboardProps {
 
 const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
   if (pipelinesSync && pipelinesSync.length > 0) {
-    return pipelinesSync;
+    return pipelinesSync.map((p: any) => p.id === 'pipe_4' && p.proposalValue === 65000 ? { ...p, proposalValue: 0 } : p);
   }
   const saved = localStorage.getItem('next_pipelines_shared');
   if (saved) {
     try {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      let modified = false;
+      parsed.forEach((p: any) => {
+        if (p.id === 'pipe_4' && p.proposalValue === 65000) {
+          p.proposalValue = 0;
+          modified = true;
+        }
+      });
+      if (modified) {
+        localStorage.setItem('next_pipelines_shared', JSON.stringify(parsed));
+      }
+      return parsed;
     } catch {
       return [];
     }
@@ -104,7 +115,7 @@ const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
             requestDate: '2026-06-28',
             type: 'Training',
             proposalSentDate: '2026-06-30',
-            proposalValue: 65000,
+            proposalValue: 0,
             followUpDate: '2026-07-08',
             status: 'Won',
             client: 'Maybank HQ',

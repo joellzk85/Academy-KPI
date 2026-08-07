@@ -128,7 +128,7 @@ export default function ManagementDashboard({
               requestDate: '2026-06-28',
               type: 'Training',
               proposalSentDate: '2026-06-30',
-              proposalValue: 65000,
+              proposalValue: 0,
               followUpDate: '2026-07-08',
               status: 'Won',
               client: 'Maybank HQ',

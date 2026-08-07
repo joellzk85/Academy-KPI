@@ -68,7 +68,7 @@ export function getInitialPipelinesForRep(repId: string) {
         requestDate: '2026-06-28',
         type: 'Training',
         proposalSentDate: '2026-06-30',
-        proposalValue: 65000,
+        proposalValue: 0,
         followUpDate: '2026-07-08',
         status: 'Won',
         client: 'Maybank HQ',
@@ -471,7 +471,18 @@ export default function RepDetailDashboard({
     const saved = localStorage.getItem('next_pipelines_shared');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        let modified = false;
+        parsed.forEach((p: any) => {
+          if (p.id === 'pipe_4' && p.proposalValue === 65000) {
+            p.proposalValue = 0;
+            modified = true;
+          }
+        });
+        if (modified) {
+          localStorage.setItem('next_pipelines_shared', JSON.stringify(parsed));
+        }
+        return parsed;
       } catch {
         return [];
       }
@@ -492,6 +503,9 @@ export default function RepDetailDashboard({
       const repName = repObj ? repObj.name : (id.charAt(0).toUpperCase() + id.slice(1).replace('-', ' '));
 
       repPipes.forEach((p: any) => {
+        if (p.id === 'pipe_4' && p.proposalValue === 65000) {
+          p.proposalValue = 0;
+        }
         if (!combined.some(item => item.id === p.id)) {
           combined.push({
             ...p,
@@ -521,7 +535,12 @@ export default function RepDetailDashboard({
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const firestorePipes: any[] = [];
       snapshot.forEach((docSnap) => {
-        firestorePipes.push({ ...docSnap.data(), id: docSnap.id });
+        const data = docSnap.data();
+        if (docSnap.id === 'pipe_4' && data.proposalValue === 65000) {
+          data.proposalValue = 0;
+          setDoc(doc(db, 'pipelines', 'pipe_4'), { ...data, proposalValue: 0 }).catch(err => console.error(err));
+        }
+        firestorePipes.push({ ...data, id: docSnap.id });
       });
 
       if (firestorePipes.length > 0) {
