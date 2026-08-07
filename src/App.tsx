@@ -478,20 +478,28 @@ export default function App() {
     const unsubscribePipes = onSnapshot(collection(db, 'pipelines'), (snapshot) => {
       const pipes: any[] = [];
       snapshot.forEach((docSnap) => {
-        pipes.push({ ...docSnap.data(), id: docSnap.id });
-      });
-      if (pipes.length > 0) {
-        pipes.sort((a, b) => b.id.localeCompare(a.id));
-        localStorage.setItem('next_pipelines_shared', JSON.stringify(pipes));
-        
-        // Sync individual rep keys
-        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
-        repIds.forEach(id => {
-          const ownedPipes = pipes.filter(p => p.ownerId === id || p.creatorId === id || p.taggedRepIds?.includes(id));
-          localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
+        const data = docSnap.data();
+        const docId = docSnap.id;
+        pipes.push({
+          ...data,
+          id: docId,
+          ownerId: data.ownerId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : ''),
+          creatorId: data.creatorId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : '')
         });
-        setPipelinesSync(pipes);
+      });
+      pipes.sort((a, b) => b.id.localeCompare(a.id));
+      localStorage.setItem('next_pipelines_shared', JSON.stringify(pipes));
+      if (pipes.length > 0) {
+        localStorage.setItem('migrated_pipelines_to_firestore', 'true');
       }
+      
+      // Sync individual rep keys
+      const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+      repIds.forEach(id => {
+        const ownedPipes = pipes.filter(p => p.ownerId === id || p.creatorId === id || p.taggedRepIds?.includes(id));
+        localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
+      });
+      setPipelinesSync(pipes);
     });
 
     // 2. Tasks Real-time Sync
@@ -1056,6 +1064,7 @@ export default function App() {
                 passwords={passwords}
                 onUpdatePasswords={handleUpdatePasswords}
                 onUpdateRepsList={handleUpdateRepsList}
+                pipelinesSync={pipelinesSync}
               />
             </motion.div>
           ) : !selectedRepId ? (

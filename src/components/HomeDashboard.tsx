@@ -26,7 +26,7 @@ interface HomeDashboardProps {
 }
 
 const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
-  if (pipelinesSync && pipelinesSync.length > 0) {
+  if (pipelinesSync) {
     return pipelinesSync.map((p: any) => p.id === 'pipe_4' && p.proposalValue === 65000 ? { ...p, proposalValue: 0 } : p);
   }
   const saved = localStorage.getItem('next_pipelines_shared');
@@ -47,6 +47,10 @@ const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
     } catch {
       return [];
     }
+  }
+
+  if (localStorage.getItem('migrated_pipelines_to_firestore') === 'true') {
+    return [];
   }
 
   const combined: any[] = [];

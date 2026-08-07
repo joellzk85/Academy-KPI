@@ -45,6 +45,7 @@ interface ManagementDashboardProps {
   passwords?: Record<string, string>;
   onUpdatePasswords?: (updatedPasswords: Record<string, string>) => void;
   onUpdateRepsList?: (updatedReps: Representative[]) => void;
+  pipelinesSync?: any[];
 }
 
 export default function ManagementDashboard({
@@ -57,7 +58,8 @@ export default function ManagementDashboard({
   onMonthChange,
   passwords = {},
   onUpdatePasswords = () => {},
-  onUpdateRepsList = () => {}
+  onUpdateRepsList = () => {},
+  pipelinesSync
 }: ManagementDashboardProps) {
   // Navigation Tabs for Management Console
   const [activeTab, setActiveTab] = useState<'overview' | 'targets' | 'quick-log' | 'pipelines' | 'reps'>('overview');
@@ -66,6 +68,10 @@ export default function ManagementDashboard({
   const [allPipelines, setAllPipelines] = useState<any[]>([]);
 
   useEffect(() => {
+    if (pipelinesSync) {
+      setAllPipelines(pipelinesSync);
+      return;
+    }
     // Collect pipelines from all reps
     const collected: any[] = [];
     reps.forEach(r => {
@@ -79,7 +85,7 @@ export default function ManagementDashboard({
             repId: r.id
           });
         });
-      } else {
+      } else if (localStorage.getItem('migrated_pipelines_to_firestore') !== 'true') {
         // Fallback default initial data
         let defaults: any[] = [];
         if (r.id === 'chee-cai') {

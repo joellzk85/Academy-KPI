@@ -488,6 +488,11 @@ export default function RepDetailDashboard({
       }
     }
     
+    // If already seeded to Firestore or explicitly cleared, do not re-generate defaults
+    if (localStorage.getItem('migrated_pipelines_to_firestore') === 'true') {
+      return [];
+    }
+
     const combined: any[] = [];
     const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
     repIds.forEach(id => {
@@ -536,11 +541,17 @@ export default function RepDetailDashboard({
       const firestorePipes: any[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (docSnap.id === 'pipe_4' && data.proposalValue === 65000) {
+        const docId = docSnap.id;
+        if (docId === 'pipe_4' && data.proposalValue === 65000) {
           data.proposalValue = 0;
           setDoc(doc(db, 'pipelines', 'pipe_4'), { ...data, proposalValue: 0 }).catch(err => console.error(err));
         }
-        firestorePipes.push({ ...data, id: docSnap.id });
+        firestorePipes.push({
+          ...data,
+          id: docId,
+          ownerId: data.ownerId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : ''),
+          creatorId: data.creatorId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : '')
+        });
       });
 
       if (firestorePipes.length > 0) {
@@ -548,6 +559,7 @@ export default function RepDetailDashboard({
         firestorePipes.sort((a, b) => b.id.localeCompare(a.id));
         setPipelines(firestorePipes);
         localStorage.setItem('next_pipelines_shared', JSON.stringify(firestorePipes));
+        localStorage.setItem('migrated_pipelines_to_firestore', 'true');
         
         // Sync back to individual keys
         const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
@@ -556,25 +568,38 @@ export default function RepDetailDashboard({
           localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
         });
       } else {
-        // No pipelines in Firestore yet, let's migrate local ones!
-        const localSaved = localStorage.getItem('next_pipelines_shared');
-        let parsed: any[] = [];
-        if (localSaved) {
-          try {
-            parsed = JSON.parse(localSaved);
-          } catch {}
-        }
-        if (!parsed || parsed.length === 0) {
-          parsed = getSharedPipelines();
-        }
-        if (parsed && parsed.length > 0) {
-          for (const p of parsed) {
-            const docId = p.id || `pipe_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-            await setDoc(doc(db, 'pipelines', docId), {
-              ...p,
-              id: docId
-            });
+        const alreadyMigrated = localStorage.getItem('migrated_pipelines_to_firestore') === 'true';
+        if (!alreadyMigrated) {
+          // No pipelines in Firestore yet, let's migrate local ones!
+          const localSaved = localStorage.getItem('next_pipelines_shared');
+          let parsed: any[] = [];
+          if (localSaved) {
+            try {
+              parsed = JSON.parse(localSaved);
+            } catch {}
           }
+          if (!parsed || parsed.length === 0) {
+            parsed = getSharedPipelines();
+          }
+          if (parsed && parsed.length > 0) {
+            for (const p of parsed) {
+              const docId = p.id || `pipe_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+              await setDoc(doc(db, 'pipelines', docId), {
+                ...p,
+                id: docId,
+                ownerId: p.ownerId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : ''),
+                creatorId: p.creatorId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : '')
+              });
+            }
+          }
+          localStorage.setItem('migrated_pipelines_to_firestore', 'true');
+        } else {
+          setPipelines([]);
+          localStorage.setItem('next_pipelines_shared', JSON.stringify([]));
+          const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+          repIds.forEach(id => {
+            localStorage.setItem(`next_pipelines_${id}`, JSON.stringify([]));
+          });
         }
       }
     });
