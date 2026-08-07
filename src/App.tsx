@@ -38,30 +38,43 @@ import { Representative, CalendarEvent, ChatMessage } from './types';
 // writing to Firestore, and parse them back when reading.
 const NESTED_ARRAY_KPI_FIELDS = ['taggedRepIdsList', 'completedTagsList', 'collaborationCommentsList'] as const;
 
+function sanitizeKpiForFirestore(kpi: any): any {
+  if (!kpi) return kpi;
+  const clone: any = JSON.parse(JSON.stringify(kpi));
+  for (const field of NESTED_ARRAY_KPI_FIELDS) {
+    if (Array.isArray(clone[field])) {
+      clone[field] = JSON.stringify(clone[field]);
+    }
+  }
+  return clone;
+}
+
+function hydrateKpi(kpi: any): any {
+  if (!kpi) return kpi;
+  for (const field of NESTED_ARRAY_KPI_FIELDS) {
+    if (typeof kpi[field] === 'string') {
+      try {
+        kpi[field] = JSON.parse(kpi[field]);
+      } catch {
+        kpi[field] = [];
+      }
+    }
+  }
+  return kpi;
+}
+
 function toFirestoreRep(rep: Representative): any {
   // Deep clone so we never mutate React state in place
   const clone: any = JSON.parse(JSON.stringify(rep));
   if (clone.kpi) {
-    for (const field of NESTED_ARRAY_KPI_FIELDS) {
-      if (Array.isArray(clone.kpi[field])) {
-        clone.kpi[field] = JSON.stringify(clone.kpi[field]);
-      }
-    }
+    clone.kpi = sanitizeKpiForFirestore(clone.kpi);
   }
   return clone;
 }
 
 function fromFirestoreRep(data: any): any {
   if (data && data.kpi) {
-    for (const field of NESTED_ARRAY_KPI_FIELDS) {
-      if (typeof data.kpi[field] === 'string') {
-        try {
-          data.kpi[field] = JSON.parse(data.kpi[field]);
-        } catch {
-          data.kpi[field] = [];
-        }
-      }
-    }
+    data.kpi = hydrateKpi(data.kpi);
   }
   return data;
 }
@@ -267,7 +280,7 @@ export default function App() {
       const key = `${rep.id}_${selectedMonth}`;
       dict[key] = rep.kpi;
       try {
-        await setDoc(doc(db, 'month_kpis', key), { kpi: rep.kpi, repId: rep.id, month: selectedMonth });
+        await setDoc(doc(db, 'month_kpis', key), { kpi: sanitizeKpiForFirestore(rep.kpi), repId: rep.id, month: selectedMonth });
       } catch (err) {
         console.error("Firestore save month KPI failed:", err);
       }
@@ -282,7 +295,7 @@ export default function App() {
       try {
         const docSnap = await getDoc(doc(db, 'month_kpis', key));
         if (docSnap.exists()) {
-          monthKpi = docSnap.data().kpi;
+          monthKpi = hydrateKpi(docSnap.data().kpi);
         }
       } catch (err) {
         console.error("Firestore getDoc month KPI failed:", err);
@@ -478,28 +491,20 @@ export default function App() {
     const unsubscribePipes = onSnapshot(collection(db, 'pipelines'), (snapshot) => {
       const pipes: any[] = [];
       snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const docId = docSnap.id;
-        pipes.push({
-          ...data,
-          id: docId,
-          ownerId: data.ownerId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : ''),
-          creatorId: data.creatorId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : '')
-        });
+        pipes.push({ ...docSnap.data(), id: docSnap.id });
       });
-      pipes.sort((a, b) => b.id.localeCompare(a.id));
-      localStorage.setItem('next_pipelines_shared', JSON.stringify(pipes));
       if (pipes.length > 0) {
-        localStorage.setItem('migrated_pipelines_to_firestore', 'true');
+        pipes.sort((a, b) => b.id.localeCompare(a.id));
+        localStorage.setItem('next_pipelines_shared', JSON.stringify(pipes));
+        
+        // Sync individual rep keys
+        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+        repIds.forEach(id => {
+          const ownedPipes = pipes.filter(p => p.ownerId === id || p.creatorId === id || p.taggedRepIds?.includes(id));
+          localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
+        });
+        setPipelinesSync(pipes);
       }
-      
-      // Sync individual rep keys
-      const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
-      repIds.forEach(id => {
-        const ownedPipes = pipes.filter(p => p.ownerId === id || p.creatorId === id || p.taggedRepIds?.includes(id));
-        localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
-      });
-      setPipelinesSync(pipes);
     });
 
     // 2. Tasks Real-time Sync
@@ -553,7 +558,7 @@ export default function App() {
         const data = docSnap.data();
         if (data && data.kpi) {
           const key = docSnap.id;
-          dict[key] = data.kpi;
+          dict[key] = hydrateKpi(data.kpi);
           changed = true;
         }
       });
@@ -808,7 +813,7 @@ export default function App() {
         
         // Also update month_kpis collection to maintain historical month integrity across all devices
         const key = `${repId}_${selectedMonth}`;
-        await setDoc(doc(db, 'month_kpis', key), { kpi: updatedKpi, repId, month: selectedMonth });
+        await setDoc(doc(db, 'month_kpis', key), { kpi: sanitizeKpiForFirestore(updatedKpi), repId, month: selectedMonth });
       } catch (err) {
         console.error("Firestore update rep KPI failed:", err);
       }
@@ -1064,7 +1069,6 @@ export default function App() {
                 passwords={passwords}
                 onUpdatePasswords={handleUpdatePasswords}
                 onUpdateRepsList={handleUpdateRepsList}
-                pipelinesSync={pipelinesSync}
               />
             </motion.div>
           ) : !selectedRepId ? (
@@ -1387,3 +1391,4 @@ export default function App() {
     </div>
   );
 }
+

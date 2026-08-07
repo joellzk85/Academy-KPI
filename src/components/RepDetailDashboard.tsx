@@ -68,7 +68,7 @@ export function getInitialPipelinesForRep(repId: string) {
         requestDate: '2026-06-28',
         type: 'Training',
         proposalSentDate: '2026-06-30',
-        proposalValue: 0,
+        proposalValue: 65000,
         followUpDate: '2026-07-08',
         status: 'Won',
         client: 'Maybank HQ',
@@ -471,28 +471,12 @@ export default function RepDetailDashboard({
     const saved = localStorage.getItem('next_pipelines_shared');
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        let modified = false;
-        parsed.forEach((p: any) => {
-          if (p.id === 'pipe_4' && p.proposalValue === 65000) {
-            p.proposalValue = 0;
-            modified = true;
-          }
-        });
-        if (modified) {
-          localStorage.setItem('next_pipelines_shared', JSON.stringify(parsed));
-        }
-        return parsed;
+        return JSON.parse(saved);
       } catch {
         return [];
       }
     }
     
-    // If already seeded to Firestore or explicitly cleared, do not re-generate defaults
-    if (localStorage.getItem('migrated_pipelines_to_firestore') === 'true') {
-      return [];
-    }
-
     const combined: any[] = [];
     const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
     repIds.forEach(id => {
@@ -508,9 +492,6 @@ export default function RepDetailDashboard({
       const repName = repObj ? repObj.name : (id.charAt(0).toUpperCase() + id.slice(1).replace('-', ' '));
 
       repPipes.forEach((p: any) => {
-        if (p.id === 'pipe_4' && p.proposalValue === 65000) {
-          p.proposalValue = 0;
-        }
         if (!combined.some(item => item.id === p.id)) {
           combined.push({
             ...p,
@@ -540,18 +521,7 @@ export default function RepDetailDashboard({
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const firestorePipes: any[] = [];
       snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const docId = docSnap.id;
-        if (docId === 'pipe_4' && data.proposalValue === 65000) {
-          data.proposalValue = 0;
-          setDoc(doc(db, 'pipelines', 'pipe_4'), { ...data, proposalValue: 0 }).catch(err => console.error(err));
-        }
-        firestorePipes.push({
-          ...data,
-          id: docId,
-          ownerId: data.ownerId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : ''),
-          creatorId: data.creatorId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : '')
-        });
+        firestorePipes.push({ ...docSnap.data(), id: docSnap.id });
       });
 
       if (firestorePipes.length > 0) {
@@ -559,7 +529,6 @@ export default function RepDetailDashboard({
         firestorePipes.sort((a, b) => b.id.localeCompare(a.id));
         setPipelines(firestorePipes);
         localStorage.setItem('next_pipelines_shared', JSON.stringify(firestorePipes));
-        localStorage.setItem('migrated_pipelines_to_firestore', 'true');
         
         // Sync back to individual keys
         const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
@@ -568,39 +537,11 @@ export default function RepDetailDashboard({
           localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
         });
       } else {
-        const alreadyMigrated = localStorage.getItem('migrated_pipelines_to_firestore') === 'true';
-        if (!alreadyMigrated) {
-          // No pipelines in Firestore yet, let's migrate local ones!
-          const localSaved = localStorage.getItem('next_pipelines_shared');
-          let parsed: any[] = [];
-          if (localSaved) {
-            try {
-              parsed = JSON.parse(localSaved);
-            } catch {}
-          }
-          if (!parsed || parsed.length === 0) {
-            parsed = getSharedPipelines();
-          }
-          if (parsed && parsed.length > 0) {
-            for (const p of parsed) {
-              const docId = p.id || `pipe_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-              await setDoc(doc(db, 'pipelines', docId), {
-                ...p,
-                id: docId,
-                ownerId: p.ownerId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : ''),
-                creatorId: p.creatorId || (docId === 'pipe_1' || docId === 'pipe_2' ? 'chee-cai' : docId === 'pipe_3' ? 'alif' : docId === 'pipe_4' ? 'xin-ying' : '')
-              });
-            }
-          }
-          localStorage.setItem('migrated_pipelines_to_firestore', 'true');
-        } else {
-          setPipelines([]);
-          localStorage.setItem('next_pipelines_shared', JSON.stringify([]));
-          const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
-          repIds.forEach(id => {
-            localStorage.setItem(`next_pipelines_${id}`, JSON.stringify([]));
-          });
-        }
+        // Firestore genuinely has no pipelines (either none created yet, or all deleted).
+        // Reflect that truthfully instead of re-uploading stale localStorage data,
+        // which would silently resurrect deleted items on every refresh.
+        setPipelines([]);
+        localStorage.setItem('next_pipelines_shared', JSON.stringify([]));
       }
     });
 
@@ -5210,3 +5151,4 @@ export default function RepDetailDashboard({
     </div>
   );
 }
+

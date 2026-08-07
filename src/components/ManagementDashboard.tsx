@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Representative } from '../types';
 import { getRepMetrics } from '../initialData';
+import { getDeletedPipelineIds } from './RepDetailDashboard';
 import { 
   TrendingUp, 
   Users, 
@@ -68,8 +69,9 @@ export default function ManagementDashboard({
   const [allPipelines, setAllPipelines] = useState<any[]>([]);
 
   useEffect(() => {
+    const deleted = getDeletedPipelineIds();
     if (pipelinesSync) {
-      setAllPipelines(pipelinesSync);
+      setAllPipelines(pipelinesSync.filter((p: any) => !deleted.includes(p.id)));
       return;
     }
     // Collect pipelines from all reps
@@ -79,11 +81,13 @@ export default function ManagementDashboard({
       if (saved) {
         const parsed = JSON.parse(saved);
         parsed.forEach((p: any) => {
-          collected.push({
-            ...p,
-            repName: r.name,
-            repId: r.id
-          });
+          if (!deleted.includes(p.id)) {
+            collected.push({
+              ...p,
+              repName: r.name,
+              repId: r.id
+            });
+          }
         });
       } else if (localStorage.getItem('migrated_pipelines_to_firestore') !== 'true') {
         // Fallback default initial data
@@ -143,16 +147,18 @@ export default function ManagementDashboard({
           ];
         }
         defaults.forEach(p => {
-          collected.push({
-            ...p,
-            repName: r.name,
-            repId: r.id
-          });
+          if (!deleted.includes(p.id)) {
+            collected.push({
+              ...p,
+              repName: r.name,
+              repId: r.id
+            });
+          }
         });
       }
     });
-    setAllPipelines(collected);
-  }, [reps, activeTab]);
+    setAllPipelines(collected.filter((p: any) => !deleted.includes(p.id)));
+  }, [reps, activeTab, pipelinesSync]);
 
   // Selected rep for targets edit
   const [editingTargetsId, setEditingTargetsId] = useState<string | null>(null);

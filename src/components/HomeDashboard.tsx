@@ -3,6 +3,7 @@ import { Representative, CalendarEvent } from '../types';
 import { getRepMetrics } from '../initialData';
 import { Plus, Calendar, ChevronLeft, ChevronRight, Edit3, Trash2, Megaphone, HelpCircle, Check, Users, RefreshCw } from 'lucide-react';
 import { initAuth, googleSignIn, googleSignOut, syncEventToGoogleCalendar } from '../lib/googleCalendar';
+import { getDeletedPipelineIds } from './RepDetailDashboard';
 
 interface HomeDashboardProps {
   reps: Representative[];
@@ -26,8 +27,11 @@ interface HomeDashboardProps {
 }
 
 const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
+  const deleted = getDeletedPipelineIds();
   if (pipelinesSync) {
-    return pipelinesSync.map((p: any) => p.id === 'pipe_4' && p.proposalValue === 65000 ? { ...p, proposalValue: 0 } : p);
+    return pipelinesSync
+      .filter((p: any) => !deleted.includes(p.id))
+      .map((p: any) => p.id === 'pipe_4' && p.proposalValue === 65000 ? { ...p, proposalValue: 0 } : p);
   }
   const saved = localStorage.getItem('next_pipelines_shared');
   if (saved) {
@@ -43,7 +47,7 @@ const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
       if (modified) {
         localStorage.setItem('next_pipelines_shared', JSON.stringify(parsed));
       }
-      return parsed;
+      return parsed.filter((p: any) => !deleted.includes(p.id));
     } catch {
       return [];
     }
@@ -605,12 +609,15 @@ export default function HomeDashboard({
   const getRepPipelineSalesForMonth = (repId: string, targetMonth: string): number => {
     try {
       let pipes: any[] = [];
-      if (pipelinesSync && pipelinesSync.length > 0) {
-        pipes = pipelinesSync.filter((p: any) => p.ownerId === repId || p.creatorId === repId || p.taggedRepIds?.includes(repId));
+      const deleted = getDeletedPipelineIds();
+      if (pipelinesSync !== undefined) {
+        pipes = pipelinesSync.filter((p: any) => (p.ownerId === repId || p.creatorId === repId || p.taggedRepIds?.includes(repId)) && !deleted.includes(p.id));
       } else {
         const saved = localStorage.getItem(`next_pipelines_${repId}`);
         if (saved) {
-          pipes = JSON.parse(saved);
+          try {
+            pipes = JSON.parse(saved).filter((p: any) => !deleted.includes(p.id));
+          } catch {}
         }
       }
       return pipes
