@@ -79,6 +79,31 @@ export function getInitialPipelinesForRep(repId: string) {
   return [];
 }
 
+// Tombstone list of pipeline IDs the user has deleted, so other views
+// (e.g. HomeDashboard's own shared-pipeline loader) can filter them out
+// even if they're reading from a stale local cache instead of live Firestore.
+const DELETED_PIPELINE_IDS_KEY = 'next_deleted_pipeline_ids';
+
+export function getDeletedPipelineIds(): string[] {
+  try {
+    const saved = localStorage.getItem(DELETED_PIPELINE_IDS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+function markPipelineDeleted(id: string) {
+  try {
+    const current = getDeletedPipelineIds();
+    if (!current.includes(id)) {
+      localStorage.setItem(DELETED_PIPELINE_IDS_KEY, JSON.stringify([...current, id]));
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export default function RepDetailDashboard({
   rep,
   reps,
@@ -3705,6 +3730,7 @@ export default function RepDetailDashboard({
                                       localStorage.setItem('next_pipelines_shared', JSON.stringify(updated));
                                       try {
                                         await deleteDoc(doc(db, 'pipelines', p.id));
+                                        markPipelineDeleted(p.id);
                                       } catch (err) {
                                         console.error("Firestore delete pipeline failed:", err);
                                       }
@@ -5151,4 +5177,5 @@ export default function RepDetailDashboard({
     </div>
   );
 }
+
 
