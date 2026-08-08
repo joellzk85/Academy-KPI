@@ -825,8 +825,8 @@ export default function RepDetailDashboard({
             ownerId: pipeOwnerId,
             ownerName: ownerObj.name,
             taggedRepIds: pipeTaggedRepIds,
-            tagNote: pipeTagNote.trim() || undefined,
-            notes: pipeNotes.trim() || undefined,
+            tagNote: pipeTagNote.trim(),
+            notes: pipeNotes.trim(),
             completedTags: p.completedTags || [],
             appointmentTicked: pipeAppointmentTicked
           };
@@ -864,8 +864,8 @@ export default function RepDetailDashboard({
         ownerId: pipeOwnerId,
         ownerName: ownerObj.name,
         taggedRepIds: pipeTaggedRepIds,
-        tagNote: pipeTagNote.trim() || undefined,
-        notes: pipeNotes.trim() || undefined,
+        tagNote: pipeTagNote.trim(),
+        notes: pipeNotes.trim(),
         completedTags: [],
         appointmentTicked: pipeAppointmentTicked
       };
@@ -5146,5 +5146,3 @@ export default function RepDetailDashboard({
     </div>
   );
 }
-
-
