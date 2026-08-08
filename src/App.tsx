@@ -254,9 +254,6 @@ export default function App() {
 
   // Selected Month View State (Format: MMM-YY, e.g. 'JUL-26')
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
-    const saved = localStorage.getItem('next_selected_month');
-    if (saved) return saved;
-
     const date = new Date();
     const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
     const monthStr = months[date.getMonth()];
@@ -1406,3 +1403,4 @@ export default function App() {
     </div>
   );
 }
+

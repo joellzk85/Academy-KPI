@@ -3,7 +3,6 @@ import { Representative, CalendarEvent } from '../types';
 import { getRepMetrics } from '../initialData';
 import { Plus, Calendar, ChevronLeft, ChevronRight, Edit3, Trash2, Megaphone, HelpCircle, Check, Users, RefreshCw } from 'lucide-react';
 import { initAuth, googleSignIn, googleSignOut, syncEventToGoogleCalendar } from '../lib/googleCalendar';
-import { getDeletedPipelineIds } from './RepDetailDashboard';
 
 interface HomeDashboardProps {
   reps: Representative[];
@@ -27,34 +26,16 @@ interface HomeDashboardProps {
 }
 
 const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
-  const deleted = getDeletedPipelineIds();
-  if (pipelinesSync) {
-    return pipelinesSync
-      .filter((p: any) => !deleted.includes(p.id))
-      .map((p: any) => p.id === 'pipe_4' && p.proposalValue === 65000 ? { ...p, proposalValue: 0 } : p);
+  if (pipelinesSync && pipelinesSync.length > 0) {
+    return pipelinesSync;
   }
   const saved = localStorage.getItem('next_pipelines_shared');
   if (saved) {
     try {
-      const parsed = JSON.parse(saved);
-      let modified = false;
-      parsed.forEach((p: any) => {
-        if (p.id === 'pipe_4' && p.proposalValue === 65000) {
-          p.proposalValue = 0;
-          modified = true;
-        }
-      });
-      if (modified) {
-        localStorage.setItem('next_pipelines_shared', JSON.stringify(parsed));
-      }
-      return parsed.filter((p: any) => !deleted.includes(p.id));
+      return JSON.parse(saved);
     } catch {
       return [];
     }
-  }
-
-  if (localStorage.getItem('migrated_pipelines_to_firestore') === 'true') {
-    return [];
   }
 
   const combined: any[] = [];
@@ -123,7 +104,7 @@ const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
             requestDate: '2026-06-28',
             type: 'Training',
             proposalSentDate: '2026-06-30',
-            proposalValue: 0,
+            proposalValue: 65000,
             followUpDate: '2026-07-08',
             status: 'Won',
             client: 'Maybank HQ',
@@ -308,10 +289,16 @@ export default function HomeDashboard({
   outlinesSync,
   monthKpisSync
 }: HomeDashboardProps) {
-  // Calendar state
-  const [currentYear, setCurrentYear] = useState(2026);
-  const [currentMonth, setCurrentMonth] = useState(6); // 6 is July (0-indexed: January is 0, July is 6)
-  const [selectedDayStr, setSelectedDayStr] = useState<string>('2026-07-06');
+  // Calendar state — defaults to today's actual month/year, not a hardcoded one
+  const today = new Date();
+  const [currentYear, setCurrentYear] = useState(today.getFullYear());
+  const [currentMonth, setCurrentMonth] = useState(today.getMonth()); // 0-indexed: January is 0
+  const [selectedDayStr, setSelectedDayStr] = useState<string>(() => {
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  });
   const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [newEventTitle, setNewEventTitle] = useState('');
   const [newEventTime, setNewEventTime] = useState('10:00 AM');
@@ -392,48 +379,51 @@ export default function HomeDashboard({
   // Jul 13 ... Jul 19
   // Jul 20 ... Jul 26
   // Jul 27 ... Aug 2
-  const calendarGrid = [
-    // Week 1
-    { dayNum: 29, dateStr: '2026-06-29', isCurrentMonth: false },
-    { dayNum: 30, dateStr: '2026-06-30', isCurrentMonth: false },
-    { dayNum: 1, dateStr: '2026-07-01', isCurrentMonth: true },
-    { dayNum: 2, dateStr: '2026-07-02', isCurrentMonth: true },
-    { dayNum: 3, dateStr: '2026-07-03', isCurrentMonth: true },
-    { dayNum: 4, dateStr: '2026-07-04', isCurrentMonth: true },
-    { dayNum: 5, dateStr: '2026-07-05', isCurrentMonth: true },
-    // Week 2
-    { dayNum: 6, dateStr: '2026-07-06', isCurrentMonth: true },
-    { dayNum: 7, dateStr: '2026-07-07', isCurrentMonth: true },
-    { dayNum: 8, dateStr: '2026-07-08', isCurrentMonth: true },
-    { dayNum: 9, dateStr: '2026-07-09', isCurrentMonth: true },
-    { dayNum: 10, dateStr: '2026-07-10', isCurrentMonth: true },
-    { dayNum: 11, dateStr: '2026-07-11', isCurrentMonth: true },
-    { dayNum: 12, dateStr: '2026-07-12', isCurrentMonth: true },
-    // Week 3
-    { dayNum: 13, dateStr: '2026-07-13', isCurrentMonth: true },
-    { dayNum: 14, dateStr: '2026-07-14', isCurrentMonth: true },
-    { dayNum: 15, dateStr: '2026-07-15', isCurrentMonth: true },
-    { dayNum: 16, dateStr: '2026-07-16', isCurrentMonth: true },
-    { dayNum: 17, dateStr: '2026-07-17', isCurrentMonth: true },
-    { dayNum: 18, dateStr: '2026-07-18', isCurrentMonth: true },
-    { dayNum: 19, dateStr: '2026-07-19', isCurrentMonth: true },
-    // Week 4
-    { dayNum: 20, dateStr: '2026-07-20', isCurrentMonth: true },
-    { dayNum: 21, dateStr: '2026-07-21', isCurrentMonth: true },
-    { dayNum: 22, dateStr: '2026-07-22', isCurrentMonth: true },
-    { dayNum: 23, dateStr: '2026-07-23', isCurrentMonth: true },
-    { dayNum: 24, dateStr: '2026-07-24', isCurrentMonth: true },
-    { dayNum: 25, dateStr: '2026-07-25', isCurrentMonth: true },
-    { dayNum: 26, dateStr: '2026-07-26', isCurrentMonth: true },
-    // Week 5
-    { dayNum: 27, dateStr: '2026-07-27', isCurrentMonth: true },
-    { dayNum: 28, dateStr: '2026-07-28', isCurrentMonth: true },
-    { dayNum: 29, dateStr: '2026-07-29', isCurrentMonth: true },
-    { dayNum: 30, dateStr: '2026-07-30', isCurrentMonth: true },
-    { dayNum: 31, dateStr: '2026-07-31', isCurrentMonth: true },
-    { dayNum: 1, dateStr: '2026-08-01', isCurrentMonth: false },
-    { dayNum: 2, dateStr: '2026-08-02', isCurrentMonth: false }
-  ];
+  // Dynamically generate a Monday-start calendar grid for the currently
+  // viewed month/year, padded with the trailing days of the previous month
+  // and leading days of the next month, matching however many full weeks
+  // are needed to cover the month.
+  const calendarGrid = (() => {
+    const toDateStr = (y: number, m: number, d: number) => {
+      const dt = new Date(y, m, d);
+      const yy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      return `${yy}-${mm}-${dd}`;
+    };
+
+    const firstOfMonth = new Date(currentYear, currentMonth, 1);
+    // JS getDay(): Sun=0..Sat=6. We want a Monday-first grid, so shift it.
+    const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // Mon=0..Sun=6
+    const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const daysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
+
+    const cells: { dayNum: number; dateStr: string; isCurrentMonth: boolean }[] = [];
+
+    // Leading days from the previous month
+    for (let i = firstWeekday - 1; i >= 0; i--) {
+      const dayNum = daysInPrevMonth - i;
+      const d = new Date(currentYear, currentMonth - 1, dayNum);
+      cells.push({ dayNum, dateStr: toDateStr(d.getFullYear(), d.getMonth(), dayNum), isCurrentMonth: false });
+    }
+
+    // Days in the current month
+    for (let dayNum = 1; dayNum <= daysInCurrentMonth; dayNum++) {
+      cells.push({ dayNum, dateStr: toDateStr(currentYear, currentMonth, dayNum), isCurrentMonth: true });
+    }
+
+    // Trailing days from the next month, padded to complete the final week
+    const remainder = cells.length % 7;
+    if (remainder !== 0) {
+      const toFill = 7 - remainder;
+      for (let dayNum = 1; dayNum <= toFill; dayNum++) {
+        const d = new Date(currentYear, currentMonth + 1, dayNum);
+        cells.push({ dayNum, dateStr: toDateStr(d.getFullYear(), d.getMonth(), dayNum), isCurrentMonth: false });
+      }
+    }
+
+    return cells;
+  })();
 
   // Selected day events
   const selectedDayEvents = events.filter(e => e.date === selectedDayStr);
@@ -609,15 +599,12 @@ export default function HomeDashboard({
   const getRepPipelineSalesForMonth = (repId: string, targetMonth: string): number => {
     try {
       let pipes: any[] = [];
-      const deleted = getDeletedPipelineIds();
-      if (pipelinesSync !== undefined) {
-        pipes = pipelinesSync.filter((p: any) => (p.ownerId === repId || p.creatorId === repId || p.taggedRepIds?.includes(repId)) && !deleted.includes(p.id));
+      if (pipelinesSync && pipelinesSync.length > 0) {
+        pipes = pipelinesSync.filter((p: any) => p.ownerId === repId || p.creatorId === repId || p.taggedRepIds?.includes(repId));
       } else {
         const saved = localStorage.getItem(`next_pipelines_${repId}`);
         if (saved) {
-          try {
-            pipes = JSON.parse(saved).filter((p: any) => !deleted.includes(p.id));
-          } catch {}
+          pipes = JSON.parse(saved);
         }
       }
       return pipes
@@ -1408,3 +1395,4 @@ export default function HomeDashboard({
     </div>
   );
 }
+
