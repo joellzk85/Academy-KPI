@@ -622,22 +622,11 @@ export default function RepDetailDashboard({
         setPayments(firestorePayments);
         localStorage.setItem('next_payments_shared', JSON.stringify(firestorePayments));
       } else {
-        const localSaved = localStorage.getItem('next_payments_shared');
-        let parsed: any[] = [];
-        if (localSaved) {
-          try {
-            parsed = JSON.parse(localSaved);
-          } catch {}
-        }
-        if (parsed && parsed.length > 0) {
-          for (const p of parsed) {
-            const docId = p.id || `pay_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-            await setDoc(doc(db, 'payments', docId), {
-              ...p,
-              id: docId
-            });
-          }
-        }
+        // Firestore genuinely has no payments (either none created yet, or all deleted).
+        // Reflect that truthfully instead of re-uploading stale localStorage data,
+        // which would silently resurrect deleted payment vouchers.
+        setPayments([]);
+        localStorage.setItem('next_payments_shared', JSON.stringify([]));
       }
     });
 
@@ -1096,31 +1085,11 @@ export default function RepDetailDashboard({
         setTasks(firestoreTasks);
         localStorage.setItem(`next_tasks_${rep.id}`, JSON.stringify(firestoreTasks));
       } else {
-        const savedTasks = localStorage.getItem(`next_tasks_${rep.id}`);
-        if (savedTasks) {
-          try {
-            const parsed = JSON.parse(savedTasks);
-            if (parsed && parsed.length > 0) {
-              for (const t of parsed) {
-                const docId = t.id || `task_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-                await setDoc(doc(db, 'tasks', docId), {
-                  ...t,
-                  id: docId,
-                  ownerRepId: rep.id,
-                  createdAt: t.createdAt || Date.now()
-                });
-              }
-              setTasks(parsed);
-            } else {
-              setTasks([]);
-            }
-          } catch (err) {
-            console.error("Migration error:", err);
-            setTasks([]);
-          }
-        } else {
-          setTasks([]);
-        }
+        // Firestore genuinely has no tasks for this rep (either none created yet,
+        // or all deleted). Reflect that truthfully instead of re-uploading stale
+        // localStorage data, which would silently resurrect deleted tasks.
+        setTasks([]);
+        localStorage.setItem(`next_tasks_${rep.id}`, JSON.stringify([]));
       }
     });
 

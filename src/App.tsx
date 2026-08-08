@@ -418,17 +418,11 @@ export default function App() {
         setCalendarEvents(firestoreEvents);
         localStorage.setItem('next_events', JSON.stringify(firestoreEvents));
       } else {
-        const saved = localStorage.getItem('next_events');
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (parsed && parsed.length > 0) {
-              for (const ev of parsed) {
-                await setDoc(doc(db, 'events', ev.id), ev);
-              }
-            }
-          } catch {}
-        }
+        // Firestore genuinely has no events (either none created yet, or all deleted).
+        // Reflect that truthfully instead of re-uploading stale localStorage data,
+        // which would silently resurrect deleted calendar events.
+        setCalendarEvents([]);
+        localStorage.setItem('next_events', JSON.stringify([]));
       }
     });
     return () => unsubscribe();
@@ -504,6 +498,15 @@ export default function App() {
           localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
         });
         setPipelinesSync(pipes);
+      } else {
+        // Firestore genuinely has none left (all deleted) - reflect that truthfully
+        // instead of leaving stale data in this sync state forever.
+        localStorage.setItem('next_pipelines_shared', JSON.stringify([]));
+        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+        repIds.forEach(id => {
+          localStorage.setItem(`next_pipelines_${id}`, JSON.stringify([]));
+        });
+        setPipelinesSync([]);
       }
     });
 
@@ -520,6 +523,12 @@ export default function App() {
           localStorage.setItem(`next_tasks_${id}`, JSON.stringify(repTasks));
         });
         setTasksSync(ts);
+      } else {
+        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+        repIds.forEach(id => {
+          localStorage.setItem(`next_tasks_${id}`, JSON.stringify([]));
+        });
+        setTasksSync([]);
       }
     });
 
@@ -533,6 +542,9 @@ export default function App() {
         quotes.sort((a, b) => a.id.localeCompare(b.id));
         localStorage.setItem('next_quotations_lzk.joel@gmail.com', JSON.stringify(quotes));
         setQuotationsSync(quotes);
+      } else {
+        localStorage.setItem('next_quotations_lzk.joel@gmail.com', JSON.stringify([]));
+        setQuotationsSync([]);
       }
     });
 
@@ -546,6 +558,9 @@ export default function App() {
         cos.sort((a, b) => a.id.localeCompare(b.id));
         localStorage.setItem('next_course_outlines_lzk.joel@gmail.com', JSON.stringify(cos));
         setOutlinesSync(cos);
+      } else {
+        localStorage.setItem('next_course_outlines_lzk.joel@gmail.com', JSON.stringify([]));
+        setOutlinesSync([]);
       }
     });
 
@@ -1391,4 +1406,3 @@ export default function App() {
     </div>
   );
 }
-
