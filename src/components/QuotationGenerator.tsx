@@ -2248,11 +2248,11 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
                     if (item.id === idToReset) {
                       const updatedItem = {
                         ...item,
-                        taggedRepId: undefined,
-                        taggedRepName: undefined,
-                        taggedBy: undefined,
+                        taggedRepId: '',
+                        taggedRepName: '',
+                        taggedBy: '',
                         isCompleted: false,
-                        tagNote: undefined
+                        tagNote: ''
                       };
                       // Sync to Firestore
                       setDoc(doc(db, 'quotations', idToReset), updatedItem).catch(err => console.error("Firestore reset tagging failed:", err));
