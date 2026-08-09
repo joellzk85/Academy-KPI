@@ -718,13 +718,28 @@ export default function App() {
   };
 
   const handleUpdateRepsList = async (updatedReps: Representative[]) => {
+    const updatedIds = new Set(updatedReps.map(r => r.id));
+    const removedReps = representatives.filter(r => !updatedIds.has(r.id));
+
     setRepresentatives(updatedReps);
     localStorage.setItem('next_reps', JSON.stringify(updatedReps));
+
     for (const r of updatedReps) {
       try {
         await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
       } catch (err) {
         console.error("Firestore update reps list failed:", err);
+      }
+    }
+
+    // Actually delete any rep that was removed from the roster — without this,
+    // their Firestore document stays behind and the real-time listener keeps
+    // pulling them right back into the list.
+    for (const r of removedReps) {
+      try {
+        await deleteDoc(doc(db, 'reps', r.id));
+      } catch (err) {
+        console.error("Firestore delete rep failed:", err);
       }
     }
   };
@@ -1403,4 +1418,3 @@ export default function App() {
     </div>
   );
 }
-
