@@ -21,7 +21,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 // Firebase imports
-import { db } from './lib/firebase';
+import { db } from '../lib/firebase';
 import { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 
 // Core components & initial datasets
