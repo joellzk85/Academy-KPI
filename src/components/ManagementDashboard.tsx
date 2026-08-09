@@ -354,13 +354,14 @@ export default function ManagementDashboard({
   // Date Range and Google Sheets Backup states
   const [startMonth, setStartMonth] = useState('JUN-26');
   const [endMonth, setEndMonth] = useState('DEC-26');
-  const [isBackupConnected, setIsBackupConnected] = useState(() => {
-    return localStorage.getItem('next_backup_connected') === 'true';
-  });
   const [lastBackupRun, setLastBackupRun] = useState(() => {
-    return localStorage.getItem('next_last_backup') || 'Sun Jul 05 2026 at 6:28:40 PM';
+    return localStorage.getItem('next_last_backup') || 'Never';
   });
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
+
+  const BACKUP_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwBGK-BzpvWvZ0pWmuXMi_lmZiJ01vOuJFsdJQ9q6zaQ-RAKx6877h91TbuS8OK3wZT/exec';
+  const BACKUP_SHEET_URL = 'https://docs.google.com/spreadsheets/d/185A2We-gBfPM-YBLiO9V3hOUTTOsPPeXALG04cY6Zq4/edit';
 
   const ALL_AVAILABLE_MONTHS = [
     'JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26', 
@@ -377,39 +378,38 @@ export default function ManagementDashboard({
     return ALL_AVAILABLE_MONTHS.slice(startIdx, endIdx + 1);
   };
 
-  const handleToggleGoogleConnection = () => {
-    const nextState = !isBackupConnected;
-    setIsBackupConnected(nextState);
-    localStorage.setItem('next_backup_connected', nextState ? 'true' : 'false');
-    if (nextState) {
-      alert("✅ Successfully connected Google Sheets API workspace account!");
-    } else {
-      alert("🔒 Disconnected Google Sheets API integration.");
-    }
-  };
-
   const handleRunBackupNow = () => {
-    if (!isBackupConnected) {
-      alert("⚠️ Google Workspace is not connected. Please connect Google first.");
-      return;
-    }
     setIsBackingUp(true);
-    setTimeout(() => {
-      const nowStr = new Date().toLocaleString('en-US', {
-        weekday: 'short',
-        month: 'short',
-        day: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true
+    setBackupError(null);
+    fetch(BACKUP_WEBAPP_URL)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === 'ok') {
+          const nowStr = new Date().toLocaleString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+          });
+          setLastBackupRun(nowStr);
+          localStorage.setItem('next_last_backup', nowStr);
+          alert(`🎉 Backup Completed Successfully!\nAll data has been exported to your Google Sheet.`);
+        } else {
+          throw new Error(data.message || 'Unknown error from backup script');
+        }
+      })
+      .catch((err) => {
+        console.error('Backup failed:', err);
+        setBackupError(err.message || String(err));
+        alert(`❌ Backup failed: ${err.message || err}`);
+      })
+      .finally(() => {
+        setIsBackingUp(false);
       });
-      setLastBackupRun(nowStr);
-      localStorage.setItem('next_last_backup', nowStr);
-      setIsBackingUp(false);
-      alert(`🎉 Backup Completed Successfully!\nExported KPI records and targets for ${reps.length} active representatives to spreadsheet tab "Backup".`);
-    }, 1200);
   };
 
   // Helpers for chronological YTD and pipeline sales calculations
@@ -1171,7 +1171,7 @@ export default function ManagementDashboard({
                       GOOGLE SHEETS BACKUP & LOG
                     </h4>
                     <p className="text-slate-400 text-[10px] uppercase font-bold mt-1 leading-relaxed">
-                      A secure backup of all overrides is automatically performed daily at 8:00 PM using Google Sheets API.
+                      A secure backup of all data is automatically performed daily at 9:00 PM using Google Sheets, in addition to on-demand backups.
                     </p>
                   </div>
                 </div>
@@ -1179,21 +1179,21 @@ export default function ManagementDashboard({
                 <div className="border border-slate-150 rounded-xl overflow-hidden text-xs divide-y divide-slate-100">
                   <div className="flex justify-between items-center p-3 hover:bg-slate-50/50 transition-colors">
                     <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider">Spreadsheet ID:</span>
-                    <span className="font-mono text-slate-800 bg-slate-50 px-2 py-0.5 border border-slate-200 rounded max-w-[200px] truncate" title="1PDzG6j2MZJ_6ZB7yb9u3H7E_abEh3v_example_id">
-                      1PDzG6j2MZJ_6ZB7yb9u3H7E_abEh3v...
+                    <span className="font-mono text-slate-800 bg-slate-50 px-2 py-0.5 border border-slate-200 rounded max-w-[200px] truncate" title="185A2We-gBfPM-YBLiO9V3hOUTTOsPPeXALG04cY6Zq4">
+                      185A2We-gBfPM-YBLiO9V3hOU...
                     </span>
                   </div>
                   <div className="flex justify-between items-center p-3 hover:bg-slate-50/50 transition-colors">
-                    <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider">Backup Tab:</span>
+                    <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider">Backup Tabs:</span>
                     <span className="font-black text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded font-mono">
-                      "Backup"
+                      One tab per data type
                     </span>
                   </div>
                   <div className="flex justify-between items-center p-3 hover:bg-slate-50/50 transition-colors">
                     <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider">Auto Backup Schedule:</span>
                     <span className="flex items-center gap-1 font-bold text-slate-700 font-mono">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Daily @ 8:00 PM
+                      Daily @ 9:00 PM
                     </span>
                   </div>
                   <div className="flex justify-between items-center p-3 hover:bg-slate-50/50 transition-colors">
@@ -1207,7 +1207,7 @@ export default function ManagementDashboard({
 
               <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
                 <a
-                  href="https://docs.google.com/spreadsheets/d/1PDzG6j2MZJ_6ZB7yb9u3H7E_abEh3v_example/edit"
+                  href={BACKUP_SHEET_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 border border-emerald-600 hover:bg-emerald-50 text-emerald-700 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-xs"
@@ -1215,44 +1215,30 @@ export default function ManagementDashboard({
                   <Link className="w-3.5 h-3.5" />
                   OPEN SHEET (BACKUP)
                 </a>
-                
-                {isBackupConnected ? (
-                  <div className="flex-1 flex gap-1.5">
-                    <button
-                      onClick={handleRunBackupNow}
-                      disabled={isBackingUp}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50"
-                    >
-                      {isBackingUp ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          RUNNING...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          BACKUP NOW
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={handleToggleGoogleConnection}
-                      className="px-2.5 py-2 border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-rose-600 rounded-xl transition-all cursor-pointer"
-                      title="Disconnect Google Drive integration"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={handleToggleGoogleConnection}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-[#F97316] hover:bg-[#EA580C] text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-sm cursor-pointer"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    CONNECT GOOGLE
-                  </button>
-                )}
+
+                <button
+                  onClick={handleRunBackupNow}
+                  disabled={isBackingUp}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                >
+                  {isBackingUp ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      RUNNING...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      BACKUP NOW
+                    </>
+                  )}
+                </button>
               </div>
+              {backupError && (
+                <p className="text-[10px] text-rose-600 font-bold mt-1">
+                  Last attempt failed: {backupError}
+                </p>
+              )}
             </div>
 
           </div>
@@ -1941,3 +1927,4 @@ export default function ManagementDashboard({
     </div>
   );
 }
+
