@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Representative, CourseOutline, CourseOutlineItem } from '../types';
-import { 
-  Plus, Trash2, Tag, RotateCcw, Save, Shield, HelpCircle, 
-  BookOpen, ChevronRight, Eye, RefreshCw, Layers, GraduationCap, 
-  FileText, Calendar, Users, List, Printer, Check, Copy, ArrowRight
-} from 'lucide-react';
+import { Quotation, QuotationItem, Representative } from '../types';
+import { Plus, Trash2, Printer, Save, FileText, CheckCircle, RefreshCw, Layers, Edit3, ClipboardList, Info, Search, Eye, EyeOff, Tag, Share2, RotateCcw, Cloud, Check, Clock } from 'lucide-react';
+import Logo from './Logo';
+import { initAuth, googleSignIn, googleSignOut, syncQuotationToGoogleSheet } from '../lib/googleCalendar';
 import { db } from '../lib/firebase';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
 
