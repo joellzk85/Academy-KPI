@@ -248,16 +248,16 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
           overview,
           outcomes,
           items,
-          isHidden: o.isHidden,
-          taggedBy: o.taggedBy,
-          tagNote: o.tagNote,
+          isHidden: o.isHidden ?? false,
+          taggedBy: o.taggedBy ?? '',
+          tagNote: o.tagNote ?? '',
           preparedBy: o.preparedBy || preparedBy || rep.name,
           creatorId: o.creatorId || rep.id,
           ownerId: ownerId || o.ownerId || rep.id,
           ownerName: ownerName || o.ownerName || rep.name,
-          taggedRepId: o.taggedRepId,
-          taggedRepName: o.taggedRepName,
-          isCompleted: o.isCompleted
+          taggedRepId: o.taggedRepId ?? '',
+          taggedRepName: o.taggedRepName ?? '',
+          isCompleted: o.isCompleted ?? false
         };
         // Sync to Firestore
         setDoc(doc(db, 'course_outlines', o.id), updatedItem).catch(err => console.error("Firestore save course outline failed:", err));
@@ -347,17 +347,13 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
       if (selectedId === idToDelete && remaining.length > 0) {
         setSelectedId(remaining[0].id);
       } else if (remaining.length === 0) {
-        // Reset with default template
-        const freshDefault = [JSON.parse(JSON.stringify(DEFAULT_OUTLINE_TEMPLATE))];
-        setOutlines(freshDefault);
-        localStorage.setItem('next_course_outlines_lzk.joel@gmail.com', JSON.stringify(freshDefault));
-        setSelectedId(freshDefault[0].id);
-
-        try {
-          await setDoc(doc(db, 'course_outlines', freshDefault[0].id), freshDefault[0]);
-        } catch (err) {
-          console.error("Firestore create default course outline failed:", err);
-        }
+        // Genuinely no outlines left — leave it empty. The library view and
+        // preview panel already fall back gracefully to a blank/template
+        // state on their own (outlines.find(...) || outlines[0] ||
+        // DEFAULT_OUTLINE_TEMPLATE), so there's no need to actually write a
+        // placeholder back into Firestore here. Doing so previously made
+        // deleted outlines appear to "come back" every time.
+        setSelectedId('');
       }
       setOutlineToDeleteId(null);
       showToast('Outline deleted successfully', 'success');
