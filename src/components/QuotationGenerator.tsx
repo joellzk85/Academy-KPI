@@ -453,16 +453,16 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
           terms,
           applySST,
           sstRate,
-          isHidden: q.isHidden,
-          taggedBy: q.taggedBy,
-          tagNote: q.tagNote,
+          isHidden: q.isHidden ?? false,
+          taggedBy: q.taggedBy ?? '',
+          tagNote: q.tagNote ?? '',
           preparedBy: q.preparedBy || preparedBy || rep.name,
           creatorId: q.creatorId || rep.id,
           ownerId: ownerId || q.ownerId || rep.id,
           ownerName: ownerName || q.ownerName || rep.name,
-          taggedRepId: q.taggedRepId,
-          taggedRepName: q.taggedRepName,
-          isCompleted: q.isCompleted
+          taggedRepId: q.taggedRepId ?? '',
+          taggedRepName: q.taggedRepName ?? '',
+          isCompleted: q.isCompleted ?? false
         };
         // Sync to Firestore
         setDoc(doc(db, 'quotations', q.id), updatedItem).catch(err => console.error("Firestore save quotation failed:", err));
