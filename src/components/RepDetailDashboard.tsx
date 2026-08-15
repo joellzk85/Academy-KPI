@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Representative, GoogleLinks } from '../types';
 import { getRepMetrics } from '../initialData';
-import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check } from 'lucide-react';
+import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3 } from 'lucide-react';
 import QuotationGenerator from './QuotationGenerator';
 import CourseOutlineGenerator from './CourseOutlineGenerator';
 import AdminRecordManager from './AdminRecordManager';
@@ -102,6 +102,231 @@ function markPipelineDeleted(id: string) {
   } catch {
     // ignore
   }
+}
+
+export interface PLLineItem {
+  id: string;
+  category: 'revenue' | 'cogs' | 'commission';
+  label: string;
+  amount: number;
+  ratePct?: number;
+  notes?: string;
+}
+
+export interface ProjectPL {
+  id: string;
+  projectTitle: string;
+  clientName: string;
+  clientCompany?: string;
+  clientContact?: string;
+  projectCode?: string;
+  projectDate?: string;
+  intakePeriod?: string;
+  paxCount?: number;
+  venueLocation?: string;
+  linkType: 'pipeline' | 'quotation' | 'manual';
+  linkedPipelineId?: string;
+  linkedQuotationNumber?: string;
+  items: PLLineItem[];
+  enableHrdcLevy?: boolean;
+  enableSst?: boolean;
+  taxRate: number;
+  updatedAt: string;
+  notes?: string;
+}
+
+export function getProjectDateValue(proj?: Partial<ProjectPL> | null): string {
+  if (!proj) return '';
+  return proj.projectDate || proj.intakePeriod || '';
+}
+
+export function formatProjectDateDisplay(dateStr?: string): string {
+  if (!dateStr) return 'N/A';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    try {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  }
+  return dateStr;
+}
+
+export function normalizeDateForInput(dateStr?: string): string {
+  if (!dateStr) return new Date().toISOString().split('T')[0];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const lower = dateStr.toLowerCase();
+  if (lower.includes('july') || lower.includes('07')) return '2026-07-15';
+  if (lower.includes('august') || lower.includes('08')) return '2026-08-20';
+  if (lower.includes('september') || lower.includes('09')) return '2026-09-15';
+  if (lower.includes('october') || lower.includes('10')) return '2026-10-15';
+  if (lower.includes('november') || lower.includes('11')) return '2026-11-15';
+  if (lower.includes('december') || lower.includes('12')) return '2026-12-15';
+  return '2026-07-15';
+}
+
+export const DEFAULT_PL_REFERENCE_URL = 'https://docs.google.com/spreadsheets/d/1Jj0LPs_9vkoGvvk_0i35f1igvFP9cKI0cymimYHZkXI/edit?usp=sharing';
+
+export const EXACT_USER_PRESET_ITEMS: string[] = [
+  'Activities Equipment and Materials',
+  'Banner',
+  'Commission',
+  'Commission for agent',
+  'Door gifts',
+  'E-certificate of Participation',
+  'Facilitators',
+  'Medals for winning team',
+  'Miscellaneous',
+  'Participants transport',
+  'Photography',
+  'T-shirts',
+  'Trainer',
+  'Transport budget',
+  'Venue cost',
+  'Videography & Drone'
+];
+
+export const PL_PRESET_ITEMS_BY_CATEGORY: Record<'revenue' | 'cogs' | 'commission', string[]> = {
+  revenue: [
+    'Advisory & Consulting Services',
+    'Corporate B2B Custom Training',
+    'Course & Bootcamp Tuition Fees',
+    'Course Outline & Syllabus Licensing',
+    'Sales'
+  ],
+  cogs: [
+    'Activities Equipment and Materials',
+    'Banner',
+    'Commission',
+    'Commission for agent',
+    'Door gifts',
+    'E-certificate of Participation',
+    'Facilitators',
+    'Medals for winning team',
+    'Miscellaneous',
+    'Participants transport',
+    'Photography',
+    'T-shirts',
+    'Trainer',
+    'Transport budget',
+    'Venue cost',
+    'Videography & Drone'
+  ],
+  commission: [
+    'Agent Commission',
+    'Commission',
+    'Commission for agent',
+    'Introducer Fee',
+    'Partner Commission',
+    'Referral Fee',
+    'Sales Rep Commission'
+  ]
+};
+
+export const DEFAULT_PL_ITEMS: PLLineItem[] = [
+  // Revenue / Sales
+  { id: 'rev_1', category: 'revenue', label: 'Sales', amount: 85000, notes: 'Total project sales revenue' },
+  
+  // Cost of Training (COGS / Direct Costs)
+  { id: 'cogs_1', category: 'cogs', label: 'Trainer', amount: 15000, notes: 'Lead trainer honorarium' },
+  { id: 'cogs_2', category: 'cogs', label: 'Facilitators', amount: 4000, notes: 'Co-trainers & assistants' },
+  { id: 'cogs_3', category: 'cogs', label: 'Activities Equipment and Materials', amount: 2500, notes: 'Training materials & activity kits' },
+  { id: 'cogs_4', category: 'cogs', label: 'E-certificate of Participation', amount: 500, notes: 'Digital certification issue' },
+  { id: 'cogs_5', category: 'cogs', label: 'Photography', amount: 1200, notes: 'Event photographer' },
+  { id: 'cogs_6', category: 'cogs', label: 'Videography & Drone', amount: 2500, notes: 'Video recording & drone coverage' },
+  { id: 'cogs_7', category: 'cogs', label: 'Medals for winning team', amount: 800, notes: 'Team competition awards' },
+  { id: 'cogs_8', category: 'cogs', label: 'Door gifts', amount: 1500, notes: 'Participant welcome gifts' },
+  { id: 'cogs_9', category: 'cogs', label: 'T-shirts', amount: 2000, notes: 'Custom event t-shirts' },
+  { id: 'cogs_10', category: 'cogs', label: 'Banner', amount: 350, notes: 'Event backdrop & banners' },
+  { id: 'cogs_11', category: 'cogs', label: 'Transport budget', amount: 1200, notes: 'Logistics & travel allowance' },
+  { id: 'cogs_12', category: 'cogs', label: 'Participants transport', amount: 3200, notes: 'Participant bus transport' },
+  { id: 'cogs_14', category: 'cogs', label: 'Venue cost', amount: 12000, notes: 'Resort/hotel venue & catering' },
+  { id: 'cogs_15', category: 'cogs', label: 'Miscellaneous', amount: 1000, notes: 'Contingency & admin extras' },
+
+  // Commissions
+  { id: 'comm_1', category: 'commission', label: 'Agent Commission', ratePct: 5.3, amount: 4500, notes: '5.3% of sales revenue' }
+];
+
+export function getDefaultProjectPLs(rep: Representative, pipelinesList: any[] = []): ProjectPL[] {
+  const repPipelines = pipelinesList.filter(p => p.representativeId === rep.id || p.repName === rep.name);
+  const d1 = repPipelines[0];
+  const d2 = repPipelines[1];
+
+  return [
+    {
+      id: `pl_prj_${rep.id}_1`,
+      projectTitle: d1 ? d1.dealName : 'Enterprise AI & Full-Stack Development Bootcamp',
+      clientName: d1 ? d1.companyName : 'Petronas Digital Sdn Bhd',
+      clientCompany: d1 ? d1.companyName : 'Petronas Group HR & Learning',
+      clientContact: d1 ? (d1.clientContactName || 'Encik Ahmad Razak') : 'Encik Ahmad Razak (Head of Learning)',
+      projectCode: `PRJ-${rep.id.toUpperCase()}-2026-01`,
+      projectDate: '2026-07-15',
+      intakePeriod: '2026-07-15',
+      paxCount: d1 ? (d1.paxCount || 25) : 30,
+      venueLocation: 'Happi Village, Janda Baik',
+      linkType: d1 ? 'pipeline' : 'manual',
+      linkedPipelineId: d1 ? d1.id : undefined,
+      linkedQuotationNumber: `QT-2026-${rep.id.toUpperCase()}-001`,
+      items: [
+        { id: 'rev_1', category: 'revenue', label: 'Sales', amount: d1 ? (d1.proposalValue || 85000) : 85000, notes: 'Total project sales revenue' },
+        { id: 'cogs_1', category: 'cogs', label: 'Trainer', amount: 15000, notes: 'Lead trainer honorarium' },
+        { id: 'cogs_2', category: 'cogs', label: 'Facilitators', amount: 4000, notes: 'Co-trainers & assistants' },
+        { id: 'cogs_3', category: 'cogs', label: 'Activities Equipment and Materials', amount: 2500, notes: 'Training materials & activity kits' },
+        { id: 'cogs_4', category: 'cogs', label: 'E-certificate of Participation', amount: 500, notes: 'Digital certification issue' },
+        { id: 'cogs_5', category: 'cogs', label: 'Photography', amount: 1200, notes: 'Event photographer' },
+        { id: 'cogs_6', category: 'cogs', label: 'Videography & Drone', amount: 2500, notes: 'Video recording & drone coverage' },
+        { id: 'cogs_7', category: 'cogs', label: 'Medals for winning team', amount: 800, notes: 'Team competition awards' },
+        { id: 'cogs_8', category: 'cogs', label: 'Door gifts', amount: 1500, notes: 'Participant welcome gifts' },
+        { id: 'cogs_9', category: 'cogs', label: 'T-shirts', amount: 2000, notes: 'Custom event t-shirts' },
+        { id: 'cogs_10', category: 'cogs', label: 'Banner', amount: 350, notes: 'Event backdrop & banners' },
+        { id: 'cogs_11', category: 'cogs', label: 'Transport budget', amount: 1200, notes: 'Logistics & travel allowance' },
+        { id: 'cogs_12', category: 'cogs', label: 'Participants transport', amount: 3200, notes: 'Participant bus transport' },
+        { id: 'cogs_14', category: 'cogs', label: 'Venue cost', amount: 12000, notes: 'Resort/hotel venue & catering' },
+        { id: 'cogs_15', category: 'cogs', label: 'Miscellaneous', amount: 1000, notes: 'Contingency & admin extras' },
+        { id: 'comm_1', category: 'commission', label: 'Agent Commission', ratePct: 5.3, amount: 4500, notes: 'Agent introduction commission' }
+      ],
+      taxRate: 15,
+      updatedAt: new Date().toISOString().split('T')[0],
+      notes: 'High-value corporate workshop deal.'
+    },
+    {
+      id: `pl_prj_${rep.id}_2`,
+      projectTitle: d2 ? d2.dealName : 'Executive Design Thinking & Innovation Retreat',
+      clientName: d2 ? d2.companyName : 'Maybank Corporate Learning',
+      clientCompany: d2 ? d2.companyName : 'Maybank Berhad',
+      clientContact: 'Ms. Sarah Chen (Talent Development)',
+      projectCode: `PRJ-${rep.id.toUpperCase()}-2026-02`,
+      projectDate: '2026-08-20',
+      intakePeriod: '2026-08-20',
+      paxCount: 20,
+      venueLocation: 'Park Royal Resort, Penang',
+      linkType: 'quotation',
+      linkedQuotationNumber: `QT-2026-${rep.id.toUpperCase()}-088`,
+      items: [
+        { id: 'rev_1', category: 'revenue', label: 'Sales', amount: 52000, notes: 'Quotation #QT-2026-088' },
+        { id: 'cogs_1', category: 'cogs', label: 'Trainer', amount: 12000, notes: 'Design Thinking Facilitator Fee' },
+        { id: 'cogs_2', category: 'cogs', label: 'Facilitators', amount: 3000, notes: 'Assistant trainers' },
+        { id: 'cogs_3', category: 'cogs', label: 'Activities Equipment and Materials', amount: 2000, notes: 'Workshop toolkits' },
+        { id: 'cogs_4', category: 'cogs', label: 'E-certificate of Participation', amount: 400, notes: 'E-certificates' },
+        { id: 'cogs_5', category: 'cogs', label: 'Photography', amount: 1000, notes: 'Photography' },
+        { id: 'cogs_6', category: 'cogs', label: 'Videography & Drone', amount: 2000, notes: 'Videography' },
+        { id: 'cogs_7', category: 'cogs', label: 'Medals for winning team', amount: 500, notes: 'Medals' },
+        { id: 'cogs_8', category: 'cogs', label: 'Door gifts', amount: 1000, notes: 'Door gifts' },
+        { id: 'cogs_9', category: 'cogs', label: 'T-shirts', amount: 1500, notes: 'T-shirts' },
+        { id: 'cogs_10', category: 'cogs', label: 'Banner', amount: 300, notes: 'Banners' },
+        { id: 'cogs_11', category: 'cogs', label: 'Transport budget', amount: 1000, notes: 'Transport' },
+        { id: 'cogs_12', category: 'cogs', label: 'Participants transport', amount: 2800, notes: 'Buses' },
+        { id: 'cogs_14', category: 'cogs', label: 'Venue cost', amount: 10000, notes: 'Resort venue cost' },
+        { id: 'cogs_15', category: 'cogs', label: 'Miscellaneous', amount: 800, notes: 'Miscellaneous' },
+        { id: 'comm_1', category: 'commission', label: 'Agent Commission', ratePct: 5.8, amount: 3000, notes: 'Commission for agent' }
+      ],
+      taxRate: 15,
+      updatedAt: new Date().toISOString().split('T')[0],
+      notes: 'Executive leadership retreat.'
+    }
+  ];
 }
 
 export default function RepDetailDashboard({
@@ -408,6 +633,455 @@ export default function RepDetailDashboard({
     return '';
   };
 
+  // Project-Based P&L Financial Statement States & Handlers
+  const [projectPLs, setProjectPLs] = useState<ProjectPL[]>(() => {
+    const saved = localStorage.getItem(`next_project_pls_${rep.id}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    // Migration from old single P&L format
+    const legacySaved = localStorage.getItem(`next_pl_${rep.id}`);
+    if (legacySaved) {
+      try {
+        const parsedLegacy = JSON.parse(legacySaved);
+        if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) {
+          const defaults = getDefaultProjectPLs(rep);
+          defaults[0].items = parsedLegacy;
+          return defaults;
+        }
+      } catch {}
+    }
+    return getDefaultProjectPLs(rep);
+  });
+
+  const [activeProjectId, setActiveProjectId] = useState<string>(() => {
+    return projectPLs[0]?.id || '';
+  });
+
+  const [showProjectModal, setShowProjectModal] = useState<boolean>(false);
+  const [editingProject, setEditingProject] = useState<Partial<ProjectPL> | null>(null);
+  const [plNotice, setPlNotice] = useState<string>('');
+  const [plViewMode, setPlViewMode] = useState<'overview' | 'detail'>('detail');
+  const [isSavingPL, setIsSavingPL] = useState<boolean>(false);
+
+  const [newPLCategory, setNewPLCategory] = useState<'revenue' | 'cogs' | 'commission'>('cogs');
+  const [newPLLabel, setNewPLLabel] = useState<string>('');
+  const [newPLAmount, setNewPLAmount] = useState<string>('');
+  const [newPLRatePct, setNewPLRatePct] = useState<string>('');
+  const [newPLNotes, setNewPLNotes] = useState<string>('');
+
+  // Date Tabulation Filter States (Tabulate Total Sales and GP based on selected date)
+  const [tabulateFilterMode, setTabulateFilterMode] = useState<'all' | 'single_date' | 'date_range' | 'month' | 'quarter'>('all');
+  const [tabulateSingleDate, setTabulateSingleDate] = useState<string>('2026-07-15');
+  const [tabulateStartDate, setTabulateStartDate] = useState<string>('2026-07-01');
+  const [tabulateEndDate, setTabulateEndDate] = useState<string>('2026-12-31');
+  const [tabulateMonth, setTabulateMonth] = useState<string>('2026-07');
+  const [tabulateQuarter, setTabulateQuarter] = useState<string>('Q3-2026');
+  const [isTabulatorOpen, setIsTabulatorOpen] = useState<boolean>(true);
+
+  // Active Project Reference
+  const activeProject: ProjectPL = projectPLs.find(p => p.id === activeProjectId) || projectPLs[0] || getDefaultProjectPLs(rep)[0];
+
+  const saveProjectPLsState = async (updatedPLs: ProjectPL[]) => {
+    setProjectPLs(updatedPLs);
+    localStorage.setItem(`next_project_pls_${rep.id}`, JSON.stringify(updatedPLs));
+    if (db) {
+      try {
+        await setDoc(doc(db, 'project_pls', rep.id), { projects: updatedPLs });
+      } catch (err) {
+        console.error("Firestore Project PL save error:", err);
+      }
+    }
+  };
+
+  const handleExplicitSavePL = async () => {
+    setIsSavingPL(true);
+    await saveProjectPLsState(projectPLs);
+    setPlNotice(`P&L Statement saved successfully! ("${activeProject?.projectTitle || 'Project'}")`);
+    setTimeout(() => {
+      setIsSavingPL(false);
+    }, 1200);
+    setTimeout(() => {
+      setPlNotice('');
+    }, 4000);
+  };
+
+  const handleOpenCreateProjectModal = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const defaultProj: Partial<ProjectPL> = {
+      id: `pl_prj_${rep.id}_${Date.now()}`,
+      projectTitle: 'New Client Workshop & Project',
+      clientName: 'New Corporate Client',
+      clientCompany: '',
+      clientContact: '',
+      projectCode: `PRJ-${rep.id.toUpperCase()}-${Date.now().toString().slice(-4)}`,
+      projectDate: todayStr,
+      intakePeriod: todayStr,
+      paxCount: 25,
+      venueLocation: 'Happi Village, Janda Baik',
+      linkType: 'manual',
+      items: DEFAULT_PL_ITEMS,
+      enableHrdcLevy: false,
+      enableSst: false,
+      taxRate: 15,
+      updatedAt: todayStr,
+      notes: ''
+    };
+    setEditingProject(defaultProj);
+    setShowProjectModal(true);
+  };
+
+  const handleOpenEditProjectModal = (proj: ProjectPL) => {
+    setEditingProject({ ...proj });
+    setShowProjectModal(true);
+  };
+
+  const handleSaveProjectDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProject || !editingProject.projectTitle) return;
+
+    let updatedList: ProjectPL[];
+    const existingIdx = projectPLs.findIndex(p => p.id === editingProject.id);
+    const chosenDate = editingProject.projectDate || editingProject.intakePeriod || new Date().toISOString().split('T')[0];
+
+    const fullProj: ProjectPL = {
+      id: editingProject.id || `pl_prj_${rep.id}_${Date.now()}`,
+      projectTitle: editingProject.projectTitle || 'Untitled Project',
+      clientName: editingProject.clientName || 'Unspecified Client',
+      clientCompany: editingProject.clientCompany || '',
+      clientContact: editingProject.clientContact || '',
+      projectCode: editingProject.projectCode || `PRJ-${Date.now().toString().slice(-4)}`,
+      projectDate: chosenDate,
+      intakePeriod: chosenDate,
+      paxCount: editingProject.paxCount || 20,
+      venueLocation: editingProject.venueLocation || 'HQ',
+      linkType: editingProject.linkType || 'manual',
+      linkedPipelineId: editingProject.linkedPipelineId,
+      linkedQuotationNumber: editingProject.linkedQuotationNumber,
+      items: editingProject.items && editingProject.items.length > 0 ? editingProject.items : DEFAULT_PL_ITEMS,
+      enableHrdcLevy: Boolean(editingProject.enableHrdcLevy),
+      enableSst: Boolean(editingProject.enableSst),
+      taxRate: typeof editingProject.taxRate === 'number' ? editingProject.taxRate : 15,
+      updatedAt: new Date().toISOString().split('T')[0],
+      notes: editingProject.notes || ''
+    };
+
+    if (existingIdx >= 0) {
+      updatedList = [...projectPLs];
+      updatedList[existingIdx] = fullProj;
+    } else {
+      updatedList = [...projectPLs, fullProj];
+    }
+
+    await saveProjectPLsState(updatedList);
+    setActiveProjectId(fullProj.id);
+    setShowProjectModal(false);
+    setEditingProject(null);
+    setPlNotice(`Saved Project P&L: "${fullProj.projectTitle}"`);
+    setTimeout(() => setPlNotice(''), 3000);
+  };
+
+  const handleDeleteProject = async (id: string) => {
+    if (projectPLs.length <= 1) {
+      alert("At least one Project P&L statement must be retained.");
+      return;
+    }
+    if (window.confirm("Are you sure you want to delete this Project P&L statement?")) {
+      const updated = projectPLs.filter(p => p.id !== id);
+      await saveProjectPLsState(updated);
+      setActiveProjectId(updated[0].id);
+      setPlNotice("Project P&L removed.");
+      setTimeout(() => setPlNotice(''), 3000);
+    }
+  };
+
+  const handleSyncRevenueFromPipeline = async () => {
+    if (!activeProject) return;
+
+    let targetDeal: any = null;
+    if (activeProject.linkedPipelineId) {
+      targetDeal = pipelines.find(p => p.id === activeProject.linkedPipelineId);
+    } else {
+      targetDeal = pipelines.find(p => p.status === 'Won') || pipelines[0];
+    }
+
+    if (!targetDeal) {
+      setPlNotice("No pipeline deal found to sync.");
+      setTimeout(() => setPlNotice(''), 3000);
+      return;
+    }
+
+    const updatedItems = activeProject.items.map(item => {
+      if (item.category === 'revenue') {
+        return {
+          ...item,
+          amount: targetDeal.proposalValue || item.amount,
+          notes: `Synced from Pipeline Deal: ${targetDeal.dealName} (${targetDeal.companyName})`
+        };
+      }
+      return item;
+    });
+
+    const updatedProject: ProjectPL = {
+      ...activeProject,
+      clientName: targetDeal.companyName || activeProject.clientName,
+      projectTitle: targetDeal.dealName || activeProject.projectTitle,
+      linkType: 'pipeline',
+      linkedPipelineId: targetDeal.id,
+      items: updatedItems,
+      updatedAt: new Date().toISOString().split('T')[0]
+    };
+
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? updatedProject : p);
+    await saveProjectPLsState(updatedPLs);
+    setPlNotice(`Synced RM ${(targetDeal.proposalValue || 0).toLocaleString()} from "${targetDeal.dealName}"!`);
+    setTimeout(() => setPlNotice(''), 3000);
+  };
+
+  const handleAddPLLineItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPLLabel.trim() || !activeProject) return;
+
+    const currentRevenue = (activeProject.items || [])
+      .filter(i => i.category === 'revenue')
+      .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+    const rateVal = parseFloat(newPLRatePct);
+    const amtVal = parseFloat(newPLAmount) || 0;
+    
+    let finalAmount = amtVal;
+    let finalRatePct: number | undefined = undefined;
+
+    if (newPLCategory === 'commission') {
+      if (!isNaN(rateVal) && rateVal > 0) {
+        finalRatePct = rateVal;
+        finalAmount = currentRevenue > 0 ? Math.round((currentRevenue * (rateVal / 100)) * 100) / 100 : amtVal;
+      } else if (currentRevenue > 0 && amtVal > 0) {
+        finalRatePct = Math.round(((amtVal / currentRevenue) * 100) * 10) / 10;
+      }
+    }
+
+    const newItem: PLLineItem = {
+      id: `pl_${Date.now()}`,
+      category: newPLCategory,
+      label: newPLLabel.trim(),
+      amount: finalAmount,
+      ratePct: finalRatePct,
+      notes: newPLNotes.trim()
+    };
+    const updatedItems = [...activeProject.items, newItem];
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? { ...p, items: updatedItems } : p);
+    await saveProjectPLsState(updatedPLs);
+    setNewPLLabel('');
+    setNewPLAmount('');
+    setNewPLRatePct('');
+    setNewPLNotes('');
+    setPlNotice(`Added line item "${newItem.label}".`);
+    setTimeout(() => setPlNotice(''), 3000);
+  };
+
+  const handleUpdatePLItem = async (id: string, field: keyof PLLineItem, value: any) => {
+    if (!activeProject) return;
+    const currentRevenue = (activeProject.items || [])
+      .filter(i => i.category === 'revenue')
+      .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+    const updatedItems = activeProject.items.map(item => {
+      if (item.id === id) {
+        if (field === 'ratePct') {
+          const rate = parseFloat(value) || 0;
+          const newAmount = currentRevenue > 0 ? Math.round((currentRevenue * (rate / 100)) * 100) / 100 : item.amount;
+          return { ...item, ratePct: rate, amount: newAmount };
+        } else if (field === 'amount') {
+          const amt = parseFloat(value) || 0;
+          const newRate = (currentRevenue > 0 && item.category === 'commission') ? Math.round(((amt / currentRevenue) * 100) * 10) / 10 : item.ratePct;
+          return { ...item, amount: amt, ratePct: newRate };
+        } else {
+          return { ...item, [field]: value };
+        }
+      }
+      return item;
+    });
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? { ...p, items: updatedItems } : p);
+    await saveProjectPLsState(updatedPLs);
+  };
+
+  const handleDeletePLItem = async (id: string) => {
+    if (!activeProject) return;
+    const updatedItems = activeProject.items.filter(item => item.id !== id);
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? { ...p, items: updatedItems } : p);
+    await saveProjectPLsState(updatedPLs);
+    setPlNotice("P&L line item removed.");
+    setTimeout(() => setPlNotice(''), 3000);
+  };
+
+  const handleUpdateTaxRate = async (rate: number) => {
+    if (!activeProject) return;
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? { ...p, taxRate: rate } : p);
+    await saveProjectPLsState(updatedPLs);
+  };
+
+  const handleToggleHrdcLevy = async (enabled: boolean) => {
+    if (!activeProject) return;
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? { ...p, enableHrdcLevy: enabled } : p);
+    await saveProjectPLsState(updatedPLs);
+  };
+
+  const handleToggleSst = async (enabled: boolean) => {
+    if (!activeProject) return;
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? { ...p, enableSst: enabled } : p);
+    await saveProjectPLsState(updatedPLs);
+  };
+
+  const handleUpdateProjectDate = async (dateStr: string) => {
+    if (!activeProject) return;
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? { ...p, projectDate: dateStr, intakePeriod: dateStr } : p);
+    await saveProjectPLsState(updatedPLs);
+  };
+
+  const handleUpdateIntakePeriod = async (period: string) => {
+    if (!activeProject) return;
+    const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? { ...p, projectDate: period, intakePeriod: period } : p);
+    await saveProjectPLsState(updatedPLs);
+  };
+
+  // Real-time Firestore sync for Project P&L Statements
+  useEffect(() => {
+    if (!db) return;
+
+    const docRef = doc(db, 'project_pls', rep.id);
+    const unsubscribe = onSnapshot(docRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.projects && Array.isArray(data.projects) && data.projects.length > 0) {
+          setProjectPLs(data.projects);
+          localStorage.setItem(`next_project_pls_${rep.id}`, JSON.stringify(data.projects));
+        }
+      } else {
+        const initial = getDefaultProjectPLs(rep, pipelines);
+        await setDoc(docRef, { projects: initial });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [rep.id]);
+
+  // Derived Financial Computations for Active Project P&L
+  const revenueItems = (activeProject?.items || []).filter(i => i.category === 'revenue');
+  const cogsItems = (activeProject?.items || []).filter(i => i.category === 'cogs');
+  const commissionItems = (activeProject?.items || []).filter(i => i.category === 'commission');
+
+  const totalRevenue = revenueItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const totalCOGS = cogsItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+
+  const resolvedCommissionItems = commissionItems.map(item => {
+    if (typeof item.ratePct === 'number' && item.ratePct > 0) {
+      const computed = totalRevenue > 0 ? (totalRevenue * (item.ratePct / 100)) : item.amount;
+      return { ...item, amount: Math.round(computed * 100) / 100 };
+    }
+    return item;
+  });
+
+  const totalCommissions = resolvedCommissionItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+
+  const grossProfit = totalRevenue - totalCOGS - totalCommissions;
+  const grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+
+  // Optional Tax Deductions & Statutory Levies (4% HRDC Levy, 8% SST)
+  const enableHrdcLevy = activeProject?.enableHrdcLevy ?? false;
+  const enableSst = activeProject?.enableSst ?? false;
+  const hrdcAmount = enableHrdcLevy ? totalRevenue * 0.04 : 0;
+  const sstAmount = enableSst ? totalRevenue * 0.08 : 0;
+  const totalLeviesAndDeductions = hrdcAmount + sstAmount;
+
+  const grossProfitAfterDeductions = grossProfit - totalLeviesAndDeductions;
+  const grossMarginAfterDeductionsPct = totalRevenue > 0 ? (grossProfitAfterDeductions / totalRevenue) * 100 : 0;
+
+  // Date Tabulation Filter Engine (Calculates Total Sales & Total GP for Selected Date)
+  const isProjectInTabulatedDate = (proj: ProjectPL): boolean => {
+    const rawDate = proj.projectDate || proj.intakePeriod || '';
+    if (tabulateFilterMode === 'all') return true;
+
+    if (tabulateFilterMode === 'single_date') {
+      if (!tabulateSingleDate) return true;
+      if (rawDate === tabulateSingleDate) return true;
+      if (rawDate.startsWith(tabulateSingleDate)) return true;
+      return false;
+    }
+
+    if (tabulateFilterMode === 'month') {
+      if (!tabulateMonth) return true;
+      if (rawDate.startsWith(tabulateMonth)) return true;
+      const [y, m] = tabulateMonth.split('-');
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const mIdx = parseInt(m, 10) - 1;
+      const mName = monthNames[mIdx];
+      if (mName && rawDate.toLowerCase().includes(mName.toLowerCase()) && rawDate.includes(y)) return true;
+      return false;
+    }
+
+    if (tabulateFilterMode === 'quarter') {
+      const [q, y] = tabulateQuarter.split('-');
+      let months: string[] = [];
+      if (q === 'Q1') months = ['01', '02', '03'];
+      else if (q === 'Q2') months = ['04', '05', '06'];
+      else if (q === 'Q3') months = ['07', '08', '09'];
+      else if (q === 'Q4') months = ['10', '11', '12'];
+
+      const matchesMonth = months.some(m => rawDate.startsWith(`${y}-${m}`));
+      if (matchesMonth) return true;
+      if (rawDate.toLowerCase().includes(q.toLowerCase()) && rawDate.includes(y)) return true;
+      return false;
+    }
+
+    if (tabulateFilterMode === 'date_range') {
+      const norm = rawDate.length === 10 ? rawDate : normalizeDateForInput(rawDate);
+      if (tabulateStartDate && norm < tabulateStartDate) return false;
+      if (tabulateEndDate && norm > tabulateEndDate) return false;
+      return true;
+    }
+
+    return true;
+  };
+
+  const tabulatedProjects = projectPLs.filter(isProjectInTabulatedDate);
+
+  const tabulatedSummary = React.useMemo(() => {
+    let totalSales = 0;
+    let totalCOGS = 0;
+    let totalCommissions = 0;
+
+    tabulatedProjects.forEach(p => {
+      const rev = p.items.filter(i => i.category === 'revenue').reduce((s, i) => s + (i.amount || 0), 0);
+      const cogs = p.items.filter(i => i.category === 'cogs').reduce((s, i) => s + (i.amount || 0), 0);
+      const comm = p.items.filter(i => i.category === 'commission').reduce((s, i) => {
+        if (typeof i.ratePct === 'number' && i.ratePct > 0) {
+          return s + (rev * (i.ratePct / 100));
+        }
+        return s + (i.amount || 0);
+      }, 0);
+
+      totalSales += rev;
+      totalCOGS += cogs;
+      totalCommissions += comm;
+    });
+
+    const totalGP = totalSales - totalCOGS - totalCommissions;
+    const gpMargin = totalSales > 0 ? (totalGP / totalSales) * 100 : 0;
+
+    return {
+      count: tabulatedProjects.length,
+      totalSales,
+      totalCOGS,
+      totalCommissions,
+      totalGP,
+      gpMargin
+    };
+  }, [tabulatedProjects]);
+
   const getDateline = (kpi: any, week: number): string => {
     if (kpi?.datelineList && Array.isArray(kpi.datelineList) && kpi.datelineList[week] !== undefined) {
       return kpi.datelineList[week] || '';
@@ -581,6 +1255,9 @@ export default function RepDetailDashboard({
     const unsubscribe = onSnapshot(docRef, async (docSnap) => {
       if (docSnap.exists()) {
         const firestoreLinks = docSnap.data() as GoogleLinks;
+        if (!firestoreLinks.pAndL) {
+          firestoreLinks.pAndL = DEFAULT_PL_REFERENCE_URL;
+        }
         setLinks(firestoreLinks);
         localStorage.setItem(`next_links_${rep.id}`, JSON.stringify(firestoreLinks));
       } else {
@@ -592,11 +1269,12 @@ export default function RepDetailDashboard({
           venue: '',
           trainerList: '',
           pendingTasks: '',
-          pAndL: ''
+          pAndL: DEFAULT_PL_REFERENCE_URL
         };
         if (storedLinks) {
           try {
             parsedLinks = JSON.parse(storedLinks);
+            if (!parsedLinks.pAndL) parsedLinks.pAndL = DEFAULT_PL_REFERENCE_URL;
           } catch {}
         }
         await setDoc(docRef, parsedLinks);
@@ -645,16 +1323,20 @@ export default function RepDetailDashboard({
         localStorage.setItem(`next_trainers_${rep.id}`, JSON.stringify(firestoreTrainers));
       } else {
         const savedTrainers = localStorage.getItem(`next_trainers_${rep.id}`);
-        let parsedTrainers = [
-          { id: 't_1', name: 'Dr. Jason Lee', specialization: 'React & AI Integration', contact: '+6012-3456789', status: 'Available', rate: 2500 },
-          { id: 't_2', name: 'Sarah Amanda', specialization: 'Design Thinking & Soft Skills', contact: '+6013-9876543', status: 'Booked', rate: 1800 },
-          { id: 't_3', name: 'Aris Rahman', specialization: 'Full-Stack Web Development', contact: '+6017-1112233', status: 'Available', rate: 2000 }
-        ];
-        if (savedTrainers) {
+        let parsedTrainers: any[] = [];
+        if (savedTrainers !== null) {
           try {
             parsedTrainers = JSON.parse(savedTrainers);
           } catch {}
+        } else {
+          parsedTrainers = [
+            { id: 't_1', name: 'Dr. Jason Lee', specialization: 'React & AI Integration', contact: '+6012-3456789', status: 'Available', rate: 2500 },
+            { id: 't_2', name: 'Sarah Amanda', specialization: 'Design Thinking & Soft Skills', contact: '+6013-9876543', status: 'Booked', rate: 1800 },
+            { id: 't_3', name: 'Aris Rahman', specialization: 'Full-Stack Web Development', contact: '+6017-1112233', status: 'Available', rate: 2000 }
+          ];
         }
+        setTrainers(parsedTrainers);
+        localStorage.setItem(`next_trainers_${rep.id}`, JSON.stringify(parsedTrainers));
         await setDoc(docRef, { trainers: parsedTrainers });
       }
     });
@@ -674,41 +1356,45 @@ export default function RepDetailDashboard({
         localStorage.setItem(`next_venues_${rep.id}`, JSON.stringify(firestoreVenues));
       } else {
         const savedVenues = localStorage.getItem(`next_venues_${rep.id}`);
-        let parsedVenues = [
-          { 
-            id: 'v_1', 
-            name: 'Happi Village, Janda Baik', 
-            distance: '45 km from HQ', 
-            meetingPackagePrice: 'RM 150/pax/day', 
-            roomPackagePrice: 'RM 280/pax', 
-            dinnerPackage: 'RM 120/pax (BBQ Buffet)', 
-            facilities: 'WiFi, Projector, Sound System, Poolside lounge', 
-            contact: 'Ms. Wong (+6019-2223344) / reservation@happivillage.my', 
-            quotationDate: '2026-05-15', 
-            remarks: 'Great outdoor vibe, cooler weather. Highly recommended for team bonding.', 
-            pictures: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=300&q=80',
-            status: 'Available'
-          },
-          { 
-            id: 'v_2', 
-            name: 'Park Royal Resort', 
-            distance: '120 km from HQ', 
-            meetingPackagePrice: 'RM 180/pax/day', 
-            roomPackagePrice: 'RM 350/pax', 
-            dinnerPackage: 'RM 150/pax (International Buffet)', 
-            facilities: 'Ballroom, PA System, 5 Breakout rooms, Beach access', 
-            contact: 'Mr. Tan (+6016-5556677) / tan.parkroyal@gmail.com', 
-            quotationDate: '2026-06-01', 
-            remarks: 'Premium beachside resort location. Good for corporate annual dinner.', 
-            pictures: 'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&w=300&q=80',
-            status: 'Booked'
-          }
-        ];
-        if (savedVenues) {
+        let parsedVenues: any[] = [];
+        if (savedVenues !== null) {
           try {
             parsedVenues = JSON.parse(savedVenues);
           } catch {}
+        } else {
+          parsedVenues = [
+            { 
+              id: 'v_1', 
+              name: 'Happi Village, Janda Baik', 
+              distance: '45 km from HQ', 
+              meetingPackagePrice: 'RM 150/pax/day', 
+              roomPackagePrice: 'RM 280/pax', 
+              dinnerPackage: 'RM 120/pax (BBQ Buffet)', 
+              facilities: 'WiFi, Projector, Sound System, Poolside lounge', 
+              contact: 'Ms. Wong (+6019-2223344) / reservation@happivillage.my', 
+              quotationDate: '2026-05-15', 
+              remarks: 'Great outdoor vibe, cooler weather. Highly recommended for team bonding.', 
+              pictures: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=300&q=80',
+              status: 'Available'
+            },
+            { 
+              id: 'v_2', 
+              name: 'Park Royal Resort', 
+              distance: '120 km from HQ', 
+              meetingPackagePrice: 'RM 180/pax/day', 
+              roomPackagePrice: 'RM 350/pax', 
+              dinnerPackage: 'RM 150/pax (International Buffet)', 
+              facilities: 'Ballroom, PA System, 5 Breakout rooms, Beach access', 
+              contact: 'Mr. Tan (+6016-5556677) / tan.parkroyal@gmail.com', 
+              quotationDate: '2026-06-01', 
+              remarks: 'Premium beachside resort location. Good for corporate annual dinner.', 
+              pictures: 'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&w=300&q=80',
+              status: 'Booked'
+            }
+          ];
         }
+        setVenues(parsedVenues);
+        localStorage.setItem(`next_venues_${rep.id}`, JSON.stringify(parsedVenues));
         await setDoc(docRef, { venues: parsedVenues });
       }
     });
@@ -2178,6 +2864,16 @@ export default function RepDetailDashboard({
                   </div>
                   
                   <div className="flex gap-2">
+                    <button 
+                      type="button"
+                      onClick={() => setShowCommissionModal(true)}
+                      className="text-xs bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-750 font-black px-3.5 py-1.5 rounded transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
+                      title="Key in weekly commission, closed sales & pipeline metrics"
+                    >
+                      <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                      {rep.id === 'atiqa' ? 'Log KPI Values' : '$ Key In Commission / Sales'}
+                    </button>
+
                     {isEditingKpi ? (
                       <>
                         <button 
@@ -4700,6 +5396,1882 @@ export default function RepDetailDashboard({
                 </div>
 
               </div>
+
+            </div>
+          ) : activeSubTab === 'pl' ? (
+            /* PROJECT-BASED PROFIT & LOSS (P&L) FINANCIAL STATEMENT WORKSPACE */
+            <div className="space-y-6">
+              
+              {/* Notification Banner */}
+              {plNotice && (
+                <div className="bg-emerald-900 text-emerald-100 rounded-xl p-3 px-4 flex items-center justify-between text-xs shadow-md animate-fade-in border border-emerald-700">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="font-semibold">{plNotice}</span>
+                  </div>
+                  <button onClick={() => setPlNotice('')} className="text-emerald-300 hover:text-white text-xs font-bold">
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Workspace Navigation & View Mode Switcher Bar */}
+              <div className="bg-slate-900 text-white rounded-xl p-3 px-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-slate-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPlViewMode('overview')}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                      plViewMode === 'overview'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>📊 All Projects Overview List</span>
+                    <span className="bg-emerald-950 text-emerald-300 text-[10px] font-mono font-bold px-2 py-0.3 rounded-full border border-emerald-800">
+                      {projectPLs.length} Projects
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPlViewMode('detail')}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                      plViewMode === 'detail'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>📄 Detailed P&L Statement</span>
+                    <span className="text-[10px] font-mono text-slate-300 truncate max-w-[140px]">
+                      ({activeProject.projectTitle})
+                    </span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExplicitSavePL}
+                    disabled={isSavingPL}
+                    className={`font-black text-xs px-4 py-2 rounded-lg transition-all shadow-sm flex items-center gap-1.5 cursor-pointer ${
+                      isSavingPL
+                        ? 'bg-emerald-500 text-white animate-pulse'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400'
+                    }`}
+                    title="Save P&L Data & Changes"
+                  >
+                    {isSavingPL ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                    <span>{isSavingPL ? 'Saved!' : 'Save P&L Statement'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleOpenCreateProjectModal}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-extrabold text-xs px-3.5 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Plus className="w-4 h-4 text-emerald-400" />
+                    + New Project
+                  </button>
+                </div>
+              </div>
+
+              {plViewMode === 'overview' ? (
+                /* ALL PROJECTS OVERVIEW LIST VIEW & DATE TABULATOR */
+                <div className="space-y-6">
+                  {/* Date-Based Financial Tabulator & Aggregation Engine */}
+                  <div className="bg-white border-2 border-emerald-500/30 rounded-2xl p-5 shadow-sm space-y-4 bg-gradient-to-b from-emerald-50/20 via-white to-white">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-emerald-600 text-white rounded-xl shadow-xs">
+                          <Calendar className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-base font-black text-slate-900 uppercase tracking-wide font-display">
+                              Date-Based Financial Tabulator
+                            </h3>
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full uppercase border border-emerald-300">
+                              Live Aggregator
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 font-medium">
+                            Tabulate Total Sales Revenue, Direct COGS, Commissions, and Gross Profit (GP) based on selected project date or date window.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTabulateFilterMode('all')}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer border ${
+                            tabulateFilterMode === 'all'
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          All Dates
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsTabulatorOpen(!isTabulatorOpen)}
+                          className="text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          {isTabulatorOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          <span>{isTabulatorOpen ? 'Collapse Filter' : 'Expand Filter'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {isTabulatorOpen && (
+                      <div className="space-y-4">
+                        {/* Tabulation Filter Mode Tabs */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 font-mono mr-1">
+                            Filter By:
+                          </span>
+                          
+                          <button
+                            type="button"
+                            onClick={() => setTabulateFilterMode('all')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              tabulateFilterMode === 'all'
+                                ? 'bg-slate-900 text-white shadow-xs'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            🌐 All Dates (Full Portfolio)
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setTabulateFilterMode('single_date')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              tabulateFilterMode === 'single_date'
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            📅 Specific Project Date
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setTabulateFilterMode('date_range')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              tabulateFilterMode === 'date_range'
+                                ? 'bg-blue-600 text-white shadow-xs'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            ↔️ Date Range (From - To)
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setTabulateFilterMode('month')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              tabulateFilterMode === 'month'
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            🗓️ By Month
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setTabulateFilterMode('quarter')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              tabulateFilterMode === 'quarter'
+                                ? 'bg-purple-600 text-white shadow-xs'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            📊 By Quarter
+                          </button>
+                        </div>
+
+                        {/* Interactive Dynamic Date Controls */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                          {tabulateFilterMode === 'single_date' && (
+                            <div className="flex flex-wrap items-center gap-3 w-full">
+                              <span className="text-xs font-black uppercase text-slate-700 font-mono">
+                                Select Target Date:
+                              </span>
+                              <input
+                                type="date"
+                                value={tabulateSingleDate}
+                                onChange={(e) => setTabulateSingleDate(e.target.value)}
+                                className="text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-500 shadow-xs"
+                              />
+                              <span className="text-xs font-extrabold text-emerald-800 bg-emerald-100/80 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                📅 {formatProjectDateDisplay(tabulateSingleDate)}
+                              </span>
+
+                              {/* Quick Presets from existing projects */}
+                              <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+                                <span className="text-[10px] font-bold text-slate-400 font-mono uppercase">Quick Presets:</span>
+                                {Array.from(new Set<string>(projectPLs.map(p => (p.projectDate || p.intakePeriod || '')).filter((d): d is string => Boolean(d)))).map((dStr, idx) => (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => setTabulateSingleDate(normalizeDateForInput(dStr))}
+                                    className="text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded-md transition-colors cursor-pointer"
+                                  >
+                                    {formatProjectDateDisplay(dStr)}
+                                  </button>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => setTabulateSingleDate(new Date().toISOString().split('T')[0])}
+                                  className="text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md transition-colors cursor-pointer"
+                                >
+                                  Today
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {tabulateFilterMode === 'date_range' && (
+                            <div className="flex flex-wrap items-center gap-3 w-full">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-black uppercase text-slate-700 font-mono">From:</span>
+                                <input
+                                  type="date"
+                                  value={tabulateStartDate}
+                                  onChange={(e) => setTabulateStartDate(e.target.value)}
+                                  className="text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:border-blue-500 shadow-xs"
+                                />
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-black uppercase text-slate-700 font-mono">To:</span>
+                                <input
+                                  type="date"
+                                  value={tabulateEndDate}
+                                  onChange={(e) => setTabulateEndDate(e.target.value)}
+                                  className="text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:border-blue-500 shadow-xs"
+                                />
+                              </div>
+
+                              {/* Quick Range Presets */}
+                              <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+                                <span className="text-[10px] font-bold text-slate-400 font-mono uppercase">Range Presets:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => { setTabulateStartDate('2026-07-01'); setTabulateEndDate('2026-07-31'); }}
+                                  className="text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded-md transition-colors cursor-pointer"
+                                >
+                                  July 2026
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setTabulateStartDate('2026-08-01'); setTabulateEndDate('2026-08-31'); }}
+                                  className="text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded-md transition-colors cursor-pointer"
+                                >
+                                  August 2026
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setTabulateStartDate('2026-07-01'); setTabulateEndDate('2026-09-30'); }}
+                                  className="text-[11px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1 rounded-md transition-colors cursor-pointer"
+                                >
+                                  Q3 2026
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setTabulateStartDate('2026-01-01'); setTabulateEndDate('2026-12-31'); }}
+                                  className="text-[11px] font-bold bg-slate-900 text-white px-2 py-1 rounded-md transition-colors cursor-pointer"
+                                >
+                                  Year 2026
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {tabulateFilterMode === 'month' && (
+                            <div className="flex flex-wrap items-center gap-3 w-full">
+                              <span className="text-xs font-black uppercase text-slate-700 font-mono">
+                                Select Target Month:
+                              </span>
+                              <input
+                                type="month"
+                                value={tabulateMonth}
+                                onChange={(e) => setTabulateMonth(e.target.value)}
+                                className="text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:border-indigo-500 shadow-xs"
+                              />
+
+                              <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+                                <span className="text-[10px] font-bold text-slate-400 font-mono uppercase">Quick Months:</span>
+                                {['2026-06', '2026-07', '2026-08', '2026-09', '2026-10'].map((m) => (
+                                  <button
+                                    key={m}
+                                    type="button"
+                                    onClick={() => setTabulateMonth(m)}
+                                    className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition-colors cursor-pointer border ${
+                                      tabulateMonth === m
+                                        ? 'bg-indigo-600 text-white border-indigo-600'
+                                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {m === '2026-06' ? 'Jun 2026' : m === '2026-07' ? 'Jul 2026' : m === '2026-08' ? 'Aug 2026' : m === '2026-09' ? 'Sep 2026' : 'Oct 2026'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {tabulateFilterMode === 'quarter' && (
+                            <div className="flex flex-wrap items-center gap-3 w-full">
+                              <span className="text-xs font-black uppercase text-slate-700 font-mono">
+                                Select Quarter:
+                              </span>
+                              <select
+                                value={tabulateQuarter}
+                                onChange={(e) => setTabulateQuarter(e.target.value)}
+                                className="text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:border-purple-500 shadow-xs"
+                              >
+                                <option value="Q1-2026">Q1 2026 (Jan - Mar 2026)</option>
+                                <option value="Q2-2026">Q2 2026 (Apr - Jun 2026)</option>
+                                <option value="Q3-2026">Q3 2026 (Jul - Sep 2026)</option>
+                                <option value="Q4-2026">Q4 2026 (Oct - Dec 2026)</option>
+                                <option value="Q1-2027">Q1 2027 (Jan - Mar 2027)</option>
+                              </select>
+
+                              <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+                                {['Q1-2026', 'Q2-2026', 'Q3-2026', 'Q4-2026'].map((q) => (
+                                  <button
+                                    key={q}
+                                    type="button"
+                                    onClick={() => setTabulateQuarter(q)}
+                                    className={`text-[11px] font-bold px-2.5 py-1 rounded-md transition-colors cursor-pointer border ${
+                                      tabulateQuarter === q
+                                        ? 'bg-purple-600 text-white border-purple-600'
+                                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {q}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {tabulateFilterMode === 'all' && (
+                            <div className="flex items-center justify-between w-full text-xs text-slate-600 font-medium">
+                              <span>Showing complete portfolio tabulation across all recorded project dates.</span>
+                              <span className="font-bold text-slate-900 font-mono">{projectPLs.length} Total Projects</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tabulated Financial Metric Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-1">
+                      {/* Tabulated Total Sales */}
+                      <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm space-y-1 border border-slate-800">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider font-mono">
+                            Tabulated Total Sales
+                          </span>
+                          <span className="text-[10px] font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
+                            {tabulatedSummary.count} Prj
+                          </span>
+                        </div>
+                        <div className="text-2xl font-black text-white font-mono tracking-tight">
+                          RM {tabulatedSummary.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-medium">
+                          {tabulateFilterMode === 'all' ? 'All project sales revenue' : 'Sales for selected date criteria'}
+                        </p>
+                      </div>
+
+                      {/* Tabulated COGS */}
+                      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider font-mono">
+                            Direct Delivery (COGS)
+                          </span>
+                          <div className="p-1 bg-amber-50 text-amber-600 rounded">
+                            <Briefcase className="w-3.5 h-3.5" />
+                          </div>
+                        </div>
+                        <div className="text-2xl font-black text-slate-800 font-mono tracking-tight">
+                          RM {tabulatedSummary.totalCOGS.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-medium">
+                          Trainers, venue & direct costs
+                        </p>
+                      </div>
+
+                      {/* Tabulated Commissions */}
+                      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider font-mono">
+                            Commissions & Fees
+                          </span>
+                          <div className="p-1 bg-purple-50 text-purple-600 rounded">
+                            <Calculator className="w-3.5 h-3.5" />
+                          </div>
+                        </div>
+                        <div className="text-2xl font-black text-slate-800 font-mono tracking-tight">
+                          RM {tabulatedSummary.totalCommissions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <p className="text-[10px] text-purple-700 font-mono font-bold">
+                          {tabulatedSummary.totalSales > 0 ? ((tabulatedSummary.totalCommissions / tabulatedSummary.totalSales) * 100).toFixed(1) : 0}% of sales
+                        </p>
+                      </div>
+
+                      {/* Tabulated Gross Profit (GP) */}
+                      <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 text-white rounded-xl p-4 shadow-sm space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-emerald-100 uppercase tracking-wider font-mono">
+                            Tabulated Gross Profit (GP)
+                          </span>
+                          <span className="bg-white/20 text-white text-[10px] font-black font-mono px-2 py-0.5 rounded uppercase">
+                            {tabulatedSummary.gpMargin.toFixed(1)}% GP
+                          </span>
+                        </div>
+                        <div className="text-2xl font-black text-white font-mono tracking-tight">
+                          RM {tabulatedSummary.totalGP.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <p className="text-[10px] text-emerald-100 font-medium font-mono">
+                          Net revenue after COGS & commissions
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Master Projects Overview List Table */}
+                  <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                    <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/80">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-black text-slate-800 uppercase tracking-wide font-display flex items-center gap-2">
+                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                            <span>All Projects Master Overview List</span>
+                          </h4>
+                          <span className="bg-slate-200 text-slate-700 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full">
+                            Showing {tabulatedProjects.length} of {projectPLs.length} Projects
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium">
+                          Overview list of corporate client training project P&Ls with actual project dates and financial metrics.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {tabulateFilterMode !== 'all' && (
+                          <button
+                            type="button"
+                            onClick={() => setTabulateFilterMode('all')}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Clear Filter</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleExplicitSavePL}
+                          disabled={isSavingPL}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          {isSavingPL ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                          <span>{isSavingPL ? 'Saved!' : 'Save All Projects'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleOpenCreateProjectModal}
+                          className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>+ Create Project</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse min-w-[950px]">
+                        <thead>
+                          <tr className="bg-slate-100 text-[10px] font-mono font-black text-slate-600 uppercase tracking-wider border-b border-slate-200">
+                            <th className="py-3 px-4">Project Title & Code</th>
+                            <th className="py-3 px-4">Actual Date of Project</th>
+                            <th className="py-3 px-4">Client & Venue</th>
+                            <th className="py-3 px-4 text-right">Sales Revenue</th>
+                            <th className="py-3 px-4 text-right">Delivery COGS</th>
+                            <th className="py-3 px-4 text-right">Commissions</th>
+                            <th className="py-3 px-4 text-right">Gross Profit (GP) & Margin</th>
+                            <th className="py-3 px-4 text-center">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-xs">
+                          {tabulatedProjects.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="py-10 text-center text-slate-500 bg-slate-50/50">
+                                <div className="max-w-md mx-auto space-y-2">
+                                  <Calendar className="w-8 h-8 text-slate-400 mx-auto" />
+                                  <p className="font-bold text-slate-700 text-sm">No Projects Match Selected Date Filter</p>
+                                  <p className="text-xs text-slate-500">
+                                    No project P&Ls were found for the current date selection. Try switching to "All Dates" or picking another date.
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setTabulateFilterMode('all')}
+                                    className="mt-2 bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition-colors"
+                                  >
+                                    Show All Projects
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : (
+                            tabulatedProjects.map((p) => {
+                              const isCurrentActive = p.id === activeProject.id;
+                              const pRev = p.items.filter(i => i.category === 'revenue').reduce((s, i) => s + (i.amount || 0), 0);
+                              const pCogs = p.items.filter(i => i.category === 'cogs').reduce((s, i) => s + (i.amount || 0), 0);
+                              const pComm = p.items.filter(i => i.category === 'commission').reduce((s, i) => {
+                                if (typeof i.ratePct === 'number' && i.ratePct > 0) {
+                                  return s + (pRev * (i.ratePct / 100));
+                                }
+                                return s + (i.amount || 0);
+                              }, 0);
+                              const pGross = pRev - pCogs - pComm;
+                              const pGrossMargin = pRev > 0 ? (pGross / pRev) * 100 : 0;
+                              const actualDate = p.projectDate || p.intakePeriod || '';
+
+                              return (
+                                <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${isCurrentActive ? 'bg-emerald-50/30' : ''}`}>
+                                  <td className="py-3.5 px-4">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-extrabold text-slate-900 text-xs">{p.projectTitle}</span>
+                                        {isCurrentActive && (
+                                          <span className="bg-emerald-600 text-white text-[9px] font-mono font-black px-1.5 py-0.2 rounded uppercase">
+                                            ACTIVE
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                                        <span>Code: {p.projectCode || 'N/A'}</span>
+                                        <span>•</span>
+                                        <span className="text-emerald-700 font-semibold uppercase">{p.linkType || 'Manual'}</span>
+                                      </div>
+                                    </div>
+                                  </td>
+
+                                  <td className="py-3.5 px-4">
+                                    <div className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 text-slate-800 font-mono text-xs font-bold">
+                                      <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                                      <span>{formatProjectDateDisplay(actualDate)}</span>
+                                    </div>
+                                  </td>
+
+                                  <td className="py-3.5 px-4">
+                                    <div className="space-y-0.5 text-xs">
+                                      <div className="font-bold text-slate-800">
+                                        {p.clientName} {p.clientCompany ? `(${p.clientCompany})` : ''}
+                                      </div>
+                                      <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
+                                        <span className="truncate max-w-[140px]">{p.venueLocation || 'Happi Village, Janda Baik'}</span>
+                                        <span>•</span>
+                                        <span>{p.paxCount || 20} Pax</span>
+                                      </div>
+                                    </div>
+                                  </td>
+
+                                  <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
+                                    RM {pRev.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+
+                                  <td className="py-3.5 px-4 text-right font-mono font-semibold text-slate-700">
+                                    RM {pCogs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+
+                                  <td className="py-3.5 px-4 text-right font-mono font-semibold text-purple-700">
+                                    RM {pComm.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+
+                                  <td className="py-3.5 px-4 text-right font-mono">
+                                    <div className="font-bold text-slate-900">
+                                      RM {pGross.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </div>
+                                    <div className={`text-[10px] font-bold ${pGrossMargin >= 40 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                      {pGrossMargin.toFixed(1)}% Gross Margin
+                                    </div>
+                                  </td>
+
+                                  <td className="py-3.5 px-4 text-center">
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveProjectId(p.id);
+                                          setPlViewMode('detail');
+                                        }}
+                                        className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                                        title="Open Detailed P&L Statement"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                        <span>Open P&L</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditProjectModal(p)}
+                                        className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors cursor-pointer"
+                                        title="Edit Project Details"
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteProject(p.id)}
+                                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                        title="Delete Project P&L"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* DETAILED P&L STATEMENT VIEW */
+                <div className="space-y-6">
+                  {/* Project Selector Bar & Management Header */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                          <FileSpreadsheet className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-black text-slate-800 uppercase tracking-wide font-display">
+                            Project Selector & Quick Switch
+                          </h3>
+                          <p className="text-[11px] text-slate-500 font-medium">
+                            Select a project pill below or click "All Projects Overview List" to view all project summaries.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleOpenCreateProjectModal}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        <Plus className="w-4 h-4" />
+                        + Create New Project P&L
+                      </button>
+                    </div>
+
+                    {/* Project Pills List */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {projectPLs.map((p) => {
+                        const isActive = p.id === activeProject.id;
+                        const pRev = p.items.filter(i => i.category === 'revenue').reduce((s, i) => s + (i.amount || 0), 0);
+                        const pCogs = p.items.filter(i => i.category === 'cogs').reduce((s, i) => s + (i.amount || 0), 0);
+                        const pGross = pRev - pCogs;
+                        const pGrossMargin = pRev > 0 ? (pGross / pRev) * 100 : 0;
+
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setActiveProjectId(p.id)}
+                            className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border text-left cursor-pointer ${
+                              isActive
+                                ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold truncate max-w-[180px]">{p.projectTitle}</span>
+                                <span className={`text-[9px] font-black font-mono px-1.5 py-0.2 rounded uppercase ${
+                                  isActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-800'
+                                }`}>
+                                  {pGrossMargin.toFixed(0)}% Margin
+                                </span>
+                              </div>
+                              <div className={`text-[10px] font-mono ${isActive ? 'text-slate-300' : 'text-slate-500'}`}>
+                                {p.clientName} • RM {pRev.toLocaleString()}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Active Project Header Card & Link Metadata Banner */}
+                  <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-800 text-white border border-slate-700 rounded-xl p-6 shadow-md space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-700/80">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-mono">
+                            {activeProject.linkType === 'pipeline'
+                              ? `🔗 PIPELINE LINKED (${activeProject.linkedPipelineId || 'DEAL'})`
+                              : activeProject.linkType === 'quotation'
+                              ? `📄 QUOTATION LINKED (${activeProject.linkedQuotationNumber || 'QT'})`
+                              : '📝 MANUAL CLIENT ENTRY'}
+                          </span>
+                          <span className="text-xs font-mono text-slate-400">
+                            Code: {activeProject.projectCode || 'PRJ-2026'}
+                          </span>
+                        </div>
+
+                        <h2 className="text-xl font-black text-white tracking-wide font-display">
+                          {activeProject.projectTitle}
+                        </h2>
+
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300 font-medium">
+                          <span><strong className="text-white">Client:</strong> {activeProject.clientName} {activeProject.clientCompany ? `(${activeProject.clientCompany})` : ''}</span>
+                          {activeProject.clientContact && <span>• <strong>Contact:</strong> {activeProject.clientContact}</span>}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Prominent Primary Save Button */}
+                        <button
+                          type="button"
+                          onClick={handleExplicitSavePL}
+                          disabled={isSavingPL}
+                          className={`font-black text-xs px-4 py-2 rounded-lg transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
+                            isSavingPL
+                              ? 'bg-emerald-500 text-white animate-pulse'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500'
+                          }`}
+                          title="Save P&L Statement to database & localStorage"
+                        >
+                          {isSavingPL ? (
+                            <>
+                              <CheckCircle className="w-4 h-4 text-white" />
+                              <span>Saved!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4" />
+                              <span>Save P&L Statement</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditProjectModal(activeProject)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs px-3.5 py-2 rounded-lg transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Briefcase className="w-3.5 h-3.5" />
+                          Edit Details
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleSyncRevenueFromPipeline}
+                          className="bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 border border-slate-600"
+                          title="Sync Tuition Revenue from Linked Pipeline/Quotation"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                          Sync Revenue
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => window.print()}
+                          className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 border border-slate-700"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          Print
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteProject(activeProject.id)}
+                          className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 p-2 rounded-lg transition-colors"
+                          title="Delete this Project P&L"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                {/* Project Reference Header Strip (Reference Model) */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono pt-1 text-slate-300">
+                  <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
+                    <span className="block text-[9px] font-black uppercase text-slate-400">Client Name</span>
+                    <span className="font-bold text-white truncate block">{activeProject.clientName || 'N/A'}</span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
+                    <span className="block text-[9px] font-black uppercase text-slate-400">Project Date</span>
+                    <span className="font-bold text-white truncate block">{activeProject.intakePeriod || 'July 2026'}</span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
+                    <span className="block text-[9px] font-black uppercase text-slate-400">Project Venue</span>
+                    <span className="font-bold text-white truncate block">{activeProject.venueLocation || 'Happi Village, Janda Baik'}</span>
+                  </div>
+                  <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
+                    <span className="block text-[9px] font-black uppercase text-slate-400">Quotation Number</span>
+                    <span className="font-bold text-emerald-400 truncate block">
+                      {activeProject.linkedQuotationNumber || (activeProject.linkType === 'pipeline' ? activeProject.linkedPipelineId || 'N/A' : 'QT-2026-001')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Executive Summary Financial Cards for Active Project */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Gross Revenue */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono">
+                      Project Gross Revenue
+                    </span>
+                    <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md">
+                      <DollarSign className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 font-mono tracking-tight">
+                    RM {totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    {revenueItems.length} revenue line item(s)
+                  </p>
+                </div>
+
+                {/* Direct Delivery Costs (COGS) */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono">
+                      Direct Delivery (COGS)
+                    </span>
+                    <div className="p-1.5 bg-amber-50 text-amber-600 rounded-md">
+                      <Briefcase className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 font-mono tracking-tight">
+                    RM {totalCOGS.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    Trainers, venue & courseware
+                  </p>
+                </div>
+
+                {/* Commissions */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono">
+                      Commissions & Fees
+                    </span>
+                    <div className="p-1.5 bg-purple-50 text-purple-600 rounded-md">
+                      <Calculator className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900 font-mono tracking-tight">
+                    RM {totalCommissions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="text-[10px] text-purple-700 font-mono font-bold">
+                    {totalRevenue > 0 ? ((totalCommissions / totalRevenue) * 100).toFixed(1) : 0}% of Sales Revenue
+                  </p>
+                </div>
+
+                {/* Gross Profit & Margin */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono">
+                      Gross Profit Margin
+                    </span>
+                    <span className={`text-[10px] font-black font-mono px-2 py-0.5 rounded uppercase tracking-wider ${grossProfit >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                      {grossMarginPct.toFixed(1)}% Margin
+                    </span>
+                  </div>
+                  <div className={`text-2xl font-black font-mono tracking-tight ${grossProfit >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                    RM {grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    Earnings after COGS & commissions
+                  </p>
+                </div>
+              </div>
+
+              {/* Controls Bar: Actual Date of Project & Tax Status */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col lg:flex-row items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono shrink-0 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Actual Date of Project:</span>
+                  </span>
+                  <input
+                    type="date"
+                    value={normalizeDateForInput(activeProject.projectDate || activeProject.intakePeriod)}
+                    onChange={(e) => handleUpdateProjectDate(e.target.value)}
+                    className="text-xs font-bold font-mono border border-slate-200 rounded-lg px-3 py-1.5 text-slate-800 bg-slate-50 focus:outline-none focus:border-blue-500 shadow-xs"
+                  />
+                  <span className="text-xs font-extrabold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 font-sans">
+                    {formatProjectDateDisplay(activeProject.projectDate || activeProject.intakePeriod)}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlViewMode('overview');
+                      setTabulateFilterMode('single_date');
+                      setTabulateSingleDate(normalizeDateForInput(activeProject.projectDate || activeProject.intakePeriod));
+                    }}
+                    className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                    title="Tabulate all sales and gross profit for this project date"
+                  >
+                    <PieChart className="w-3 h-3 text-emerald-600" />
+                    <span>Tabulate by Date</span>
+                  </button>
+                </div>
+
+                {/* Active Tax & Levy Status Badges */}
+                <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end text-xs font-mono">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono shrink-0">
+                    Active Tax & Levies:
+                  </span>
+                  {enableHrdcLevy ? (
+                    <span className="px-2.5 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[11px] flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-600" />
+                      4% HRDC Levy
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-400 border border-slate-200 font-medium text-[11px]">
+                      HRDC Levy Off
+                    </span>
+                  )}
+
+                  {enableSst ? (
+                    <span className="px-2.5 py-1 rounded-md bg-blue-100 text-blue-900 border border-blue-300 font-bold text-[11px] flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                      8% SST
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-400 border border-slate-200 font-medium text-[11px]">
+                      SST Off
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Detailed Financial Statement Table */}
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                
+                <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Calculator className="w-4 h-4 text-emerald-400" />
+                    <h4 className="text-xs font-black uppercase tracking-wider font-mono text-white">
+                      {activeProject.projectTitle} — P&L Financial Statement
+                    </h4>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+                    Currency: MYR (RM)
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider font-mono">
+                        <th className="py-3 px-4">Line Item Category / Description</th>
+                        <th className="py-3 px-4 text-right w-44">Amount (RM)</th>
+                        <th className="py-3 px-4 w-64 hidden md:table-cell">Notes / Context</th>
+                        <th className="py-3 px-4 text-center w-16">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs text-slate-800">
+                      
+                      {/* SECTION 1: REVENUE / SALES */}
+                      <tr className="bg-emerald-50/60 border-y border-emerald-100 font-black text-emerald-900 uppercase tracking-wider text-[11px]">
+                        <td colSpan={4} className="py-2.5 px-4 font-mono flex items-center justify-between">
+                          <span>I. SALES</span>
+                          <span className="text-[10px] font-normal text-emerald-700">Project sales revenue & tuition fees</span>
+                        </td>
+                      </tr>
+
+                      {revenueItems.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-4">
+                            <input
+                              type="text"
+                              list="pl-item-presets-list"
+                              value={item.label}
+                              onChange={(e) => handleUpdatePLItem(item.id, 'label', e.target.value)}
+                              className="w-full text-xs font-semibold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 text-right">
+                            <input
+                              type="number"
+                              step="100"
+                              value={item.amount || ''}
+                              onChange={(e) => handleUpdatePLItem(item.id, 'amount', e.target.value)}
+                              className="w-full text-right font-mono font-bold text-emerald-700 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 hidden md:table-cell">
+                            <input
+                              type="text"
+                              value={item.notes || ''}
+                              placeholder="Add notes..."
+                              onChange={(e) => handleUpdatePLItem(item.id, 'notes', e.target.value)}
+                              className="w-full text-[11px] text-slate-500 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePLItem(item.id)}
+                              className="text-slate-300 hover:text-rose-600 transition-colors p-1 rounded"
+                              title="Delete line item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Revenue Subtotal */}
+                      <tr className="bg-slate-100 font-bold text-slate-900 border-t border-slate-200">
+                        <td className="py-2.5 px-4 uppercase text-[11px] font-mono">TOTAL SALES</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-emerald-800 text-sm font-black">
+                          RM {totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td colSpan={2} className="hidden md:table-cell py-2.5 px-4 text-[10px] text-slate-400 font-mono">
+                          100.0% of Total Revenue
+                        </td>
+                      </tr>
+
+
+                      {/* SECTION 2: COST OF TRAINING */}
+                      <tr className="bg-amber-50/60 border-y border-amber-100 font-black text-amber-900 uppercase tracking-wider text-[11px]">
+                        <td colSpan={4} className="py-2.5 px-4 font-mono flex items-center justify-between">
+                          <span>II. COST OF TRAINING</span>
+                          <span className="text-[10px] font-normal text-amber-700">Trainers, equipment, materials, logistics, venue & fees</span>
+                        </td>
+                      </tr>
+
+                      {cogsItems.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-4">
+                            <input
+                              type="text"
+                              list="pl-item-presets-list"
+                              value={item.label}
+                              onChange={(e) => handleUpdatePLItem(item.id, 'label', e.target.value)}
+                              className="w-full text-xs font-semibold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 text-right">
+                            <input
+                              type="number"
+                              step="50"
+                              value={item.amount || ''}
+                              onChange={(e) => handleUpdatePLItem(item.id, 'amount', e.target.value)}
+                              className="w-full text-right font-mono font-bold text-amber-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 hidden md:table-cell">
+                            <input
+                              type="text"
+                              value={item.notes || ''}
+                              placeholder="Add notes..."
+                              onChange={(e) => handleUpdatePLItem(item.id, 'notes', e.target.value)}
+                              className="w-full text-[11px] text-slate-500 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePLItem(item.id)}
+                              className="text-slate-300 hover:text-rose-600 transition-colors p-1 rounded"
+                              title="Delete line item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* COGS Subtotal */}
+                      <tr className="bg-slate-100 font-bold text-slate-900 border-t border-slate-200">
+                        <td className="py-2.5 px-4 uppercase text-[11px] font-mono">TOTAL COST OF TRAINING</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-amber-800 text-sm font-black">
+                          RM {totalCOGS.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td colSpan={2} className="hidden md:table-cell py-2.5 px-4 text-[10px] text-slate-400 font-mono">
+                          {totalRevenue > 0 ? ((totalCOGS / totalRevenue) * 100).toFixed(1) : 0}% of Sales
+                        </td>
+                      </tr>
+
+
+                      {/* SECTION 3: COMMISSIONS & AGENT FEES */}
+                      <tr className="bg-purple-50/60 border-y border-purple-100 font-black text-purple-900 uppercase tracking-wider text-[11px]">
+                        <td colSpan={4} className="py-2.5 px-4 font-mono flex items-center justify-between">
+                          <span>III. COMMISSIONS & AGENT FEES</span>
+                          <span className="text-[10px] font-normal text-purple-700">Agent, sales rep & introducer commissions (with % rate)</span>
+                        </td>
+                      </tr>
+
+                      {resolvedCommissionItems.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-4">
+                            <input
+                              type="text"
+                              list="pl-item-presets-list"
+                              value={item.label}
+                              onChange={(e) => handleUpdatePLItem(item.id, 'label', e.target.value)}
+                              className="w-full text-xs font-semibold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <div className="flex items-center text-[11px] font-mono font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 shrink-0">
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={item.ratePct ?? ''}
+                                  placeholder="%"
+                                  onChange={(e) => handleUpdatePLItem(item.id, 'ratePct', e.target.value)}
+                                  className="w-10 text-right font-mono font-bold text-purple-700 bg-transparent focus:outline-none"
+                                />
+                                <span className="ml-0.5 text-purple-500">%</span>
+                              </div>
+                              <input
+                                type="number"
+                                step="50"
+                                value={item.amount || ''}
+                                onChange={(e) => handleUpdatePLItem(item.id, 'amount', e.target.value)}
+                                className="w-24 text-right font-mono font-bold text-purple-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                              />
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-4 hidden md:table-cell">
+                            <input
+                              type="text"
+                              value={item.notes || ''}
+                              placeholder="Add notes..."
+                              onChange={(e) => handleUpdatePLItem(item.id, 'notes', e.target.value)}
+                              className="w-full text-[11px] text-slate-500 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none py-0.5"
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePLItem(item.id)}
+                              className="text-slate-300 hover:text-rose-600 transition-colors p-1 rounded"
+                              title="Delete line item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Commissions Subtotal */}
+                      <tr className="bg-slate-100 font-bold text-slate-900 border-t border-slate-200">
+                        <td className="py-2.5 px-4 uppercase text-[11px] font-mono">TOTAL COMMISSIONS</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-purple-900 text-sm font-black">
+                          RM {totalCommissions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td colSpan={2} className="hidden md:table-cell py-2.5 px-4 text-[10px] text-slate-400 font-mono">
+                          {totalRevenue > 0 ? ((totalCommissions / totalRevenue) * 100).toFixed(1) : 0}% of Total Revenue
+                        </td>
+                      </tr>
+
+
+                      {/* GROSS PROFIT SUMMARY ROW */}
+                      <tr className="bg-emerald-100/70 border-y-2 border-emerald-300 font-black text-emerald-950 text-sm">
+                        <td className="py-3 px-4 font-mono uppercase">
+                          GROSS PROFIT (SALES - COGS - COMMISSIONS)
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-black text-emerald-900">
+                          RM {grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td colSpan={2} className="hidden md:table-cell py-3 px-4 text-xs font-mono text-emerald-800">
+                          GROSS PROFIT %: {grossMarginPct.toFixed(1)}%
+                        </td>
+                      </tr>
+
+
+                      {/* OPTIONAL TAX DEDUCTIONS & LEVIES SECTION */}
+                      {(enableHrdcLevy || enableSst) && (
+                        <>
+                          <tr className="bg-amber-50/50 border-y border-amber-200/60 font-black text-amber-900 uppercase tracking-wider text-[11px]">
+                            <td colSpan={4} className="py-2.5 px-4 font-mono flex items-center justify-between">
+                              <span>STATUTORY LEVIES & TAX DEDUCTIONS</span>
+                              <span className="text-[10px] font-normal text-amber-700">Optional HRDC & SST Statutory Adjustments</span>
+                            </td>
+                          </tr>
+
+                          {/* HRDC Levy (4%) Row */}
+                          {enableHrdcLevy && (
+                            <tr className="bg-amber-50/20 text-slate-800 text-xs hover:bg-amber-50/40 transition-colors">
+                              <td className="py-2.5 px-4 font-semibold text-amber-950 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                                <span>Less: 4% HRDC Levy (Human Resources Development Corporation)</span>
+                              </td>
+                              <td className="py-2.5 px-4 text-right font-mono text-amber-900 font-extrabold">
+                                (RM {hrdcAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                              </td>
+                              <td colSpan={2} className="hidden md:table-cell py-2.5 px-4 text-[10px] text-amber-800 font-mono">
+                                Calculated at 4.0% of Total Sales (RM {totalRevenue.toLocaleString()})
+                              </td>
+                            </tr>
+                          )}
+
+                          {/* SST (8%) Row */}
+                          {enableSst && (
+                            <tr className="bg-blue-50/20 text-slate-800 text-xs hover:bg-blue-50/40 transition-colors">
+                              <td className="py-2.5 px-4 font-semibold text-blue-950 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                                <span>Less: 8% SST (Sales & Services Tax)</span>
+                              </td>
+                              <td className="py-2.5 px-4 text-right font-mono text-blue-900 font-extrabold">
+                                (RM {sstAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                              </td>
+                              <td colSpan={2} className="hidden md:table-cell py-2.5 px-4 text-[10px] text-blue-800 font-mono">
+                                Calculated at 8.0% of Total Sales (RM {totalRevenue.toLocaleString()})
+                              </td>
+                            </tr>
+                          )}
+
+                          {/* GROSS PROFIT AFTER DEDUCTIONS */}
+                          <tr className="bg-slate-900 text-white font-black text-sm border-t-2 border-slate-900">
+                            <td className="py-4 px-4 font-mono uppercase text-emerald-400">
+                              GROSS PROFIT AFTER STATUTORY DEDUCTIONS
+                            </td>
+                            <td className="py-4 px-4 text-right font-mono text-base font-black text-emerald-400">
+                              RM {grossProfitAfterDeductions.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td colSpan={2} className="hidden md:table-cell py-4 px-4 text-xs font-mono text-emerald-300">
+                              Margin: {grossMarginAfterDeductionsPct.toFixed(1)}%
+                            </td>
+                          </tr>
+                        </>
+                      )}
+
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* FORM AT THE BOTTOM: Tax & Statutory Levy Options & Custom Line Item Form */}
+                <div className="p-4 bg-slate-50 border-t border-slate-200 space-y-4">
+                  
+                  {/* Tax & Statutory Levy Configuration Form */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs">
+                    <h5 className="text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-2.5 flex items-center justify-between">
+                      <span>Tax & Statutory Levy Options</span>
+                      <span className="text-[9px] font-normal text-slate-400">Applies to {activeProject.projectTitle}</span>
+                    </h5>
+                    
+                    <div className="flex flex-wrap items-center gap-3">
+                      {/* HRDC Levy Toggle (4%) */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleHrdcLevy(!enableHrdcLevy)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold transition-all flex items-center gap-2 cursor-pointer border ${
+                          enableHrdcLevy 
+                            ? 'bg-amber-50 border-amber-400 text-amber-900 shadow-xs' 
+                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className={`w-2.5 h-2.5 rounded-full ${enableHrdcLevy ? 'bg-amber-500 ring-2 ring-amber-200' : 'bg-slate-300'}`} />
+                        <span>4% - HRDC levy</span>
+                      </button>
+
+                      {/* SST Toggle (8%) */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSst(!enableSst)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold transition-all flex items-center gap-2 cursor-pointer border ${
+                          enableSst 
+                            ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-xs' 
+                            : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className={`w-2.5 h-2.5 rounded-full ${enableSst ? 'bg-blue-500 ring-2 ring-blue-200' : 'bg-slate-300'}`} />
+                        <span>8% SST</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Add Custom P&L Line Item Form */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
+                    <h5 className="text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono flex items-center justify-between">
+                      <span>+ Add Line Item to {activeProject.projectTitle}</span>
+                      <span className="text-[9px] font-normal text-slate-400">Select from preset dropdown or enter custom description</span>
+                    </h5>
+
+                    <datalist id="pl-item-presets-list">
+                      {EXACT_USER_PRESET_ITEMS.map(item => <option key={item} value={item} />)}
+                      {PL_PRESET_ITEMS_BY_CATEGORY.revenue.map(item => <option key={item} value={item} />)}
+                      {PL_PRESET_ITEMS_BY_CATEGORY.commission.map(item => <option key={item} value={item} />)}
+                    </datalist>
+
+                    <form onSubmit={handleAddPLLineItem} className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                        
+                        {/* 1. Category */}
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider mb-1">
+                            1. Category
+                          </label>
+                          <select
+                            value={newPLCategory}
+                            onChange={(e) => {
+                              const cat = e.target.value as any;
+                              setNewPLCategory(cat);
+                              if (cat === 'commission' && PL_PRESET_ITEMS_BY_CATEGORY.commission.length > 0 && !newPLLabel) {
+                                setNewPLLabel(PL_PRESET_ITEMS_BY_CATEGORY.commission[0]);
+                              }
+                            }}
+                            className="w-full text-xs font-bold border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                          >
+                            <option value="revenue">Revenue (Income)</option>
+                            <option value="cogs">Cost of Training (COGS)</option>
+                            <option value="commission">Commissions</option>
+                          </select>
+                        </div>
+
+                        {/* 2. Dropdown Option (Preset List) */}
+                        <div className="sm:col-span-4">
+                          <label className="block text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider mb-1">
+                            2. Dropdown Option (Preset List)
+                          </label>
+                          <select
+                            value={
+                              EXACT_USER_PRESET_ITEMS.includes(newPLLabel) || 
+                              PL_PRESET_ITEMS_BY_CATEGORY[newPLCategory]?.includes(newPLLabel) 
+                                ? newPLLabel 
+                                : ''
+                            }
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                const selected = e.target.value;
+                                setNewPLLabel(selected);
+                                if (selected === 'Commission' || selected === 'Commission for agent' || PL_PRESET_ITEMS_BY_CATEGORY.commission.includes(selected)) {
+                                  setNewPLCategory('commission');
+                                } else if (PL_PRESET_ITEMS_BY_CATEGORY.revenue.includes(selected)) {
+                                  setNewPLCategory('revenue');
+                                } else {
+                                  setNewPLCategory('cogs');
+                                }
+                              }
+                            }}
+                            className="w-full text-xs font-semibold border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                          >
+                            <option value="">-- Select from dropdown list --</option>
+                            <optgroup label="Standard Preset Items">
+                              {EXACT_USER_PRESET_ITEMS.map((preset) => (
+                                <option key={preset} value={preset}>
+                                  {preset}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Revenue Categories">
+                              {PL_PRESET_ITEMS_BY_CATEGORY.revenue.map((preset) => (
+                                <option key={preset} value={preset}>
+                                  {preset}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Commission Categories">
+                              {PL_PRESET_ITEMS_BY_CATEGORY.commission.map((preset) => (
+                                <option key={preset} value={preset}>
+                                  {preset}
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        </div>
+
+                        {/* 3. Item Description / Custom Input */}
+                        <div className="sm:col-span-5">
+                          <label className="block text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider mb-1">
+                            3. Item Description (Selected or Custom)
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            list="pl-item-presets-list"
+                            placeholder="Type any custom item not in dropdown or select above..."
+                            value={newPLLabel}
+                            onChange={(e) => setNewPLLabel(e.target.value)}
+                            className="w-full text-xs font-semibold border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                        
+                        {/* Commission Rate % (Only if Commission selected) */}
+                        {newPLCategory === 'commission' && (
+                          <div className="sm:col-span-3">
+                            <label className="block text-[10px] font-mono font-bold text-purple-700 uppercase tracking-wider mb-1">
+                              Commission Rate (%)
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                step="0.1"
+                                placeholder="e.g. 5.0"
+                                value={newPLRatePct}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setNewPLRatePct(val);
+                                  const rateNum = parseFloat(val);
+                                  if (!isNaN(rateNum) && totalRevenue > 0) {
+                                    setNewPLAmount((totalRevenue * (rateNum / 100)).toFixed(2));
+                                  }
+                                }}
+                                className="w-full text-xs font-mono font-bold border border-purple-300 rounded-lg px-3 py-2 bg-purple-50/50 text-purple-900 focus:outline-none focus:border-purple-600"
+                              />
+                              <span className="absolute right-2.5 top-2 text-xs text-purple-500 font-bold">%</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Amount */}
+                        <div className={newPLCategory === 'commission' ? "sm:col-span-3" : "sm:col-span-4"}>
+                          <label className="block text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider mb-1">
+                            Amount (RM)
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            step="50"
+                            placeholder="e.g. 1500.00"
+                            value={newPLAmount}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setNewPLAmount(val);
+                              const amtNum = parseFloat(val);
+                              if (!isNaN(amtNum) && totalRevenue > 0 && newPLCategory === 'commission') {
+                                setNewPLRatePct(((amtNum / totalRevenue) * 100).toFixed(1));
+                              }
+                            }}
+                            className="w-full text-xs font-mono font-bold border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        {/* Notes */}
+                        <div className={newPLCategory === 'commission' ? "sm:col-span-3" : "sm:col-span-5"}>
+                          <label className="block text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider mb-1">
+                            Notes / Context (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Add details, agent name or calculation notes..."
+                            value={newPLNotes}
+                            onChange={(e) => setNewPLNotes(e.target.value)}
+                            className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        {/* Add Button */}
+                        <div className="sm:col-span-3">
+                          <button
+                            type="submit"
+                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-xs flex items-center justify-center gap-1.5"
+                          >
+                            <span>+ Add Line Item</span>
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Save Action Bar */}
+                  <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-slate-800">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30">
+                        <Save className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-black uppercase tracking-wider text-emerald-300 font-mono">
+                          Save P&L Statement & All Changes
+                        </h5>
+                        <p className="text-[11px] text-slate-300 font-medium">
+                          Click to commit all line item entries, notes, and tax options for "{activeProject.projectTitle}".
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleExplicitSavePL}
+                      disabled={isSavingPL}
+                      className={`font-black text-xs px-5 py-2.5 rounded-lg transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
+                        isSavingPL
+                          ? 'bg-emerald-500 text-white animate-pulse'
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400'
+                      }`}
+                    >
+                      {isSavingPL ? (
+                        <>
+                          <CheckCircle className="w-4 h-4 text-white" />
+                          <span>Saving P&L Statement...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4" />
+                          <span>💾 Save P&L Statement Now</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                </div>
+              )}
+
+              {/* PROJECT LINK & DETAILS MODAL */}
+              {showProjectModal && editingProject && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                    
+                    {/* Modal Header */}
+                    <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg border border-blue-500/30">
+                          <Briefcase className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-black uppercase tracking-wider font-mono">
+                            {editingProject.id ? 'Edit Project P&L Link & Details' : 'Create New Project P&L Statement'}
+                          </h3>
+                          <p className="text-[11px] text-slate-400 font-sans">
+                            Link this P&L to a pipeline deal, quotation, or input custom client details.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShowProjectModal(false)}
+                        className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors text-sm font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* Modal Form Body */}
+                    <form onSubmit={handleSaveProjectDetails} className="p-6 overflow-y-auto space-y-5 text-xs">
+                      
+                      {/* Link Source Selection */}
+                      <div className="space-y-2">
+                        <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono">
+                          Select Project Link Source
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingProject({ ...editingProject, linkType: 'pipeline' })}
+                            className={`p-3 rounded-xl border font-extrabold text-left transition-all cursor-pointer ${
+                              editingProject.linkType === 'pipeline'
+                                ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-xs'
+                                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="block text-xs">📈 Pipeline Deal</span>
+                            <span className="block text-[9px] font-normal text-slate-400 mt-0.5">Link to active pipeline</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setEditingProject({ ...editingProject, linkType: 'quotation' })}
+                            className={`p-3 rounded-xl border font-extrabold text-left transition-all cursor-pointer ${
+                              editingProject.linkType === 'quotation'
+                                ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-xs'
+                                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="block text-xs">📄 Quotation</span>
+                            <span className="block text-[9px] font-normal text-slate-400 mt-0.5">Link to official quote</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setEditingProject({ ...editingProject, linkType: 'manual' })}
+                            className={`p-3 rounded-xl border font-extrabold text-left transition-all cursor-pointer ${
+                              editingProject.linkType === 'manual'
+                                ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-xs'
+                                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="block text-xs">✍️ Manual Entry</span>
+                            <span className="block text-[9px] font-normal text-slate-400 mt-0.5">Custom client details</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Pipeline Link Dropdown (If Pipeline Selected) */}
+                      {editingProject.linkType === 'pipeline' && (
+                        <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-xl space-y-2">
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-blue-900 font-mono">
+                            Select Pipeline Deal to Link
+                          </label>
+                          <select
+                            value={editingProject.linkedPipelineId || ''}
+                            onChange={(e) => {
+                              const deal = pipelines.find(p => p.id === e.target.value);
+                              if (deal) {
+                                // Auto populate details
+                                const updatedItems = (editingProject.items || DEFAULT_PL_ITEMS).map(item => {
+                                  if (item.category === 'revenue') {
+                                    return {
+                                      ...item,
+                                      amount: deal.proposalValue || item.amount,
+                                      notes: `Linked to Pipeline: ${deal.dealName}`
+                                    };
+                                  }
+                                  return item;
+                                });
+
+                                setEditingProject({
+                                  ...editingProject,
+                                  linkedPipelineId: deal.id,
+                                  projectTitle: deal.dealName || editingProject.projectTitle,
+                                  clientName: deal.companyName || editingProject.clientName,
+                                  paxCount: deal.paxCount || editingProject.paxCount,
+                                  items: updatedItems
+                                });
+                              }
+                            }}
+                            className="w-full text-xs font-bold border border-blue-300 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-600"
+                          >
+                            <option value="">-- Choose Pipeline Deal --</option>
+                            {pipelines.map(p => (
+                              <option key={p.id} value={p.id}>
+                                [{p.status.toUpperCase()}] {p.companyName} - {p.dealName} (RM {(p.proposalValue || 0).toLocaleString()})
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[10px] text-blue-700 font-medium">
+                            Selecting a deal will automatically pull Client Name, Deal Title, and proposal revenue into this P&L.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Quotation Link Input (If Quotation Selected) */}
+                      {editingProject.linkType === 'quotation' && (
+                        <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-xl space-y-2">
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-blue-900 font-mono">
+                            Enter Quotation Reference Number
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. QT-2026-CC-088"
+                            value={editingProject.linkedQuotationNumber || ''}
+                            onChange={(e) => setEditingProject({ ...editingProject, linkedQuotationNumber: e.target.value })}
+                            className="w-full text-xs font-mono font-bold border border-blue-300 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-600"
+                          />
+                        </div>
+                      )}
+
+                      {/* Core Client & Project Fields */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-1">
+                            Project Title *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Enterprise AI & Full-Stack Development..."
+                            value={editingProject.projectTitle || ''}
+                            onChange={(e) => setEditingProject({ ...editingProject, projectTitle: e.target.value })}
+                            className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-1">
+                            Client / Organization Name *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Petronas Digital Sdn Bhd..."
+                            value={editingProject.clientName || ''}
+                            onChange={(e) => setEditingProject({ ...editingProject, clientName: e.target.value })}
+                            className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-1">
+                            Client Contact Person
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Encik Ahmad Razak (Head of Learning)..."
+                            value={editingProject.clientContact || ''}
+                            onChange={(e) => setEditingProject({ ...editingProject, clientContact: e.target.value })}
+                            className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-1">
+                            Project Reference Code
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. PRJ-2026-001..."
+                            value={editingProject.projectCode || ''}
+                            onChange={(e) => setEditingProject({ ...editingProject, projectCode: e.target.value })}
+                            className="w-full text-xs font-mono border border-slate-200 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-1 flex items-center justify-between">
+                            <span>Actual Date of Project *</span>
+                            {editingProject.projectDate && (
+                              <span className="text-emerald-600 font-bold lowercase font-sans">
+                                {formatProjectDateDisplay(editingProject.projectDate)}
+                              </span>
+                            )}
+                          </label>
+                          <input
+                            type="date"
+                            required
+                            value={normalizeDateForInput(editingProject.projectDate || editingProject.intakePeriod)}
+                            onChange={(e) => setEditingProject({ ...editingProject, projectDate: e.target.value, intakePeriod: e.target.value })}
+                            className="w-full text-xs font-mono font-bold border border-slate-200 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-1">
+                            Pax Count (Participants)
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={editingProject.paxCount || 20}
+                            onChange={(e) => setEditingProject({ ...editingProject, paxCount: parseInt(e.target.value) || 1 })}
+                            className="w-full text-xs font-mono border border-slate-200 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-1">
+                            Venue / Delivery Location
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Happi Village, Janda Baik or Remote Zoom..."
+                            value={editingProject.venueLocation || ''}
+                            onChange={(e) => setEditingProject({ ...editingProject, venueLocation: e.target.value })}
+                            className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2 space-y-2 pt-2 border-t border-slate-100">
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono">
+                            Optional Tax Deductions & Reserve Settings
+                          </label>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <label className={`p-3 rounded-xl border flex items-center gap-2 cursor-pointer transition-all ${
+                              editingProject.enableHrdcLevy ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-slate-50 border-slate-200 text-slate-600'
+                            }`}>
+                              <input
+                                type="checkbox"
+                                checked={Boolean(editingProject.enableHrdcLevy)}
+                                onChange={(e) => setEditingProject({ ...editingProject, enableHrdcLevy: e.target.checked })}
+                                className="rounded text-amber-600 focus:ring-amber-500"
+                              />
+                              <div>
+                                <span className="block font-bold text-xs">4% HRDC Levy</span>
+                                <span className="block text-[9px] text-slate-400 font-normal">HRD Corp Levy Deduction</span>
+                              </div>
+                            </label>
+
+                            <label className={`p-3 rounded-xl border flex items-center gap-2 cursor-pointer transition-all ${
+                              editingProject.enableSst ? 'bg-blue-50 border-blue-300 text-blue-900' : 'bg-slate-50 border-slate-200 text-slate-600'
+                            }`}>
+                              <input
+                                type="checkbox"
+                                checked={Boolean(editingProject.enableSst)}
+                                onChange={(e) => setEditingProject({ ...editingProject, enableSst: e.target.checked })}
+                                className="rounded text-blue-600 focus:ring-blue-500"
+                              />
+                              <div>
+                                <span className="block font-bold text-xs">8% SST</span>
+                                <span className="block text-[9px] text-slate-400 font-normal">Sales & Services Tax</span>
+                              </div>
+                            </label>
+
+                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                              <span className="block text-[10px] font-bold text-slate-600">Tax Reserve Rate %</span>
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="50"
+                                  value={typeof editingProject.taxRate === 'number' ? editingProject.taxRate : 15}
+                                  onChange={(e) => setEditingProject({ ...editingProject, taxRate: parseFloat(e.target.value) || 0 })}
+                                  className="w-full text-xs font-mono font-bold border border-slate-300 rounded-lg p-1.5 bg-white text-slate-800 text-center focus:outline-none"
+                                />
+                                <span className="text-xs font-bold text-slate-500">%</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 font-mono mb-1">
+                            Notes / Special Terms
+                          </label>
+                          <textarea
+                            rows={2}
+                            placeholder="Add project scope, special billing notes, or delivery terms..."
+                            value={editingProject.notes || ''}
+                            onChange={(e) => setEditingProject({ ...editingProject, notes: e.target.value })}
+                            className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Modal Footer Buttons */}
+                      <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setShowProjectModal(false)}
+                          className="px-4 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          type="submit"
+                          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer"
+                        >
+                          Save Project P&L Details
+                        </button>
+                      </div>
+
+                    </form>
+                  </div>
+                </div>
+              )}
 
             </div>
           ) : (
