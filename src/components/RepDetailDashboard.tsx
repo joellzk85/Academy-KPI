@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Representative, GoogleLinks } from '../types';
 import { getRepMetrics } from '../initialData';
-import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3 } from 'lucide-react';
+import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3, CheckSquare, Square, FolderCheck, Search, Layers, CheckCheck } from 'lucide-react';
 import QuotationGenerator from './QuotationGenerator';
 import CourseOutlineGenerator from './CourseOutlineGenerator';
 import AdminRecordManager from './AdminRecordManager';
@@ -673,13 +673,15 @@ export default function RepDetailDashboard({
   const [newPLRatePct, setNewPLRatePct] = useState<string>('');
   const [newPLNotes, setNewPLNotes] = useState<string>('');
 
-  // Date Tabulation Filter States (Tabulate Total Sales and GP based on selected date)
-  const [tabulateFilterMode, setTabulateFilterMode] = useState<'all' | 'single_date' | 'date_range' | 'month' | 'quarter'>('all');
+  // Date & Project Tabulation Filter States (Tabulate Total Sales and GP based on selected date or project)
+  const [tabulateFilterMode, setTabulateFilterMode] = useState<'all' | 'by_project' | 'single_date' | 'date_range' | 'month' | 'quarter'>('all');
   const [tabulateSingleDate, setTabulateSingleDate] = useState<string>('2026-07-15');
   const [tabulateStartDate, setTabulateStartDate] = useState<string>('2026-07-01');
   const [tabulateEndDate, setTabulateEndDate] = useState<string>('2026-12-31');
   const [tabulateMonth, setTabulateMonth] = useState<string>('2026-07');
   const [tabulateQuarter, setTabulateQuarter] = useState<string>('Q3-2026');
+  const [tabulateSelectedProjectIds, setTabulateSelectedProjectIds] = useState<string[]>([]);
+  const [tabulateProjectSearch, setTabulateProjectSearch] = useState<string>('');
   const [isTabulatorOpen, setIsTabulatorOpen] = useState<boolean>(true);
 
   // Active Project Reference
@@ -1000,10 +1002,15 @@ export default function RepDetailDashboard({
   const grossProfitAfterDeductions = grossProfit - totalLeviesAndDeductions;
   const grossMarginAfterDeductionsPct = totalRevenue > 0 ? (grossProfitAfterDeductions / totalRevenue) * 100 : 0;
 
-  // Date Tabulation Filter Engine (Calculates Total Sales & Total GP for Selected Date)
+  // Date & Project Tabulation Filter Engine (Calculates Total Sales & Total GP for Selected Projects/Dates)
   const isProjectInTabulatedDate = (proj: ProjectPL): boolean => {
     const rawDate = proj.projectDate || proj.intakePeriod || '';
     if (tabulateFilterMode === 'all') return true;
+
+    if (tabulateFilterMode === 'by_project') {
+      if (tabulateSelectedProjectIds.length === 0) return true;
+      return tabulateSelectedProjectIds.includes(proj.id);
+    }
 
     if (tabulateFilterMode === 'single_date') {
       if (!tabulateSingleDate) return true;
@@ -1045,6 +1052,37 @@ export default function RepDetailDashboard({
     }
 
     return true;
+  };
+
+  const toggleProjectInTabulation = (projId: string) => {
+    if (tabulateFilterMode !== 'by_project') {
+      setTabulateFilterMode('by_project');
+      setTabulateSelectedProjectIds([projId]);
+      return;
+    }
+    setTabulateSelectedProjectIds(prev => {
+      if (prev.includes(projId)) {
+        const next = prev.filter(id => id !== projId);
+        return next;
+      } else {
+        return [...prev, projId];
+      }
+    });
+  };
+
+  const selectAllProjectsForTabulation = () => {
+    setTabulateFilterMode('by_project');
+    setTabulateSelectedProjectIds(projectPLs.map(p => p.id));
+  };
+
+  const clearAllProjectsForTabulation = () => {
+    setTabulateFilterMode('by_project');
+    setTabulateSelectedProjectIds([]);
+  };
+
+  const selectOnlyProjectForTabulation = (projId: string) => {
+    setTabulateFilterMode('by_project');
+    setTabulateSelectedProjectIds([projId]);
   };
 
   const tabulatedProjects = projectPLs.filter(isProjectInTabulatedDate);
@@ -5531,7 +5569,7 @@ export default function RepDetailDashboard({
                         {/* Tabulation Filter Mode Tabs */}
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 font-mono mr-1">
-                            Filter By:
+                            Tabulate By:
                           </span>
                           
                           <button
@@ -5543,7 +5581,30 @@ export default function RepDetailDashboard({
                                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                             }`}
                           >
-                            🌐 All Dates (Full Portfolio)
+                            🌐 All Projects (Full Portfolio)
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTabulateFilterMode('by_project');
+                              if (tabulateSelectedProjectIds.length === 0) {
+                                setTabulateSelectedProjectIds([activeProject?.id || projectPLs[0]?.id].filter(Boolean));
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                              tabulateFilterMode === 'by_project'
+                                ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400/40'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            <FolderCheck className="w-3.5 h-3.5" />
+                            <span>📁 Select by Project(s)</span>
+                            {tabulateFilterMode === 'by_project' && tabulateSelectedProjectIds.length > 0 && (
+                              <span className="bg-emerald-900/60 text-emerald-100 text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full">
+                                {tabulateSelectedProjectIds.length}
+                              </span>
+                            )}
                           </button>
 
                           <button
@@ -5551,7 +5612,7 @@ export default function RepDetailDashboard({
                             onClick={() => setTabulateFilterMode('single_date')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                               tabulateFilterMode === 'single_date'
-                                ? 'bg-emerald-600 text-white shadow-xs'
+                                ? 'bg-emerald-700 text-white shadow-xs'
                                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                             }`}
                           >
@@ -5595,8 +5656,185 @@ export default function RepDetailDashboard({
                           </button>
                         </div>
 
-                        {/* Interactive Dynamic Date Controls */}
-                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                        {/* Interactive Dynamic Project / Date Controls */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                          {tabulateFilterMode === 'by_project' && (
+                            <div className="space-y-3 w-full">
+                              {/* Top Quick Actions Bar for Project Selection */}
+                              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-200">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs font-black uppercase text-slate-700 font-mono flex items-center gap-1.5">
+                                    <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Choose Project(s) to Tabulate:</span>
+                                  </span>
+
+                                  {/* Fast Dropdown to isolate single project */}
+                                  <select
+                                    value={tabulateSelectedProjectIds.length === 1 ? tabulateSelectedProjectIds[0] : ''}
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        selectOnlyProjectForTabulation(e.target.value);
+                                      }
+                                    }}
+                                    className="text-xs font-bold bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:border-emerald-500 shadow-xs max-w-[260px] truncate"
+                                  >
+                                    <option value="">
+                                      {tabulateSelectedProjectIds.length === 0
+                                        ? '-- All Projects Selected --'
+                                        : tabulateSelectedProjectIds.length === 1
+                                        ? '-- Single Project Selected --'
+                                        : `-- ${tabulateSelectedProjectIds.length} Projects Selected (Custom) --`}
+                                    </option>
+                                    {projectPLs.map(p => (
+                                      <option key={p.id} value={p.id}>
+                                        {p.projectTitle} ({p.projectDate || p.intakePeriod || 'No date'})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <div className="relative">
+                                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                    <input
+                                      type="text"
+                                      placeholder="Filter projects list..."
+                                      value={tabulateProjectSearch}
+                                      onChange={(e) => setTabulateProjectSearch(e.target.value)}
+                                      className="text-xs pl-8 pr-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 w-44 shadow-xs font-medium"
+                                    />
+                                    {tabulateProjectSearch && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setTabulateProjectSearch('')}
+                                        className="text-slate-400 hover:text-slate-600 absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+                                      >
+                                        ×
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={selectAllProjectsForTabulation}
+                                    className="text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                                  >
+                                    <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Select All ({projectPLs.length})</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={clearAllProjectsForTabulation}
+                                    className="text-[11px] font-bold bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 hover:border-rose-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    Clear Selection
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => selectOnlyProjectForTabulation(activeProject.id)}
+                                    className="text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    Active Project Only
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Interactive Project Multi-Select Grid */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-64 overflow-y-auto pr-1">
+                                {projectPLs
+                                  .filter(p => {
+                                    if (!tabulateProjectSearch) return true;
+                                    const q = tabulateProjectSearch.toLowerCase();
+                                    return (
+                                      p.projectTitle.toLowerCase().includes(q) ||
+                                      (p.projectCode && p.projectCode.toLowerCase().includes(q)) ||
+                                      (p.clientName && p.clientName.toLowerCase().includes(q)) ||
+                                      (p.clientCompany && p.clientCompany.toLowerCase().includes(q)) ||
+                                      (p.projectDate && p.projectDate.toLowerCase().includes(q))
+                                    );
+                                  })
+                                  .map(p => {
+                                    const isSelected = tabulateSelectedProjectIds.length === 0 || tabulateSelectedProjectIds.includes(p.id);
+                                    const isStrictSelected = tabulateSelectedProjectIds.includes(p.id);
+                                    const pRev = p.items.filter(i => i.category === 'revenue').reduce((s, i) => s + (i.amount || 0), 0);
+                                    const pCogs = p.items.filter(i => i.category === 'cogs').reduce((s, i) => s + (i.amount || 0), 0);
+                                    const pComm = p.items.filter(i => i.category === 'commission').reduce((s, i) => {
+                                      if (typeof i.ratePct === 'number' && i.ratePct > 0) return s + (pRev * (i.ratePct / 100));
+                                      return s + (i.amount || 0);
+                                    }, 0);
+                                    const pGross = pRev - pCogs - pComm;
+
+                                    return (
+                                      <div
+                                        key={p.id}
+                                        onClick={() => toggleProjectInTabulation(p.id)}
+                                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-2.5 ${
+                                          isStrictSelected
+                                            ? 'bg-emerald-50/80 border-emerald-500 shadow-xs ring-1 ring-emerald-400'
+                                            : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                        }`}
+                                      >
+                                        <div className="pt-0.5 shrink-0">
+                                          {isStrictSelected ? (
+                                            <div className="w-4 h-4 bg-emerald-600 rounded text-white flex items-center justify-center">
+                                              <Check className="w-3 h-3 stroke-[3]" />
+                                            </div>
+                                          ) : (
+                                            <div className="w-4 h-4 border-2 border-slate-300 rounded hover:border-slate-400 bg-white" />
+                                          )}
+                                        </div>
+
+                                        <div className="flex-1 min-w-0 space-y-1">
+                                          <div className="flex items-center justify-between gap-1">
+                                            <span className="font-extrabold text-xs text-slate-900 truncate">
+                                              {p.projectTitle}
+                                            </span>
+                                            {p.id === activeProject.id && (
+                                              <span className="bg-slate-200 text-slate-700 text-[8px] font-mono font-bold px-1 rounded uppercase shrink-0">
+                                                ACTIVE
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+                                            <span className="text-blue-700 font-bold">
+                                              📅 {formatProjectDateDisplay(p.projectDate || p.intakePeriod)}
+                                            </span>
+                                            <span>•</span>
+                                            <span className="truncate">{p.clientName || 'Corporate Client'}</span>
+                                          </div>
+
+                                          <div className="flex items-center justify-between text-[11px] font-mono pt-1 border-t border-slate-100">
+                                            <span className="text-slate-600 font-medium">
+                                              Sales: <strong className="text-slate-900">RM {pRev.toLocaleString()}</strong>
+                                            </span>
+                                            <span className="font-bold text-emerald-700">
+                                              GP: RM {pGross.toLocaleString()}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+
+                              {/* Selection Footer Indicator */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs text-slate-600 font-medium">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                  <span>
+                                    Tabulating <strong>{tabulatedProjects.length}</strong> of <strong>{projectPLs.length}</strong> total projects
+                                  </span>
+                                </span>
+                                <span className="text-[11px] font-mono text-slate-500">
+                                  Tip: Click any project card above or checkbox in the table below to toggle it in the live tabulation.
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
                           {tabulateFilterMode === 'single_date' && (
                             <div className="flex flex-wrap items-center gap-3 w-full">
                               <span className="text-xs font-black uppercase text-slate-700 font-mono">
@@ -5763,7 +6001,7 @@ export default function RepDetailDashboard({
 
                           {tabulateFilterMode === 'all' && (
                             <div className="flex items-center justify-between w-full text-xs text-slate-600 font-medium">
-                              <span>Showing complete portfolio tabulation across all recorded project dates.</span>
+                              <span>Showing complete portfolio tabulation across all recorded projects and dates.</span>
                               <span className="font-bold text-slate-900 font-mono">{projectPLs.length} Total Projects</span>
                             </div>
                           )}
@@ -5896,9 +6134,38 @@ export default function RepDetailDashboard({
                     </div>
 
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse min-w-[950px]">
+                      <table className="w-full text-left border-collapse min-w-[1000px]">
                         <thead>
                           <tr className="bg-slate-100 text-[10px] font-mono font-black text-slate-600 uppercase tracking-wider border-b border-slate-200">
+                            <th className="py-3 px-3 w-10 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (tabulateFilterMode !== 'by_project') {
+                                    setTabulateFilterMode('by_project');
+                                    setTabulateSelectedProjectIds(projectPLs.map(p => p.id));
+                                  } else {
+                                    if (tabulateSelectedProjectIds.length === projectPLs.length) {
+                                      setTabulateSelectedProjectIds([]);
+                                    } else {
+                                      setTabulateSelectedProjectIds(projectPLs.map(p => p.id));
+                                    }
+                                  }
+                                }}
+                                title={tabulateSelectedProjectIds.length === projectPLs.length ? 'Deselect all projects' : 'Select all projects for tabulation'}
+                                className="p-1 rounded hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+                              >
+                                {tabulateFilterMode === 'by_project' && tabulateSelectedProjectIds.length === projectPLs.length ? (
+                                  <CheckSquare className="w-4 h-4 text-emerald-600" />
+                                ) : tabulateFilterMode === 'by_project' && tabulateSelectedProjectIds.length > 0 ? (
+                                  <div className="w-4 h-4 bg-emerald-600 rounded text-white text-[10px] font-black flex items-center justify-center">
+                                    -
+                                  </div>
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-400" />
+                                )}
+                              </button>
+                            </th>
                             <th className="py-3 px-4">Project Title & Code</th>
                             <th className="py-3 px-4">Actual Date of Project</th>
                             <th className="py-3 px-4">Client & Venue</th>
@@ -5912,12 +6179,12 @@ export default function RepDetailDashboard({
                         <tbody className="divide-y divide-slate-100 text-xs">
                           {tabulatedProjects.length === 0 ? (
                             <tr>
-                              <td colSpan={8} className="py-10 text-center text-slate-500 bg-slate-50/50">
+                              <td colSpan={9} className="py-10 text-center text-slate-500 bg-slate-50/50">
                                 <div className="max-w-md mx-auto space-y-2">
                                   <Calendar className="w-8 h-8 text-slate-400 mx-auto" />
-                                  <p className="font-bold text-slate-700 text-sm">No Projects Match Selected Date Filter</p>
+                                  <p className="font-bold text-slate-700 text-sm">No Projects Match Selected Filter</p>
                                   <p className="text-xs text-slate-500">
-                                    No project P&Ls were found for the current date selection. Try switching to "All Dates" or picking another date.
+                                    No project P&Ls were found for the current selection. Try switching to "All Projects" or selecting other projects.
                                   </p>
                                   <button
                                     type="button"
@@ -5932,6 +6199,7 @@ export default function RepDetailDashboard({
                           ) : (
                             tabulatedProjects.map((p) => {
                               const isCurrentActive = p.id === activeProject.id;
+                              const isProjectChecked = tabulateFilterMode === 'by_project' ? tabulateSelectedProjectIds.includes(p.id) : true;
                               const pRev = p.items.filter(i => i.category === 'revenue').reduce((s, i) => s + (i.amount || 0), 0);
                               const pCogs = p.items.filter(i => i.category === 'cogs').reduce((s, i) => s + (i.amount || 0), 0);
                               const pComm = p.items.filter(i => i.category === 'commission').reduce((s, i) => {
@@ -5945,7 +6213,26 @@ export default function RepDetailDashboard({
                               const actualDate = p.projectDate || p.intakePeriod || '';
 
                               return (
-                                <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${isCurrentActive ? 'bg-emerald-50/30' : ''}`}>
+                                <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${isCurrentActive ? 'bg-emerald-50/30' : ''} ${isProjectChecked && tabulateFilterMode === 'by_project' ? 'bg-emerald-50/20' : ''}`}>
+                                  <td className="py-3.5 px-3 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleProjectInTabulation(p.id)}
+                                      className="p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
+                                      title={isProjectChecked ? 'Click to toggle project from tabulation' : 'Click to add project to tabulation'}
+                                    >
+                                      {tabulateFilterMode === 'by_project' ? (
+                                        tabulateSelectedProjectIds.includes(p.id) ? (
+                                          <CheckSquare className="w-4 h-4 text-emerald-600" />
+                                        ) : (
+                                          <Square className="w-4 h-4 text-slate-300 hover:text-slate-500" />
+                                        )
+                                      ) : (
+                                        <Square className="w-4 h-4 text-slate-300 hover:text-slate-500" />
+                                      )}
+                                    </button>
+                                  </td>
+
                                   <td className="py-3.5 px-4">
                                     <div className="space-y-1">
                                       <div className="flex items-center gap-2">
@@ -6007,6 +6294,15 @@ export default function RepDetailDashboard({
 
                                   <td className="py-3.5 px-4 text-center">
                                     <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => selectOnlyProjectForTabulation(p.id)}
+                                        className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg transition-colors cursor-pointer"
+                                        title="Tabulate Only This Project in Tabulator"
+                                      >
+                                        <Calculator className="w-3.5 h-3.5" />
+                                      </button>
+
                                       <button
                                         type="button"
                                         onClick={() => {

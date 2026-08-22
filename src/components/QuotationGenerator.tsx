@@ -603,8 +603,19 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
   const finalTotal = grandTotal + sstAmount;
 
   // Trigger Browser native print
+  // Temporarily blank the document title so the browser's native print
+  // header (top-right) shows no text instead of the app/tab title.
+  // Note: the date/time stamp on the print header (top-left) is generated
+  // by the browser itself and cannot be removed via code — only by
+  // unchecking "Headers and footers" in the browser's print dialog.
   const handlePrint = () => {
+    const originalTitle = document.title;
+    document.title = '';
     window.print();
+    // Restore the tab title shortly after the print dialog closes/opens
+    setTimeout(() => {
+      document.title = originalTitle;
+    }, 500);
   };
 
   const getQuotationTotal = (q: Quotation) => {
@@ -1841,7 +1852,7 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
                 <p className="font-bold text-slate-800">NEXT ACADEMY SDN BHD</p>
                 <p>(Company No. 202401030750)</p>
                 <p>10, Jalan SS 5B/4, Ss 5, 47301 Petaling Jaya, Selangor</p>
-                <p>Tel: +603-2201 1234 | Email: corporate@nextacademy.my</p>
+                <p>Tel: +6018-363 4888 | Email: info@nextacademy.my</p>
               </div>
             </div>
 
@@ -2104,16 +2115,8 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
               </div>
             </div>
 
-            {/* Bottom corporate signature area */}
-            <div className="pt-12 grid grid-cols-2 gap-12 text-sm font-sans">
-              <div className="space-y-12">
-                <p className="font-bold text-slate-500">Prepared By:</p>
-                <div className="border-t border-slate-300 pt-1.5 w-48">
-                  <p className="font-extrabold text-slate-800">{rep.name}</p>
-                  <p className="text-xs text-slate-400 font-mono font-semibold">NEXT Academy Representative</p>
-                </div>
-              </div>
-
+            {/* Bottom corporate signature area - Accepted By only */}
+            <div className="pt-12 flex justify-end text-sm font-sans">
               <div className="space-y-12 text-right flex flex-col items-end">
                 <p className="font-bold text-slate-500 text-left w-48">Accepted By:</p>
                 <div className="border-t border-slate-300 pt-1.5 w-48 text-left">
