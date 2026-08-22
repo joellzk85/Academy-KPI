@@ -227,6 +227,23 @@ export interface Trainer {
   createdByName?: string;
 }
 
+export interface Venue {
+  id: string;
+  name: string;
+  distance?: string;
+  meetingPackagePrice?: string;
+  roomPackagePrice?: string;
+  dinnerPackage?: string;
+  facilities?: string;
+  contact?: string;
+  remarks?: string;
+  pictures?: string;
+  status: 'Available' | 'Booked' | 'Under Renovation';
+  createdAt?: number;
+  createdBy?: string;
+  createdByName?: string;
+}
+
 export interface AdminRecord {
   id: string;
   completed: boolean;
