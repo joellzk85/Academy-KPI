@@ -5,6 +5,7 @@ import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent
 import QuotationGenerator from './QuotationGenerator';
 import CourseOutlineGenerator from './CourseOutlineGenerator';
 import AdminRecordManager from './AdminRecordManager';
+import ClientManager from './ClientManager';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -2700,6 +2701,8 @@ export default function RepDetailDashboard({
             <CourseOutlineGenerator key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'admin_record' ? (
             <AdminRecordManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
+          ) : activeSubTab === 'client' ? (
+            <ClientManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'kpi' ? (
             /* KPI SCREEN (WEEKLY BREAKDOWN TABLE) */
             <div className="space-y-6">

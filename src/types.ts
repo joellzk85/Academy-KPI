@@ -197,6 +197,22 @@ export interface CourseOutline {
   isCompleted?: boolean;
 }
 
+export interface Client {
+  id: string;
+  companyName: string;
+  contactName: string;
+  designation?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  industry?: string;
+  hrdcRegistered?: boolean;
+  notes?: string;
+  createdAt?: number;
+  createdBy?: string;
+  createdByName?: string;
+}
+
 export interface AdminRecord {
   id: string;
   completed: boolean;
