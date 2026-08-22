@@ -6,6 +6,7 @@ import QuotationGenerator from './QuotationGenerator';
 import CourseOutlineGenerator from './CourseOutlineGenerator';
 import AdminRecordManager from './AdminRecordManager';
 import ClientManager from './ClientManager';
+import TrainerManager from './TrainerManager';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -1350,38 +1351,6 @@ export default function RepDetailDashboard({
     return () => unsubscribe();
   }, []);
 
-  // Real-time Firestore sync for Trainers
-  useEffect(() => {
-    if (!db) return;
-
-    const docRef = doc(db, 'trainers', rep.id);
-    const unsubscribe = onSnapshot(docRef, async (docSnap) => {
-      if (docSnap.exists()) {
-        const firestoreTrainers = docSnap.data().trainers || [];
-        setTrainers(firestoreTrainers);
-        localStorage.setItem(`next_trainers_${rep.id}`, JSON.stringify(firestoreTrainers));
-      } else {
-        const savedTrainers = localStorage.getItem(`next_trainers_${rep.id}`);
-        let parsedTrainers: any[] = [];
-        if (savedTrainers !== null) {
-          try {
-            parsedTrainers = JSON.parse(savedTrainers);
-          } catch {}
-        } else {
-          parsedTrainers = [
-            { id: 't_1', name: 'Dr. Jason Lee', specialization: 'React & AI Integration', contact: '+6012-3456789', status: 'Available', rate: 2500 },
-            { id: 't_2', name: 'Sarah Amanda', specialization: 'Design Thinking & Soft Skills', contact: '+6013-9876543', status: 'Booked', rate: 1800 },
-            { id: 't_3', name: 'Aris Rahman', specialization: 'Full-Stack Web Development', contact: '+6017-1112233', status: 'Available', rate: 2000 }
-          ];
-        }
-        setTrainers(parsedTrainers);
-        localStorage.setItem(`next_trainers_${rep.id}`, JSON.stringify(parsedTrainers));
-        await setDoc(docRef, { trainers: parsedTrainers });
-      }
-    });
-
-    return () => unsubscribe();
-  }, [rep.id]);
 
   // Real-time Firestore sync for Venues
   useEffect(() => {
@@ -1702,23 +1671,6 @@ export default function RepDetailDashboard({
     setTaskAssignedToId('');
   };
 
-  // Trainer List States
-  const [trainers, setTrainers] = useState<any[]>(() => {
-    const saved = localStorage.getItem(`next_trainers_${rep.id}`);
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: 't_1', name: 'Dr. Jason Lee', specialization: 'React & AI Integration', contact: '+6012-3456789', status: 'Available', rate: 2500 },
-      { id: 't_2', name: 'Sarah Amanda', specialization: 'Design Thinking & Soft Skills', contact: '+6013-9876543', status: 'Booked', rate: 1800 },
-      { id: 't_3', name: 'Aris Rahman', specialization: 'Full-Stack Web Development', contact: '+6017-1112233', status: 'Available', rate: 2000 }
-    ];
-  });
-
-  const [trainerName, setTrainerName] = useState('');
-  const [trainerSpec, setTrainerSpec] = useState('React & AI Integration');
-  const [trainerContact, setTrainerContact] = useState('');
-  const [trainerStatus, setTrainerStatus] = useState('Available');
-  const [trainerRate, setTrainerRate] = useState('');
-
   // Venue List States
   const [venues, setVenues] = useState<any[]>(() => {
     const saved = localStorage.getItem(`next_venues_${rep.id}`);
@@ -1820,34 +1772,6 @@ export default function RepDetailDashboard({
 
     return () => unsubscribe();
   }, [rep.id]);
-
-  const handleAddTrainerSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!trainerName.trim()) return;
-    const newTrainer = {
-      id: `t_${Date.now()}`,
-      name: trainerName,
-      specialization: trainerSpec,
-      contact: trainerContact || 'N/A',
-      status: trainerStatus,
-      rate: parseFloat(trainerRate) || 0
-    };
-    const updated = [...trainers, newTrainer];
-    setTrainers(updated);
-    localStorage.setItem(`next_trainers_${rep.id}`, JSON.stringify(updated));
-    try {
-      if (db) {
-        await setDoc(doc(db, 'trainers', rep.id), { trainers: updated });
-      }
-    } catch (err) {
-      console.error("Firestore save trainer failed:", err);
-    }
-
-    setTrainerName('');
-    setTrainerContact('');
-    setTrainerRate('');
-    setTrainerStatus('Available');
-  };
 
   const handleAddVenueSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2703,6 +2627,8 @@ export default function RepDetailDashboard({
             <AdminRecordManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'client' ? (
             <ClientManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
+          ) : activeSubTab === 'trainerList' ? (
+            <TrainerManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'kpi' ? (
             /* KPI SCREEN (WEEKLY BREAKDOWN TABLE) */
             <div className="space-y-6">
@@ -4468,273 +4394,6 @@ export default function RepDetailDashboard({
                 )}
               </div>
 
-            </div>
-          ) : activeSubTab === 'trainerList' ? (
-            /* INTERACTIVE TRAINER LIST WORKSPACE */
-            <div className="space-y-6">
-              {/* Google Sheets Integration Card */}
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5 font-display">
-                      <GraduationCap className="w-4 h-4 text-blue-600" />
-                      Trainer List Google Sheets Sync
-                    </h4>
-                    <p className="text-xs text-slate-500">
-                      Tie this trainer database to a live collaborative Google Sheet. Paste the URL below to load dynamic sheets.
-                    </p>
-                  </div>
-                  {links.trainerList ? (
-                    <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold px-2.5 py-1 rounded font-mono">
-                      Connected Live Google Sheet
-                    </span>
-                  ) : (
-                    <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-extrabold px-2.5 py-1 rounded font-mono">
-                      Offline Mode (Local Storage Only)
-                    </span>
-                  )}
-                </div>
-
-                <form onSubmit={handleSaveUrl} className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Link2 className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                    <input 
-                      type="url" 
-                      value={inputUrl}
-                      onChange={(e) => setInputUrl(e.target.value)}
-                      placeholder="https://docs.google.com/spreadsheets/d/..." 
-                      className="w-full text-xs pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-800"
-                    />
-                  </div>
-                  <button 
-                    type="submit"
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider px-5 rounded-lg transition-colors cursor-pointer"
-                  >
-                    Tie Sheet
-                  </button>
-                  {links.trainerList && (
-                    <button 
-                      type="button"
-                      onClick={async () => {
-                        const updatedLinks = { ...links, trainerList: '' };
-                        setLinks(updatedLinks);
-                        localStorage.setItem(`next_links_${rep.id}`, JSON.stringify(updatedLinks));
-                        try {
-                          if (db) {
-                            await setDoc(doc(db, 'links', rep.id), updatedLinks);
-                          }
-                        } catch (err) {
-                          console.error("Firestore save links failed:", err);
-                        }
-                        setInputUrl('');
-                      }}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider px-3 rounded-lg transition-colors cursor-pointer border border-slate-250"
-                      title="Disconnect Sheet"
-                    >
-                      Reset
-                    </button>
-                  )}
-                </form>
-              </div>
-
-              {/* Two Column Grid: Add Form + Directory List */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Add Trainer Form Card */}
-                <div className="lg:col-span-4 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                  <div className="p-4 bg-slate-800 text-white">
-                    <h5 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
-                      <Plus className="w-4 h-4 text-blue-400" />
-                      Register New Trainer
-                    </h5>
-                  </div>
-                  <form onSubmit={handleAddTrainerSubmit} className="p-5 space-y-4">
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Trainer Name
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. Dr. Jane Smith"
-                        value={trainerName}
-                        onChange={(e) => setTrainerName(e.target.value)}
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Specialization
-                      </label>
-                      <select
-                        value={trainerSpec}
-                        onChange={(e) => setTrainerSpec(e.target.value)}
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white"
-                      >
-                        <option value="React & AI Integration">React & AI Integration</option>
-                        <option value="Design Thinking & Soft Skills">Design Thinking & Soft Skills</option>
-                        <option value="Full-Stack Web Development">Full-Stack Web Development</option>
-                        <option value="Leadership & Corporate">Leadership & Corporate</option>
-                        <option value="Sales Mastery">Sales Mastery</option>
-                        <option value="Technical QA">Technical QA</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Contact Number / Email
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. +6011-1234567"
-                        value={trainerContact}
-                        onChange={(e) => setTrainerContact(e.target.value)}
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white font-mono"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Daily Rate (RM)
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-2 text-slate-400 text-xs font-black font-mono">RM</span>
-                        <input
-                          type="number"
-                          placeholder="e.g. 2000"
-                          value={trainerRate}
-                          onChange={(e) => setTrainerRate(e.target.value)}
-                          className="w-full text-xs border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Status
-                      </label>
-                      <select
-                        value={trainerStatus}
-                        onChange={(e) => setTrainerStatus(e.target.value)}
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white"
-                      >
-                        <option value="Available">Available</option>
-                        <option value="Booked">Booked</option>
-                        <option value="On Leave">On Leave</option>
-                      </select>
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider py-2.5 rounded-lg transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer mt-2"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Add to Future Listing
-                    </button>
-                  </form>
-                </div>
-
-                {/* Trainer Directory List */}
-                <div className="lg:col-span-8 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                  <div className="p-4 bg-slate-100 border-b border-slate-200 flex items-center justify-between">
-                    <h5 className="text-xs font-black uppercase tracking-wider text-slate-700 font-display flex items-center gap-1.5">
-                      <Users className="w-4 h-4 text-slate-500" />
-                      Registered Trainers Database ({trainers.length})
-                    </h5>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                          <th className="p-4">Trainer Name</th>
-                          <th className="p-4">Specialization</th>
-                          <th className="p-4">Contact</th>
-                          <th className="p-4 text-right">Daily Rate</th>
-                          <th className="p-4 text-center">Status</th>
-                          <th className="p-4 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700 font-sans text-xs">
-                        {trainers.map((t) => (
-                          <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="p-4 font-extrabold text-slate-800">{t.name}</td>
-                            <td className="p-4 font-mono text-[10px] text-slate-500">{t.specialization}</td>
-                            <td className="p-4 font-mono text-slate-600">{t.contact}</td>
-                            <td className="p-4 text-right font-mono font-black text-slate-800">
-                              RM {parseFloat(t.rate || 0).toLocaleString()}
-                            </td>
-                            <td className="p-4 text-center">
-                              {t.status === 'Available' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-black text-[9px] uppercase tracking-wider">
-                                  Available
-                                </span>
-                              ) : t.status === 'Booked' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 font-black text-[9px] uppercase tracking-wider">
-                                  Booked
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 font-black text-[9px] uppercase tracking-wider">
-                                  On Leave
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-4 text-right">
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const updated = trainers.filter(item => item.id !== t.id);
-                                  setTrainers(updated);
-                                  localStorage.setItem(`next_trainers_${rep.id}`, JSON.stringify(updated));
-                                  try {
-                                    if (db) {
-                                      await setDoc(doc(db, 'trainers', rep.id), { trainers: updated });
-                                    }
-                                  } catch (err) {
-                                    console.error("Firestore save trainer failed:", err);
-                                  }
-                                }}
-                                className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-                                title="Remove Trainer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-
-              {/* Embedded Google Sheets Preview if linked */}
-              {links.trainerList && (
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest font-mono bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded">
-                      Embedded Google Sheet Live Preview
-                    </span>
-                    <a 
-                      href={links.trainerList} 
-                      target="_blank" 
-                      referrerPolicy="no-referrer"
-                      rel="noopener noreferrer"
-                      className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                    >
-                      Open Google Link in New Tab →
-                    </a>
-                  </div>
-                  <div className="w-full h-[400px] rounded-lg border border-slate-200 overflow-hidden bg-slate-50 relative">
-                    <iframe 
-                      src={links.trainerList}
-                      className="w-full h-full border-0"
-                      title="Trainer Google Sheet Sync"
-                      sandbox="allow-scripts allow-same-origin allow-popups"
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           ) : activeSubTab === 'venue' ? (
             /* INTERACTIVE VENUE WORKSPACE */

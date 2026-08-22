@@ -213,6 +213,20 @@ export interface Client {
   createdByName?: string;
 }
 
+export interface Trainer {
+  id: string;
+  name: string;
+  specialization: string;
+  contact?: string;
+  email?: string;
+  rate: number;
+  status: 'Available' | 'Booked' | 'On Leave';
+  notes?: string;
+  createdAt?: number;
+  createdBy?: string;
+  createdByName?: string;
+}
+
 export interface AdminRecord {
   id: string;
   completed: boolean;
