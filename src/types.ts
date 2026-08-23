@@ -129,6 +129,7 @@ export interface QuotationItem {
   code: string;
   date: string;
   trainer: string;
+  trainerId?: string;
   feePerDay: number;
   days: number;
   totalFee: number;
@@ -160,6 +161,9 @@ export interface Quotation {
   taggedRepId?: string;
   taggedRepName?: string;
   isCompleted?: boolean;
+  clientId?: string;
+  venueId?: string;
+  pipelineId?: string;
 }
 
 export interface CourseOutlineItem {

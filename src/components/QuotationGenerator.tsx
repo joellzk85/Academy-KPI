@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Quotation, QuotationItem, Representative } from '../types';
+import { Quotation, QuotationItem, Representative, Client, Venue, Trainer } from '../types';
 import { Plus, Trash2, Printer, Save, FileText, CheckCircle, RefreshCw, Layers, Edit3, ClipboardList, Info, Search, Eye, EyeOff, Tag, Share2, RotateCcw, Cloud, Check, Clock } from 'lucide-react';
 import Logo from './Logo';
 import { initAuth, googleSignIn, googleSignOut, syncQuotationToGoogleSheet } from '../lib/googleCalendar';
@@ -245,14 +245,208 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
   const [preparedBy, setPreparedBy] = useState<string>('');
   const [ownerId, setOwnerId] = useState<string>('');
   const [ownerName, setOwnerName] = useState<string>('');
+  const [clientId, setClientId] = useState<string>('');
+  const [venueId, setVenueId] = useState<string>('');
+  const [pipelineId, setPipelineId] = useState<string>('');
+
+  // Read-only live directories, used to power "search existing or type new" pickers
+  // for Client, Trainer, Venue, and to support "Create from Pipeline".
+  const [clientDirectory, setClientDirectory] = useState<Client[]>([]);
+  const [trainerDirectory, setTrainerDirectory] = useState<Trainer[]>([]);
+  const [venueDirectory, setVenueDirectory] = useState<Venue[]>([]);
+  const [pipelineDirectory, setPipelineDirectory] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!db) return;
+    const unsubClients = onSnapshot(query(collection(db, 'clients')), (snap) => {
+      const list: Client[] = [];
+      snap.forEach(d => list.push({ ...(d.data() as Client), id: d.id }));
+      setClientDirectory(list);
+    });
+    const unsubTrainers = onSnapshot(query(collection(db, 'trainers_directory')), (snap) => {
+      const list: Trainer[] = [];
+      snap.forEach(d => list.push({ ...(d.data() as Trainer), id: d.id }));
+      setTrainerDirectory(list);
+    });
+    const unsubVenues = onSnapshot(query(collection(db, 'venues_directory')), (snap) => {
+      const list: Venue[] = [];
+      snap.forEach(d => list.push({ ...(d.data() as Venue), id: d.id }));
+      setVenueDirectory(list);
+    });
+    const unsubPipelines = onSnapshot(query(collection(db, 'pipelines')), (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+      setPipelineDirectory(list);
+    });
+    return () => {
+      unsubClients();
+      unsubTrainers();
+      unsubVenues();
+      unsubPipelines();
+    };
+  }, []);
 
   // Form input builders
   const [newItemProgram, setNewItemProgram] = useState('');
   const [newItemCode, setNewItemCode] = useState('');
   const [newItemDate, setNewItemDate] = useState('');
   const [newItemTrainer, setNewItemTrainer] = useState('');
+  const [newItemTrainerId, setNewItemTrainerId] = useState('');
   const [newItemFee, setNewItemFee] = useState('5500');
   const [newItemDays, setNewItemDays] = useState('2');
+
+  // Does the currently typed Company Name match an existing Client Database record?
+  const matchedClient = clientDirectory.find(
+    c => c.companyName.trim().toLowerCase() === company.trim().toLowerCase()
+  );
+  // Does the currently typed Venue match an existing Venue Database record?
+  const matchedVenue = venueDirectory.find(
+    v => v.name.trim().toLowerCase() === venue.trim().toLowerCase()
+  );
+  // Does the currently typed Trainer match an existing Trainer Database record?
+  const matchedTrainer = trainerDirectory.find(
+    t => t.name.trim().toLowerCase() === newItemTrainer.trim().toLowerCase()
+  );
+
+  useEffect(() => {
+    setClientId(matchedClient ? matchedClient.id : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company, clientDirectory]);
+
+  useEffect(() => {
+    setVenueId(matchedVenue ? matchedVenue.id : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venue, venueDirectory]);
+
+  useEffect(() => {
+    setNewItemTrainerId(matchedTrainer ? matchedTrainer.id : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newItemTrainer, trainerDirectory]);
+
+  // Selecting an existing client auto-fills company/address/attn in one click
+  const handleSelectClient = (c: Client) => {
+    setCompany(c.companyName);
+    setAddress(c.address || '');
+    if (c.contactName && c.contactName !== 'N/A') setAttn(c.contactName);
+    setClientId(c.id);
+  };
+
+  // Quick-adds a freshly typed, not-yet-in-the-database company name into the shared Client Database
+  const handleQuickAddClient = async () => {
+    if (!company.trim()) return;
+    const newClient: Client = {
+      id: `client_${Date.now()}`,
+      companyName: company.trim(),
+      contactName: attn.trim() || 'N/A',
+      address: address.trim(),
+      createdAt: Date.now(),
+      createdBy: rep.id,
+      createdByName: rep.name,
+    };
+    try {
+      if (db) await setDoc(doc(db, 'clients', newClient.id), newClient);
+      setClientId(newClient.id);
+    } catch (err) {
+      console.error('Quick-add client failed:', err);
+    }
+  };
+
+  // Quick-adds a freshly typed, not-yet-in-the-database venue into the shared Venue Database
+  const handleQuickAddVenue = async () => {
+    if (!venue.trim()) return;
+    const newVenue: Venue = {
+      id: `venue_${Date.now()}`,
+      name: venue.trim(),
+      status: 'Available',
+      createdAt: Date.now(),
+      createdBy: rep.id,
+      createdByName: rep.name,
+    };
+    try {
+      if (db) await setDoc(doc(db, 'venues_directory', newVenue.id), newVenue);
+      setVenueId(newVenue.id);
+    } catch (err) {
+      console.error('Quick-add venue failed:', err);
+    }
+  };
+
+  // Quick-adds a freshly typed, not-yet-in-the-database trainer into the shared Trainer Database
+  const handleQuickAddTrainer = async () => {
+    if (!newItemTrainer.trim()) return;
+    const newTrainer: Trainer = {
+      id: `trainer_${Date.now()}`,
+      name: newItemTrainer.trim(),
+      specialization: 'React & AI Integration',
+      rate: parseFloat(newItemFee) || 0,
+      status: 'Available',
+      createdAt: Date.now(),
+      createdBy: rep.id,
+      createdByName: rep.name,
+    };
+    try {
+      if (db) await setDoc(doc(db, 'trainers_directory', newTrainer.id), newTrainer);
+      setNewItemTrainerId(newTrainer.id);
+    } catch (err) {
+      console.error('Quick-add trainer failed:', err);
+    }
+  };
+
+  // Starts a brand new quotation pre-filled from an existing Pipeline deal,
+  // so the rep doesn't have to retype the client/course details from scratch.
+  const handleCreateFromPipeline = async (pipelineDealId: string) => {
+    const deal = pipelineDirectory.find(p => p.id === pipelineDealId);
+    if (!deal) return;
+
+    setPreviousQuotes(JSON.parse(JSON.stringify(quotations)));
+    setPreviousSelectedId(selectedId);
+    setUndoMessage('New quotation created from pipeline deal.');
+
+    const newId = `q_${Date.now()}`;
+    const linkedClient = clientDirectory.find(c => c.id === deal.clientId);
+
+    const cleanQuote: Quotation = {
+      id: newId,
+      refNumber: `1G/NA/${new Date().getFullYear()}${(new Date().getMonth()+1).toString().padStart(2,'0')}${new Date().getDate().toString().padStart(2,'0')}/${(quotations.length + 1).toString().padStart(2, '0')}`,
+      date: new Date().toISOString().substring(0, 10),
+      attn: linkedClient?.contactName && linkedClient.contactName !== 'N/A' ? linkedClient.contactName : '',
+      company: deal.client || '',
+      address: linkedClient?.address || '',
+      venue: '',
+      time: '',
+      participants: '',
+      trainingProvider: '',
+      items: deal.courseName ? [{
+        id: `item_${Date.now()}`,
+        no: 1,
+        program: deal.courseName,
+        code: '',
+        date: '',
+        trainer: '',
+        feePerDay: deal.proposalValue || 0,
+        days: 1,
+        totalFee: deal.proposalValue || 0,
+      }] : [],
+      remarks: [],
+      terms: DEFAULT_TERMS,
+      preparedBy: rep.name,
+      creatorId: rep.id,
+      ownerId: rep.id,
+      ownerName: rep.name,
+      clientId: deal.clientId || '',
+      pipelineId: deal.id,
+    };
+
+    const updated = [...quotations, cleanQuote];
+    setQuotations(updated);
+    localStorage.setItem('next_quotations_lzk.joel@gmail.com', JSON.stringify(updated));
+    setSelectedId(newId);
+
+    try {
+      await setDoc(doc(db, 'quotations', newId), cleanQuote);
+    } catch (err) {
+      console.error('Firestore create quotation from pipeline failed:', err);
+    }
+  };
 
   const [newRemark, setNewRemark] = useState('');
   const [newTerm, setNewTerm] = useState('');
@@ -427,6 +621,9 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
     setPreparedBy(active.preparedBy || rep.name);
     setOwnerId(active.ownerId || active.creatorId || rep.id);
     setOwnerName(active.ownerName || active.preparedBy || rep.name);
+    setClientId(active.clientId || '');
+    setVenueId(active.venueId || '');
+    setPipelineId(active.pipelineId || '');
   }, [selectedId, quotations, rep]);
 
   // Save the current values back into the quotations list
@@ -462,7 +659,10 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
           ownerName: ownerName || q.ownerName || rep.name,
           taggedRepId: q.taggedRepId ?? '',
           taggedRepName: q.taggedRepName ?? '',
-          isCompleted: q.isCompleted ?? false
+          isCompleted: q.isCompleted ?? false,
+          clientId: clientId || '',
+          venueId: venueId || '',
+          pipelineId: pipelineId || q.pipelineId || ''
         };
         // Sync to Firestore
         setDoc(doc(db, 'quotations', q.id), updatedItem).catch(err => console.error("Firestore save quotation failed:", err));
@@ -542,6 +742,7 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
       code: newItemCode || 'TBD',
       date: newItemDate || 'TBD',
       trainer: newItemTrainer || 'TBD',
+      trainerId: newItemTrainerId || '',
       feePerDay: rate,
       days,
       totalFee: total
@@ -555,6 +756,7 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
     setNewItemCode('');
     setNewItemDate('');
     setNewItemTrainer('');
+    setNewItemTrainerId('');
     setNewItemFee('5500');
     setNewItemDays('2');
   };
@@ -767,6 +969,27 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
           >
             Create New
           </button>
+
+          {pipelineDirectory.length > 0 && (
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleCreateFromPipeline(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-black text-xs uppercase tracking-wider px-3.5 py-2 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+              title="Create a new quotation pre-filled from an existing pipeline deal"
+            >
+              <option value="" disabled>+ Create from Pipeline</option>
+              {pipelineDirectory.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.client} — {p.courseName} ({p.status})
+                </option>
+              ))}
+            </select>
+          )}
 
           <button
             onClick={() => handleDeleteQuotation(selectedId)}
@@ -1305,16 +1528,42 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
               </div>
 
               <div>
-                <label className="block text-xs font-black text-slate-600 uppercase mb-2 tracking-wider">
+                <label className="block text-xs font-black text-slate-600 uppercase mb-2 tracking-wider flex items-center gap-1.5">
                   Company Name
+                  {matchedClient && (
+                    <span className="inline-flex items-center gap-0.5 text-violet-600 font-mono normal-case text-[9px] bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">
+                      <CheckCircle className="w-2.5 h-2.5" />
+                      Linked to Client Database
+                    </span>
+                  )}
                 </label>
                 <input
                   type="text"
+                  list="quotation-client-suggestions"
                   value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  placeholder="e.g. 1 Group (Melaka) Sdn Bhd"
+                  onChange={(e) => {
+                    setCompany(e.target.value);
+                    const match = clientDirectory.find(c => c.companyName.trim().toLowerCase() === e.target.value.trim().toLowerCase());
+                    if (match) handleSelectClient(match);
+                  }}
+                  placeholder="Search existing client, or type a new company"
                   className="w-full text-sm border border-slate-200 rounded-lg px-3.5 py-2.5 text-slate-800 focus:outline-none focus:border-blue-500 bg-white font-medium"
                 />
+                <datalist id="quotation-client-suggestions">
+                  {clientDirectory.map(c => (
+                    <option key={c.id} value={c.companyName} />
+                  ))}
+                </datalist>
+                {company.trim() && !matchedClient && (
+                  <button
+                    type="button"
+                    onClick={handleQuickAddClient}
+                    className="mt-1 text-[10px] text-violet-600 hover:text-violet-700 font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Save "{company.trim()}" to Client Database
+                  </button>
+                )}
               </div>
 
               <div>
@@ -1365,16 +1614,38 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
 
               <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-100">
                 <div>
-                  <label className="block text-xs font-black text-slate-600 uppercase mb-2 tracking-wider">
+                  <label className="block text-xs font-black text-slate-600 uppercase mb-2 tracking-wider flex items-center gap-1.5">
                     Training Venue
+                    {matchedVenue && (
+                      <span className="inline-flex items-center gap-0.5 text-teal-600 font-mono normal-case text-[9px] bg-teal-50 border border-teal-200 px-1 py-0.5 rounded">
+                        <CheckCircle className="w-2.5 h-2.5" />
+                        Linked
+                      </span>
+                    )}
                   </label>
                   <input
                     type="text"
+                    list="quotation-venue-suggestions"
                     value={venue}
                     onChange={(e) => setVenue(e.target.value)}
-                    placeholder="e.g. Happi Village, Janda Baik"
+                    placeholder="Search existing venue, or type a new one"
                     className="w-full text-sm border border-slate-200 rounded-lg px-3.5 py-2.5 text-slate-800 focus:outline-none focus:border-blue-500 bg-white font-medium"
                   />
+                  <datalist id="quotation-venue-suggestions">
+                    {venueDirectory.map(v => (
+                      <option key={v.id} value={v.name} />
+                    ))}
+                  </datalist>
+                  {venue.trim() && !matchedVenue && (
+                    <button
+                      type="button"
+                      onClick={handleQuickAddVenue}
+                      className="mt-1 text-[10px] text-teal-600 hover:text-teal-700 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Save to Venue Database
+                    </button>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-black text-slate-600 uppercase mb-2 tracking-wider">
@@ -1499,16 +1770,41 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
                 </div>
 
                 <div>
-                  <label className="block text-[9px] font-black text-slate-500 uppercase mb-1">
+                  <label className="block text-[9px] font-black text-slate-500 uppercase mb-1 flex items-center gap-1">
                     Assigned Trainer
+                    {matchedTrainer && (
+                      <span className="inline-flex items-center text-blue-600" title="Linked to Trainer Database">
+                        <CheckCircle className="w-2.5 h-2.5" />
+                      </span>
+                    )}
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. Chris Low"
+                    list="quotation-trainer-suggestions"
+                    placeholder="Search existing trainer, or type a new one"
                     value={newItemTrainer}
-                    onChange={(e) => setNewItemTrainer(e.target.value)}
+                    onChange={(e) => {
+                      setNewItemTrainer(e.target.value);
+                      const match = trainerDirectory.find(t => t.name.trim().toLowerCase() === e.target.value.trim().toLowerCase());
+                      if (match) setNewItemFee(String(match.rate || newItemFee));
+                    }}
                     className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:border-blue-500 bg-white"
                   />
+                  <datalist id="quotation-trainer-suggestions">
+                    {trainerDirectory.map(t => (
+                      <option key={t.id} value={t.name} />
+                    ))}
+                  </datalist>
+                  {newItemTrainer.trim() && !matchedTrainer && (
+                    <button
+                      type="button"
+                      onClick={handleQuickAddTrainer}
+                      className="mt-1 text-[9px] text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                      Save to Trainer Database
+                    </button>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
