@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Representative, GoogleLinks } from '../types';
+import { Representative, GoogleLinks, Client } from '../types';
 import { getRepMetrics } from '../initialData';
 import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3, CheckSquare, Square, FolderCheck, Search, Layers, CheckCheck } from 'lucide-react';
 import QuotationGenerator from './QuotationGenerator';
@@ -1253,6 +1253,22 @@ export default function RepDetailDashboard({
     return getSharedPipelines();
   });
 
+  // Read-only live sync of the shared Client Database, used to power the
+  // "search existing client or type a new one" picker on the Pipeline form.
+  const [clientDirectory, setClientDirectory] = useState<Client[]>([]);
+  useEffect(() => {
+    if (!db) return;
+    const q = query(collection(db, 'clients'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: Client[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ ...(docSnap.data() as Client), id: docSnap.id });
+      });
+      setClientDirectory(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Real-time Firestore sync for pipelines
   useEffect(() => {
     if (!db) return;
@@ -1399,6 +1415,7 @@ export default function RepDetailDashboard({
 
   // Pipeline Form States
   const [pipeClient, setPipeClient] = useState('');
+  const [pipeClientId, setPipeClientId] = useState<string>('');
   const [pipeCourseName, setPipeCourseName] = useState('');
   const [pipeRequestDate, setPipeRequestDate] = useState(new Date().toISOString().substring(0, 10));
   const [pipeType, setPipeType] = useState<'Training' | 'Teambuilding'>('Training');
@@ -1415,6 +1432,44 @@ export default function RepDetailDashboard({
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [pipeProposalNotSentYet, setPipeProposalNotSentYet] = useState(false);
   const [pipeAppointmentTicked, setPipeAppointmentTicked] = useState(false);
+
+  // Does the currently typed client name match an existing Client Database record?
+  const matchedPipeClient = clientDirectory.find(
+    c => c.companyName.trim().toLowerCase() === pipeClient.trim().toLowerCase()
+  );
+
+  // Quietly keep pipeClientId in sync whenever the typed name matches an existing client,
+  // and clear it when the rep types something that no longer matches (e.g. a new one-off name).
+  useEffect(() => {
+    if (matchedPipeClient) {
+      setPipeClientId(matchedPipeClient.id);
+    } else {
+      setPipeClientId('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipeClient, clientDirectory]);
+
+  // Lets a rep save a freshly-typed, not-yet-in-the-database client name directly
+  // into the shared Client Database without leaving the Pipeline form.
+  const handleQuickAddClientFromPipeline = async () => {
+    if (!pipeClient.trim()) return;
+    const newClient: Client = {
+      id: `client_${Date.now()}`,
+      companyName: pipeClient.trim(),
+      contactName: 'N/A',
+      createdAt: Date.now(),
+      createdBy: rep.id,
+      createdByName: rep.name,
+    };
+    try {
+      if (db) {
+        await setDoc(doc(db, 'clients', newClient.id), newClient);
+      }
+      setPipeClientId(newClient.id);
+    } catch (err) {
+      console.error('Quick-add client failed:', err);
+    }
+  };
 
   // Reset pipelines list when rep changes
   const handleRaisePipelineSubmit = async (e: React.FormEvent) => {
@@ -1453,6 +1508,7 @@ export default function RepDetailDashboard({
           newPipe = {
             ...p,
             client: pipeClient,
+            clientId: pipeClientId || '',
             courseName: pipeCourseName,
             requestDate: pipeRequestDate,
             type: pipeType,
@@ -1490,6 +1546,7 @@ export default function RepDetailDashboard({
       newPipe = {
         id: `pipe_${Date.now()}`,
         client: pipeClient,
+        clientId: pipeClientId || '',
         courseName: pipeCourseName,
         requestDate: pipeRequestDate,
         type: pipeType,
@@ -3697,17 +3754,39 @@ export default function RepDetailDashboard({
                   <form onSubmit={handleRaisePipelineSubmit} className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 flex items-center gap-1.5">
                           Client Name
+                          {matchedPipeClient && (
+                            <span className="inline-flex items-center gap-0.5 text-violet-600 font-mono normal-case text-[9px] bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">
+                              <Users className="w-2.5 h-2.5" />
+                              Linked
+                            </span>
+                          )}
                         </label>
                         <input
                           type="text"
                           required
-                          placeholder="e.g. Shopee Malaysia"
+                          list="pipeline-client-suggestions"
+                          placeholder="Search existing client, or type a new one"
                           value={pipeClient}
                           onChange={(e) => setPipeClient(e.target.value)}
                           className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
                         />
+                        <datalist id="pipeline-client-suggestions">
+                          {clientDirectory.map(c => (
+                            <option key={c.id} value={c.companyName} />
+                          ))}
+                        </datalist>
+                        {pipeClient.trim() && !matchedPipeClient && (
+                          <button
+                            type="button"
+                            onClick={handleQuickAddClientFromPipeline}
+                            className="mt-1 text-[10px] text-violet-600 hover:text-violet-700 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Save "{pipeClient.trim()}" to Client Database
+                          </button>
+                        )}
                       </div>
 
                       <div>
@@ -4053,6 +4132,11 @@ export default function RepDetailDashboard({
                               <td className="p-4">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-extrabold text-slate-800">{p.client}</span>
+                                  {p.clientId && (
+                                    <span title="Linked to Client Database" className="inline-flex items-center text-violet-500">
+                                      <Users className="w-3 h-3" />
+                                    </span>
+                                  )}
                                 </div>
                                 <span className="text-[10px] text-slate-400 block font-mono mt-0.5">{p.courseName}</span>
                                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -4183,6 +4267,7 @@ export default function RepDetailDashboard({
                                   onClick={() => {
                                     setEditingPipeId(p.id);
                                     setPipeClient(p.client);
+                                    setPipeClientId(p.clientId || '');
                                     setPipeCourseName(p.courseName);
                                     setPipeRequestDate(p.requestDate);
                                     setPipeType(p.type);
