@@ -8,6 +8,7 @@ import AdminRecordManager from './AdminRecordManager';
 import ClientManager from './ClientManager';
 import TrainerManager from './TrainerManager';
 import VenueManager from './VenueManager';
+import AppointmentManager from './AppointmentManager';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -21,7 +22,7 @@ interface RepDetailDashboardProps {
   onMonthChange: (month: string) => void;
 }
 
-type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record';
+type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments';
 
 
 export function getInitialPipelinesForRep(repId: string) {
@@ -2410,6 +2411,17 @@ export default function RepDetailDashboard({
               📍 Venue List
             </button>
 
+            <button 
+              onClick={() => handleSubTabChange('appointments')}
+              className={`w-full text-left p-3.5 rounded-lg text-xs font-black uppercase tracking-wider border transition-all ${
+                activeSubTab === 'appointments' 
+                  ? 'bg-slate-100 border-slate-300 text-slate-800 font-extrabold shadow-2xs' 
+                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              📅 Appointments
+            </button>
+
             {(rep.id === 'xin-ying' || rep.id === 'atiqa') && (
               <>
                 <button 
@@ -2543,6 +2555,8 @@ export default function RepDetailDashboard({
             <TrainerManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'venue' ? (
             <VenueManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
+          ) : activeSubTab === 'appointments' ? (
+            <AppointmentManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'kpi' ? (
             /* KPI SCREEN (WEEKLY BREAKDOWN TABLE) */
             <div className="space-y-6">
