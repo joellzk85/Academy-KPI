@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Representative, CourseOutline, CourseOutlineItem } from '../types';
+import { Representative, CourseOutline, CourseOutlineItem, Client } from '../types';
 import {
   Plus, Trash2, Tag, RotateCcw, Save, BookOpen, Eye, EyeOff, Layers,
   FileText, ClipboardList, Info, Search, Share2, Check, Clock, CheckCircle,
@@ -174,6 +174,61 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
   const [preparedBy, setPreparedBy] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [ownerName, setOwnerName] = useState('');
+  const [preparedForCompany, setPreparedForCompany] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [pipelineId, setPipelineId] = useState('');
+
+  // Read-only live directories, used to power the "search existing or type new"
+  // client picker and "Create from Pipeline" shortcut.
+  const [clientDirectory, setClientDirectory] = useState<Client[]>([]);
+  const [pipelineDirectory, setPipelineDirectory] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!db) return;
+    const unsubClients = onSnapshot(query(collection(db, 'clients')), (snap) => {
+      const list: Client[] = [];
+      snap.forEach(d => list.push({ ...(d.data() as Client), id: d.id }));
+      setClientDirectory(list);
+    });
+    const unsubPipelines = onSnapshot(query(collection(db, 'pipelines')), (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+      setPipelineDirectory(list);
+    });
+    return () => {
+      unsubClients();
+      unsubPipelines();
+    };
+  }, []);
+
+  // Does the currently typed "Prepared For" company match an existing Client Database record?
+  const matchedClient = clientDirectory.find(
+    c => c.companyName.trim().toLowerCase() === preparedForCompany.trim().toLowerCase()
+  );
+
+  useEffect(() => {
+    setClientId(matchedClient ? matchedClient.id : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preparedForCompany, clientDirectory]);
+
+  // Quick-adds a freshly typed, not-yet-in-the-database company into the shared Client Database
+  const handleQuickAddClient = async () => {
+    if (!preparedForCompany.trim()) return;
+    const newClient: Client = {
+      id: `client_${Date.now()}`,
+      companyName: preparedForCompany.trim(),
+      contactName: 'N/A',
+      createdAt: Date.now(),
+      createdBy: rep.id,
+      createdByName: rep.name,
+    };
+    try {
+      if (db) await setDoc(doc(db, 'clients', newClient.id), newClient);
+      setClientId(newClient.id);
+    } catch (err) {
+      console.error('Quick-add client failed:', err);
+    }
+  };
 
   // Module row inputs
   const [newItemModuleTitle, setNewItemModuleTitle] = useState('');
@@ -235,6 +290,9 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
     setPreparedBy(active.preparedBy || rep.name);
     setOwnerId(active.ownerId || active.creatorId || rep.id);
     setOwnerName(active.ownerName || active.preparedBy || rep.name);
+    setPreparedForCompany(active.preparedForCompany || '');
+    setClientId(active.clientId || '');
+    setPipelineId(active.pipelineId || '');
   }, [selectedId, outlines, rep]);
 
   // Save the current values back into the list
@@ -268,7 +326,10 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
           ownerName: ownerName || o.ownerName || rep.name,
           taggedRepId: o.taggedRepId ?? '',
           taggedRepName: o.taggedRepName ?? '',
-          isCompleted: o.isCompleted ?? false
+          isCompleted: o.isCompleted ?? false,
+          preparedForCompany: preparedForCompany || '',
+          clientId: clientId || '',
+          pipelineId: pipelineId || o.pipelineId || ''
         };
         // Sync to Firestore
         setDoc(doc(db, 'course_outlines', o.id), updatedItem).catch(err => console.error("Firestore save course outline failed:", err));
@@ -490,6 +551,57 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
     }
   };
 
+  // Starts a brand new course outline pre-filled from an existing Pipeline deal,
+  // so the rep doesn't have to retype the client/course details from scratch.
+  const handleCreateOutlineFromPipeline = async (pipelineDealId: string) => {
+    const deal = pipelineDirectory.find(p => p.id === pipelineDealId);
+    if (!deal) return;
+
+    const newObj: CourseOutline = {
+      id: `outline_${Date.now()}`,
+      refNumber: `CO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      date: new Date().toISOString().substring(0, 10),
+      courseTitle: deal.courseName || 'New Professional Course Outline',
+      durationDays: 1,
+      totalHours: 7,
+      category: 'Software Engineering',
+      level: 'Intermediate',
+      audience: 'Working professionals seeking technical skills.',
+      prerequisites: 'Basic knowledge of the course topic.',
+      overview: 'Provide a brief summary detailing the key learning journeys, industry relevances, and targeted skill upgrades here.',
+      outcomes: ['List learning outcome #1 here'],
+      items: [
+        {
+          id: `module_1_${Date.now()}`,
+          no: 1,
+          moduleTitle: 'Module 1: Foundations',
+          topics: '• Key Concept 1\n• Hands-on Project Part A',
+          duration: '3 Hours',
+          methodology: 'Hands-on training'
+        }
+      ],
+      preparedBy: rep.name,
+      creatorId: rep.id,
+      ownerId: rep.id,
+      ownerName: rep.name,
+      preparedForCompany: deal.client || '',
+      clientId: deal.clientId || '',
+      pipelineId: deal.id
+    };
+
+    const updated = [newObj, ...outlines];
+    setOutlines(updated);
+    localStorage.setItem('next_course_outlines_lzk.joel@gmail.com', JSON.stringify(updated));
+    setSelectedId(newObj.id);
+    showToast('Created new course outline from pipeline deal!', 'success');
+
+    try {
+      await setDoc(doc(db, 'course_outlines', newObj.id), newObj);
+    } catch (err) {
+      console.error("Firestore create course outline from pipeline failed:", err);
+    }
+  };
+
   // Filter & sort list
   const filteredOutlines = outlines.filter(o => {
     // Privacy constraints
@@ -661,6 +773,27 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
           >
             Create New
           </button>
+
+          {pipelineDirectory.length > 0 && (
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleCreateOutlineFromPipeline(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-black text-xs uppercase tracking-wider px-3.5 py-2 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+              title="Create a new course outline pre-filled from an existing pipeline deal"
+            >
+              <option value="" disabled>+ Create from Pipeline</option>
+              {pipelineDirectory.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.client} — {p.courseName} ({p.status})
+                </option>
+              ))}
+            </select>
+          )}
 
           <button
             onClick={() => handleDeleteOutline(selectedId)}
@@ -1191,6 +1324,41 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
               </div>
 
               <div>
+                <label className="block text-xs font-black text-slate-600 uppercase mb-2 tracking-wider flex items-center gap-1.5">
+                  Prepared For (Company)
+                  {matchedClient && (
+                    <span className="inline-flex items-center gap-0.5 text-violet-600 font-mono normal-case text-[9px] bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">
+                      <CheckCircle className="w-2.5 h-2.5" />
+                      Linked to Client Database
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  list="outline-client-suggestions"
+                  value={preparedForCompany}
+                  onChange={(e) => setPreparedForCompany(e.target.value)}
+                  placeholder="Search existing client, or type a new company (optional)"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3.5 py-2.5 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white font-medium"
+                />
+                <datalist id="outline-client-suggestions">
+                  {clientDirectory.map(c => (
+                    <option key={c.id} value={c.companyName} />
+                  ))}
+                </datalist>
+                {preparedForCompany.trim() && !matchedClient && (
+                  <button
+                    type="button"
+                    onClick={handleQuickAddClient}
+                    className="mt-1 text-[10px] text-violet-600 hover:text-violet-700 font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Save "{preparedForCompany.trim()}" to Client Database
+                  </button>
+                )}
+              </div>
+
+              <div>
                 <label className="block text-xs font-black text-slate-600 uppercase mb-2 tracking-wider">
                   Target Audience
                 </label>
@@ -1478,6 +1646,11 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
                 <h1 className="text-base md:text-lg font-extrabold text-slate-900 uppercase tracking-tight leading-tight">
                   {courseTitle || 'UNTITLED SYLLABUS COURSE'}
                 </h1>
+                {preparedForCompany && (
+                  <p className="text-xs text-slate-500 font-semibold">
+                    Prepared for: <span className="font-bold text-slate-700">{preparedForCompany}</span>
+                  </p>
+                )}
               </div>
 
               {/* Address / Meta Reference details */}
