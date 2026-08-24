@@ -268,6 +268,24 @@ export interface Appointment {
   createdByName?: string;
 }
 
+export interface ClientPayment {
+  id: string;
+  clientName: string;
+  clientId?: string;
+  quotationId?: string;
+  quotationRef?: string;
+  pipelineId?: string;
+  invoiceAmount: number;
+  amountReceived: number;
+  paymentDate?: string;
+  dueDate?: string;
+  status: 'Unpaid' | 'Partial' | 'Paid' | 'Overdue';
+  notes?: string;
+  createdAt?: number;
+  createdBy?: string;
+  createdByName?: string;
+}
+
 export interface AdminRecord {
   id: string;
   completed: boolean;
@@ -304,5 +322,3 @@ export interface AdminRecord {
   pipelineId?: string;
   quotationId?: string;
 }
-
-

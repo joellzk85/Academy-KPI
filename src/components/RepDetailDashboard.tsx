@@ -9,6 +9,7 @@ import ClientManager from './ClientManager';
 import TrainerManager from './TrainerManager';
 import VenueManager from './VenueManager';
 import AppointmentManager from './AppointmentManager';
+import ClientPaymentManager from './ClientPaymentManager';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -22,7 +23,7 @@ interface RepDetailDashboardProps {
   onMonthChange: (month: string) => void;
 }
 
-type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments';
+type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments' | 'client_payments';
 
 
 export function getInitialPipelinesForRep(repId: string) {
@@ -2530,6 +2531,17 @@ export default function RepDetailDashboard({
               📅 Appointments
             </button>
 
+            <button 
+              onClick={() => handleSubTabChange('client_payments')}
+              className={`w-full text-left p-3.5 rounded-lg text-xs font-black uppercase tracking-wider border transition-all ${
+                activeSubTab === 'client_payments' 
+                  ? 'bg-green-50 border-green-300 text-green-700 font-extrabold shadow-2xs' 
+                  : 'bg-white border-slate-200 text-green-700 hover:bg-green-50 hover:border-green-200'
+              }`}
+            >
+              💰 Client Payments
+            </button>
+
             {(rep.id === 'xin-ying' || rep.id === 'atiqa') && (
               <>
                 <button 
@@ -2665,6 +2677,8 @@ export default function RepDetailDashboard({
             <VenueManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'appointments' ? (
             <AppointmentManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
+          ) : activeSubTab === 'client_payments' ? (
+            <ClientPaymentManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'kpi' ? (
             /* KPI SCREEN (WEEKLY BREAKDOWN TABLE) */
             <div className="space-y-6">
