@@ -1270,6 +1270,114 @@ export default function RepDetailDashboard({
     return () => unsubscribe();
   }, []);
 
+  // Read-only live sync of Quotations and Course Outlines, so a Won pipeline deal
+  // can show whether a quotation/outline already exists for it, and its ref number,
+  // instead of the rep having to hunt for it or retype it from scratch.
+  const [quotationsForPipelines, setQuotationsForPipelines] = useState<any[]>([]);
+  const [outlinesForPipelines, setOutlinesForPipelines] = useState<any[]>([]);
+  useEffect(() => {
+    if (!db) return;
+    const unsubQ = onSnapshot(query(collection(db, 'quotations')), (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+      setQuotationsForPipelines(list);
+    });
+    const unsubO = onSnapshot(query(collection(db, 'course_outlines')), (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+      setOutlinesForPipelines(list);
+    });
+    return () => {
+      unsubQ();
+      unsubO();
+    };
+  }, []);
+
+  // Creates a bare-bones draft Quotation directly linked to this Won pipeline deal,
+  // then switches to the Quotation tab so the rep can flesh it out.
+  const handleCreateQuotationForPipeline = async (p: any) => {
+    const newId = `q_${Date.now()}`;
+    const linkedClient = clientDirectory.find(c => c.id === p.clientId);
+    const cleanQuote = {
+      id: newId,
+      refNumber: `1G/NA/${new Date().getFullYear()}${(new Date().getMonth()+1).toString().padStart(2,'0')}${new Date().getDate().toString().padStart(2,'0')}/${(quotationsForPipelines.length + 1).toString().padStart(2, '0')}`,
+      date: new Date().toISOString().substring(0, 10),
+      attn: linkedClient?.contactName && linkedClient.contactName !== 'N/A' ? linkedClient.contactName : '',
+      company: p.client || '',
+      address: linkedClient?.address || '',
+      venue: '',
+      time: '',
+      participants: '',
+      trainingProvider: '',
+      items: p.courseName ? [{
+        id: `item_${Date.now()}`,
+        no: 1,
+        program: p.courseName,
+        code: '',
+        date: '',
+        trainer: '',
+        feePerDay: p.proposalValue || 0,
+        days: 1,
+        totalFee: p.proposalValue || 0,
+      }] : [],
+      remarks: [],
+      terms: [],
+      preparedBy: rep.name,
+      creatorId: rep.id,
+      ownerId: rep.id,
+      ownerName: rep.name,
+      clientId: p.clientId || '',
+      pipelineId: p.id,
+    };
+    try {
+      await setDoc(doc(db, 'quotations', newId), cleanQuote);
+      setActiveSubTab('quotation');
+    } catch (err) {
+      console.error('Create quotation for pipeline failed:', err);
+    }
+  };
+
+  // Creates a bare-bones draft Course Outline directly linked to this Won pipeline deal,
+  // then switches to the Course Outline tab so the rep can flesh it out.
+  const handleCreateOutlineForPipeline = async (p: any) => {
+    const newId = `outline_${Date.now()}`;
+    const newObj = {
+      id: newId,
+      refNumber: `CO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      date: new Date().toISOString().substring(0, 10),
+      courseTitle: p.courseName || 'New Professional Course Outline',
+      durationDays: 1,
+      totalHours: 7,
+      category: 'Software Engineering',
+      level: 'Intermediate',
+      audience: 'Working professionals seeking technical skills.',
+      prerequisites: 'Basic knowledge of the course topic.',
+      overview: 'Provide a brief summary detailing the key learning journeys, industry relevances, and targeted skill upgrades here.',
+      outcomes: ['List learning outcome #1 here'],
+      items: [{
+        id: `module_1_${Date.now()}`,
+        no: 1,
+        moduleTitle: 'Module 1: Foundations',
+        topics: '• Key Concept 1\n• Hands-on Project Part A',
+        duration: '3 Hours',
+        methodology: 'Hands-on training'
+      }],
+      preparedBy: rep.name,
+      creatorId: rep.id,
+      ownerId: rep.id,
+      ownerName: rep.name,
+      preparedForCompany: p.client || '',
+      clientId: p.clientId || '',
+      pipelineId: p.id
+    };
+    try {
+      await setDoc(doc(db, 'course_outlines', newId), newObj);
+      setActiveSubTab('course_outline');
+    } catch (err) {
+      console.error('Create course outline for pipeline failed:', err);
+    }
+  };
+
   // Real-time Firestore sync for pipelines
   useEffect(() => {
     if (!db) return;
@@ -4103,6 +4211,7 @@ export default function RepDetailDashboard({
                           <th className="p-4 text-right">Proposal Value</th>
                           <th className="p-4">Follow up date</th>
                           <th className="p-4 text-center">Status</th>
+                          <th className="p-4 text-center">Docs</th>
                           <th className="p-4 text-right">Actions</th>
                         </tr>
                       </thead>
@@ -4272,6 +4381,56 @@ export default function RepDetailDashboard({
                                   <AlertCircle className={`w-3.5 h-3.5 ${isOverdue(p) ? 'text-rose-600' : 'text-amber-500'}`} />
                                   {isOverdue(p) ? 'OVERDUE (2+ Days)' : 'Pending'}
                                 </span>
+                              )}
+                            </td>
+                            <td className="p-4 text-center">
+                              {p.status === 'Won' ? (
+                                <div className="flex flex-col items-center gap-1">
+                                  {(() => {
+                                    const linkedQuote = quotationsForPipelines.find(q => q.pipelineId === p.id);
+                                    return linkedQuote ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveSubTab('quotation')}
+                                        className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
+                                        title="Open in Quotation Generator"
+                                      >
+                                        📄 {linkedQuote.refNumber}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCreateQuotationForPipeline(p)}
+                                        className="text-[9px] font-black text-slate-400 hover:text-blue-600 border border-dashed border-slate-300 hover:border-blue-300 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
+                                      >
+                                        + Quotation
+                                      </button>
+                                    );
+                                  })()}
+                                  {(() => {
+                                    const linkedOutline = outlinesForPipelines.find(o => o.pipelineId === p.id);
+                                    return linkedOutline ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveSubTab('course_outline')}
+                                        className="text-[9px] font-black text-emerald-600 hover:text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
+                                        title="Open in Course Outline Generator"
+                                      >
+                                        📘 {linkedOutline.refNumber}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCreateOutlineForPipeline(p)}
+                                        className="text-[9px] font-black text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 hover:border-emerald-300 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
+                                      >
+                                        + Outline
+                                      </button>
+                                    );
+                                  })()}
+                                </div>
+                              ) : (
+                                <span className="text-slate-300 text-[10px]">—</span>
                               )}
                             </td>
                             <td className="p-4 text-right">
