@@ -5,7 +5,8 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/
 import {
   Plus, Trash2, Edit3, Search, X, Building2, User,
   Phone, Mail, MapPin, Briefcase, CheckCircle, RotateCcw,
-  Users, ShieldCheck, CalendarPlus, Save
+  Users, ShieldCheck, CalendarPlus, Save, Eye, TrendingUp,
+  FileText, BookOpen, ClipboardList, CalendarClock, Wallet
 } from 'lucide-react';
 
 interface ClientManagerProps {
@@ -72,6 +73,72 @@ export default function ClientManager({ rep, reps, requestManagerPermission }: C
 
     return () => unsubscribe();
   }, []);
+
+  // Read-only live sync of every other collection linked to clients, powering
+  // the Client 360 view below (pipeline deals, quotations, outlines, admin
+  // records, appointments, and payments tied to a given client).
+  const [pipelineDirectory, setPipelineDirectory] = useState<any[]>([]);
+  const [quotationDirectory, setQuotationDirectory] = useState<any[]>([]);
+  const [outlineDirectory, setOutlineDirectory] = useState<any[]>([]);
+  const [adminRecordDirectory, setAdminRecordDirectory] = useState<any[]>([]);
+  const [appointmentDirectory, setAppointmentDirectory] = useState<any[]>([]);
+  const [paymentDirectory, setPaymentDirectory] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!db) return;
+    const unsubs = [
+      onSnapshot(query(collection(db, 'pipelines')), (snap) => {
+        const list: any[] = [];
+        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+        setPipelineDirectory(list);
+      }),
+      onSnapshot(query(collection(db, 'quotations')), (snap) => {
+        const list: any[] = [];
+        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+        setQuotationDirectory(list);
+      }),
+      onSnapshot(query(collection(db, 'course_outlines')), (snap) => {
+        const list: any[] = [];
+        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+        setOutlineDirectory(list);
+      }),
+      onSnapshot(query(collection(db, 'admin_records')), (snap) => {
+        const list: any[] = [];
+        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+        setAdminRecordDirectory(list);
+      }),
+      onSnapshot(query(collection(db, 'appointments')), (snap) => {
+        const list: any[] = [];
+        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+        setAppointmentDirectory(list);
+      }),
+      onSnapshot(query(collection(db, 'client_payments')), (snap) => {
+        const list: any[] = [];
+        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+        setPaymentDirectory(list);
+      }),
+    ];
+    return () => unsubs.forEach(u => u());
+  }, []);
+
+  // Client 360 view state
+  const [view360ClientId, setView360ClientId] = useState<string | null>(null);
+  const view360Client = clients.find(c => c.id === view360ClientId);
+
+  // Every record type is matched to a client either by a direct clientId link,
+  // or (for records created before that client existed in the database) by
+  // company name text match, so nothing is missed just because it predates linking.
+  const getClientRecords = (c: Client) => {
+    const nameMatch = (val?: string) => (val || '').trim().toLowerCase() === c.companyName.trim().toLowerCase();
+    return {
+      deals: pipelineDirectory.filter(p => p.clientId === c.id || nameMatch(p.client)),
+      quotations: quotationDirectory.filter(q => q.clientId === c.id || nameMatch(q.company)),
+      outlines: outlineDirectory.filter(o => o.clientId === c.id || nameMatch(o.preparedForCompany)),
+      adminRecords: adminRecordDirectory.filter(r => r.clientId === c.id || nameMatch(r.client)),
+      appointments: appointmentDirectory.filter(a => a.clientId === c.id || nameMatch(a.clientName)),
+      payments: paymentDirectory.filter(p => p.clientId === c.id || nameMatch(p.clientName)),
+    };
+  };
 
   const resetForm = () => {
     setFormCompanyName('');
@@ -457,6 +524,13 @@ export default function ClientManager({ rep, reps, requestManagerPermission }: C
                     <td className="p-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
+                          onClick={() => setView360ClientId(c.id)}
+                          className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors cursor-pointer"
+                          title="View 360: all activity for this client"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => handleOpenEditModal(c)}
                           className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                           title="Edit client"
@@ -638,6 +712,220 @@ export default function ClientManager({ rep, reps, requestManagerPermission }: C
           </div>
         </div>
       )}
+
+      {/* Client 360 View */}
+      {view360Client && (() => {
+        const records = getClientRecords(view360Client);
+        const wonDeals = records.deals.filter((d: any) => d.status === 'Won');
+        const totalWonValue = wonDeals.reduce((sum: number, d: any) => sum + (d.proposalValue || 0), 0);
+        const totalReceived = records.payments.reduce((sum: number, p: any) => sum + (p.amountReceived || 0), 0);
+        const totalOutstanding = records.payments.reduce((sum: number, p: any) => sum + ((p.invoiceAmount || 0) - (p.amountReceived || 0)), 0);
+
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl max-w-3xl w-full shadow-2xl border border-slate-150 max-h-[92vh] overflow-y-auto">
+
+              {/* Header */}
+              <div className="sticky top-0 bg-white border-b border-slate-150 p-5 flex items-start justify-between z-10">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-violet-600" />
+                    <h2 className="text-lg font-black text-slate-900">{view360Client.companyName}</h2>
+                    {view360Client.hrdcRegistered && (
+                      <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold px-2 py-0.5 rounded font-mono">
+                        <ShieldCheck className="w-3 h-3" />
+                        HRDC
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[11px] text-slate-500">
+                    {view360Client.contactName && view360Client.contactName !== 'N/A' && (
+                      <span className="flex items-center gap-1"><User className="w-3 h-3" />{view360Client.contactName}{view360Client.designation ? ` (${view360Client.designation})` : ''}</span>
+                    )}
+                    {view360Client.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{view360Client.phone}</span>}
+                    {view360Client.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{view360Client.email}</span>}
+                    {view360Client.industry && <span className="flex items-center gap-1"><Briefcase className="w-3 h-3" />{view360Client.industry}</span>}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setView360ClientId(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer flex-shrink-0"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-6">
+
+                {/* Summary stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3">
+                    <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider font-mono">Won Deals Value</div>
+                    <div className="text-lg font-black text-emerald-600 mt-1">RM {totalWonValue.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3">
+                    <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider font-mono">Received</div>
+                    <div className="text-lg font-black text-green-600 mt-1">RM {totalReceived.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3">
+                    <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider font-mono">Outstanding</div>
+                    <div className="text-lg font-black text-amber-600 mt-1">RM {totalOutstanding.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3">
+                    <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider font-mono">Total Deals</div>
+                    <div className="text-lg font-black text-slate-800 mt-1">{records.deals.length}</div>
+                  </div>
+                </div>
+
+                {/* Pipeline Deals */}
+                <div>
+                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                    Pipeline Deals ({records.deals.length})
+                  </h3>
+                  {records.deals.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic">No pipeline deals logged for this client yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {records.deals.map((d: any) => (
+                        <div key={d.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
+                          <span className="font-bold text-slate-700">{d.courseName || 'Untitled deal'}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-slate-500">RM {(d.proposalValue || 0).toLocaleString()}</span>
+                            <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
+                              d.status === 'Won' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                              d.status === 'Lost' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                              'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}>{d.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Quotations */}
+                <div>
+                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                    <FileText className="w-3.5 h-3.5 text-blue-500" />
+                    Quotations ({records.quotations.length})
+                  </h3>
+                  {records.quotations.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic">No quotations sent to this client yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {records.quotations.map((q: any) => {
+                        const itemsTotal = (q.items || []).reduce((sum: number, it: any) => sum + (it.totalFee || 0), 0);
+                        const sst = q.applySST ? (itemsTotal * (q.sstRate || 8) / 100) : 0;
+                        return (
+                          <div key={q.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
+                            <span className="font-mono font-bold text-slate-700">{q.refNumber}</span>
+                            <span className="font-mono text-slate-500">RM {(itemsTotal + sst).toLocaleString()}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Course Outlines */}
+                <div>
+                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                    <BookOpen className="w-3.5 h-3.5 text-emerald-500" />
+                    Course Outlines ({records.outlines.length})
+                  </h3>
+                  {records.outlines.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic">No course outlines prepared for this client yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {records.outlines.map((o: any) => (
+                        <div key={o.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
+                          <span className="font-bold text-slate-700">{o.courseTitle}</span>
+                          <span className="font-mono text-slate-400">{o.refNumber}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Admin Records (Jobs) */}
+                <div>
+                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                    <ClipboardList className="w-3.5 h-3.5 text-slate-500" />
+                    Confirmed Jobs / Admin Records ({records.adminRecords.length})
+                  </h3>
+                  {records.adminRecords.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic">No confirmed jobs logged for this client yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {records.adminRecords.map((r: any) => (
+                        <div key={r.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
+                          <span className="font-bold text-slate-700">{r.programmeName || 'Untitled programme'}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-slate-500">{r.trainingDate}</span>
+                            <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
+                              r.completed ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-500 border border-slate-200'
+                            }`}>{r.completed ? 'Done' : 'In Progress'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Appointments */}
+                <div>
+                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                    <CalendarClock className="w-3.5 h-3.5 text-amber-500" />
+                    Appointments ({records.appointments.length})
+                  </h3>
+                  {records.appointments.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic">No appointments logged for this client yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {records.appointments.map((a: any) => (
+                        <div key={a.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
+                          <span className="font-bold text-slate-700">{a.type} — {a.date} {a.time || ''}</span>
+                          <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
+                            a.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                            a.status === 'No-Show' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                            'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}>{a.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Payments */}
+                <div>
+                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                    <Wallet className="w-3.5 h-3.5 text-green-600" />
+                    Payments ({records.payments.length})
+                  </h3>
+                  {records.payments.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic">No payments logged for this client yet.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {records.payments.map((p: any) => (
+                        <div key={p.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
+                          <span className="font-mono text-slate-500">Invoiced RM {(p.invoiceAmount || 0).toLocaleString()}</span>
+                          <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
+                            p.status === 'Paid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                            p.status === 'Overdue' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                            'bg-slate-50 text-slate-500 border border-slate-200'
+                          }`}>{p.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
