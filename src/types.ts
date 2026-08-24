@@ -300,6 +300,9 @@ export interface AdminRecord {
   ownerId?: string;
   ownerName?: string;
   createdAt?: number;
+  clientId?: string;
+  pipelineId?: string;
+  quotationId?: string;
 }
 
 

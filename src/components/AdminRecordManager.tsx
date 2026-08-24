@@ -269,6 +269,32 @@ interface AdminRecordManagerProps {
 }
 
 export default function AdminRecordManager({ rep, reps, requestManagerPermission }: AdminRecordManagerProps) {
+  // Only Ying and Atiqa are allowed to create, edit, or delete Admin Records.
+  // Everyone else can view the checklist (useful for visibility) but cannot change it.
+  const isAdminEditor = rep.id === 'xin-ying' || rep.id === 'atiqa';
+
+  // Read-only live sync of Won pipeline deals and Quotations, used to power
+  // "Create from Pipeline" so client/programme/quotation ref carry over automatically.
+  const [pipelineDirectory, setPipelineDirectory] = useState<any[]>([]);
+  const [quotationDirectory, setQuotationDirectory] = useState<any[]>([]);
+  useEffect(() => {
+    if (!db) return;
+    const unsubPipelines = onSnapshot(query(collection(db, 'pipelines')), (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+      setPipelineDirectory(list);
+    });
+    const unsubQuotations = onSnapshot(query(collection(db, 'quotations')), (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push({ ...d.data(), id: d.id }));
+      setQuotationDirectory(list);
+    });
+    return () => {
+      unsubPipelines();
+      unsubQuotations();
+    };
+  }, []);
+
   const [records, setRecords] = useState<AdminRecord[]>(() => {
     const saved = localStorage.getItem('next_admin_records_checklist_v1');
     if (saved) {
@@ -360,6 +386,9 @@ export default function AdminRecordManager({ rep, reps, requestManagerPermission
   const [trainingDate, setTrainingDate] = useState('');
   const [programmeName, setProgrammeName] = useState('');
   const [client, setClient] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [pipelineId, setPipelineId] = useState('');
+  const [quotationId, setQuotationId] = useState('');
   const [trainer, setTrainer] = useState('');
   const [typeOfTraining, setTypeOfTraining] = useState('In-house');
   const [trainingHour, setTrainingHour] = useState(7);
@@ -398,6 +427,9 @@ export default function AdminRecordManager({ rep, reps, requestManagerPermission
     setTrainingDate(rec.trainingDate);
     setProgrammeName(rec.programmeName);
     setClient(rec.client);
+    setClientId(rec.clientId || '');
+    setPipelineId(rec.pipelineId || '');
+    setQuotationId(rec.quotationId || '');
     setTrainer(rec.trainer);
     setTypeOfTraining(rec.typeOfTraining || 'In-house');
     setTrainingHour(rec.trainingHour || 7);
@@ -431,6 +463,9 @@ export default function AdminRecordManager({ rep, reps, requestManagerPermission
     setTrainingDate(new Date().toISOString().substring(0, 10));
     setProgrammeName('');
     setClient('');
+    setClientId('');
+    setPipelineId('');
+    setQuotationId('');
     setTrainer(rep.name);
     setTypeOfTraining('In-house');
     setTrainingHour(7);
@@ -457,6 +492,54 @@ export default function AdminRecordManager({ rep, reps, requestManagerPermission
     setIsFormOpen(true);
   };
 
+  // For Ying/Atiqa only: pre-fills a new Admin Record from a Won pipeline deal,
+  // carrying over the client, programme, and quotation ref automatically.
+  const handleCreateFromPipeline = (dealId: string) => {
+    const deal = pipelineDirectory.find(p => p.id === dealId);
+    if (!deal) return;
+    const linkedQuote = quotationDirectory.find(q => q.pipelineId === deal.id);
+
+    setSelectedRecordId(null);
+    setCompleted(false);
+    setNo((records.length + 1).toString());
+    setTrainingDate(new Date().toISOString().substring(0, 10));
+    setProgrammeName(deal.courseName || '');
+    setClient(deal.client || '');
+    setClientId(deal.clientId || '');
+    setPipelineId(deal.id);
+    setQuotationId(linkedQuote?.id || '');
+    setTrainer(rep.name);
+    setTypeOfTraining('In-house');
+    setTrainingHour(7);
+    setQuotation(linkedQuote?.refNumber || '');
+    setPutInBitrixCalendar('YES');
+    setVenuePicContact('');
+    setBookHotel('N/A');
+    setPayHotel('N/A');
+    setBookBus('N/A');
+    setPayBus('N/A');
+    setBookFacilitator('N/A');
+    setPayFacilitator('N/A');
+    setTrainerPo('N/A');
+    setGrantApproved('N/A');
+    setOutputSummaryQr('');
+    setHandoutsMaterials('Done');
+    setUploadPhotosDrive('');
+    setAttendanceList('');
+    setInvoice('');
+    setJd14('');
+    setCertificate('');
+    setTrainingReport('');
+    setIsEditing(false);
+    setIsFormOpen(true);
+  };
+
+  // Won deals that don't yet have a linked Admin Record, so Ying/Atiqa know
+  // which closed deals still need to be handed off into the admin checklist.
+  const wonDealsWithoutRecord = pipelineDirectory.filter(
+    p => p.status === 'Won' && !records.some(r => r.pipelineId === p.id)
+  );
+
   const handleToggleCompleted = async (id: string) => {
     const recordToUpdate = records.find(r => r.id === id);
     if (!recordToUpdate) return;
@@ -476,6 +559,10 @@ export default function AdminRecordManager({ rep, reps, requestManagerPermission
 
   const handleSaveRecord = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdminEditor) {
+      showToast('Only Ying and Atiqa can save Admin Records.', 'error');
+      return;
+    }
     if (!client.trim()) {
       showToast('Client Name is required!', 'error');
       return;
@@ -515,7 +602,10 @@ export default function AdminRecordManager({ rep, reps, requestManagerPermission
       trainingReport: trainingReport.trim(),
       ownerId: rep.id,
       ownerName: rep.name,
-      createdAt: isEditing ? (records.find(r => r.id === selectedRecordId)?.createdAt || Date.now()) : Date.now()
+      createdAt: isEditing ? (records.find(r => r.id === selectedRecordId)?.createdAt || Date.now()) : Date.now(),
+      clientId: clientId || '',
+      pipelineId: pipelineId || '',
+      quotationId: quotationId || ''
     };
 
     let updatedList: AdminRecord[] = [];
@@ -538,6 +628,10 @@ export default function AdminRecordManager({ rep, reps, requestManagerPermission
   };
 
   const handleDeleteRecord = (id: string) => {
+    if (!isAdminEditor) {
+      showToast('Only Ying and Atiqa can delete Admin Records.', 'error');
+      return;
+    }
     requestManagerPermission(async () => {
       setPreviousRecords(JSON.parse(JSON.stringify(records)));
       setUndoMessage('Training log record deleted.');
@@ -905,15 +999,50 @@ Generated automatically by NEXT Academy Checklist Engine.
               <Download className="w-3.5 h-3.5" />
               EXPORT CSV
             </button>
-            <button
-              onClick={handleCreateInit}
-              className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] uppercase tracking-wider px-4 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
-            >
-              <Plus className="w-4 h-4" />
-              LOG NEW PROGRAM
-            </button>
+            {isAdminEditor && wonDealsWithoutRecord.length > 0 && (
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleCreateFromPipeline(e.target.value);
+                    e.target.value = '';
+                  }
+                }}
+                className="flex-1 md:flex-none bg-blue-900/40 hover:bg-blue-900/60 text-blue-200 font-bold text-[10px] uppercase tracking-wider px-3.5 py-2 rounded-lg border border-blue-700 transition-all cursor-pointer"
+                title="Create an admin record pre-filled from a Won pipeline deal"
+              >
+                <option value="" disabled>+ From Won Deal ({wonDealsWithoutRecord.length})</option>
+                {wonDealsWithoutRecord.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.client} — {p.courseName}
+                  </option>
+                ))}
+              </select>
+            )}
+            {isAdminEditor ? (
+              <button
+                onClick={handleCreateInit}
+                className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] uppercase tracking-wider px-4 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
+              >
+                <Plus className="w-4 h-4" />
+                LOG NEW PROGRAM
+              </button>
+            ) : (
+              <span className="flex-1 md:flex-none text-[10px] text-slate-500 font-bold uppercase tracking-wider px-3.5 py-2 flex items-center justify-center gap-1.5 border border-dashed border-slate-700 rounded-lg">
+                🔒 View Only
+              </span>
+            )}
           </div>
         </div>
+
+        {!isAdminEditor && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-800 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>
+              Admin Records can only be created, edited, or deleted by Ying and Atiqa. You can view the checklist, but changes are locked.
+            </span>
+          </div>
+        )}
 
         {/* Filters Panel */}
         <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 pt-3 border-t border-slate-800">
@@ -1016,8 +1145,11 @@ Generated automatically by NEXT Academy Checklist Engine.
                       {/* Completed inline toggle */}
                       <td className="p-3 sticky left-0 bg-white hover:bg-slate-50 z-10 text-center border-r border-slate-100">
                         <button
-                          onClick={() => handleToggleCompleted(r.id)}
-                          className="mx-auto flex items-center justify-center cursor-pointer text-slate-500 hover:text-emerald-600 transition-transform"
+                          onClick={() => isAdminEditor && handleToggleCompleted(r.id)}
+                          disabled={!isAdminEditor}
+                          className={`mx-auto flex items-center justify-center transition-transform ${
+                            isAdminEditor ? 'cursor-pointer text-slate-500 hover:text-emerald-600' : 'cursor-not-allowed opacity-60'
+                          }`}
                         >
                           {r.completed ? (
                             <CheckSquare className="w-4.5 h-4.5 text-emerald-600" />
@@ -1126,22 +1258,26 @@ Generated automatically by NEXT Academy Checklist Engine.
                       </td>
 
                       <td className="p-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => handleEditInit(r)}
-                            className="p-1 rounded text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 cursor-pointer"
-                            title="Edit logistical checklist"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteRecord(r.id)}
-                            className="p-1 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
-                            title="Remove"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {isAdminEditor ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => handleEditInit(r)}
+                              className="p-1 rounded text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 cursor-pointer"
+                              title="Edit logistical checklist"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRecord(r.id)}
+                              className="p-1 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                              title="Remove"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300 text-[10px]" title="Only Ying and Atiqa can edit">🔒</span>
+                        )}
                       </td>
                     </tr>
                   );
