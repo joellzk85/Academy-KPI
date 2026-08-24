@@ -153,6 +153,8 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
   // Searching & Sorting
   const [outlineSearchQuery, setOutlineSearchQuery] = useState('');
   const [outlineSortBy, setOutlineSortBy] = useState<'date' | 'title'>('date');
+  const [outlinePageSize, setOutlinePageSize] = useState<10 | 20 | 30>(10);
+  const [outlineCurrentPage, setOutlineCurrentPage] = useState(1);
   const [showHiddenOutlines, setShowHiddenOutlines] = useState(false);
 
   // Workspace Layout Mode ('split' | 'stacked' | 'edit-only' | 'preview-only')
@@ -631,6 +633,12 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
     return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime();
   });
 
+  const outlineTotalPages = Math.max(1, Math.ceil(filteredOutlines.length / outlinePageSize));
+  const paginatedOutlines = filteredOutlines.slice(
+    (outlineCurrentPage - 1) * outlinePageSize,
+    (outlineCurrentPage - 1) * outlinePageSize + outlinePageSize
+  );
+
   // Module Row Management
   const handleAddModuleRow = (e: React.FormEvent) => {
     e.preventDefault();
@@ -824,7 +832,10 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
                 type="text"
                 placeholder="Search by title, ref, category..."
                 value={outlineSearchQuery}
-                onChange={(e) => setOutlineSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setOutlineSearchQuery(e.target.value);
+                  setOutlineCurrentPage(1);
+                }}
                 className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-emerald-500 bg-slate-50 w-56 font-medium"
               />
             </div>
@@ -838,6 +849,22 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
               >
                 <option value="date">Latest Date</option>
                 <option value="title">Course Title</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <span>Show:</span>
+              <select
+                value={outlinePageSize}
+                onChange={(e) => {
+                  setOutlinePageSize(Number(e.target.value) as 10 | 20 | 30);
+                  setOutlineCurrentPage(1);
+                }}
+                className="bg-white border border-slate-200 rounded px-2 py-1 cursor-pointer font-sans"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={30}>30</option>
               </select>
             </div>
 
@@ -876,7 +903,7 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {filteredOutlines.map(o => {
+                {paginatedOutlines.map(o => {
                   const isCurrent = o.id === selectedId;
                   return (
                     <React.Fragment key={o.id}>
@@ -1113,6 +1140,34 @@ export default function CourseOutlineGenerator({ rep, reps, requestManagerPermis
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination controls */}
+        {filteredOutlines.length > 0 && (
+          <div className="flex items-center justify-between pt-2 text-[11px] font-bold text-slate-500">
+            <span>
+              Showing {Math.min((outlineCurrentPage - 1) * outlinePageSize + 1, filteredOutlines.length)}–{Math.min(outlineCurrentPage * outlinePageSize, filteredOutlines.length)} of {filteredOutlines.length}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={outlineCurrentPage <= 1}
+                onClick={() => setOutlineCurrentPage(p => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Prev
+              </button>
+              <span className="px-2">Page {outlineCurrentPage} of {outlineTotalPages}</span>
+              <button
+                type="button"
+                disabled={outlineCurrentPage >= outlineTotalPages}
+                onClick={() => setOutlineCurrentPage(p => Math.min(outlineTotalPages, p + 1))}
+                className="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>

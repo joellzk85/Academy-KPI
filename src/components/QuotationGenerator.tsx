@@ -458,6 +458,8 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
   // Quotations Prepared Library list view states
   const [quoteSearchQuery, setQuoteSearchQuery] = useState('');
   const [quoteSortBy, setQuoteSortBy] = useState<'date' | 'created' | 'client'>('date');
+  const [quotePageSize, setQuotePageSize] = useState<10 | 20 | 30>(10);
+  const [quoteCurrentPage, setQuoteCurrentPage] = useState(1);
   const [showHiddenQuotes, setShowHiddenQuotes] = useState(false);
 
   // Google Sheets Integration State
@@ -870,6 +872,12 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
     return timeB - timeA;
   });
 
+  const quoteTotalPages = Math.max(1, Math.ceil(filteredQuotes.length / quotePageSize));
+  const paginatedQuotes = filteredQuotes.slice(
+    (quoteCurrentPage - 1) * quotePageSize,
+    (quoteCurrentPage - 1) * quotePageSize + quotePageSize
+  );
+
   return (
     <div className="space-y-6">
       {/* CSS print override styles */}
@@ -1021,7 +1029,10 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
                 type="text"
                 placeholder="Search by client, ref, provider..."
                 value={quoteSearchQuery}
-                onChange={(e) => setQuoteSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setQuoteSearchQuery(e.target.value);
+                  setQuoteCurrentPage(1);
+                }}
                 className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 bg-slate-50 w-56 font-medium"
               />
             </div>
@@ -1037,6 +1048,23 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
                 <option value="date">Quote Date</option>
                 <option value="created">Created Time</option>
                 <option value="client">Client Name</option>
+              </select>
+            </div>
+
+            {/* Page Size Dropdown */}
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <span>Show:</span>
+              <select
+                value={quotePageSize}
+                onChange={(e) => {
+                  setQuotePageSize(Number(e.target.value) as 10 | 20 | 30);
+                  setQuoteCurrentPage(1);
+                }}
+                className="bg-white border border-slate-200 rounded px-2 py-1 cursor-pointer font-sans"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={30}>30</option>
               </select>
             </div>
 
@@ -1076,7 +1104,7 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {filteredQuotes.map(q => {
+                {paginatedQuotes.map(q => {
                   const isCurrent = q.id === selectedId;
                   const total = getQuotationTotal(q);
                   return (
@@ -1346,6 +1374,34 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination controls */}
+        {filteredQuotes.length > 0 && (
+          <div className="flex items-center justify-between pt-2 text-[11px] font-bold text-slate-500">
+            <span>
+              Showing {Math.min((quoteCurrentPage - 1) * quotePageSize + 1, filteredQuotes.length)}–{Math.min(quoteCurrentPage * quotePageSize, filteredQuotes.length)} of {filteredQuotes.length}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={quoteCurrentPage <= 1}
+                onClick={() => setQuoteCurrentPage(p => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Prev
+              </button>
+              <span className="px-2">Page {quoteCurrentPage} of {quoteTotalPages}</span>
+              <button
+                type="button"
+                disabled={quoteCurrentPage >= quoteTotalPages}
+                onClick={() => setQuoteCurrentPage(p => Math.min(quoteTotalPages, p + 1))}
+                className="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>

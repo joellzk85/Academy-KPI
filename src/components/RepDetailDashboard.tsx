@@ -1575,6 +1575,9 @@ export default function RepDetailDashboard({
   const [pipeOwnerId, setPipeOwnerId] = useState<string>(rep.id);
   const [editingPipeId, setEditingPipeId] = useState<string | null>(null);
   const [pipelineSortBy, setPipelineSortBy] = useState<'latest' | 'oldest' | 'pending' | 'won' | 'lost'>('latest');
+  const [pipelineSearchQuery, setPipelineSearchQuery] = useState('');
+  const [pipelinePageSize, setPipelinePageSize] = useState<10 | 20 | 30>(10);
+  const [pipelineCurrentPage, setPipelineCurrentPage] = useState(1);
   const [pipeTaggedRepIds, setPipeTaggedRepIds] = useState<string[]>([]);
   const [pipeTagNote, setPipeTagNote] = useState<string>('');
   const [pipeNotes, setPipeNotes] = useState<string>('');
@@ -4223,12 +4226,25 @@ export default function RepDetailDashboard({
 
               {/* Pipeline List Board */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden" id="pipeline-table-card">
-                <div className="p-4 bg-slate-800 text-white flex items-center justify-between">
+                <div className="p-4 bg-slate-800 text-white flex flex-col md:flex-row md:items-center justify-between gap-3">
                   <h4 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
                     <Briefcase className="w-4 h-4 text-slate-300" />
                     PAST PIPELINE OPPORTUNITIES ({pipelines.length})
                   </h4>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Search client, course..."
+                        value={pipelineSearchQuery}
+                        onChange={(e) => {
+                          setPipelineSearchQuery(e.target.value);
+                          setPipelineCurrentPage(1);
+                        }}
+                        className="pl-8 pr-3 py-1.5 text-[10px] border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 bg-slate-700 placeholder-slate-400 w-48 font-medium"
+                      />
+                    </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10px] font-black uppercase text-slate-400 font-mono">Sort by:</span>
                       <select
@@ -4241,6 +4257,21 @@ export default function RepDetailDashboard({
                         <option value="pending">Pending</option>
                         <option value="won">Won</option>
                         <option value="lost">Lost</option>
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-black uppercase text-slate-400 font-mono">Show:</span>
+                      <select
+                        value={pipelinePageSize}
+                        onChange={(e) => {
+                          setPipelinePageSize(Number(e.target.value) as 10 | 20 | 30);
+                          setPipelineCurrentPage(1);
+                        }}
+                        className="bg-slate-700 text-white text-[10px] font-black uppercase rounded px-2.5 py-1 focus:outline-none border border-slate-600 font-mono cursor-pointer"
+                      >
+                        <option value={10}>10</option>
+                        <option value={20}>20</option>
+                        <option value={30}>30</option>
                       </select>
                     </div>
                     <span className="text-[10px] bg-slate-700 text-slate-300 font-bold px-2.5 py-1 rounded font-mono">
@@ -4269,30 +4300,40 @@ export default function RepDetailDashboard({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700 font-sans text-xs">
-                        {[...pipelines].sort((a, b) => {
-                          if (pipelineSortBy === 'latest') {
-                            return new Date(b.requestDate || b.proposalSentDate || 0).getTime() - new Date(a.requestDate || a.proposalSentDate || 0).getTime();
-                          }
-                          if (pipelineSortBy === 'oldest') {
-                            return new Date(a.requestDate || a.proposalSentDate || 0).getTime() - new Date(b.requestDate || b.proposalSentDate || 0).getTime();
-                          }
-                          if (pipelineSortBy === 'pending') {
-                            if (a.status === 'Pending' && b.status !== 'Pending') return -1;
-                            if (a.status !== 'Pending' && b.status === 'Pending') return 1;
+                        {(() => {
+                          const filtered = pipelines.filter(p => {
+                            const q = pipelineSearchQuery.trim().toLowerCase();
+                            if (!q) return true;
+                            return (p.client || '').toLowerCase().includes(q) || (p.courseName || '').toLowerCase().includes(q);
+                          });
+                          const sorted = [...filtered].sort((a, b) => {
+                            if (pipelineSortBy === 'latest') {
+                              return new Date(b.requestDate || b.proposalSentDate || 0).getTime() - new Date(a.requestDate || a.proposalSentDate || 0).getTime();
+                            }
+                            if (pipelineSortBy === 'oldest') {
+                              return new Date(a.requestDate || a.proposalSentDate || 0).getTime() - new Date(b.requestDate || b.proposalSentDate || 0).getTime();
+                            }
+                            if (pipelineSortBy === 'pending') {
+                              if (a.status === 'Pending' && b.status !== 'Pending') return -1;
+                              if (a.status !== 'Pending' && b.status === 'Pending') return 1;
+                              return 0;
+                            }
+                            if (pipelineSortBy === 'won') {
+                              if (a.status === 'Won' && b.status !== 'Won') return -1;
+                              if (a.status !== 'Won' && b.status === 'Won') return 1;
+                              return 0;
+                            }
+                            if (pipelineSortBy === 'lost') {
+                              if (a.status === 'Lost' && b.status !== 'Lost') return -1;
+                              if (a.status !== 'Lost' && b.status === 'Lost') return 1;
+                              return 0;
+                            }
                             return 0;
-                          }
-                          if (pipelineSortBy === 'won') {
-                            if (a.status === 'Won' && b.status !== 'Won') return -1;
-                            if (a.status !== 'Won' && b.status === 'Won') return 1;
-                            return 0;
-                          }
-                          if (pipelineSortBy === 'lost') {
-                            if (a.status === 'Lost' && b.status !== 'Lost') return -1;
-                            if (a.status !== 'Lost' && b.status === 'Lost') return 1;
-                            return 0;
-                          }
-                          return 0;
-                        }).map((p) => {
+                          });
+                          const startIdx = (pipelineCurrentPage - 1) * pipelinePageSize;
+                          const paginated = sorted.slice(startIdx, startIdx + pipelinePageSize);
+                          return paginated;
+                        })().map((p) => {
                           const isTaggedPending = p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id);
                           return (
                             <tr key={p.id} className={`transition-all duration-300 ${
@@ -4560,6 +4601,43 @@ export default function RepDetailDashboard({
                     </table>
                   </div>
                 )}
+
+                {/* Pagination controls */}
+                {(() => {
+                  const filteredCount = pipelines.filter(p => {
+                    const q = pipelineSearchQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    return (p.client || '').toLowerCase().includes(q) || (p.courseName || '').toLowerCase().includes(q);
+                  }).length;
+                  const totalPages = Math.max(1, Math.ceil(filteredCount / pipelinePageSize));
+                  if (filteredCount === 0) return null;
+                  return (
+                    <div className="flex items-center justify-between p-3 bg-slate-50 border-t border-slate-150 text-[10px] font-bold text-slate-500">
+                      <span>
+                        Showing {Math.min((pipelineCurrentPage - 1) * pipelinePageSize + 1, filteredCount)}–{Math.min(pipelineCurrentPage * pipelinePageSize, filteredCount)} of {filteredCount}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={pipelineCurrentPage <= 1}
+                          onClick={() => setPipelineCurrentPage(p => Math.max(1, p - 1))}
+                          className="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          Prev
+                        </button>
+                        <span className="px-2">Page {pipelineCurrentPage} of {totalPages}</span>
+                        <button
+                          type="button"
+                          disabled={pipelineCurrentPage >= totalPages}
+                          onClick={() => setPipelineCurrentPage(p => Math.min(totalPages, p + 1))}
+                          className="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
             </div>
