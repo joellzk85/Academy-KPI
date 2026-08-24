@@ -131,6 +131,7 @@ export interface ProjectPL {
   venueLocation?: string;
   linkType: 'pipeline' | 'quotation' | 'manual';
   linkedPipelineId?: string;
+  linkedQuotationId?: string;
   linkedQuotationNumber?: string;
   items: PLLineItem[];
   enableHrdcLevy?: boolean;
@@ -255,21 +256,21 @@ export const DEFAULT_PL_ITEMS: PLLineItem[] = [
 ];
 
 export function getDefaultProjectPLs(rep: Representative, pipelinesList: any[] = []): ProjectPL[] {
-  const repPipelines = pipelinesList.filter(p => p.representativeId === rep.id || p.repName === rep.name);
+  const repPipelines = pipelinesList.filter(p => p.ownerId === rep.id);
   const d1 = repPipelines[0];
   const d2 = repPipelines[1];
 
   return [
     {
       id: `pl_prj_${rep.id}_1`,
-      projectTitle: d1 ? d1.dealName : 'Enterprise AI & Full-Stack Development Bootcamp',
-      clientName: d1 ? d1.companyName : 'Petronas Digital Sdn Bhd',
-      clientCompany: d1 ? d1.companyName : 'Petronas Group HR & Learning',
-      clientContact: d1 ? (d1.clientContactName || 'Encik Ahmad Razak') : 'Encik Ahmad Razak (Head of Learning)',
+      projectTitle: d1 ? d1.courseName : 'Enterprise AI & Full-Stack Development Bootcamp',
+      clientName: d1 ? d1.client : 'Petronas Digital Sdn Bhd',
+      clientCompany: d1 ? d1.client : 'Petronas Group HR & Learning',
+      clientContact: 'Encik Ahmad Razak (Head of Learning)',
       projectCode: `PRJ-${rep.id.toUpperCase()}-2026-01`,
       projectDate: '2026-07-15',
       intakePeriod: '2026-07-15',
-      paxCount: d1 ? (d1.paxCount || 25) : 30,
+      paxCount: 30,
       venueLocation: 'Happi Village, Janda Baik',
       linkType: d1 ? 'pipeline' : 'manual',
       linkedPipelineId: d1 ? d1.id : undefined,
@@ -298,9 +299,9 @@ export function getDefaultProjectPLs(rep: Representative, pipelinesList: any[] =
     },
     {
       id: `pl_prj_${rep.id}_2`,
-      projectTitle: d2 ? d2.dealName : 'Executive Design Thinking & Innovation Retreat',
-      clientName: d2 ? d2.companyName : 'Maybank Corporate Learning',
-      clientCompany: d2 ? d2.companyName : 'Maybank Berhad',
+      projectTitle: d2 ? d2.courseName : 'Executive Design Thinking & Innovation Retreat',
+      clientName: d2 ? d2.client : 'Maybank Corporate Learning',
+      clientCompany: d2 ? d2.client : 'Maybank Berhad',
       clientContact: 'Ms. Sarah Chen (Talent Development)',
       projectCode: `PRJ-${rep.id.toUpperCase()}-2026-02`,
       projectDate: '2026-08-20',
@@ -808,6 +809,44 @@ export default function RepDetailDashboard({
   const handleSyncRevenueFromPipeline = async () => {
     if (!activeProject) return;
 
+    // If this project is linked to a Quotation, re-pull its current total (in case
+    // the quotation was edited since it was first linked) instead of a pipeline deal.
+    if (activeProject.linkType === 'quotation' && activeProject.linkedQuotationId) {
+      const quote = quotationsForPipelines.find(q => q.id === activeProject.linkedQuotationId);
+      if (!quote) {
+        setPlNotice("Linked quotation not found.");
+        setTimeout(() => setPlNotice(''), 3000);
+        return;
+      }
+      const itemsTotal = (quote.items || []).reduce((sum: number, it: any) => sum + (it.totalFee || 0), 0);
+      const sst = quote.applySST ? (itemsTotal * (quote.sstRate || 8) / 100) : 0;
+      const quoteTotal = itemsTotal + sst;
+
+      const updatedItems = activeProject.items.map(item => {
+        if (item.category === 'revenue') {
+          return {
+            ...item,
+            amount: quoteTotal || item.amount,
+            notes: `Synced from Quotation: ${quote.refNumber}`
+          };
+        }
+        return item;
+      });
+
+      const updatedProject: ProjectPL = {
+        ...activeProject,
+        clientName: quote.company || activeProject.clientName,
+        items: updatedItems,
+        updatedAt: new Date().toISOString().split('T')[0]
+      };
+
+      const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? updatedProject : p);
+      await saveProjectPLsState(updatedPLs);
+      setPlNotice(`Synced RM ${quoteTotal.toLocaleString()} from Quotation "${quote.refNumber}"!`);
+      setTimeout(() => setPlNotice(''), 3000);
+      return;
+    }
+
     let targetDeal: any = null;
     if (activeProject.linkedPipelineId) {
       targetDeal = pipelines.find(p => p.id === activeProject.linkedPipelineId);
@@ -826,7 +865,7 @@ export default function RepDetailDashboard({
         return {
           ...item,
           amount: targetDeal.proposalValue || item.amount,
-          notes: `Synced from Pipeline Deal: ${targetDeal.dealName} (${targetDeal.companyName})`
+          notes: `Synced from Pipeline Deal: ${targetDeal.courseName} (${targetDeal.client})`
         };
       }
       return item;
@@ -834,8 +873,8 @@ export default function RepDetailDashboard({
 
     const updatedProject: ProjectPL = {
       ...activeProject,
-      clientName: targetDeal.companyName || activeProject.clientName,
-      projectTitle: targetDeal.dealName || activeProject.projectTitle,
+      clientName: targetDeal.client || activeProject.clientName,
+      projectTitle: targetDeal.courseName || activeProject.projectTitle,
       linkType: 'pipeline',
       linkedPipelineId: targetDeal.id,
       items: updatedItems,
@@ -844,7 +883,7 @@ export default function RepDetailDashboard({
 
     const updatedPLs = projectPLs.map(p => p.id === activeProject.id ? updatedProject : p);
     await saveProjectPLsState(updatedPLs);
-    setPlNotice(`Synced RM ${(targetDeal.proposalValue || 0).toLocaleString()} from "${targetDeal.dealName}"!`);
+    setPlNotice(`Synced RM ${(targetDeal.proposalValue || 0).toLocaleString()} from "${targetDeal.courseName}"!`);
     setTimeout(() => setPlNotice(''), 3000);
   };
 
@@ -6728,7 +6767,7 @@ export default function RepDetailDashboard({
                                     return {
                                       ...item,
                                       amount: deal.proposalValue || item.amount,
-                                      notes: `Linked to Pipeline: ${deal.dealName}`
+                                      notes: `Linked to Pipeline: ${deal.courseName || deal.client}`
                                     };
                                   }
                                   return item;
@@ -6737,9 +6776,8 @@ export default function RepDetailDashboard({
                                 setEditingProject({
                                   ...editingProject,
                                   linkedPipelineId: deal.id,
-                                  projectTitle: deal.dealName || editingProject.projectTitle,
-                                  clientName: deal.companyName || editingProject.clientName,
-                                  paxCount: deal.paxCount || editingProject.paxCount,
+                                  projectTitle: deal.courseName || editingProject.projectTitle,
+                                  clientName: deal.client || editingProject.clientName,
                                   items: updatedItems
                                 });
                               }
@@ -6749,7 +6787,7 @@ export default function RepDetailDashboard({
                             <option value="">-- Choose Pipeline Deal --</option>
                             {pipelines.map(p => (
                               <option key={p.id} value={p.id}>
-                                [{p.status.toUpperCase()}] {p.companyName} - {p.dealName} (RM {(p.proposalValue || 0).toLocaleString()})
+                                [{(p.status || '').toUpperCase()}] {p.client} - {p.courseName} (RM {(p.proposalValue || 0).toLocaleString()})
                               </option>
                             ))}
                           </select>
@@ -6759,19 +6797,60 @@ export default function RepDetailDashboard({
                         </div>
                       )}
 
-                      {/* Quotation Link Input (If Quotation Selected) */}
+                      {/* Quotation Link Dropdown (If Quotation Selected) */}
                       {editingProject.linkType === 'quotation' && (
                         <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-xl space-y-2">
                           <label className="block text-[10px] font-black uppercase tracking-wider text-blue-900 font-mono">
-                            Enter Quotation Reference Number
+                            Select Quotation to Link
                           </label>
-                          <input
-                            type="text"
-                            placeholder="e.g. QT-2026-CC-088"
-                            value={editingProject.linkedQuotationNumber || ''}
-                            onChange={(e) => setEditingProject({ ...editingProject, linkedQuotationNumber: e.target.value })}
-                            className="w-full text-xs font-mono font-bold border border-blue-300 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-600"
-                          />
+                          <select
+                            value={editingProject.linkedQuotationId || ''}
+                            onChange={(e) => {
+                              const quote = quotationsForPipelines.find(q => q.id === e.target.value);
+                              if (quote) {
+                                const itemsTotal = (quote.items || []).reduce((sum: number, it: any) => sum + (it.totalFee || 0), 0);
+                                const sst = quote.applySST ? (itemsTotal * (quote.sstRate || 8) / 100) : 0;
+                                const quoteTotal = itemsTotal + sst;
+
+                                const updatedItems = (editingProject.items || DEFAULT_PL_ITEMS).map(item => {
+                                  if (item.category === 'revenue') {
+                                    return {
+                                      ...item,
+                                      amount: quoteTotal || item.amount,
+                                      notes: `Linked to Quotation: ${quote.refNumber}`
+                                    };
+                                  }
+                                  return item;
+                                });
+
+                                setEditingProject({
+                                  ...editingProject,
+                                  linkedQuotationId: quote.id,
+                                  linkedQuotationNumber: quote.refNumber,
+                                  projectTitle: quote.items?.[0]?.program || editingProject.projectTitle,
+                                  clientName: quote.company || editingProject.clientName,
+                                  clientContact: quote.attn || editingProject.clientContact,
+                                  linkedPipelineId: quote.pipelineId || editingProject.linkedPipelineId,
+                                  items: updatedItems
+                                });
+                              }
+                            }}
+                            className="w-full text-xs font-bold border border-blue-300 rounded-lg p-2.5 bg-white text-slate-800 focus:outline-none focus:border-blue-600"
+                          >
+                            <option value="">-- Choose Quotation --</option>
+                            {quotationsForPipelines.map(q => {
+                              const itemsTotal = (q.items || []).reduce((sum: number, it: any) => sum + (it.totalFee || 0), 0);
+                              const sst = q.applySST ? (itemsTotal * (q.sstRate || 8) / 100) : 0;
+                              return (
+                                <option key={q.id} value={q.id}>
+                                  {q.company} — {q.refNumber} (RM {(itemsTotal + sst).toLocaleString()})
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <p className="text-[10px] text-blue-700 font-medium">
+                            Selecting a quotation will automatically pull Client Name, Project Title, and the quoted total (incl. SST) into this P&L.
+                          </p>
                         </div>
                       )}
 
