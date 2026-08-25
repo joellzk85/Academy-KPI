@@ -4873,11 +4873,11 @@ export default function RepDetailDashboard({
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse table-fixed">
+                      <table className="w-full text-left border-collapse min-w-[900px]">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">
                             <th className="p-4 w-[100px]">Date Created</th>
-                            <th className="p-4 min-w-[320px] max-w-[420px]">Task Details</th>
+                            <th className="p-4 min-w-[420px]">Task Details</th>
                             <th className="p-4 w-[100px]">Dateline / Due</th>
                             <th className="p-4 w-[90px] text-center">Status</th>
                             <th className="p-4 w-[130px]">Assigned By / To</th>
@@ -4915,17 +4915,17 @@ export default function RepDetailDashboard({
                                       const isLong = !hasStructuredFields && (t.detail || '').length > 160;
 
                                       return (
-                                        <div className="max-w-[400px]">
+                                        <div className="min-w-[420px] max-w-[640px]">
                                           <p className={`font-bold text-slate-800 leading-snug break-words ${isCompleted ? 'text-slate-400 line-through decoration-slate-300' : ''} ${!hasStructuredFields && !isExpanded && isLong ? 'line-clamp-2' : ''}`}>
                                             {summary}
                                           </p>
 
                                           {hasStructuredFields && isExpanded && (
-                                            <dl className={`mt-2 space-y-1 border-l-2 pl-3 ${isCompleted ? 'border-slate-200' : 'border-blue-200'}`}>
+                                            <dl className={`mt-2 space-y-1.5 border-l-2 pl-3 ${isCompleted ? 'border-slate-200' : 'border-blue-200'}`}>
                                               {fields.map((f, i) => (
-                                                <div key={i} className="flex gap-1.5 text-[11px] leading-snug">
-                                                  <dt className={`shrink-0 font-black uppercase tracking-wide ${isCompleted ? 'text-slate-300' : 'text-slate-400'}`}>
-                                                    {f.label}:
+                                                <div key={i} className="grid grid-cols-[130px_1fr] gap-x-2 text-[11px] leading-snug">
+                                                  <dt className={`font-black uppercase tracking-wide ${isCompleted ? 'text-slate-300' : 'text-slate-400'}`}>
+                                                    {f.label}
                                                   </dt>
                                                   <dd className={`font-semibold break-words ${isCompleted ? 'text-slate-400 line-through decoration-slate-300' : 'text-slate-600'}`}>
                                                     {f.value}
