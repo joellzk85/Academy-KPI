@@ -1862,6 +1862,47 @@ export default function RepDetailDashboard({
   const [taskHideDone, setTaskHideDone] = useState(false);
   const [previousTasks, setPreviousTasks] = useState<any[] | null>(null);
   const [taskUndoMessage, setTaskUndoMessage] = useState<string | null>(null);
+  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
+
+  const toggleTaskExpanded = (taskId: string) => {
+    setExpandedTaskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
+      return next;
+    });
+  };
+
+  // Parses freeform task notes that follow a "Label: value - Label: value" pattern
+  // (common for quotation/booking requests) into a clean summary + structured fields.
+  // Falls back gracefully to plain text when the note doesn't match that shape.
+  const parseTaskDetail = (detail: string): { summary: string; fields: { label: string; value: string }[] } => {
+    if (!detail) return { summary: '', fields: [] };
+
+    const segments = detail.split(/\s*-\s+(?=[A-Za-z][A-Za-z\s./]{2,30}:)/g).map(s => s.trim()).filter(Boolean);
+
+    if (segments.length < 2) {
+      return { summary: detail, fields: [] };
+    }
+
+    const fields: { label: string; value: string }[] = [];
+    let summary = segments[0];
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      const match = seg.match(/^([A-Za-z][A-Za-z\s./]{2,30}):\s*(.+)$/s);
+      if (match) {
+        fields.push({ label: match[1].trim(), value: match[2].trim() });
+      } else if (i === 0) {
+        summary = seg;
+      }
+    }
+
+    if (fields.length < 2) {
+      return { summary: detail, fields: [] };
+    }
+
+    return { summary, fields };
+  };
 
   const handleTaskUndo = async () => {
     if (previousTasks) {
@@ -4832,15 +4873,15 @@ export default function RepDetailDashboard({
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
+                      <table className="w-full text-left border-collapse table-fixed">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                            <th className="p-4 w-[110px]">Date Created</th>
-                            <th className="p-4">Task Details</th>
-                            <th className="p-4 w-[110px]">Dateline / Due</th>
-                            <th className="p-4 w-[100px] text-center">Status</th>
-                            <th className="p-4 w-[140px]">Assigned By / To</th>
-                            <th className="p-4 w-[90px] text-right">Actions</th>
+                            <th className="p-4 w-[100px]">Date Created</th>
+                            <th className="p-4 min-w-[320px] max-w-[420px]">Task Details</th>
+                            <th className="p-4 w-[100px]">Dateline / Due</th>
+                            <th className="p-4 w-[90px] text-center">Status</th>
+                            <th className="p-4 w-[130px]">Assigned By / To</th>
+                            <th className="p-4 w-[80px] text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-150 text-slate-700 font-sans text-xs">
@@ -4867,14 +4908,55 @@ export default function RepDetailDashboard({
                                     {t.dateCreated}
                                   </td>
                                   <td className="p-4 align-top">
-                                    <span className={`block font-extrabold text-slate-800 leading-relaxed ${isCompleted ? 'line-through text-slate-400' : ''}`}>
-                                      {t.detail}
-                                    </span>
-                                    {t.isDuplicate && (
-                                      <span className="inline-block mt-1.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-indigo-50 border border-indigo-200 text-indigo-700 font-mono">
-                                        Received Copy
-                                      </span>
-                                    )}
+                                    {(() => {
+                                      const isExpanded = expandedTaskIds.has(t.id);
+                                      const { summary, fields } = parseTaskDetail(t.detail || '');
+                                      const hasStructuredFields = fields.length > 0;
+                                      const isLong = !hasStructuredFields && (t.detail || '').length > 160;
+
+                                      return (
+                                        <div className="max-w-[400px]">
+                                          <p className={`font-bold text-slate-800 leading-snug break-words ${isCompleted ? 'text-slate-400 line-through decoration-slate-300' : ''} ${!hasStructuredFields && !isExpanded && isLong ? 'line-clamp-2' : ''}`}>
+                                            {summary}
+                                          </p>
+
+                                          {hasStructuredFields && isExpanded && (
+                                            <dl className={`mt-2 space-y-1 border-l-2 pl-3 ${isCompleted ? 'border-slate-200' : 'border-blue-200'}`}>
+                                              {fields.map((f, i) => (
+                                                <div key={i} className="flex gap-1.5 text-[11px] leading-snug">
+                                                  <dt className={`shrink-0 font-black uppercase tracking-wide ${isCompleted ? 'text-slate-300' : 'text-slate-400'}`}>
+                                                    {f.label}:
+                                                  </dt>
+                                                  <dd className={`font-semibold break-words ${isCompleted ? 'text-slate-400 line-through decoration-slate-300' : 'text-slate-600'}`}>
+                                                    {f.value}
+                                                  </dd>
+                                                </div>
+                                              ))}
+                                            </dl>
+                                          )}
+
+                                          {(hasStructuredFields || isLong) && (
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleTaskExpanded(t.id)}
+                                              className="mt-1.5 text-[10px] font-black uppercase tracking-wider text-blue-600 hover:text-blue-800 flex items-center gap-0.5"
+                                            >
+                                              {isExpanded ? (
+                                                <>Show less <ChevronUp className="w-3 h-3" /></>
+                                              ) : (
+                                                <>{hasStructuredFields ? `+${fields.length} details` : 'Show more'} <ChevronDown className="w-3 h-3" /></>
+                                              )}
+                                            </button>
+                                          )}
+
+                                          {t.isDuplicate && (
+                                            <span className="inline-block mt-1.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-indigo-50 border border-indigo-200 text-indigo-700 font-mono">
+                                              Received Copy
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
                                   </td>
                                   <td className="p-4 font-mono text-red-600 font-extrabold align-top">
                                     {t.dateline}
