@@ -203,6 +203,12 @@ export default function AppointmentManager({ rep, reps, requestManagerPermission
     try {
       if (db) {
         await setDoc(doc(db, 'appointments', newAppt.id), newAppt);
+        // Two-way tie: if this appointment is linked to a pipeline deal,
+        // make sure that deal's "Appointment Scheduled" checkbox is ticked too,
+        // so KPI (which reads off the pipeline checkbox) stays in sync either way.
+        if (newAppt.pipelineId) {
+          await setDoc(doc(db, 'pipelines', newAppt.pipelineId), { appointmentTicked: true }, { merge: true });
+        }
       }
     } catch (err) {
       console.error('Firestore save appointment failed:', err);
@@ -316,8 +322,9 @@ export default function AppointmentManager({ rep, reps, requestManagerPermission
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-800 flex items-start gap-2">
         <CalendarClock className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <span>
-          This is a detailed appointment log for your own tracking and reference. It does not affect your KPI numbers —
-          KPI still counts the "Appointment" checkbox on each Pipeline entry, as before.
+          Appointments logged here and linked to a pipeline deal automatically tick that deal's "Appointment Scheduled"
+          checkbox, so KPI stays accurate no matter which place you log from. Standalone appointments (no pipeline link)
+          don't affect KPI, since KPI is counted per pipeline deal.
         </span>
       </div>
 

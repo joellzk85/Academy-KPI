@@ -1730,6 +1730,35 @@ export default function RepDetailDashboard({
       console.error("Firestore save pipeline failed:", err);
     }
 
+    // Two-way tie between the Pipeline "Appointment Scheduled" checkbox and the
+    // Appointments log: only fire on the false->true transition (not on every
+    // edit while already ticked), using a deterministic doc id so re-saving is
+    // idempotent and doesn't create duplicates.
+    const wasTickedBefore = editingPipeId ? (oldPipe?.appointmentTicked || false) : false;
+    if (pipeAppointmentTicked && !wasTickedBefore) {
+      const linkedAppt = {
+        id: `appt_pipe_${newPipe.id}`,
+        clientName: newPipe.client,
+        clientId: newPipe.clientId || '',
+        pipelineId: newPipe.id,
+        repId: newPipe.ownerId,
+        repName: newPipe.ownerName,
+        date: new Date().toISOString().substring(0, 10),
+        time: '',
+        type: 'Follow-up',
+        status: 'Completed',
+        notes: 'Auto-logged from Pipeline "Appointment Scheduled" checkbox.',
+        createdAt: Date.now(),
+        createdBy: rep.id,
+        createdByName: rep.name,
+      };
+      try {
+        await setDoc(doc(db, 'appointments', linkedAppt.id), linkedAppt);
+      } catch (err) {
+        console.error('Auto-create linked appointment failed:', err);
+      }
+    }
+
     // Sync back to individual keys
     const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
     repIds.forEach(id => {
