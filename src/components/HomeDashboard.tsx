@@ -747,7 +747,7 @@ export default function HomeDashboard({
 
   return (
     <div className="space-y-6" id="home-dashboard">
-      
+
       {/* Top Row: Quick Month view selector */}
       <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xs" id="home-month-selector">
         <div className="flex items-center gap-2">
@@ -763,7 +763,7 @@ export default function HomeDashboard({
             </p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2">
           <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider font-mono">
             Active Month:
@@ -779,15 +779,15 @@ export default function HomeDashboard({
           </select>
         </div>
       </div>
-      
+
       {/* 4 Cards Row & Calendar */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-        
+
         {/* Left Side: 4 KPI Cards Grid */}
         <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-4">
-          
+
           {/* Card 1: Total Sales YTD (Dark Blue Theme) */}
-          <div 
+          <div
             className="p-6 rounded-xl relative overflow-hidden bg-gradient-to-br from-[#0c244c] to-[#081a38] text-white border border-blue-950 flex flex-col justify-between shadow-sm min-h-[165px]"
             id="kpi-card-total-sales"
           >
@@ -795,7 +795,7 @@ export default function HomeDashboard({
             <div className="absolute right-4 bottom-2 text-white/5 font-black text-9xl pointer-events-none select-none font-mono">
               $
             </div>
-            
+
             <div className="space-y-1">
               <span className="text-[11px] font-bold tracking-wider text-slate-300 uppercase block font-display">
                 TOTAL SALES TO DATE (YTD)
@@ -804,7 +804,7 @@ export default function HomeDashboard({
                 RM {totalSalesToDateYTD.toLocaleString()}
               </h3>
             </div>
-            
+
             <div className="flex justify-between items-end mt-4">
               <span className="text-xs text-slate-300 font-semibold uppercase tracking-wider font-display">
                 ALL REPRESENTATIVES
@@ -816,7 +816,7 @@ export default function HomeDashboard({
           </div>
 
           {/* Card 2: Filtered YTD Sales */}
-          <div 
+          <div
             className="p-6 rounded-xl bg-white border border-slate-200/80 text-slate-800 flex flex-col justify-between shadow-xs min-h-[165px]"
             id="kpi-card-filtered-sales"
           >
@@ -828,7 +828,7 @@ export default function HomeDashboard({
                 RM {filteredYTDSales.toLocaleString()}
               </h3>
             </div>
-            
+
             <div className="flex justify-between items-end mt-4">
               <span className="text-xs text-slate-500 font-bold uppercase tracking-wider font-display">
                 {numReps} REPS FILTERED
@@ -840,7 +840,7 @@ export default function HomeDashboard({
           </div>
 
           {/* Card 3: Active Month Sales */}
-          <div 
+          <div
             className="p-6 rounded-xl bg-white border border-slate-200/80 text-slate-800 flex flex-col justify-between shadow-xs min-h-[165px]"
             id="kpi-card-active-sales"
           >
@@ -852,7 +852,7 @@ export default function HomeDashboard({
                 RM {activeMonthSales.toLocaleString()}
               </h3>
             </div>
-            
+
             <div className="flex justify-between items-end mt-4">
               <span className="text-xs text-slate-500 font-bold uppercase tracking-wider font-display">
                 {totalProposalsTeam} PROPOSALS & {totalPreviewsTeam} PREVIEWS
@@ -864,7 +864,7 @@ export default function HomeDashboard({
           </div>
 
           {/* Card 4: Circle Gauges */}
-          <div 
+          <div
             className="p-6 rounded-xl bg-white border border-slate-200/80 text-slate-800 flex items-center justify-around shadow-xs min-h-[165px]"
             id="kpi-card-gauges"
           >
@@ -873,13 +873,13 @@ export default function HomeDashboard({
               <div className="relative w-28 h-28 flex items-center justify-center">
                 <svg className="w-full h-full transform -rotate-90" viewBox="0 0 112 112">
                   <circle cx="56" cy="56" r={rLarge} stroke="#f1f5f9" strokeWidth="6" fill="none" />
-                  <circle 
-                    cx="56" 
-                    cy="56" 
-                    r={rLarge} 
-                    stroke="#3b82f6" 
-                    strokeWidth="7" 
-                    fill="none" 
+                  <circle
+                    cx="56"
+                    cy="56"
+                    r={rLarge}
+                    stroke="#3b82f6"
+                    strokeWidth="7"
+                    fill="none"
                     strokeDasharray={cLarge}
                     strokeDashoffset={cLarge - (monthSalesProgressPct / 100) * cLarge}
                     strokeLinecap="round"
@@ -907,13 +907,13 @@ export default function HomeDashboard({
               <div className="relative w-28 h-28 flex items-center justify-center">
                 <svg className="w-full h-full transform -rotate-90" viewBox="0 0 112 112">
                   <circle cx="56" cy="56" r={rLarge} stroke="#f1f5f9" strokeWidth="6" fill="none" />
-                  <circle 
-                    cx="56" 
-                    cy="56" 
-                    r={rLarge} 
-                    stroke="#10b981" 
-                    strokeWidth="7" 
-                    fill="none" 
+                  <circle
+                    cx="56"
+                    cy="56"
+                    r={rLarge}
+                    stroke="#10b981"
+                    strokeWidth="7"
+                    fill="none"
                     strokeDasharray={cLarge}
                     strokeDashoffset={cLarge - (ytdSalesProgressPct / 100) * cLarge}
                     strokeLinecap="round"
@@ -939,7 +939,7 @@ export default function HomeDashboard({
 
         {/* Right Side: July 2026 Calendar Widget (Perfect copy of the screenshot layout!) */}
         <div className="lg:col-span-5 bg-white border border-slate-200/80 rounded-xl p-5 shadow-xs flex flex-col justify-between">
-          
+
           {/* Calendar Header */}
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-1">
@@ -986,7 +986,7 @@ export default function HomeDashboard({
             </div>
             {googleToken ? (
               <div className="flex items-center gap-1.5">
-                <button 
+                <button
                   onClick={handleResyncCalendar}
                   disabled={isSyncing}
                   className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-150 px-2 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
@@ -995,16 +995,16 @@ export default function HomeDashboard({
                   <RefreshCw className={`w-2.5 h-2.5 ${isSyncing ? 'animate-spin' : ''}`} />
                   Resync
                 </button>
-                <button 
-                  onClick={handleGoogleLogout} 
+                <button
+                  onClick={handleGoogleLogout}
                   className="text-[9px] font-bold text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-150 border border-rose-100 px-2 py-1 rounded transition-colors cursor-pointer"
                 >
                   Disconnect
                 </button>
               </div>
             ) : (
-              <button 
-                onClick={handleGoogleLogin} 
+              <button
+                onClick={handleGoogleLogin}
                 className="text-[9px] font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-100 px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1"
               >
                 <RefreshCw className="w-2.5 h-2.5" />
@@ -1035,9 +1035,9 @@ export default function HomeDashboard({
             {calendarGrid.map((cell, idx) => {
               const dayEvents = events.filter(e => e.date === cell.dateStr);
               const isSelected = selectedDayStr === cell.dateStr;
-              
+
               return (
-                <div 
+                <div
                   key={idx}
                   onClick={() => setSelectedDayStr(cell.dateStr)}
                   className={`min-h-[48px] p-1 bg-white cursor-pointer transition-colors relative flex flex-col justify-between ${
@@ -1054,7 +1054,7 @@ export default function HomeDashboard({
                   {/* Bullet points or tags for events */}
                   <div className="flex flex-col gap-0.5 mt-1 overflow-hidden max-h-[30px]">
                     {dayEvents.slice(0, 3).map((ev, evIdx) => (
-                      <div 
+                      <div
                         key={evIdx}
                         title={`${ev.time} - ${ev.title}`}
                         className={`text-[7px] leading-tight px-1 py-0.2 rounded-xs truncate text-white ${ev.color || 'bg-blue-500'}`}
@@ -1080,7 +1080,7 @@ export default function HomeDashboard({
                 <Calendar className="w-3.5 h-3.5 text-blue-500" />
                 Events for {new Date(selectedDayStr).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
               </span>
-              <button 
+              <button
                 onClick={() => setShowAddEventModal(true)}
                 className="text-[9px] bg-blue-600 hover:bg-blue-700 text-white font-black px-2 py-1 rounded flex items-center gap-0.5 transition-colors"
               >
@@ -1107,7 +1107,7 @@ export default function HomeDashboard({
                           )}
                         </div>
                         <p className="text-[9px] text-slate-400 font-mono mt-0.5">{ev.time}</p>
-                        
+
                         {/* Attendee Representatives */}
                         {ev.attendees && ev.attendees.length > 0 && (
                           <div className="flex items-center gap-1 mt-1 flex-wrap">
@@ -1124,7 +1124,7 @@ export default function HomeDashboard({
                         )}
                       </div>
                     </div>
-                    <button 
+                    <button
                       onClick={() => onDeleteEvent(ev.id)}
                       className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100"
                     >
@@ -1141,7 +1141,7 @@ export default function HomeDashboard({
       </div>
 
       {/* Newsfeed / Notice Box */}
-      <div 
+      <div
         className="bg-white border border-slate-200/80 rounded-xl p-4 shadow-xs flex items-center gap-4 relative overflow-hidden"
         id="notice-ticker-panel"
       >
@@ -1154,7 +1154,7 @@ export default function HomeDashboard({
             <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest font-display block">
               Newsfeed / Notice
             </span>
-            <button 
+            <button
               onClick={() => setShowNoticeInput(!showNoticeInput)}
               className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
             >
@@ -1162,17 +1162,17 @@ export default function HomeDashboard({
               Manage Notices
             </button>
           </div>
-          
+
           {showNoticeInput ? (
             <form onSubmit={handleAddNoticeSubmit} className="mt-2 flex gap-2">
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={newNoticeText}
                 onChange={(e) => setNewNoticeText(e.target.value)}
                 placeholder="Type a new notice or update notice logs..."
                 className="flex-1 text-xs border border-slate-200 rounded px-3 py-1.5 focus:outline-none focus:border-blue-500 text-slate-800"
               />
-              <button 
+              <button
                 type="submit"
                 className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded transition-colors"
               >
@@ -1187,246 +1187,4 @@ export default function HomeDashboard({
                 notices.slice(-2).map((notice, noticeIdx) => (
                   <div key={noticeIdx} className="text-xs text-slate-700 leading-normal flex justify-between items-center group">
                     <span className="truncate">📢 {notice}</span>
-                    <button 
-                      onClick={() => onDeleteNotice(notices.indexOf(notice))}
-                      className="text-slate-300 hover:text-red-500 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity pl-2"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Representative Selection Section (Direct Match to Bottom buttons) */}
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider font-display">
-            Next Academy Team Representatives
-          </h3>
-          <button 
-            onClick={() => {
-              if (isManagementUnlocked) {
-                setShowAddRepModal(true);
-              } else {
-                onRequestManagementUnlock();
-              }
-            }}
-            className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg border border-blue-100 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Representative
-          </button>
-        </div>
-
-        {/* Big styled representative clickable buttons as requested in Page 1 bottom */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4" id="representatives-list">
-          {reps.map((rep) => {
-            const alertStatus = getRepAlertStatus(rep.id, reps, pipelinesSync, tasksSync, quotationsSync, outlinesSync);
-            const shouldFlash = alertStatus.shouldFlash;
-            return (
-              <button
-                key={rep.id}
-                onClick={() => onSelectRep(rep)}
-                className={`p-5 rounded-xl text-center shadow-xs transition-all group cursor-pointer ${
-                  shouldFlash
-                    ? 'animate-flash-red text-white border-2'
-                    : 'bg-white border border-slate-200 text-slate-700 hover:border-blue-400 hover:shadow-md hover:shadow-blue-500/5'
-                }`}
-                id={`rep-btn-${rep.id}`}
-              >
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-display font-black text-sm mx-auto transition-colors ${
-                  shouldFlash
-                    ? 'bg-white/20 border border-white/30 text-white'
-                    : 'bg-slate-50 border border-slate-100 text-slate-500 group-hover:bg-blue-50 group-hover:text-blue-600 group-hover:border-blue-100'
-                }`}>
-                  {rep.name.substring(0, 2).toUpperCase()}
-                </div>
-                <h4 className={`text-sm font-black mt-3 truncate ${
-                  shouldFlash ? 'text-white' : 'text-slate-800 group-hover:text-blue-600 transition-colors'
-                }`}>
-                  {rep.name}
-                </h4>
-                <p className={`text-[10px] font-extrabold mt-1 uppercase tracking-wider font-sans leading-tight ${
-                  shouldFlash ? 'text-white/90' : 'text-blue-600'
-                }`}>
-                  {rep.id === 'xin-ying' ? 'Super Manager' :
-                   rep.id === 'chee-cai' ? 'Unstoppable Lead Trainer & Sales' :
-                   rep.id === 'alif' ? 'Rising Sales' :
-                   rep.id === 'atiqa' ? 'Amazing Admin' : 'Representative'}
-                </p>
-                <p className={`text-[9px] mt-1 uppercase tracking-wider font-mono ${
-                  shouldFlash ? 'text-white/80 font-black' : 'text-slate-400'
-                }`}>
-                  {shouldFlash ? '⚠️ ACTION REQUIRED' : 'View Console'}
-                </p>
-                {shouldFlash && (
-                  <div className="mt-2 text-[8px] font-black uppercase tracking-widest bg-white/20 border border-white/20 px-1.5 py-0.5 rounded text-center">
-                    {alertStatus.hasUnattendedTasks ? 'Pending Tasks' : ''}
-                    {alertStatus.hasUnattendedTasks && alertStatus.hasTags ? ' & ' : ''}
-                    {alertStatus.hasTaggedPipelines ? 'Tagged Pipeline' : alertStatus.isTaggedInWeeklyReports ? 'Tagged In Check-In' : ''}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Add Event Modal */}
-      {showAddEventModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-150 space-y-4">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">
-              Add Operational Event
-            </h3>
-            <form onSubmit={handleAddEventSubmit} className="space-y-3">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Event Title</label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="e.g. Director lunch strategy" 
-                  value={newEventTitle}
-                  onChange={(e) => setNewEventTitle(e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Time Slot</label>
-                  <input 
-                    type="text" 
-                    required
-                    placeholder="e.g. 11:00 AM" 
-                    value={newEventTime}
-                    onChange={(e) => setNewEventTime(e.target.value)}
-                    className="w-full text-xs border border-slate-200 rounded px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Event Color</label>
-                  <select 
-                    value={newEventColor}
-                    onChange={(e) => setNewEventColor(e.target.value)}
-                    className="w-full text-xs border border-slate-200 rounded px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="bg-blue-500">Blue (Meeting)</option>
-                    <option value="bg-emerald-500">Green (Growth)</option>
-                    <option value="bg-amber-500">Amber (Lunch)</option>
-                    <option value="bg-cyan-500">Cyan (Interview)</option>
-                    <option value="bg-purple-500">Purple (Academic)</option>
-                    <option value="bg-rose-500">Rose (Urgent)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Invite/Tag Other Representatives */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Invite Representatives (Link to their Calendars)
-                </label>
-                <div className="grid grid-cols-2 gap-1.5 max-h-24 overflow-y-auto border border-slate-200 rounded p-2">
-                  {reps.map(rep => (
-                    <label key={rep.id} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer hover:bg-slate-50 p-1 rounded">
-                      <input 
-                        type="checkbox"
-                        checked={selectedRepIdsForEvent.includes(rep.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedRepIdsForEvent(prev => [...prev, rep.id]);
-                          } else {
-                            setSelectedRepIdsForEvent(prev => prev.filter(id => id !== rep.id));
-                          }
-                        }}
-                        className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 border-slate-300"
-                      />
-                      <span className="truncate">{rep.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Sync with Google Calendar Sync Check */}
-              <div className="pt-1">
-                <label className="flex items-start gap-2 cursor-pointer bg-slate-50 p-2 rounded border border-slate-100">
-                  <input 
-                    type="checkbox"
-                    checked={syncToGoogleCheckbox}
-                    onChange={(e) => setSyncToGoogleCheckbox(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 border-slate-300 cursor-pointer mt-0.5"
-                  />
-                  <div className="text-left">
-                    <span className="text-[11px] font-bold text-slate-700 block leading-tight">Sync with nextacademy24@gmail.com</span>
-                    <span className="text-[9px] text-slate-400 block mt-0.5">
-                      {googleToken ? 'Authenticated. Google Calendar will receive this event.' : 'Requires connection. Click "Connect Account" above first.'}
-                    </span>
-                  </div>
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button 
-                  type="button" 
-                  onClick={() => setShowAddEventModal(false)}
-                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-4 py-2 rounded transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded transition-colors"
-                >
-                  Add Event
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Add Representative Modal */}
-      {showAddRepModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-150 space-y-4">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">
-              Add Representative Roster
-            </h3>
-            <form onSubmit={handleAddRepSubmit} className="space-y-3">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Representative Name</label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="e.g. Jonathan Lim" 
-                  value={newRepName}
-                  onChange={(e) => setNewRepName(e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button 
-                  type="button" 
-                  onClick={() => setShowAddRepModal(false)}
-                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-4 py-2 rounded transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded transition-colors"
-                >
-                  Create Representative
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
+                    <button
