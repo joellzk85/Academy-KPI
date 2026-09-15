@@ -456,6 +456,44 @@ export default function ManagementDashboard({
     }
   };
 
+  // Tracks Proposal-Sent activity and Appointment-ticked activity from the shared
+  // pipeline log for a given rep/month, so KPI scores on the management side stay
+  // in sync with what each rep's own KPI page already counts.
+  const getRepPipelineActivityForMonth = (repId: string, targetMonth: string, type: 'proposals' | 'appointments'): number => {
+    try {
+      return allPipelines.filter((p: any) => {
+        const ownerId = p.ownerId || p.creatorId || p.repId;
+        if (ownerId !== repId) return false;
+
+        const monthMap: Record<string, string> = {
+          'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
+          'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+        };
+        const parts = targetMonth.split('-');
+        const checkMonth = (dateStr: string) => {
+          if (parts.length !== 2) return true;
+          const m = monthMap[parts[0]];
+          const y = '20' + parts[1];
+          if (!m || !y) return true;
+          return dateStr.startsWith(`${y}-${m}`);
+        };
+
+        if (type === 'proposals') {
+          const dateStr = p.proposalSentDate || '';
+          if (!dateStr || dateStr.toLowerCase() === 'not yet') return false;
+          return checkMonth(dateStr);
+        } else {
+          if (!p.isAppointment && !p.appointmentTicked) return false;
+          const dateStr = p.requestDate || '';
+          if (!dateStr) return false;
+          return checkMonth(dateStr);
+        }
+      }).length;
+    } catch {
+      return 0;
+    }
+  };
+
   // Math metrics
   const activeMonthSales = reps.reduce((sum, r) => {
     if (r.id === 'atiqa') return sum; // Atiqa uses performance ratings (1-5) instead of RM sales!
@@ -485,8 +523,8 @@ export default function ManagementDashboard({
   })();
   
   const numReps = reps.length;
-  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0), 0);
-  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0), 0);
+  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals')), 0);
+  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments')), 0);
 
   // Targets totals
   const totalSalesTargetTeam = reps.reduce((sum, r) => {
@@ -500,8 +538,10 @@ export default function ManagementDashboard({
   const getRepScores = (rep: Representative) => {
     const pipelineSales = rep.id === 'atiqa' ? 0 : getRepPipelineSalesForMonth(rep.id, selectedMonth);
     const totalSales = (rep.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0) + pipelineSales;
-    const totalProposals = (rep.kpi?.proposals ?? []).reduce((a, b) => a + b, 0);
-    const totalPreview = (rep.kpi?.preview ?? []).reduce((a, b) => a + b, 0);
+    const pipelineProposals = rep.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(rep.id, selectedMonth, 'proposals');
+    const totalProposals = (rep.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + pipelineProposals;
+    const pipelinePreviews = rep.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(rep.id, selectedMonth, 'appointments');
+    const totalPreview = (rep.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + pipelinePreviews;
 
     const metricsList = getRepMetrics(rep);
     
@@ -1206,7 +1246,7 @@ export default function ManagementDashboard({
               </div>
 
               <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
-                <a
+                
                   href={BACKUP_SHEET_URL}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -1927,4 +1967,3 @@ export default function ManagementDashboard({
     </div>
   );
 }
-

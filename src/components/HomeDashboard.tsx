@@ -371,14 +371,6 @@ export default function HomeDashboard({
     }
   };
 
-  // Generate July 2026 Calendar days
-  // In July 2026: Wednesday is 1st.
-  // Let's create a hardcoded or calculated grid of 35 days (Mon to Sun) starting from Mon Jun 29.
-  // Jun 29, Jun 30, Jul 1, Jul 2, Jul 3, Jul 4, Jul 5
-  // Jul 6 ... Jul 12
-  // Jul 13 ... Jul 19
-  // Jul 20 ... Jul 26
-  // Jul 27 ... Aug 2
   // Dynamically generate a Monday-start calendar grid for the currently
   // viewed month/year, padded with the trailing days of the previous month
   // and leading days of the next month, matching however many full weeks
@@ -638,6 +630,49 @@ export default function HomeDashboard({
     return getRepPipelineSalesForMonth(repId, selectedMonth);
   };
 
+  // Tracks Proposal-Sent activity and Appointment-ticked activity from the shared
+  // pipeline log for a given rep/month, mirroring the same logic used on each
+  // rep's own KPI page, so the team-wide average score here doesn't undercount.
+  const getRepPipelineActivityForMonth = (repId: string, targetMonth: string, type: 'proposals' | 'appointments'): number => {
+    try {
+      let pipes: any[] = [];
+      if (pipelinesSync && pipelinesSync.length > 0) {
+        pipes = pipelinesSync.filter((p: any) => (p.ownerId || p.creatorId) === repId);
+      } else {
+        const saved = localStorage.getItem(`next_pipelines_${repId}`);
+        if (saved) pipes = JSON.parse(saved);
+      }
+
+      const monthMap: Record<string, string> = {
+        'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
+        'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+      };
+      const parts = targetMonth.split('-');
+      const checkMonth = (dateStr: string) => {
+        if (parts.length !== 2) return true;
+        const m = monthMap[parts[0]];
+        const y = '20' + parts[1];
+        if (!m || !y) return true;
+        return dateStr.startsWith(`${y}-${m}`);
+      };
+
+      return pipes.filter((p: any) => {
+        if (type === 'proposals') {
+          const dateStr = p.proposalSentDate || '';
+          if (!dateStr || dateStr.toLowerCase() === 'not yet') return false;
+          return checkMonth(dateStr);
+        } else {
+          if (!p.isAppointment && !p.appointmentTicked) return false;
+          const dateStr = p.requestDate || '';
+          if (!dateStr) return false;
+          return checkMonth(dateStr);
+        }
+      }).length;
+    } catch {
+      return 0;
+    }
+  };
+
   // Math metrics
   const activeMonthSales = reps.reduce((sum, r) => {
     if (r.id === 'atiqa') return sum; // Atiqa uses performance ratings (1-5) instead of RM sales!
@@ -669,14 +704,14 @@ export default function HomeDashboard({
   const filteredYTDSales = totalSalesToDateYTD;
   
   const numReps = reps.length;
-  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0), 0);
-  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0), 0);
+  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals')), 0);
+  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments')), 0);
 
   const avgTeamScore = numReps === 0 ? 0 : Math.round(reps.reduce((acc, r) => {
     const pipelineSales = r.id === 'atiqa' ? 0 : getRepPipelineSales(r.id);
     const salesTotal = (r.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0) + pipelineSales;
-    const proposalsTotal = (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0);
-    const previewTotal = (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0);
+    const proposalsTotal = (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals'));
+    const previewTotal = (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments'));
 
     const metricsList = getRepMetrics(r);
     const overall = metricsList.reduce((sum, metric) => {
@@ -1395,4 +1430,3 @@ export default function HomeDashboard({
     </div>
   );
 }
-
