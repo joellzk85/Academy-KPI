@@ -62,10 +62,8 @@ export default function ManagementDashboard({
   onUpdateRepsList = () => {},
   pipelinesSync
 }: ManagementDashboardProps) {
-  // Navigation Tabs for Management Console
   const [activeTab, setActiveTab] = useState<'overview' | 'targets' | 'quick-log' | 'pipelines' | 'reps'>('overview');
-
-  // Loaded pipelines across all representatives for managerial overview
+  
   const [allPipelines, setAllPipelines] = useState<any[]>([]);
 
   useEffect(() => {
@@ -74,7 +72,6 @@ export default function ManagementDashboard({
       setAllPipelines(pipelinesSync.filter((p: any) => !deleted.includes(p.id)));
       return;
     }
-    // Collect pipelines from all reps
     const collected: any[] = [];
     reps.forEach(r => {
       const saved = localStorage.getItem(`next_pipelines_${r.id}`);
@@ -90,7 +87,6 @@ export default function ManagementDashboard({
           }
         });
       } else if (localStorage.getItem('migrated_pipelines_to_firestore') !== 'true') {
-        // Fallback default initial data
         let defaults: any[] = [];
         if (r.id === 'chee-cai') {
           defaults = [
@@ -160,26 +156,22 @@ export default function ManagementDashboard({
     setAllPipelines(collected.filter((p: any) => !deleted.includes(p.id)));
   }, [reps, activeTab, pipelinesSync]);
 
-  // Selected rep for targets edit
   const [editingTargetsId, setEditingTargetsId] = useState<string | null>(null);
   const [targetSales, setTargetSales] = useState('30000');
   const [targetProposals, setTargetProposals] = useState('2');
   const [targetPreview, setTargetPreview] = useState('1');
 
-  // Quick Log Form state
   const [selectedRepId, setSelectedRepId] = useState(reps[0]?.id || '');
-  const [selectedWeek, setSelectedWeek] = useState(0); // 0 to 4 (Week 1 to 5)
+  const [selectedWeek, setSelectedWeek] = useState(0);
   const [logSales, setLogSales] = useState('');
   const [logProposals, setLogProposals] = useState('');
   const [logPreviews, setLogPreviews] = useState('');
 
-  // Team-wide bulk target setup
   const [bulkSales, setBulkSales] = useState('30000');
   const [bulkProposals, setBulkProposals] = useState('2');
   const [bulkPreviews, setBulkPreviews] = useState('1');
   const [showBulkModal, setShowBulkModal] = useState(false);
 
-  // Representative Management States
   const [editingRepId, setEditingRepId] = useState<string | null>(null);
   const [editRepName, setEditRepName] = useState('');
   const [editRepEmail, setEditRepEmail] = useState('');
@@ -351,7 +343,6 @@ export default function ManagementDashboard({
     alert(`Representative "${repName}" has been successfully removed.`);
   };
 
-  // Date Range and Google Sheets Backup states
   const [startMonth, setStartMonth] = useState('JUN-26');
   const [endMonth, setEndMonth] = useState('DEC-26');
   const [lastBackupRun, setLastBackupRun] = useState(() => {
@@ -364,7 +355,7 @@ export default function ManagementDashboard({
   const BACKUP_SHEET_URL = 'https://docs.google.com/spreadsheets/d/185A2We-gBfPM-YBLiO9V3hOUTTOsPPeXALG04cY6Zq4/edit';
 
   const ALL_AVAILABLE_MONTHS = [
-    'JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26',
+    'JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26', 
     'JUL-26', 'AUG-26', 'SEP-26', 'OCT-26', 'NOV-26', 'DEC-26',
     'JAN-27', 'FEB-27', 'MAR-27', 'APR-27', 'MAY-27', 'JUN-27'
   ];
@@ -412,17 +403,16 @@ export default function ManagementDashboard({
       });
   };
 
-  // Helpers for chronological YTD and pipeline sales calculations
   const getYTDMonths = (selMonth: string): string[] => {
     const allMonths = [
-      'JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26',
+      'JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26', 
       'JUL-26', 'AUG-26', 'SEP-26', 'OCT-26', 'NOV-26', 'DEC-26',
       'JAN-27', 'FEB-27', 'MAR-27', 'APR-27', 'MAY-27', 'JUN-27'
     ];
     const selIndex = allMonths.indexOf(selMonth);
     if (selIndex === -1) return [selMonth];
     const parts = selMonth.split('-');
-    const yearSuffix = parts[1]; // e.g. '26'
+    const yearSuffix = parts[1];
     return allMonths.slice(0, selIndex + 1).filter(m => m.endsWith(`-${yearSuffix}`));
   };
 
@@ -433,8 +423,7 @@ export default function ManagementDashboard({
           if (p.repId !== repId) return false;
           if (p.status !== 'Won') return false;
           const dateStr = p.proposalSentDate || p.requestDate || '';
-
-          // Month filter
+          
           const monthMap: Record<string, string> = {
             'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
             'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
@@ -456,47 +445,8 @@ export default function ManagementDashboard({
     }
   };
 
-  // Tracks Proposal-Sent activity and Appointment-ticked activity from the shared
-  // pipeline log for a given rep/month, so KPI scores on the management side stay
-  // in sync with what each rep's own KPI page already counts.
-  const getRepPipelineActivityForMonth = (repId: string, targetMonth: string, type: 'proposals' | 'appointments'): number => {
-    try {
-      return allPipelines.filter((p: any) => {
-        const ownerId = p.ownerId || p.creatorId || p.repId;
-        if (ownerId !== repId) return false;
-
-        const monthMap: Record<string, string> = {
-          'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-          'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-        };
-        const parts = targetMonth.split('-');
-        const checkMonth = (dateStr: string) => {
-          if (parts.length !== 2) return true;
-          const m = monthMap[parts[0]];
-          const y = '20' + parts[1];
-          if (!m || !y) return true;
-          return dateStr.startsWith(`${y}-${m}`);
-        };
-
-        if (type === 'proposals') {
-          const dateStr = p.proposalSentDate || '';
-          if (!dateStr || dateStr.toLowerCase() === 'not yet') return false;
-          return checkMonth(dateStr);
-        } else {
-          if (!p.isAppointment && !p.appointmentTicked) return false;
-          const dateStr = p.requestDate || '';
-          if (!dateStr) return false;
-          return checkMonth(dateStr);
-        }
-      }).length;
-    } catch {
-      return 0;
-    }
-  };
-
-  // Math metrics
   const activeMonthSales = reps.reduce((sum, r) => {
-    if (r.id === 'atiqa') return sum; // Atiqa uses performance ratings (1-5) instead of RM sales!
+    if (r.id === 'atiqa') return sum;
     const manualSales = (r.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0);
     return sum + manualSales + getRepPipelineSalesForMonth(r.id, selectedMonth);
   }, 0);
@@ -521,30 +471,26 @@ export default function ManagementDashboard({
       return sum + repYTDSum;
     }, 0);
   })();
-
+  
   const numReps = reps.length;
-  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals')), 0);
-  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments')), 0);
+  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0), 0);
+  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0), 0);
 
-  // Targets totals
   const totalSalesTargetTeam = reps.reduce((sum, r) => {
     if (r.id === 'atiqa') return sum;
     return sum + (r.targets?.salesFigure ?? 30000);
   }, 0);
-  const totalProposalsTargetTeam = reps.length * 10; // 2 per week * 5 weeks = 10 per rep
+  const totalProposalsTargetTeam = reps.length * 10;
   const totalPreviewsTargetTeam = reps.reduce((sum, r) => sum + (r.targets?.preview ?? 1), 0);
 
-  // Calculated overall score per rep helper
   const getRepScores = (rep: Representative) => {
     const pipelineSales = rep.id === 'atiqa' ? 0 : getRepPipelineSalesForMonth(rep.id, selectedMonth);
     const totalSales = (rep.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0) + pipelineSales;
-    const pipelineProposals = rep.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(rep.id, selectedMonth, 'proposals');
-    const totalProposals = (rep.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + pipelineProposals;
-    const pipelinePreviews = rep.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(rep.id, selectedMonth, 'appointments');
-    const totalPreview = (rep.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + pipelinePreviews;
+    const totalProposals = (rep.kpi?.proposals ?? []).reduce((a, b) => a + b, 0);
+    const totalPreview = (rep.kpi?.preview ?? []).reduce((a, b) => a + b, 0);
 
     const metricsList = getRepMetrics(rep);
-
+    
     const getMetricScore = (key: string) => {
       const config = metricsList.find(m => m.key === key);
       if (!config) return 0;
@@ -581,26 +527,21 @@ export default function ManagementDashboard({
     };
   };
 
-  // Find Top Performers
   const repPerformanceList = reps.map(rep => ({
     rep,
     metrics: getRepScores(rep)
   }));
 
-  // Sort by sales closed to find best closer
   const sortedBySales = [...repPerformanceList].sort((a, b) => b.metrics.totalSales - a.metrics.totalSales);
   const topCloser = sortedBySales[0];
 
-  // Sort by overall performance score
   const sortedByScore = [...repPerformanceList].sort((a, b) => b.metrics.overallScore - a.metrics.overallScore);
   const topPerformer = sortedByScore[0];
 
-  // Team average score calculation
   const avgTeamScore = numReps === 0 ? 0 : Math.round(
     repPerformanceList.reduce((acc, r) => acc + r.metrics.overallScore, 0) / numReps
   );
 
-  // Targets Edit handler
   const handleStartEditingTargets = (rep: Representative) => {
     setActiveTab('targets');
     setEditingTargetsId(rep.id);
@@ -621,7 +562,6 @@ export default function ManagementDashboard({
     setEditingTargetsId(null);
   };
 
-  // Team Bulk update targets
   const handleBulkTargetsSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     reps.forEach(rep => {
@@ -634,7 +574,6 @@ export default function ManagementDashboard({
     setShowBulkModal(false);
   };
 
-  // Quick Log Handler
   const handleQuickLogSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const rep = reps.find(r => r.id === selectedRepId);
@@ -656,16 +595,13 @@ export default function ManagementDashboard({
 
     onUpdateRepKpi(selectedRepId, updatedKpi);
 
-    // Reset log inputs
     setLogSales('');
     setLogProposals('');
     setLogPreviews('');
-
-    // Trigger small animation or notification
+    
     alert(`Successfully logged data for ${rep.name} on Week ${selectedWeek + 1}!`);
   };
 
-  // Score badge color logic
   const getScoreStyle = (score: number) => {
     if (score >= 80) return 'bg-emerald-50 text-emerald-700 border-emerald-100';
     if (score >= 50) return 'bg-amber-50 text-amber-700 border-amber-100';
@@ -674,12 +610,11 @@ export default function ManagementDashboard({
 
   return (
     <div className="space-y-6" id="management-dashboard-view">
-
-      {/* Upper Management Header Banner */}
+      
       <div className="bg-slate-900 text-white rounded-2xl p-6 md:p-8 border border-slate-800 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
-
+        
         <div className="space-y-2 relative z-10">
           <div className="flex items-center gap-2">
             <span className="text-[10px] bg-blue-600/80 text-blue-100 font-extrabold px-2.5 py-1 rounded-full uppercase tracking-widest font-mono">
@@ -697,7 +632,7 @@ export default function ManagementDashboard({
           </p>
         </div>
 
-        <button
+        <button 
           onClick={() => onAskCopilot("Analyze the entire sales team's metrics for July 2026. Who is overperforming, who needs immediate support, and what is the overall team health forecast?")}
           className="relative z-10 flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 active:scale-95 transition-all cursor-pointer"
         >
@@ -706,7 +641,6 @@ export default function ManagementDashboard({
         </button>
       </div>
 
-      {/* Primary Sub-Navigation inside the Console */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-2 rounded-xl border border-slate-200">
         <div className="flex flex-wrap gap-1">
           <button
@@ -720,7 +654,7 @@ export default function ManagementDashboard({
             <BarChart3 className="w-4 h-4" />
             Overview & Leaderboard
           </button>
-
+          
           <button
             onClick={() => setActiveTab('targets')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
@@ -785,14 +719,11 @@ export default function ManagementDashboard({
         </div>
       </div>
 
-      {/* Main Tab views */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-
-          {/* Executive Summary Stats Grid */}
+          
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5" id="management-stats-grid">
-
-            {/* Team Sales Card */}
+            
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start">
@@ -813,7 +744,6 @@ export default function ManagementDashboard({
               </div>
             </div>
 
-            {/* Team Proposals */}
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start">
@@ -836,7 +766,6 @@ export default function ManagementDashboard({
               </div>
             </div>
 
-            {/* Team Previews */}
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start">
@@ -857,7 +786,6 @@ export default function ManagementDashboard({
               </div>
             </div>
 
-            {/* Team Average Score */}
             <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start">
@@ -874,8 +802,8 @@ export default function ManagementDashboard({
               </div>
               <div className="mt-4 pt-3 border-t border-slate-150">
                 <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-purple-500 transition-all duration-500"
+                  <div 
+                    className="h-full bg-purple-500 transition-all duration-500" 
                     style={{ width: `${avgTeamScore}%` }}
                   />
                 </div>
@@ -884,10 +812,8 @@ export default function ManagementDashboard({
 
           </div>
 
-          {/* Spotlight Row */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5" id="spotlight-row">
-
-            {/* Spotlight 1: Leader by Score */}
+            
             {topPerformer && (
               <div className="bg-gradient-to-tr from-blue-500/5 to-cyan-500/5 border border-blue-100 rounded-2xl p-5 flex items-center justify-between">
                 <div className="space-y-1.5">
@@ -906,7 +832,6 @@ export default function ManagementDashboard({
               </div>
             )}
 
-            {/* Spotlight 2: Best Closer by Revenue */}
             {topCloser && (
               <div className="bg-gradient-to-tr from-emerald-500/5 to-green-500/5 border border-emerald-100 rounded-2xl p-5 flex items-center justify-between">
                 <div className="space-y-1.5">
@@ -927,7 +852,6 @@ export default function ManagementDashboard({
 
           </div>
 
-          {/* Interactive Custom SVG Comparison Chart */}
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
             <div className="flex justify-between items-center">
               <div className="space-y-0.5">
@@ -950,21 +874,18 @@ export default function ManagementDashboard({
               </div>
             </div>
 
-            {/* Custom Responsive SVG Horizontal Bar Chart */}
             <div className="space-y-4 pt-2">
               {reps.map((rep) => {
                 const metrics = getRepScores(rep);
                 const salesTarget = rep.targets?.salesFigure ?? 30000;
-
-                // Calculate percentages relative to the highest sales target or value to prevent overflow
+                
                 const maxVal = Math.max(...reps.map(r => Math.max(r.targets?.salesFigure ?? 30000, (r.kpi?.salesFigure ?? []).reduce((a,b)=>a+b,0))), 40000);
                 const actualPct = Math.min(100, (metrics.totalSales / maxVal) * 100);
                 const targetPct = Math.min(100, (salesTarget / maxVal) * 100);
 
                 return (
                   <div key={rep.id} className="grid grid-cols-12 gap-4 items-center">
-
-                    {/* Name */}
+                    
                     <div className="col-span-3">
                       <p className="text-xs font-extrabold text-slate-800 truncate">{rep.name}</p>
                       <p className="text-[9px] text-slate-400 font-mono mt-0.5 uppercase tracking-wider">
@@ -972,17 +893,14 @@ export default function ManagementDashboard({
                       </p>
                     </div>
 
-                    {/* Bar visualizer */}
                     <div className="col-span-7 relative h-6 bg-slate-50 border border-slate-100 rounded-md overflow-hidden flex items-center">
-
-                      {/* Target bar (light overlay border/background) */}
-                      <div
+                      
+                      <div 
                         className="absolute h-full bg-slate-100 border-r border-slate-300/80 transition-all duration-500"
                         style={{ width: `${targetPct}%` }}
                       />
 
-                      {/* Actual value bar */}
-                      <div
+                      <div 
                         className="absolute h-full bg-blue-500/90 hover:bg-blue-600 transition-all duration-500 rounded-r-xs flex items-center pl-2"
                         style={{ width: `${actualPct}%` }}
                       >
@@ -995,7 +913,6 @@ export default function ManagementDashboard({
 
                     </div>
 
-                    {/* Numeric breakdown */}
                     <div className="col-span-2 text-right">
                       <span className="text-xs font-black font-mono text-slate-700">
                         {Math.round((metrics.totalSales / salesTarget) * 100)}%
@@ -1011,7 +928,6 @@ export default function ManagementDashboard({
             </div>
           </div>
 
-          {/* Main Comparison Leaderboard Table */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
             <div className="p-4 bg-slate-800 text-white flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider font-display">
@@ -1038,8 +954,7 @@ export default function ManagementDashboard({
                   {repPerformanceList.map(({ rep, metrics }) => {
                     return (
                       <tr key={rep.id} className="hover:bg-slate-50/50 transition-colors">
-
-                        {/* Name column */}
+                        
                         <td className="p-4">
                           <div className="flex items-center gap-2.5">
                             <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-black text-slate-600">
@@ -1052,22 +967,20 @@ export default function ManagementDashboard({
                           </div>
                         </td>
 
-                        {/* Overall efficiency score */}
                         <td className="p-4 text-center">
                           <span className={`inline-block px-2.5 py-1 rounded-full border text-[10px] font-black font-mono ${getScoreStyle(metrics.overallScore)}`}>
                             {metrics.overallScore}%
                           </span>
                         </td>
 
-                        {/* Sales Volume */}
                         <td className="p-4">
                           <div className="space-y-1">
                             <p className="font-extrabold font-mono text-slate-800">
                               {rep.id === 'atiqa' ? `${metrics.totalSales} Rating` : `RM ${metrics.totalSales.toLocaleString()}`}
                             </p>
                             <div className="w-24 bg-slate-100 h-1 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-emerald-500"
+                              <div 
+                                className="h-full bg-emerald-500" 
                                 style={{ width: `${metrics.salesScore}%` }}
                               />
                             </div>
@@ -1077,7 +990,6 @@ export default function ManagementDashboard({
                           </div>
                         </td>
 
-                        {/* Proposals Sent */}
                         <td className="p-4 text-center">
                           <p className="font-black font-mono text-slate-800">
                             {rep.id === 'atiqa' ? `${metrics.totalProposals} Claims` : `${metrics.totalProposals} / 10`}
@@ -1087,7 +999,6 @@ export default function ManagementDashboard({
                           </span>
                         </td>
 
-                        {/* Previews Achieved */}
                         <td className="p-4 text-center">
                           <p className="font-black font-mono text-slate-800">
                             {rep.id === 'atiqa' ? `${metrics.totalPreview} / 20` : `${metrics.totalPreview} / ${rep.targets?.preview ?? 1}`}
@@ -1097,7 +1008,6 @@ export default function ManagementDashboard({
                           </span>
                         </td>
 
-                        {/* Actions */}
                         <td className="p-4 text-right">
                           <div className="flex justify-end gap-1.5">
                             <button
@@ -1124,10 +1034,8 @@ export default function ManagementDashboard({
             </div>
           </div>
 
-          {/* New Section: KPI Date Range and Backup Management */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-
-            {/* Card 1: KPI Active Date Range Configuration */}
+            
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col justify-between space-y-4">
               <div className="space-y-4">
                 <div className="flex items-start gap-3">
@@ -1192,14 +1100,13 @@ export default function ManagementDashboard({
                   </div>
                 </div>
               </div>
-
+              
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
                 <span>Active Year Setup:</span>
                 <span className="font-extrabold text-blue-600">2026 Operational Term</span>
               </div>
             </div>
 
-            {/* Card 2: Google Sheets Backup & Log */}
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col justify-between space-y-4">
               <div className="space-y-4">
                 <div className="flex items-start gap-3">
@@ -1286,10 +1193,9 @@ export default function ManagementDashboard({
         </div>
       )}
 
-      {/* Targets Management Panel */}
       {activeTab === 'targets' && (
         <div className="space-y-6">
-
+          
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
               <div className="space-y-0.5">
@@ -1301,7 +1207,7 @@ export default function ManagementDashboard({
                 </p>
               </div>
 
-              <button
+              <button 
                 onClick={() => setShowBulkModal(true)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
               >
@@ -1310,7 +1216,6 @@ export default function ManagementDashboard({
               </button>
             </div>
 
-            {/* Editing Active Targets inline row */}
             {editingTargetsId && (
               <form onSubmit={handleSaveTargets} className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-4 animate-fadeIn">
                 <div className="flex items-center gap-2">
@@ -1323,7 +1228,7 @@ export default function ManagementDashboard({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Sales Figure target (RM)</label>
-                    <input
+                    <input 
                       type="number"
                       required
                       value={targetSales}
@@ -1333,7 +1238,7 @@ export default function ManagementDashboard({
                   </div>
                   <div>
                     <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Proposals Target (weekly)</label>
-                    <input
+                    <input 
                       type="number"
                       required
                       value={targetProposals}
@@ -1343,7 +1248,7 @@ export default function ManagementDashboard({
                   </div>
                   <div>
                     <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Preview Target (monthly)</label>
-                    <input
+                    <input 
                       type="number"
                       required
                       value={targetPreview}
@@ -1354,14 +1259,14 @@ export default function ManagementDashboard({
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
-                  <button
+                  <button 
                     type="button"
                     onClick={() => setEditingTargetsId(null)}
                     className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-4 py-2 rounded-lg"
                   >
                     Cancel
                   </button>
-                  <button
+                  <button 
                     type="submit"
                     className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg"
                   >
@@ -1371,7 +1276,6 @@ export default function ManagementDashboard({
               </form>
             )}
 
-            {/* List of current targets with editing trigger */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {reps.map((rep) => {
                 return (
@@ -1424,7 +1328,6 @@ export default function ManagementDashboard({
         </div>
       )}
 
-      {/* Quick KPI Logging screen */}
       {activeTab === 'quick-log' && (
         <div className="max-w-xl mx-auto">
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
@@ -1438,11 +1341,10 @@ export default function ManagementDashboard({
             </div>
 
             <form onSubmit={handleQuickLogSubmit} className="space-y-4">
-
-              {/* Select rep */}
+              
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Select Representative</label>
-                <select
+                <select 
                   value={selectedRepId}
                   onChange={(e) => setSelectedRepId(e.target.value)}
                   className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
@@ -1453,10 +1355,9 @@ export default function ManagementDashboard({
                 </select>
               </div>
 
-              {/* Select Week */}
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Select Active Week</label>
-                <select
+                <select 
                   value={selectedWeek}
                   onChange={(e) => setSelectedWeek(parseInt(e.target.value))}
                   className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
@@ -1469,10 +1370,9 @@ export default function ManagementDashboard({
                 </select>
               </div>
 
-              {/* Sales Closed */}
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Add Sales Closed (RM)</label>
-                <input
+                <input 
                   type="number"
                   placeholder="e.g. 5000 (leaves blank for no change)"
                   value={logSales}
@@ -1481,11 +1381,10 @@ export default function ManagementDashboard({
                 />
               </div>
 
-              {/* Proposals and Previews side by side */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Add Proposals</label>
-                  <input
+                  <input 
                     type="number"
                     placeholder="e.g. 1"
                     value={logProposals}
@@ -1495,7 +1394,7 @@ export default function ManagementDashboard({
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Add Previews</label>
-                  <input
+                  <input 
                     type="number"
                     placeholder="e.g. 1"
                     value={logPreviews}
@@ -1521,7 +1420,6 @@ export default function ManagementDashboard({
 
       {activeTab === 'pipelines' && (
         <div className="space-y-6">
-          {/* Executive Header Banner */}
           <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-md border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6" id="executive-pipeline-banner">
             <div className="space-y-1 text-left">
               <span className="text-[10px] bg-blue-500/20 text-blue-300 font-bold px-3 py-1 rounded border border-blue-500/30 font-mono uppercase tracking-widest">
@@ -1534,7 +1432,7 @@ export default function ManagementDashboard({
                 Real-time tracking of deal value, status, and conversion trajectories for all sales representatives.
               </p>
             </div>
-
+            
             <div className="flex gap-4">
               <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-4 text-center min-w-[140px]">
                 <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest block font-mono">
@@ -1555,7 +1453,6 @@ export default function ManagementDashboard({
             </div>
           </div>
 
-          {/* Table representing all combined pipelines */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden" id="management-pipeline-table-card">
             <div className="p-4 bg-slate-800 text-white flex items-center justify-between">
               <h4 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
@@ -1636,7 +1533,6 @@ export default function ManagementDashboard({
 
       {activeTab === 'reps' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6">
-          {/* Header */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-5 border-b border-slate-100">
             <div className="space-y-1">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
@@ -1652,9 +1548,7 @@ export default function ManagementDashboard({
             </div>
           </div>
 
-          {/* Main Content Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left side: List of Representatives */}
             <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
               <div className="bg-slate-50/50 px-4 py-3 border-b border-slate-200">
                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Active Representatives & Credentials</h4>
@@ -1711,8 +1605,8 @@ export default function ManagementDashboard({
                                 type="button"
                                 onClick={() => handleStartEditRep(repItem)}
                                 className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded transition-all cursor-pointer ${
-                                  isEditingThis
-                                    ? 'bg-blue-100 text-blue-700'
+                                  isEditingThis 
+                                    ? 'bg-blue-100 text-blue-700' 
                                     : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
                                 }`}
                               >
@@ -1737,10 +1631,8 @@ export default function ManagementDashboard({
               </div>
             </div>
 
-            {/* Right side: Forms */}
             <div className="lg:col-span-5 space-y-4">
               {editingRepId ? (
-                /* EDIT FORM */
                 <div className="bg-slate-50 border border-blue-200 rounded-xl p-5 shadow-2xs space-y-4 relative">
                   <div className="absolute top-4 right-4 bg-blue-100 border border-blue-200 rounded-full p-1 text-blue-600">
                     <Shield className="w-4 h-4" />
@@ -1758,8 +1650,8 @@ export default function ManagementDashboard({
                   <form onSubmit={handleEditRepSubmit} className="space-y-3 text-xs">
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Full Name</label>
-                      <input
-                        type="text"
+                      <input 
+                        type="text" 
                         required
                         value={editRepName}
                         onChange={(e) => setEditRepName(e.target.value)}
@@ -1769,8 +1661,8 @@ export default function ManagementDashboard({
 
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Account ID / Name</label>
-                      <input
-                        type="text"
+                      <input 
+                        type="text" 
                         required
                         value={editRepAccountName}
                         onChange={(e) => setEditRepAccountName(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-'))}
@@ -1782,8 +1674,8 @@ export default function ManagementDashboard({
 
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Email Address</label>
-                      <input
-                        type="email"
+                      <input 
+                        type="email" 
                         value={editRepEmail}
                         onChange={(e) => setEditRepEmail(e.target.value)}
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-sans"
@@ -1792,8 +1684,8 @@ export default function ManagementDashboard({
 
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Login Password</label>
-                      <input
-                        type="text"
+                      <input 
+                        type="text" 
                         required
                         value={editRepPassword}
                         onChange={(e) => setEditRepPassword(e.target.value)}
@@ -1802,14 +1694,14 @@ export default function ManagementDashboard({
                     </div>
 
                     <div className="flex gap-2 pt-2">
-                      <button
-                        type="button"
+                      <button 
+                        type="button" 
                         onClick={() => setEditingRepId(null)}
                         className="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold transition-all text-center cursor-pointer"
                       >
                         Cancel
                       </button>
-                      <button
+                      <button 
                         type="submit"
                         className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-wider transition-all text-center shadow-2xs cursor-pointer"
                       >
@@ -1819,7 +1711,6 @@ export default function ManagementDashboard({
                   </form>
                 </div>
               ) : (
-                /* ADD FORM */
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 shadow-2xs space-y-4">
                   <div className="space-y-1">
                     <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-1.5 font-display">
@@ -1834,10 +1725,10 @@ export default function ManagementDashboard({
                   <form onSubmit={handleAddRepSubmitInDashboard} className="space-y-3 text-xs">
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Full Name</label>
-                      <input
-                        type="text"
+                      <input 
+                        type="text" 
                         required
-                        placeholder="e.g. Rachel Lim"
+                        placeholder="e.g. Rachel Lim" 
                         value={newRepName}
                         onChange={(e) => handleNewRepNameChange(e.target.value)}
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-sans"
@@ -1846,10 +1737,10 @@ export default function ManagementDashboard({
 
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Account ID / Name</label>
-                      <input
-                        type="text"
+                      <input 
+                        type="text" 
                         required
-                        placeholder="e.g. rachel-lim"
+                        placeholder="e.g. rachel-lim" 
                         value={newRepAccountName}
                         onChange={(e) => setNewRepAccountName(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-'))}
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono font-bold"
@@ -1858,9 +1749,9 @@ export default function ManagementDashboard({
 
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Email Address</label>
-                      <input
-                        type="email"
-                        placeholder="e.g. rachel@nextenergy24.com"
+                      <input 
+                        type="email" 
+                        placeholder="e.g. rachel@nextenergy24.com" 
                         value={newRepEmail}
                         onChange={(e) => setNewRepEmail(e.target.value)}
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-sans"
@@ -1869,17 +1760,17 @@ export default function ManagementDashboard({
 
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Login Password</label>
-                      <input
-                        type="text"
+                      <input 
+                        type="text" 
                         required
-                        placeholder="e.g. Rach123"
+                        placeholder="e.g. Rach123" 
                         value={newRepPassword}
                         onChange={(e) => setNewRepPassword(e.target.value)}
                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono font-bold"
                       />
                     </div>
 
-                    <button
+                    <button 
                       type="submit"
                       className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-wider transition-all text-center shadow-2xs cursor-pointer flex items-center justify-center gap-1.5"
                     >
@@ -1894,7 +1785,6 @@ export default function ManagementDashboard({
         </div>
       )}
 
-      {/* Team Bulk Targets setup Modal */}
       {showBulkModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-150 space-y-4">
@@ -1906,14 +1796,14 @@ export default function ManagementDashboard({
                 Apply a uniform benchmark to every representative on the active roster.
               </p>
             </div>
-
+            
             <form onSubmit={handleBulkTargetsSubmit} className="space-y-4">
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulk Sales Target (RM)</label>
-                <input
-                  type="number"
+                <input 
+                  type="number" 
                   required
-                  placeholder="e.g. 30000"
+                  placeholder="e.g. 30000" 
                   value={bulkSales}
                   onChange={(e) => setBulkSales(e.target.value)}
                   className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
@@ -1922,10 +1812,10 @@ export default function ManagementDashboard({
 
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulk Weekly Proposals Target</label>
-                <input
-                  type="number"
+                <input 
+                  type="number" 
                   required
-                  placeholder="e.g. 2"
+                  placeholder="e.g. 2" 
                   value={bulkProposals}
                   onChange={(e) => setBulkProposals(e.target.value)}
                   className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
@@ -1934,10 +1824,10 @@ export default function ManagementDashboard({
 
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulk Monthly Previews Target</label>
-                <input
-                  type="number"
+                <input 
+                  type="number" 
                   required
-                  placeholder="e.g. 1"
+                  placeholder="e.g. 1" 
                   value={bulkPreviews}
                   onChange={(e) => setBulkPreviews(e.target.value)}
                   className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
@@ -1945,14 +1835,14 @@ export default function ManagementDashboard({
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
+                <button 
+                  type="button" 
                   onClick={() => setShowBulkModal(false)}
                   className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-4 py-2 rounded-lg transition-colors"
                 >
                   Cancel
                 </button>
-                <button
+                <button 
                   type="submit"
                   className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg transition-colors"
                 >
