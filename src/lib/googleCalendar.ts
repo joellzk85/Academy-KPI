@@ -1,9 +1,10 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Initialize Firebase App and Auth
-const app = initializeApp(firebaseConfig);
+// Google Calendar / Sheets sync uses its OWN separate Firebase connection,
+// so signing in to Google here never logs anyone out of the CRM.
+const app = getApps().find(a => a.name === 'google-sync') || initializeApp(firebaseConfig, 'google-sync');
 export const auth = getAuth(app);
 
 // Configure Google OAuth Provider with Calendar & Sheets/Drive scopes

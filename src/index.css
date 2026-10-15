@@ -1,17 +1,29 @@
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Archivo", sans-serif;
-  --font-mono: "Archivo", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* NEXT Academy CRM palette */
+  --color-ink: #1C2B45;
+  --color-ink-soft: #4A5872;
+  --color-accent: #0E6E62;
+  --color-accent-soft: #E3F1EE;
+  --color-surface: #F5F6F3;
+  --color-line: #E2E5DE;
+  --color-attention: #B45309;
+  --color-attention-soft: #FDF3E4;
+  --color-danger: #B42318;
+  --color-danger-soft: #FCEDEC;
 }
 
 /* Light theme for Next Academy Sales & Ops dashboard */
 body {
   font-family: var(--font-sans);
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: #F5F6F3;
+  color: #1C2B45;
   overflow-x: hidden;
 }
 
@@ -104,4 +116,10 @@ body {
     background: white !important;
     color: black !important;
   }
+}
+
+/* Visible keyboard focus everywhere */
+:focus-visible {
+  outline: 2px solid #0E6E62;
+  outline-offset: 2px;
 }

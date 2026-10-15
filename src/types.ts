@@ -322,3 +322,28 @@ export interface AdminRecord {
   pipelineId?: string;
   quotationId?: string;
 }
+
+// ---- Team & login (Phase 1) ----
+// The Team list is the ONE place people's names and roles live.
+// Every other screen reads names from here.
+export type TeamRole = 'rep' | 'admin' | 'management';
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  role: TeamRole;
+  active: boolean;
+  loginId: string;          // hidden internal login, never shown to people
+  authUid: string;          // the login account currently linked to this person
+  authVersion: number;      // goes up each time management resets the password
+  mustChangePassword: boolean;
+  createdAt?: number;
+  createdById?: string;
+  removedAt?: number;
+}
+
+export const ROLE_LABELS: Record<TeamRole, string> = {
+  rep: 'Sales rep',
+  admin: 'Admin',
+  management: 'Management',
+};

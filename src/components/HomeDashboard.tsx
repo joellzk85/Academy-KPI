@@ -163,6 +163,7 @@ const getRepAlertStatus = (
     const sharedPipes = getSharedPipelines(actualRepsList, pipelinesSync);
     hasTaggedPipelines = sharedPipes.some((p: any) => p.taggedRepIds?.includes(repId) && !p.completedTags?.includes(repId));
     
+    // isOverdue helper function
     const isOverdue = (p: any) => {
       if (p.status !== 'Pending') return false;
       if (p.proposalSentDate && p.proposalSentDate !== 'not yet') return false;
@@ -186,11 +187,13 @@ const getRepAlertStatus = (
   try {
     actualRepsList.forEach(otherRep => {
       if (otherRep.id !== repId && otherRep.kpi) {
+        // Check legacy/week 0 tag
         const isLegacyTagged = otherRep.kpi.taggedRepIds && Array.isArray(otherRep.kpi.taggedRepIds) && otherRep.kpi.taggedRepIds.includes(repId);
         const isLegacyCompleted = otherRep.kpi.completedTags && Array.isArray(otherRep.kpi.completedTags) && otherRep.kpi.completedTags.includes(repId);
         if (isLegacyTagged && !isLegacyCompleted) {
           isTaggedInWeeklyReports = true;
         }
+        // Check list-based tags for all weeks
         if (otherRep.kpi.taggedRepIdsList && Array.isArray(otherRep.kpi.taggedRepIdsList)) {
           otherRep.kpi.taggedRepIdsList.forEach((weekTags: any, weekIdx: number) => {
             if (Array.isArray(weekTags) && weekTags.includes(repId)) {
@@ -202,6 +205,7 @@ const getRepAlertStatus = (
             }
           });
         }
+        // Check accountability partner for all weeks
         if (otherRep.kpi.accountabilityPartnerIdList && Array.isArray(otherRep.kpi.accountabilityPartnerIdList)) {
           otherRep.kpi.accountabilityPartnerIdList.forEach((partnerId: any, weekIdx: number) => {
             if (partnerId === repId) {
@@ -285,9 +289,10 @@ export default function HomeDashboard({
   outlinesSync,
   monthKpisSync
 }: HomeDashboardProps) {
+  // Calendar state — defaults to today's actual month/year, not a hardcoded one
   const today = new Date();
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
-  const [currentMonth, setCurrentMonth] = useState(today.getMonth());
+  const [currentMonth, setCurrentMonth] = useState(today.getMonth()); // 0-indexed: January is 0
   const [selectedDayStr, setSelectedDayStr] = useState<string>(() => {
     const y = today.getFullYear();
     const m = String(today.getMonth() + 1).padStart(2, '0');
@@ -299,12 +304,15 @@ export default function HomeDashboard({
   const [newEventTime, setNewEventTime] = useState('10:00 AM');
   const [newEventColor, setNewEventColor] = useState('bg-blue-500');
 
+  // Representative management
   const [showAddRepModal, setShowAddRepModal] = useState(false);
   const [newRepName, setNewRepName] = useState('');
 
+  // Notice management
   const [newNoticeText, setNewNoticeText] = useState('');
   const [showNoticeInput, setShowNoticeInput] = useState(false);
 
+  // Google Calendar Integration State
   const [googleUser, setGoogleUser] = useState<any>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -312,6 +320,7 @@ export default function HomeDashboard({
   const [selectedRepIdsForEvent, setSelectedRepIdsForEvent] = useState<string[]>([]);
   const [syncToGoogleCheckbox, setSyncToGoogleCheckbox] = useState(true);
 
+  // Setup Firebase Auth Listener for Google Workspace API Sync
   useEffect(() => {
     const unsubscribe = initAuth(
       (user, token) => {
@@ -338,6 +347,7 @@ export default function HomeDashboard({
     };
   }, []);
 
+  // Month navigation helpers
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
@@ -361,6 +371,10 @@ export default function HomeDashboard({
     }
   };
 
+  // Dynamically generate a Monday-start calendar grid for the currently
+  // viewed month/year, padded with the trailing days of the previous month
+  // and leading days of the next month, matching however many full weeks
+  // are needed to cover the month.
   const calendarGrid = (() => {
     const toDateStr = (y: number, m: number, d: number) => {
       const dt = new Date(y, m, d);
@@ -371,22 +385,26 @@ export default function HomeDashboard({
     };
 
     const firstOfMonth = new Date(currentYear, currentMonth, 1);
-    const firstWeekday = (firstOfMonth.getDay() + 6) % 7;
+    // JS getDay(): Sun=0..Sat=6. We want a Monday-first grid, so shift it.
+    const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // Mon=0..Sun=6
     const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const daysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
 
     const cells: { dayNum: number; dateStr: string; isCurrentMonth: boolean }[] = [];
 
+    // Leading days from the previous month
     for (let i = firstWeekday - 1; i >= 0; i--) {
       const dayNum = daysInPrevMonth - i;
       const d = new Date(currentYear, currentMonth - 1, dayNum);
       cells.push({ dayNum, dateStr: toDateStr(d.getFullYear(), d.getMonth(), dayNum), isCurrentMonth: false });
     }
 
+    // Days in the current month
     for (let dayNum = 1; dayNum <= daysInCurrentMonth; dayNum++) {
       cells.push({ dayNum, dateStr: toDateStr(currentYear, currentMonth, dayNum), isCurrentMonth: true });
     }
 
+    // Trailing days from the next month, padded to complete the final week
     const remainder = cells.length % 7;
     if (remainder !== 0) {
       const toFill = 7 - remainder;
@@ -399,12 +417,14 @@ export default function HomeDashboard({
     return cells;
   })();
 
+  // Selected day events
   const selectedDayEvents = events.filter(e => e.date === selectedDayStr);
 
   const handleAddEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEventTitle.trim()) return;
 
+    // Fetch attendee emails
     const attendeeEmails = selectedRepIdsForEvent.map(repId => {
       const foundRep = reps.find(r => r.id === repId);
       return foundRep?.email || `${repId}@nextenergy24.com`;
@@ -554,6 +574,7 @@ export default function HomeDashboard({
     setShowNoticeInput(false);
   };
 
+  // Helper to get YTD months chronologically for the selected month's year
   const getYTDMonths = (selMonth: string): string[] => {
     const allMonths = [
       'JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26', 
@@ -563,7 +584,7 @@ export default function HomeDashboard({
     const selIndex = allMonths.indexOf(selMonth);
     if (selIndex === -1) return [selMonth];
     const parts = selMonth.split('-');
-    const yearSuffix = parts[1];
+    const yearSuffix = parts[1]; // e.g. '26'
     return allMonths.slice(0, selIndex + 1).filter(m => m.endsWith(`-${yearSuffix}`));
   };
 
@@ -583,6 +604,7 @@ export default function HomeDashboard({
           if (p.status !== 'Won') return false;
           const dateStr = p.proposalSentDate || p.requestDate || '';
           
+          // Month filter
           const monthMap: Record<string, string> = {
             'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
             'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
@@ -608,8 +630,52 @@ export default function HomeDashboard({
     return getRepPipelineSalesForMonth(repId, selectedMonth);
   };
 
+  // Tracks Proposal-Sent activity and Appointment-ticked activity from the shared
+  // pipeline log for a given rep/month, mirroring the same logic used on each
+  // rep's own KPI page, so the team-wide average score here doesn't undercount.
+  const getRepPipelineActivityForMonth = (repId: string, targetMonth: string, type: 'proposals' | 'appointments'): number => {
+    try {
+      let pipes: any[] = [];
+      if (pipelinesSync && pipelinesSync.length > 0) {
+        pipes = pipelinesSync.filter((p: any) => (p.ownerId || p.creatorId) === repId);
+      } else {
+        const saved = localStorage.getItem(`next_pipelines_${repId}`);
+        if (saved) pipes = JSON.parse(saved);
+      }
+
+      const monthMap: Record<string, string> = {
+        'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
+        'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+      };
+      const parts = targetMonth.split('-');
+      const checkMonth = (dateStr: string) => {
+        if (parts.length !== 2) return true;
+        const m = monthMap[parts[0]];
+        const y = '20' + parts[1];
+        if (!m || !y) return true;
+        return dateStr.startsWith(`${y}-${m}`);
+      };
+
+      return pipes.filter((p: any) => {
+        if (type === 'proposals') {
+          const dateStr = p.proposalSentDate || '';
+          if (!dateStr || dateStr.toLowerCase() === 'not yet') return false;
+          return checkMonth(dateStr);
+        } else {
+          if (!p.isAppointment && !p.appointmentTicked) return false;
+          const dateStr = p.requestDate || '';
+          if (!dateStr) return false;
+          return checkMonth(dateStr);
+        }
+      }).length;
+    } catch {
+      return 0;
+    }
+  };
+
+  // Math metrics
   const activeMonthSales = reps.reduce((sum, r) => {
-    if (r.id === 'atiqa') return sum;
+    if (r.id === 'atiqa') return sum; // Atiqa uses performance ratings (1-5) instead of RM sales!
     const manualSales = (r.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0);
     return sum + manualSales + getRepPipelineSales(r.id);
   }, 0);
@@ -638,14 +704,14 @@ export default function HomeDashboard({
   const filteredYTDSales = totalSalesToDateYTD;
   
   const numReps = reps.length;
-  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0), 0);
-  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0), 0);
+  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals')), 0);
+  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments')), 0);
 
   const avgTeamScore = numReps === 0 ? 0 : Math.round(reps.reduce((acc, r) => {
     const pipelineSales = r.id === 'atiqa' ? 0 : getRepPipelineSales(r.id);
     const salesTotal = (r.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0) + pipelineSales;
-    const proposalsTotal = (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0);
-    const previewTotal = (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0);
+    const proposalsTotal = (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals'));
+    const previewTotal = (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments'));
 
     const metricsList = getRepMetrics(r);
     const overall = metricsList.reduce((sum, metric) => {
@@ -666,20 +732,23 @@ export default function HomeDashboard({
     return acc + overall;
   }, 0) / numReps);
 
+  // Month and YTD sales targets / progress calculations
   const monthSalesTarget = reps.reduce((sum, r) => {
     if (r.id === 'atiqa') return sum;
     return sum + (r.targets?.salesFigure ?? 30000);
   }, 0);
   const monthSalesProgressPct = monthSalesTarget > 0 ? Math.min(100, Math.round((activeMonthSales / monthSalesTarget) * 100)) : 0;
-  const ytdSalesTarget = 1000000;
+  const ytdSalesTarget = 1000000; // RM target up to Dec 2026 is RM 1,000,000
   const ytdSalesProgressPct = ytdSalesTarget > 0 ? Math.min(100, Math.round((totalSalesToDateYTD / ytdSalesTarget) * 100)) : 0;
 
+  // Radial Gauge circumferences
   const rLarge = 42;
   const cLarge = 2 * Math.PI * rLarge;
 
   return (
     <div className="space-y-6" id="home-dashboard">
       
+      {/* Top Row: Quick Month view selector */}
       <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xs" id="home-month-selector">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-blue-50 border border-blue-100 text-blue-600 rounded-lg">
@@ -711,14 +780,18 @@ export default function HomeDashboard({
         </div>
       </div>
       
+      {/* 4 Cards Row & Calendar */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
         
+        {/* Left Side: 4 KPI Cards Grid */}
         <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-4">
           
+          {/* Card 1: Total Sales YTD (Dark Blue Theme) */}
           <div 
             className="p-6 rounded-xl relative overflow-hidden bg-gradient-to-br from-[#0c244c] to-[#081a38] text-white border border-blue-950 flex flex-col justify-between shadow-sm min-h-[165px]"
             id="kpi-card-total-sales"
           >
+            {/* Giant grey/blue $ sign behind numbers */}
             <div className="absolute right-4 bottom-2 text-white/5 font-black text-9xl pointer-events-none select-none font-mono">
               $
             </div>
@@ -742,6 +815,7 @@ export default function HomeDashboard({
             </div>
           </div>
 
+          {/* Card 2: Filtered YTD Sales */}
           <div 
             className="p-6 rounded-xl bg-white border border-slate-200/80 text-slate-800 flex flex-col justify-between shadow-xs min-h-[165px]"
             id="kpi-card-filtered-sales"
@@ -765,6 +839,7 @@ export default function HomeDashboard({
             </div>
           </div>
 
+          {/* Card 3: Active Month Sales */}
           <div 
             className="p-6 rounded-xl bg-white border border-slate-200/80 text-slate-800 flex flex-col justify-between shadow-xs min-h-[165px]"
             id="kpi-card-active-sales"
@@ -788,10 +863,12 @@ export default function HomeDashboard({
             </div>
           </div>
 
+          {/* Card 4: Circle Gauges */}
           <div 
             className="p-6 rounded-xl bg-white border border-slate-200/80 text-slate-800 flex items-center justify-around shadow-xs min-h-[165px]"
             id="kpi-card-gauges"
           >
+            {/* Gauge 1: Month Target */}
             <div className="flex flex-col items-center space-y-2">
               <div className="relative w-28 h-28 flex items-center justify-center">
                 <svg className="w-full h-full transform -rotate-90" viewBox="0 0 112 112">
@@ -822,8 +899,10 @@ export default function HomeDashboard({
               </span>
             </div>
 
+            {/* Divider */}
             <div className="h-28 w-[1px] bg-slate-100" />
 
+            {/* Gauge 2: YTD Target */}
             <div className="flex flex-col items-center space-y-2">
               <div className="relative w-28 h-28 flex items-center justify-center">
                 <svg className="w-full h-full transform -rotate-90" viewBox="0 0 112 112">
@@ -858,8 +937,10 @@ export default function HomeDashboard({
 
         </div>
 
+        {/* Right Side: July 2026 Calendar Widget (Perfect copy of the screenshot layout!) */}
         <div className="lg:col-span-5 bg-white border border-slate-200/80 rounded-xl p-5 shadow-xs flex flex-col justify-between">
           
+          {/* Calendar Header */}
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-1">
               <span className="text-xs font-bold text-slate-500">Today</span>
@@ -874,6 +955,7 @@ export default function HomeDashboard({
               </h4>
             </div>
 
+            {/* Menu controls of calendar */}
             <div className="flex items-center gap-1.5">
               <button className="p-1 hover:bg-slate-100 rounded text-slate-400">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -891,6 +973,7 @@ export default function HomeDashboard({
             </div>
           </div>
 
+          {/* Google Calendar Connection Status Bar */}
           <div className="bg-slate-50 border border-slate-100/80 rounded-lg p-2.5 my-2 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${googleToken ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
@@ -936,6 +1019,7 @@ export default function HomeDashboard({
             </div>
           )}
 
+          {/* Days Grid Headers */}
           <div className="grid grid-cols-7 text-center py-2 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50">
             <span>Mon</span>
             <span>Tue</span>
@@ -946,6 +1030,7 @@ export default function HomeDashboard({
             <span>Sun</span>
           </div>
 
+          {/* Calendar Grid Cells */}
           <div className="grid grid-cols-7 gap-[1px] bg-slate-100 border border-slate-100 mt-1 rounded overflow-hidden">
             {calendarGrid.map((cell, idx) => {
               const dayEvents = events.filter(e => e.date === cell.dateStr);
@@ -959,12 +1044,14 @@ export default function HomeDashboard({
                     isSelected ? 'ring-2 ring-blue-500/80 z-10' : 'hover:bg-slate-50/50'
                   }`}
                 >
+                  {/* Day Number */}
                   <span className={`text-[10px] font-black leading-none ${
                     cell.isCurrentMonth ? 'text-slate-700' : 'text-slate-300'
                   }`}>
                     {cell.dayNum}
                   </span>
 
+                  {/* Bullet points or tags for events */}
                   <div className="flex flex-col gap-0.5 mt-1 overflow-hidden max-h-[30px]">
                     {dayEvents.slice(0, 3).map((ev, evIdx) => (
                       <div 
@@ -986,6 +1073,7 @@ export default function HomeDashboard({
             })}
           </div>
 
+          {/* Selected Date Events Panel */}
           <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-150 space-y-2">
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-black text-slate-700 uppercase tracking-wider font-display flex items-center gap-1">
@@ -1020,6 +1108,7 @@ export default function HomeDashboard({
                         </div>
                         <p className="text-[9px] text-slate-400 font-mono mt-0.5">{ev.time}</p>
                         
+                        {/* Attendee Representatives */}
                         {ev.attendees && ev.attendees.length > 0 && (
                           <div className="flex items-center gap-1 mt-1 flex-wrap">
                             <span className="text-[8px] font-bold text-slate-400 mr-0.5">Invited:</span>
@@ -1051,6 +1140,7 @@ export default function HomeDashboard({
 
       </div>
 
+      {/* Newsfeed / Notice Box */}
       <div 
         className="bg-white border border-slate-200/80 rounded-xl p-4 shadow-xs flex items-center gap-4 relative overflow-hidden"
         id="notice-ticker-panel"
@@ -1097,7 +1187,7 @@ export default function HomeDashboard({
                 notices.slice(-2).map((notice, noticeIdx) => (
                   <div key={noticeIdx} className="text-xs text-slate-700 leading-normal flex justify-between items-center group">
                     <span className="truncate">📢 {notice}</span>
-                    <button
+                    <button 
                       onClick={() => onDeleteNotice(notices.indexOf(notice))}
                       className="text-slate-300 hover:text-red-500 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity pl-2"
                     >
@@ -1111,6 +1201,7 @@ export default function HomeDashboard({
         </div>
       </div>
 
+      {/* Representative Selection Section (Direct Match to Bottom buttons) */}
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider font-display">
@@ -1131,6 +1222,7 @@ export default function HomeDashboard({
           </button>
         </div>
 
+        {/* Big styled representative clickable buttons as requested in Page 1 bottom */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4" id="representatives-list">
           {reps.map((rep) => {
             const alertStatus = getRepAlertStatus(rep.id, reps, pipelinesSync, tasksSync, quotationsSync, outlinesSync);
@@ -1184,6 +1276,7 @@ export default function HomeDashboard({
         </div>
       </div>
 
+      {/* Add Event Modal */}
       {showAddEventModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-150 space-y-4">
@@ -1231,6 +1324,7 @@ export default function HomeDashboard({
                 </div>
               </div>
 
+              {/* Invite/Tag Other Representatives */}
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                   Invite Representatives (Link to their Calendars)
@@ -1256,6 +1350,7 @@ export default function HomeDashboard({
                 </div>
               </div>
 
+              {/* Sync with Google Calendar Sync Check */}
               <div className="pt-1">
                 <label className="flex items-start gap-2 cursor-pointer bg-slate-50 p-2 rounded border border-slate-100">
                   <input 
@@ -1293,6 +1388,7 @@ export default function HomeDashboard({
         </div>
       )}
 
+      {/* Add Representative Modal */}
       {showAddRepModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-150 space-y-4">

@@ -16,21 +16,27 @@ import {
   Unlock,
   Eye,
   EyeOff,
-  Key
+  Key,
+  LogOut,
+  KeyRound,
+  UserCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Firebase imports
-import { db } from './lib/firebase';
+import { db, auth } from './lib/firebase';
 import { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 
 // Core components & initial datasets
 import Logo from './components/Logo';
 import HomeDashboard from './components/HomeDashboard';
 import RepDetailDashboard, { getInitialPipelinesForRep } from './components/RepDetailDashboard';
 import ManagementDashboard from './components/ManagementDashboard';
-import { INITIAL_REPRESENTATIVES, INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
-import { Representative, CalendarEvent, ChatMessage } from './types';
+import TeamManager from './components/TeamManager';
+import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
+import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
+import { Representative, CalendarEvent, ChatMessage, TeamMember, ROLE_LABELS } from './types';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -63,14 +69,25 @@ function hydrateKpi(kpi: any): any {
   return kpi;
 }
 
+// Rep workspace documents only hold KPI and targets. Names live ONLY in the
+// Team list, so they are never copied here.
 function toFirestoreRep(rep: Representative): any {
-  // Deep clone so we never mutate React state in place
-  const clone: any = JSON.parse(JSON.stringify(rep));
+  const clone: any = JSON.parse(JSON.stringify({ kpi: rep.kpi, targets: rep.targets }));
   if (clone.kpi) {
     clone.kpi = sanitizeKpiForFirestore(clone.kpi);
   }
   return clone;
 }
+
+const DEFAULT_TARGETS: Representative['targets'] = { salesFigure: 30000, proposals: 2, preview: 1 };
+const emptyKpi = (): Representative['kpi'] => ({
+  salesFigure: [0, 0, 0, 0, 0],
+  proposals: [0, 0, 0, 0, 0],
+  preview: [0, 0, 0, 0, 0]
+});
+
+// Old login data left in browsers by the previous password system.
+const LEGACY_LOCAL_KEYS = ['next_password_mapping', 'next_unlocked', 'next_reps'];
 
 function fromFirestoreRep(data: any): any {
   if (data && data.kpi) {
@@ -79,93 +96,124 @@ function fromFirestoreRep(data: any): any {
   return data;
 }
 
+// ============================================================
+// Login gate: decides which screen to show before the CRM loads.
+// ============================================================
 export default function App() {
-  // Passwords mapping state (tied to localStorage for persistence)
-  const [passwords, setPasswords] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('next_password_mapping');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    const initial = {
-      'management': 'Management123',
-      'xin-ying': 'XY123',
-      'alif': 'Lif123',
-      'atiqa': 'Atq123',
-      'chee-cai': 'CC123',
-      'new-guy': 'NG123'
-    };
-    localStorage.setItem('next_password_mapping', JSON.stringify(initial));
-    return initial;
-  });
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamLoaded, setTeamLoaded] = useState(false);
+  const [setupDone, setSetupDone] = useState<boolean | null>(null);
+  // undefined = still checking, null = this login is not linked to anyone
+  const [linkedMemberId, setLinkedMemberId] = useState<string | null | undefined>(undefined);
 
-  const getRequiredPassword = (idOrKey: string): string => {
-    if (passwords[idOrKey]) {
-      return passwords[idOrKey];
+  useEffect(() => {
+    LEGACY_LOCAL_KEYS.forEach(k => localStorage.removeItem(k));
+    const unsubAuth = onAuthStateChanged(auth, user => {
+      setAuthUser(user);
+      setAuthReady(true);
+    });
+    const unsubTeam = onSnapshot(
+      collection(db, 'team'),
+      snap => {
+        setTeamMembers(snap.docs.map(d => ({ ...(d.data() as TeamMember), id: d.id })));
+        setTeamLoaded(true);
+      },
+      err => {
+        console.error('Team list failed to load:', err);
+        setTeamLoaded(true);
+      }
+    );
+    const unsubSetup = onSnapshot(
+      doc(db, 'config', 'setup'),
+      snap => setSetupDone(snap.exists()),
+      err => {
+        console.error('Setup check failed:', err);
+        setSetupDone(false);
+      }
+    );
+    return () => {
+      unsubAuth();
+      unsubTeam();
+      unsubSetup();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      setLinkedMemberId(undefined);
+      return;
     }
-    const clean = idOrKey.replace(/[^a-zA-Z]/g, '');
-    const capitalized = clean.charAt(0).toUpperCase() + (clean.slice(1, 3) || '');
-    return `${capitalized}123` || 'Reps123';
+    setLinkedMemberId(undefined);
+    const unsub = onSnapshot(
+      doc(db, 'auth_map', authUser.uid),
+      snap => {
+        const data = snap.data() as any;
+        setLinkedMemberId(snap.exists() && data?.active ? data.memberId : null);
+      },
+      () => setLinkedMemberId(null)
+    );
+    return () => unsub();
+  }, [authUser]);
+
+  if (!authReady || !teamLoaded || setupDone === null) return <LoadingScreen />;
+  if (!setupDone) return <SetupScreen />;
+  if (!authUser) return <LoginForm members={teamMembers} />;
+  if (linkedMemberId === undefined) return <LoadingScreen message="Checking your access…" />;
+
+  const currentMember = teamMembers.find(m => m.id === linkedMemberId && m.active);
+  if (!currentMember) return <NoAccessScreen />;
+  if (currentMember.mustChangePassword) return <ForcedPasswordChangeScreen member={currentMember} />;
+
+  return <CrmApp key={currentMember.id} currentMember={currentMember} teamMembers={teamMembers} />;
+}
+
+// ============================================================
+// The CRM itself (only runs after a successful login).
+// ============================================================
+function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; teamMembers: TeamMember[] }) {
+  const isManagement = currentMember.role === 'management';
+  const isRep = currentMember.role === 'rep';
+
+  // Rep workspace data (KPI + targets) keyed by team member id.
+  const [repDocs, setRepDocs] = useState<Record<string, { kpi?: Representative['kpi']; targets?: Representative['targets'] }>>({});
+
+  // People with a sales workspace: active reps and admins. Names come from Team.
+  const representatives: Representative[] = React.useMemo(() => {
+    return teamMembers
+      .filter(m => m.active && (m.role === 'rep' || m.role === 'admin'))
+      .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'rep' ? -1 : 1))
+      .map(m => ({
+        id: m.id,
+        name: m.name,
+        kpi: repDocs[m.id]?.kpi || emptyKpi(),
+        targets: repDocs[m.id]?.targets || DEFAULT_TARGETS
+      }));
+  }, [teamMembers, repDocs]);
+
+  const setRepresentatives = (updater: Representative[] | ((prev: Representative[]) => Representative[])) => {
+    const next = typeof updater === 'function' ? (updater as any)(representatives) : updater;
+    setRepDocs(prev => {
+      const copy = { ...prev };
+      next.forEach((r: Representative) => {
+        copy[r.id] = { kpi: r.kpi, targets: r.targets };
+      });
+      return copy;
+    });
   };
 
-  // Roster and Events State
-  const [representatives, setRepresentatives] = useState<Representative[]>(() => {
-    const saved = localStorage.getItem('next_reps');
-    let repsList = INITIAL_REPRESENTATIVES;
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].kpi && 'salesFigure' in parsed[0].kpi) {
-          repsList = parsed;
-        }
-      } catch (e) {
-        console.error("Failed to parse saved representatives, resetting to initial:", e);
-      }
-    }
-    
-    // Ensure the latest target settings are updated for Chee Cai, Alif, and Ying
-    return repsList.map(rep => {
-      if (rep.id === 'chee-cai') {
-        return {
-          ...rep,
-          targets: {
-            salesFigure: 30000,
-            preview: 25,     // Appointment
-            proposals: 120    // Proposal
-          }
-        };
-      }
-      if (rep.id === 'alif') {
-        return {
-          ...rep,
-          targets: {
-            salesFigure: 60000,
-            proposals: 12,    // Appointment
-            preview: 6        // Public Program
-          }
-        };
-      }
-      if (rep.id === 'xin-ying') {
-        return {
-          ...rep,
-          kpi: {
-            ...rep.kpi,
-            extraMetric: rep.kpi.extraMetric || [0, 0, 0, 0, 0]
-          },
-          targets: {
-            salesFigure: 30000,
-            preview: 1,       // Preview
-            proposals: 8,       // Proposal
-            extraMetric: 1    // Trainer Opportunity Day
-          }
-        };
-      }
-      return rep;
-    });
-  });
+  const repIdsRef = React.useRef<string[]>([]);
+  repIdsRef.current = teamMembers.map(m => m.id);
+
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (text: string) => {
+    setToast(text);
+    window.setTimeout(() => setToast(t => (t === text ? null : t)), 4000);
+  };
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [managementView, setManagementView] = useState<'dashboard' | 'team'>('dashboard');
 
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
     const saved = localStorage.getItem('next_events');
@@ -177,9 +225,11 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_NOTICES;
   });
 
-  // Active Representative Selection
+  // Active Representative Selection (reps can only ever open their own workspace)
   const [selectedRepId, setSelectedRepId] = useState<string | null>(() => {
-    return localStorage.getItem('next_selected_rep_id') || null;
+    const saved = localStorage.getItem('next_selected_rep_id') || null;
+    if (isRep) return currentMember.id;
+    return saved;
   });
 
   // Track if we came from operations or management to handle the Back button correctly
@@ -191,6 +241,7 @@ export default function App() {
   // Tab State ('operations' | 'management')
   const [currentTab, setCurrentTab] = useState<'operations' | 'management'>(() => {
     const saved = localStorage.getItem('next_current_tab');
+    if (!isManagement) return 'operations';
     return (saved as 'operations' | 'management') || 'operations';
   });
 
@@ -209,24 +260,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('next_current_tab', currentTab);
   }, [currentTab]);
-
-  // Password Authentication States
-  const [unlockedSections, setUnlockedSections] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('next_unlocked');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [pendingUnlock, setPendingUnlock] = useState<{ type: 'management' | 'rep'; id?: string; name: string } | null>(null);
-  const [unlockPasswordInput, setUnlockPasswordInput] = useState('');
-  const [unlockError, setUnlockError] = useState('');
-  const [showUnlockPassword, setShowUnlockPassword] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem('next_unlocked', JSON.stringify(unlockedSections));
-  }, [unlockedSections]);
 
   // Time & Quote Dynamic States
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -305,12 +338,6 @@ export default function App() {
           preview: [0, 0, 0, 0, 0]
         };
       }
-      if (rep.id === 'xin-ying' && !monthKpi.extraMetric) {
-        monthKpi = {
-          ...monthKpi,
-          extraMetric: [0, 0, 0, 0, 0]
-        };
-      }
       return { ...rep, kpi: monthKpi };
     }));
 
@@ -318,87 +345,28 @@ export default function App() {
     setRepresentatives(updatedReps);
     setSelectedMonth(newMonth);
     localStorage.setItem('next_selected_month', newMonth);
-    localStorage.setItem('next_reps', JSON.stringify(updatedReps));
 
     // Push updated representatives with targets / details to Firestore
     for (const r of updatedReps) {
       try {
-        await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
+        await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r), { merge: true });
       } catch (err) {
         console.error("Firestore rep update failed on month change:", err);
       }
     }
   };
 
-  // Real-time Firestore synchronizer for Reps
+  // Real-time Firestore synchronizer for rep workspaces (KPI + targets only)
   useEffect(() => {
     if (!db) return;
-    const unsubscribe = onSnapshot(collection(db, 'reps'), async (snapshot) => {
-      const firestoreReps: any[] = [];
+    const unsubscribe = onSnapshot(collection(db, 'reps'), (snapshot) => {
+      const next: Record<string, { kpi?: Representative['kpi']; targets?: Representative['targets'] }> = {};
       snapshot.forEach((docSnap) => {
-        firestoreReps.push(fromFirestoreRep({ ...docSnap.data(), id: docSnap.id }));
+        const data = fromFirestoreRep({ ...docSnap.data() });
+        next[docSnap.id] = { kpi: data.kpi, targets: data.targets };
       });
-
-      if (firestoreReps.length > 0) {
-        // If some representatives from the default list are missing in Firestore, seed them automatically
-        const missingReps = INITIAL_REPRESENTATIVES.filter(initRep => !firestoreReps.some(fr => fr.id === initRep.id));
-        if (missingReps.length > 0) {
-          for (const r of missingReps) {
-            try {
-              await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
-            } catch (err) {
-              console.error("Firestore seeding of missing rep failed:", err);
-            }
-          }
-          return;
-        }
-
-        const orderMap = { 'xin-ying': 0, 'chee-cai': 1, 'alif': 2, 'atiqa': 3, 'new-guy': 4 };
-        firestoreReps.sort((a, b) => {
-          const idxA = orderMap[a.id as keyof typeof orderMap] !== undefined ? orderMap[a.id as keyof typeof orderMap] : 99;
-          const idxB = orderMap[b.id as keyof typeof orderMap] !== undefined ? orderMap[b.id as keyof typeof orderMap] : 99;
-          return idxA - idxB;
-        });
-
-        // Resolve local month state sync
-        const storedKpis = localStorage.getItem('next_month_kpis_dict');
-        const dict = storedKpis ? JSON.parse(storedKpis) : {};
-        const mergedReps = firestoreReps.map(rep => {
-          const key = `${rep.id}_${selectedMonth}`;
-          // Always prefer the live Firestore KPI if available to ensure correct sync between phone and PC
-          let monthKpi = rep.kpi || dict[key];
-          if (rep.id === 'xin-ying' && (!monthKpi || !monthKpi.extraMetric)) {
-            monthKpi = {
-              ...(monthKpi || {}),
-              salesFigure: monthKpi?.salesFigure || [0, 0, 0, 0, 0],
-              proposals: monthKpi?.proposals || [0, 0, 0, 0, 0],
-              preview: monthKpi?.preview || [0, 0, 0, 0, 0],
-              extraMetric: [0, 0, 0, 0, 0]
-            };
-          }
-          if (monthKpi) {
-            dict[key] = monthKpi;
-          }
-          return { ...rep, kpi: monthKpi };
-        });
-
-        localStorage.setItem('next_month_kpis_dict', JSON.stringify(dict));
-        setRepresentatives(mergedReps);
-        localStorage.setItem('next_reps', JSON.stringify(mergedReps));
-      } else {
-        // No reps in Firestore yet, seed them from local storage / initial data
-        const saved = localStorage.getItem('next_reps');
-        let repsList = representatives;
-        if (saved) {
-          try { repsList = JSON.parse(saved); } catch {}
-        }
-        if (repsList && repsList.length > 0) {
-          for (const r of repsList) {
-            await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
-          }
-        }
-      }
-    });
+      setRepDocs(next);
+    }, (err) => console.error('Rep workspaces failed to load:', err));
     return () => unsubscribe();
   }, [selectedMonth]);
 
@@ -425,52 +393,22 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Real-time Firestore synchronizer for Notices & Passwords Configuration
+  // Real-time Firestore synchronizer for Notices
   useEffect(() => {
     if (!db) return;
-
-    // Migrate defaults if needed
-    const migrateConfig = async () => {
-      try {
-        const noticeSnap = await getDoc(doc(db, 'config', 'notices'));
-        if (!noticeSnap.exists()) {
-          await setDoc(doc(db, 'config', 'notices'), { notices });
-        }
-        const passSnap = await getDoc(doc(db, 'config', 'passwords'));
-        if (!passSnap.exists()) {
-          await setDoc(doc(db, 'config', 'passwords'), { passwords });
-        }
-      } catch (err) {
-        const errorMsg = String(err);
-        const isOffline = errorMsg.toLowerCase().includes('offline') || errorMsg.toLowerCase().includes('unavailable');
-        if (isOffline) {
-          console.warn("Config migration status: client is offline, using local storage cache fallbacks.");
-        } else {
-          console.warn("Config migration notice:", err);
-        }
+    const unsubscribe = onSnapshot(doc(db, 'config', 'notices'), async (docSnap) => {
+      const data = docSnap.data();
+      if (data && Array.isArray(data.notices)) {
+        setNotices(data.notices);
+        localStorage.setItem('next_notices', JSON.stringify(data.notices));
+      } else if (!docSnap.exists()) {
+        try { await setDoc(doc(db, 'config', 'notices'), { notices }); } catch { /* ignore */ }
       }
-    };
-    migrateConfig();
-
-    const unsubscribe = onSnapshot(collection(db, 'config'), (snapshot) => {
-      snapshot.forEach((docSnap) => {
-        if (docSnap.id === 'notices') {
-          const data = docSnap.data();
-          if (data && Array.isArray(data.notices)) {
-            setNotices(data.notices);
-            localStorage.setItem('next_notices', JSON.stringify(data.notices));
-          }
-        }
-        if (docSnap.id === 'passwords') {
-          const data = docSnap.data();
-          if (data && data.passwords) {
-            setPasswords(data.passwords);
-            localStorage.setItem('next_password_mapping', JSON.stringify(data.passwords));
-          }
-        }
-      });
-    });
-
+    }, (err) => console.warn('Notices failed to load:', err));
+    // The old login system stored passwords as readable text. Remove it for good.
+    if (isManagement) {
+      deleteDoc(doc(db, 'config', 'passwords')).catch(() => { /* already gone */ });
+    }
     return () => unsubscribe();
   }, []);
 
@@ -489,7 +427,7 @@ export default function App() {
         localStorage.setItem('next_pipelines_shared', JSON.stringify(pipes));
         
         // Sync individual rep keys
-        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+        const repIds = repIdsRef.current;
         repIds.forEach(id => {
           const ownedPipes = pipes.filter(p => p.ownerId === id || p.creatorId === id || p.taggedRepIds?.includes(id));
           localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
@@ -499,7 +437,7 @@ export default function App() {
         // Firestore genuinely has none left (all deleted) - reflect that truthfully
         // instead of leaving stale data in this sync state forever.
         localStorage.setItem('next_pipelines_shared', JSON.stringify([]));
-        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+        const repIds = repIdsRef.current;
         repIds.forEach(id => {
           localStorage.setItem(`next_pipelines_${id}`, JSON.stringify([]));
         });
@@ -514,14 +452,14 @@ export default function App() {
         ts.push({ ...docSnap.data(), id: docSnap.id });
       });
       if (ts.length > 0) {
-        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+        const repIds = repIdsRef.current;
         repIds.forEach(id => {
           const repTasks = ts.filter(t => t.ownerRepId === id);
           localStorage.setItem(`next_tasks_${id}`, JSON.stringify(repTasks));
         });
         setTasksSync(ts);
       } else {
-        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+        const repIds = repIdsRef.current;
         repIds.forEach(id => {
           localStorage.setItem(`next_tasks_${id}`, JSON.stringify([]));
         });
@@ -617,131 +555,25 @@ export default function App() {
 
   // Handlers for HomeDashboard interactions
   const handleSelectRep = (rep: Representative) => {
-    // If management is unlocked, we bypass individual rep passwords (administrative override)
-    if (unlockedSections.includes('management') || unlockedSections.includes(rep.id)) {
-      setRepSelectionSource('operations');
-      setSelectedRepId(rep.id);
-      setCurrentTab('operations');
-    } else {
-      setUnlockError('');
-      setUnlockPasswordInput('');
-      setShowUnlockPassword(false);
-      setPendingUnlock({ type: 'rep', id: rep.id, name: rep.name });
+    if (isRep && rep.id !== currentMember.id) {
+      showToast('You can open your own workspace only.');
+      return;
     }
+    setRepSelectionSource('operations');
+    setSelectedRepId(rep.id);
+    setCurrentTab('operations');
   };
 
   const handleSwitchTab = (tab: 'operations' | 'management') => {
-    if (tab === 'management') {
-      if (unlockedSections.includes('management')) {
-        setCurrentTab('management');
-        setSelectedRepId(null);
-      } else {
-        setUnlockError('');
-        setUnlockPasswordInput('');
-        setShowUnlockPassword(false);
-        setPendingUnlock({ type: 'management', name: 'Management Console' });
-      }
-    } else {
-      setCurrentTab('operations');
-      setSelectedRepId(null);
-    }
+    if (tab === 'management' && !isManagement) return;
+    setCurrentTab(tab);
+    setSelectedRepId(null);
   };
 
-  const handleVerifyPassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pendingUnlock) return;
-
-    const targetKey = pendingUnlock.type === 'management' ? 'management' : (pendingUnlock.id || '');
-    const correctPassword = getRequiredPassword(targetKey);
-
-    if (unlockPasswordInput === correctPassword) {
-      setUnlockedSections(prev => [...prev, targetKey]);
-      setUnlockPasswordInput('');
-      setUnlockError('');
-      setShowUnlockPassword(false);
-
-      if (pendingUnlock.type === 'management') {
-        setCurrentTab('management');
-        setSelectedRepId(null);
-      } else {
-        setRepSelectionSource('operations');
-        setSelectedRepId(pendingUnlock.id || null);
-        setCurrentTab('operations');
-      }
-      setPendingUnlock(null);
-    } else {
-      setUnlockError('Incorrect password. Please try again.');
-    }
-  };
-
-  const handleLockSection = (key: string) => {
-    setUnlockedSections(prev => prev.filter(k => k !== key));
-    if (key === 'management') {
-      setCurrentTab('operations');
-    } else if (selectedRepId === key) {
-      setSelectedRepId(null);
-    }
-  };
-
-  const handleAddRep = async (name: string) => {
-    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    const newRep: Representative = {
-      id,
-      name,
-      kpi: {
-        salesFigure: [0, 0, 0, 0, 0],
-        proposals: [0, 0, 0, 0, 0],
-        preview: [0, 0, 0, 0, 0]
-      },
-      targets: {
-        salesFigure: 30000,
-        proposals: 2,
-        preview: 1
-      }
-    };
-    setRepresentatives(prev => [...prev, newRep]);
-    try {
-      await setDoc(doc(db, 'reps', id), toFirestoreRep(newRep));
-    } catch (err) {
-      console.error("Firestore add rep failed:", err);
-    }
-  };
-
-  const handleUpdatePasswords = async (updatedPasswords: Record<string, string>) => {
-    setPasswords(updatedPasswords);
-    localStorage.setItem('next_password_mapping', JSON.stringify(updatedPasswords));
-    try {
-      await setDoc(doc(db, 'config', 'passwords'), { passwords: updatedPasswords });
-    } catch (err) {
-      console.error("Firestore passwords update failed:", err);
-    }
-  };
-
-  const handleUpdateRepsList = async (updatedReps: Representative[]) => {
-    const updatedIds = new Set(updatedReps.map(r => r.id));
-    const removedReps = representatives.filter(r => !updatedIds.has(r.id));
-
-    setRepresentatives(updatedReps);
-    localStorage.setItem('next_reps', JSON.stringify(updatedReps));
-
-    for (const r of updatedReps) {
-      try {
-        await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r));
-      } catch (err) {
-        console.error("Firestore update reps list failed:", err);
-      }
-    }
-
-    // Actually delete any rep that was removed from the roster — without this,
-    // their Firestore document stays behind and the real-time listener keeps
-    // pulling them right back into the list.
-    for (const r of removedReps) {
-      try {
-        await deleteDoc(doc(db, 'reps', r.id));
-      } catch (err) {
-        console.error("Firestore delete rep failed:", err);
-      }
-    }
+  const handleLogout = async () => {
+    localStorage.removeItem('next_selected_rep_id');
+    localStorage.removeItem('next_current_tab');
+    await signOut(auth);
   };
 
   const handleAddEvent = async (evt: Omit<CalendarEvent, 'id'>) => {
@@ -780,7 +612,6 @@ export default function App() {
   const getOverduePipelineNotices = (): string[] => {
     const alerts: string[] = [];
     representatives.forEach(rep => {
-      if (rep.id === 'atiqa') return;
 
       const saved = localStorage.getItem(`next_pipelines_${rep.id}`);
       let pipes: any[] = [];
@@ -836,7 +667,7 @@ export default function App() {
       const updatedRep = { ...targetRep, kpi: updatedKpi };
       setRepresentatives(prev => prev.map(rep => rep.id === repId ? updatedRep : rep));
       try {
-        await setDoc(doc(db, 'reps', repId), toFirestoreRep(updatedRep));
+        await setDoc(doc(db, 'reps', repId), toFirestoreRep(updatedRep), { merge: true });
         
         // Also update month_kpis collection to maintain historical month integrity across all devices
         const key = `${repId}_${selectedMonth}`;
@@ -853,7 +684,7 @@ export default function App() {
       const updatedRep = { ...targetRep, targets: updatedTargets };
       setRepresentatives(prev => prev.map(rep => rep.id === repId ? updatedRep : rep));
       try {
-        await setDoc(doc(db, 'reps', repId), toFirestoreRep(updatedRep));
+        await setDoc(doc(db, 'reps', repId), toFirestoreRep(updatedRep), { merge: true });
       } catch (err) {
         console.error("Firestore update rep targets failed:", err);
       }
@@ -922,7 +753,6 @@ export default function App() {
   // Predefined prompts for rapid query analysis
   const PRESET_PROMPTS = [
     { label: "Analyze Conversion", query: "Can you analyze the Call-to-Appointment and Appointment-to-Closing ratios for all representatives, and identify our top performing pipeline strategy?" },
-    { label: "Improve Atiqa performance", query: "Write a professional coaching outreach message for Atiqa, offering tips to scale her appointments to closed units from 8% to our 15% ideal standard." },
     { label: "Weekly Update Email", query: "Draft a high-energy weekly recap email for the Next Academy Sales Team to summarize our performance, congratulate top closures, and remind them of the upcoming team building at Happi Village." }
   ];
 
@@ -966,9 +796,9 @@ export default function App() {
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Operations Room
+                Team workspaces
               </button>
-              <button
+{isManagement && (              <button
                 onClick={() => handleSwitchTab('management')}
                 className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                   currentTab === 'management'
@@ -976,48 +806,43 @@ export default function App() {
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Management Console
-              </button>
+                Management
+              </button>)}
             </div>
           </div>
 
           {/* Active Session Badges & Real-time Dynamic Date & Time */}
           <div className="flex items-center gap-4 text-right">
-            {/* Active Session Badges */}
-            {unlockedSections.length > 0 && (
-              <div className="hidden md:flex items-center gap-2">
-                {unlockedSections.includes('management') && (
-                  <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-lg text-xs font-bold text-rose-700 shadow-xs">
-                    <Lock className="w-3 h-3 text-rose-500" />
-                    <span>Admin Active</span>
-                    <button 
-                      onClick={() => handleLockSection('management')}
-                      className="ml-1 text-rose-400 hover:text-rose-700 transition-colors uppercase text-[9px] font-black underline cursor-pointer"
-                      title="Lock Management Console"
-                    >
-                      Lock
-                    </button>
+            {/* Logged-in person + menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowUserMenu(v => !v)}
+                className="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-1.5 text-left hover:bg-surface"
+                aria-haspopup="menu"
+                aria-expanded={showUserMenu}
+              >
+                <UserCircle2 className="h-5 w-5 text-accent" />
+                <span className="hidden sm:block">
+                  <span className="block text-sm font-semibold leading-tight text-ink">{currentMember.name}</span>
+                  <span className="block text-xs leading-tight text-ink-soft">{ROLE_LABELS[currentMember.role]}</span>
+                </span>
+                <ChevronDown className="h-4 w-4 text-ink-soft" />
+              </button>
+              {showUserMenu && (
+                <div role="menu" className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-line bg-white py-1 text-left shadow-lg">
+                  <div className="border-b border-line px-4 py-2.5 sm:hidden">
+                    <p className="text-sm font-semibold text-ink">{currentMember.name}</p>
+                    <p className="text-xs text-ink-soft">{ROLE_LABELS[currentMember.role]}</p>
                   </div>
-                )}
-                {unlockedSections.filter(k => k !== 'management').map(repKey => {
-                  const rep = representatives.find(r => r.id === repKey);
-                  if (!rep) return null;
-                  return (
-                    <div key={repKey} className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-700 shadow-xs">
-                      <Unlock className="w-3 h-3 text-emerald-500 animate-pulse" />
-                      <span className="truncate max-w-[80px]">{rep.name} Active</span>
-                      <button 
-                        onClick={() => handleLockSection(repKey)}
-                        className="ml-1 text-emerald-400 hover:text-emerald-700 transition-colors uppercase text-[9px] font-black underline cursor-pointer"
-                        title={`Lock ${rep.name} Console`}
-                      >
-                        Lock
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                  <button role="menuitem" onClick={() => { setShowUserMenu(false); setShowChangePassword(true); }} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface">
+                    <KeyRound className="h-4 w-4 text-ink-soft" /> Change my password
+                  </button>
+                  <button role="menuitem" onClick={handleLogout} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-danger hover:bg-danger-soft">
+                    <LogOut className="h-4 w-4" /> Log out
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="space-y-0.5">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-mono">
@@ -1048,7 +873,7 @@ export default function App() {
       <main className="flex-1 py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         
         {/* Mobile Tab switcher (visible only on small screens) */}
-        <div className="flex md:hidden items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 mb-6">
+        {isManagement && <div className="flex md:hidden items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 mb-6">
           <button
             onClick={() => handleSwitchTab('operations')}
             className={`flex-1 text-center py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
@@ -1059,7 +884,7 @@ export default function App() {
           >
             Operations
           </button>
-          <button
+{isManagement && (          <button
             onClick={() => handleSwitchTab('management')}
             className={`flex-1 text-center py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
               currentTab === 'management'
@@ -1068,8 +893,8 @@ export default function App() {
             }`}
           >
             Management
-          </button>
-        </div>
+          </button>)}
+        </div>}
 
         <AnimatePresence mode="wait">
           {currentTab === 'management' ? (
@@ -1081,6 +906,24 @@ export default function App() {
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
+              <div className="mb-5 inline-flex rounded-xl border border-line bg-white p-1" role="tablist">
+                {([['dashboard', 'Dashboard'], ['team', 'Team']] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    role="tab"
+                    aria-selected={managementView === key}
+                    onClick={() => setManagementView(key)}
+                    className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
+                      managementView === key ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {managementView === 'team' ? (
+                <TeamManager currentMember={currentMember} teamMembers={teamMembers} />
+              ) : (
               <ManagementDashboard
                 reps={representatives}
                 onSelectRep={(rep) => {
@@ -1093,10 +936,9 @@ export default function App() {
                 onAskCopilot={(prompt) => handleSendChatMessage(prompt)}
                 selectedMonth={selectedMonth}
                 onMonthChange={handleMonthChange}
-                passwords={passwords}
-                onUpdatePasswords={handleUpdatePasswords}
-                onUpdateRepsList={handleUpdateRepsList}
+                onOpenTeam={() => setManagementView('team')}
               />
+              )}
             </motion.div>
           ) : !selectedRepId ? (
             /* A. HOME VIEW (Overview Dashboard) */
@@ -1112,17 +954,20 @@ export default function App() {
                 events={calendarEvents}
                 notices={[...notices, ...getOverduePipelineNotices()]}
                 onSelectRep={handleSelectRep}
-                onAddRep={handleAddRep}
+                onAddRep={() => {}}
                 onAddEvent={handleAddEvent}
                 onDeleteEvent={handleDeleteEvent}
                 onAddNotice={handleAddNotice}
                 onDeleteNotice={handleDeleteNotice}
-                isManagementUnlocked={unlockedSections.includes('management')}
+                isManagementUnlocked={false}
                 onRequestManagementUnlock={() => {
-                  setUnlockError('');
-                  setUnlockPasswordInput('');
-                  setShowUnlockPassword(false);
-                  setPendingUnlock({ type: 'management', name: 'Management Console' });
+                  if (isManagement) {
+                    setCurrentTab('management');
+                    setManagementView('team');
+                    setSelectedRepId(null);
+                  } else {
+                    showToast('Only Management can add people. Ask them to add new team members in Management → Team.');
+                  }
                 }}
                 selectedMonth={selectedMonth}
                 onMonthChange={handleMonthChange}
@@ -1307,113 +1152,29 @@ export default function App() {
 
       {/* 4. Humble static footer */}
       <footer className="bg-white border-t border-slate-200/80 py-4 mt-12 text-center text-[11px] text-slate-400 font-mono">
-        <p>NEXT ACADEMY OPERATIONS SUITE • POWERED BY GEMINI 3.5 FLASH • SECURE PREVIEW RUNTIME</p>
+        <p>NEXT Academy CRM</p>
       </footer>
 
-      {/* 5. Password Authentication Gate Modal */}
-      <AnimatePresence>
-        {pendingUnlock && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md"
-            id="password-auth-overlay"
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 15 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 15 }}
-              transition={{ type: 'spring', duration: 0.4 }}
-              className="bg-white border border-slate-200 shadow-2xl rounded-2xl max-w-md w-full p-6 sm:p-8 flex flex-col space-y-5 text-center overflow-hidden relative"
-              id="password-card"
-            >
-              {/* Top styled lock circle */}
-              <div className="mx-auto w-12 h-12 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 animate-bounce">
-                <Lock className="w-5 h-5" />
-              </div>
+      {/* 5. Change my password */}
+      {showChangePassword && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md rounded-2xl border border-line bg-white p-6 shadow-xl">
+            <h3 className="mb-4 text-lg font-bold text-ink">Change my password</h3>
+            <ChangePasswordForm
+              member={currentMember}
+              onDone={() => { setShowChangePassword(false); showToast('Your password has been changed.'); }}
+              onCancel={() => setShowChangePassword(false)}
+            />
+          </div>
+        </div>
+      )}
 
-              {/* Title & Info */}
-              <div className="space-y-1.5">
-                <h3 className="text-lg font-black text-slate-800 uppercase tracking-wide font-display">
-                  Unlock Access
-                </h3>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Enter password to unlock the <span className="font-extrabold text-blue-600">{pendingUnlock.name}</span>.
-                </p>
-              </div>
-
-              {/* Input Form */}
-              <form onSubmit={handleVerifyPassword} className="space-y-4">
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                    <Key className="w-4 h-4" />
-                  </span>
-                  <input
-                    type={showUnlockPassword ? "text" : "password"}
-                    value={unlockPasswordInput}
-                    onChange={(e) => {
-                      setUnlockPasswordInput(e.target.value);
-                      if (unlockError) setUnlockError('');
-                    }}
-                    placeholder="Enter lock password..."
-                    autoFocus
-                    required
-                    className="w-full pl-10 pr-10 py-3 text-xs border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 text-slate-800 font-medium tracking-wide shadow-xs"
-                    id="password-input-field"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowUnlockPassword(!showUnlockPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    {showUnlockPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-
-                {unlockError && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-xs font-semibold text-rose-500 text-left"
-                  >
-                    ⚠️ {unlockError}
-                  </motion.p>
-                )}
-
-                {/* Submit and Cancel Buttons */}
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPendingUnlock(null);
-                      setUnlockPasswordInput('');
-                      setUnlockError('');
-                      setShowUnlockPassword(false);
-                    }}
-                    className="flex-1 py-3 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-black uppercase tracking-wider transition-all cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-blue-500/15 cursor-pointer"
-                  >
-                    Unlock
-                  </button>
-                </div>
-              </form>
-
-
-
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* 6. Small confirmation messages */}
+      {toast && (
+        <div role="status" className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-ink px-4 py-3 text-sm font-medium text-white shadow-lg">
+          {toast}
+        </div>
+      )}
 
     </div>
   );
