@@ -1,15 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, Eye, EyeOff, Loader2, LogOut, ShieldCheck } from 'lucide-react';
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  reauthenticateWithCredential,
-  EmailAuthProvider,
-  updatePassword,
-} from 'firebase/auth';
-import { doc, writeBatch, updateDoc } from 'firebase/firestore';
-import { auth, db, buildLoginId, newMemberId, friendlyError } from '../lib/firebase';
+import { signInWithCustomToken, signOut } from 'firebase/auth';
+import { auth, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember, ROLE_LABELS } from '../types';
 import Logo from './Logo';
 
@@ -114,35 +106,13 @@ export function SetupScreen() {
     if (password !== confirm) return setError('The two passwords do not match.');
 
     setBusy(true);
-    const memberId = newMemberId();
-    const loginId = buildLoginId(memberId, 1);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, loginId, password);
-      const uid = cred.user.uid;
-      const member: TeamMember = {
-        id: memberId,
+      const { token, memberId } = await callServer<{ token: string; memberId: string }>('/api/auth/setup', {
         name: name.trim(),
-        role: 'management',
-        active: true,
-        loginId,
-        authUid: uid,
-        authVersion: 1,
-        mustChangePassword: false,
-        createdAt: Date.now(),
-        createdById: memberId,
-      };
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'team', memberId), member);
-      batch.set(doc(db, 'auth_map', uid), { memberId, role: 'management', active: true });
-      batch.set(doc(db, 'config', 'setup'), { initialized: true, at: Date.now(), byMemberId: memberId });
-      try {
-        await batch.commit();
-      } catch (dbErr) {
-        // Undo the half-created login so setup can be tried again cleanly.
-        try { await cred.user.delete(); } catch { /* ignore */ }
-        throw dbErr;
-      }
+        password,
+      });
       localStorage.setItem(LAST_NAME_KEY, memberId);
+      await signInWithCustomToken(auth, token);
     } catch (err) {
       setError(friendlyError(err));
       setBusy(false);
@@ -199,7 +169,8 @@ export function LoginForm({ members }: { members: TeamMember[] }) {
     if (!password) return setError('Enter your password.');
     setBusy(true);
     try {
-      await signInWithEmailAndPassword(auth, member.loginId, password);
+      const { token } = await callServer<{ token: string }>('/api/auth/login', { memberId: member.id, password });
+      await signInWithCustomToken(auth, token);
       passwordTypedAtLogin = password;
       localStorage.setItem(LAST_NAME_KEY, member.id);
     } catch (err) {
@@ -270,16 +241,9 @@ export function ChangePasswordForm({
     if (next.length < 6) return setError('New passwords need at least 6 characters.');
     if (next !== confirm) return setError('The two new passwords do not match.');
     if (next === currentPw) return setError('Choose a password that is different from the current one.');
-    const user = auth.currentUser;
-    if (!user) return setError('You are logged out. Log in again.');
-
     setBusy(true);
     try {
-      await reauthenticateWithCredential(user, EmailAuthProvider.credential(member.loginId, currentPw));
-      await updatePassword(user, next);
-      if (member.mustChangePassword) {
-        await updateDoc(doc(db, 'team', member.id), { mustChangePassword: false });
-      }
+      await callServer('/api/auth/change-password', { currentPassword: currentPw, newPassword: next }, true);
       passwordTypedAtLogin = '';
       onDone();
     } catch (err) {
@@ -350,7 +314,7 @@ export function NoAccessScreen() {
     >
       <div className="mb-5 flex items-center gap-3 rounded-lg bg-surface px-3.5 py-3 text-sm text-ink-soft">
         <ShieldCheck className="h-5 w-5 shrink-0 text-accent" />
-        Your account may have been removed or had its password reset.
+        Your access may have been removed by Management.
       </div>
       <button type="button" onClick={() => signOut(auth)} className={primaryBtn}>
         <LogOut className="h-4 w-4" />

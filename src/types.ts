@@ -329,17 +329,14 @@ export interface AdminRecord {
 export type TeamRole = 'rep' | 'admin' | 'management';
 
 export interface TeamMember {
-  id: string;
+  id: string;               // also this person's login ID (never shown)
   name: string;
   role: TeamRole;
   active: boolean;
-  loginId: string;          // hidden internal login, never shown to people
-  authUid: string;          // the login account currently linked to this person
-  authVersion: number;      // goes up each time management resets the password
   mustChangePassword: boolean;
   createdAt?: number;
   createdById?: string;
-  removedAt?: number;
+  removedAt?: number | null;
 }
 
 export const ROLE_LABELS: Record<TeamRole, string> = {

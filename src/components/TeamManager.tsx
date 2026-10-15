@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Eye, EyeOff, KeyRound, Loader2, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
-import { collection, doc, getDocs, query, where, writeBatch } from 'firebase/firestore';
-import { db, buildLoginId, newMemberId, createLoginForSomeoneElse, friendlyError } from '../lib/firebase';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember, TeamRole, ROLE_LABELS } from '../types';
 
 interface TeamManagerProps {
@@ -17,8 +17,6 @@ const primaryBtn =
 const secondaryBtn =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-50';
 
-const DEFAULT_TARGETS = { salesFigure: 30000, proposals: 2, preview: 1 };
-const EMPTY_KPI = { salesFigure: [0, 0, 0, 0, 0], proposals: [0, 0, 0, 0, 0], preview: [0, 0, 0, 0, 0] };
 
 const ROLE_HELP: Record<TeamRole, string> = {
   rep: 'Works on their own clients and deals.',
@@ -51,6 +49,18 @@ function TempPasswordField({ value, onChange, id }: { value: string; onChange: (
   );
 }
 
+function MustChangeBox({ checked, onChange, id }: { checked: boolean; onChange: (v: boolean) => void; id: string }) {
+  return (
+    <label htmlFor={id} className="mt-3 flex cursor-pointer items-start gap-2.5 text-sm text-ink">
+      <input id={id} type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#0E6E62]" />
+      <span>
+        Ask them to choose their own password at next login
+        <span className="block text-ink-soft">Untick to keep the password you set here.</span>
+      </span>
+    </label>
+  );
+}
+
 function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" role="dialog" aria-modal="true">
@@ -77,6 +87,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
   const [newName, setNewName] = useState('');
   const [newRole, setNewRole] = useState<TeamRole>('rep');
   const [newPassword, setNewPassword] = useState('');
+  const [newMustChange, setNewMustChange] = useState(true);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState('');
 
@@ -85,6 +96,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
 
   const [dialog, setDialog] = useState<DialogState>(null);
   const [dialogPassword, setDialogPassword] = useState('');
+  const [dialogMustChange, setDialogMustChange] = useState(true);
   const [transferTo, setTransferTo] = useState('');
   const [dialogError, setDialogError] = useState('');
   const [dialogBusy, setDialogBusy] = useState(false);
@@ -108,6 +120,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
   const closeDialog = () => {
     setDialog(null);
     setDialogPassword('');
+    setDialogMustChange(true);
     setTransferTo('');
     setDialogError('');
     setDialogBusy(false);
@@ -120,35 +133,21 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     const name = newName.trim();
     if (!name) return setAddError('Enter a name.');
     if (nameTaken(name)) return setAddError(`Someone called "${name}" is already on the team. Add a surname or initial so people can tell them apart at login.`);
-    if (newPassword.length < 6) return setAddError('The temporary password needs at least 6 characters.');
+    if (newPassword.length < 6) return setAddError('Passwords need at least 6 characters.');
 
     setAdding(true);
     try {
-      const memberId = newMemberId();
-      const loginId = buildLoginId(memberId, 1);
-      const uid = await createLoginForSomeoneElse(loginId, newPassword);
-      const member: TeamMember = {
-        id: memberId,
-        name,
-        role: newRole,
-        active: true,
-        loginId,
-        authUid: uid,
-        authVersion: 1,
-        mustChangePassword: true,
-        createdAt: Date.now(),
-        createdById: currentMember.id,
-      };
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'team', memberId), member);
-      batch.set(doc(db, 'auth_map', uid), { memberId, role: newRole, active: true });
-      // Workspace for KPI and targets (no name stored here; names live only in Team).
-      batch.set(doc(db, 'reps', memberId), { kpi: EMPTY_KPI, targets: DEFAULT_TARGETS }, { merge: true });
-      await batch.commit();
-      flash('ok', `${name} has been added. Give them the temporary password; they will be asked to set their own when they first log in.`);
+      await callServer('/api/team/add', { name, role: newRole, password: newPassword, mustChangePassword: newMustChange }, true);
+      flash(
+        'ok',
+        newMustChange
+          ? `${name} has been added. Give them the password; they'll be asked to set their own when they first log in.`
+          : `${name} has been added. Give them the password you set.`
+      );
       setNewName('');
       setNewPassword('');
       setNewRole('rep');
+      setNewMustChange(true);
     } catch (err) {
       setAddError(friendlyError(err));
     } finally {
@@ -165,10 +164,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     }
     setBusyId(member.id);
     try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, 'team', member.id), { role });
-      batch.set(doc(db, 'auth_map', member.authUid), { memberId: member.id, role, active: true });
-      await batch.commit();
+      await callServer('/api/team/role', { memberId: member.id, role }, true);
       flash('ok', `${member.name} is now ${ROLE_LABELS[role]}.`);
     } catch (err) {
       flash('error', friendlyError(err));
@@ -182,31 +178,22 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     if (!dialog || (dialog.kind !== 'reset' && dialog.kind !== 'reactivate')) return;
     const member = dialog.member;
     setDialogError('');
-    if (dialogPassword.length < 6) return setDialogError('The temporary password needs at least 6 characters.');
+    if (dialogPassword.length < 6) return setDialogError('Passwords need at least 6 characters.');
     if (dialog.kind === 'reactivate' && nameTaken(member.name, member.id)) {
       return setDialogError(`Someone called "${member.name}" is already active. Rename one of them first.`);
     }
     setDialogBusy(true);
     try {
-      const version = (member.authVersion || 1) + 1;
-      const loginId = buildLoginId(member.id, version);
-      const uid = await createLoginForSomeoneElse(loginId, dialogPassword);
-      const batch = writeBatch(db);
-      if (member.authUid) batch.delete(doc(db, 'auth_map', member.authUid));
-      batch.set(doc(db, 'auth_map', uid), { memberId: member.id, role: member.role, active: true });
-      batch.update(doc(db, 'team', member.id), {
-        authUid: uid,
-        loginId,
-        authVersion: version,
-        mustChangePassword: true,
-        active: true,
-      });
-      await batch.commit();
+      await callServer(
+        dialog.kind === 'reset' ? '/api/team/password' : '/api/team/reactivate',
+        { memberId: member.id, password: dialogPassword, mustChangePassword: dialogMustChange },
+        true
+      );
       flash(
         'ok',
         dialog.kind === 'reset'
-          ? `${member.name}'s password has been reset. Give them the temporary password; their old password no longer works.`
-          : `${member.name} can log in again with the temporary password.`
+          ? `${member.name}'s password has been changed. Their old password no longer works.`
+          : `${member.name} can log in again with the password you set.`
       );
       closeDialog();
     } catch (err) {
@@ -243,13 +230,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     if (openDeals.length > 0 && !receiver) return setDialogError('Choose who takes over the open deals.');
     setDialogBusy(true);
     try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, 'team', member.id), { active: false, removedAt: Date.now() });
-      if (member.authUid) batch.delete(doc(db, 'auth_map', member.authUid));
-      if (receiver) {
-        openDeals.forEach(d => batch.update(doc(db, 'pipelines', d.id), { ownerId: receiver.id, ownerName: receiver.name }));
-      }
-      await batch.commit();
+      await callServer('/api/team/remove', { memberId: member.id, transferToId: receiver?.id || '' }, true);
       flash(
         'ok',
         receiver
@@ -325,7 +306,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                     {!isMe && (
                       <>
                         <button type="button" className={secondaryBtn} onClick={() => setDialog({ kind: 'reset', member: m })}>
-                          <KeyRound className="h-3.5 w-3.5" /> Reset password
+                          <KeyRound className="h-3.5 w-3.5" /> Set password
                         </button>
                         <button
                           type="button"
@@ -394,9 +375,9 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
               </div>
             </div>
             <div>
-              <label htmlFor="tm-pw" className={labelClass}>Temporary password</label>
+              <label htmlFor="tm-pw" className={labelClass}>Password</label>
               <TempPasswordField id="tm-pw" value={newPassword} onChange={v => { setNewPassword(v); setAddError(''); }} />
-              <p className="mt-1.5 text-sm text-ink-soft">They'll be asked to set their own password the first time they log in.</p>
+              <MustChangeBox id="tm-must" checked={newMustChange} onChange={setNewMustChange} />
             </div>
             {addError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{addError}</p>}
             <button type="submit" disabled={adding} className={`${primaryBtn} w-full`}>
@@ -409,20 +390,21 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
 
       {/* Dialogs */}
       {dialog && (dialog.kind === 'reset' || dialog.kind === 'reactivate') && (
-        <Dialog title={dialog.kind === 'reset' ? `Reset ${dialog.member.name}'s password` : `Give ${dialog.member.name} access again`} onClose={closeDialog}>
+        <Dialog title={dialog.kind === 'reset' ? `Set a new password for ${dialog.member.name}` : `Give ${dialog.member.name} access again`} onClose={closeDialog}>
           <p className="mb-4 text-[15px] leading-relaxed text-ink-soft">
             {dialog.kind === 'reset'
-              ? 'Their current password will stop working straight away. Set a temporary one and pass it to them; they will choose their own at next login.'
-              : 'They will be able to log in again as ' + ROLE_LABELS[dialog.member.role] + '. Set a temporary password and pass it to them.'}
+              ? 'Their current password stops working straight away and they are logged out on every device. Pass the new password to them.'
+              : 'They will be able to log in again as ' + ROLE_LABELS[dialog.member.role] + '. Set a password and pass it to them.'}
           </p>
-          <label htmlFor="dlg-pw" className={labelClass}>Temporary password</label>
+          <label htmlFor="dlg-pw" className={labelClass}>New password</label>
           <TempPasswordField id="dlg-pw" value={dialogPassword} onChange={v => { setDialogPassword(v); setDialogError(''); }} />
+          <MustChangeBox id="dlg-must" checked={dialogMustChange} onChange={setDialogMustChange} />
           {dialogError && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{dialogError}</p>}
           <div className="mt-5 flex justify-end gap-2">
             <button type="button" className={secondaryBtn} onClick={closeDialog}>Cancel</button>
             <button type="button" className={primaryBtn} disabled={dialogBusy} onClick={handleNewLogin}>
               {dialogBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-              {dialog.kind === 'reset' ? 'Reset password' : 'Give access'}
+              {dialog.kind === 'reset' ? 'Save password' : 'Give access'}
             </button>
           </div>
         </Dialog>

@@ -1,7 +1,8 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 1)
-// - The Team list is readable by the login screen, but only Management can change it.
+// NEXT Academy CRM database rules (Phase 1, server-checked logins)
+// - The Team list is readable by the login screen; only the CRM server changes it.
+// - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
 // - The old plain-text password store can no longer be read by anyone.
 service cloud.firestore {
@@ -19,43 +20,29 @@ service cloud.firestore {
     function isManagement() {
       return isMember() && get(myLinkPath()).data.role == 'management';
     }
-    function setupDone() {
-      return exists(/databases/$(database)/documents/config/setup);
-    }
 
-    // People: names and roles (shown on the login screen)
+    // People: names and roles (shown on the login screen).
+    // Only the CRM server changes these, after checking Management's login.
     match /team/{memberId} {
       allow read: if true;
-      allow create: if isManagement()
-        || (signedIn() && !setupDone()
-            && request.resource.data.role == 'management'
-            && request.resource.data.authUid == request.auth.uid);
-      // Management can edit anyone; a person may only mark their own
-      // temporary password as changed.
-      allow update: if isManagement()
-        || (isMember()
-            && resource.data.authUid == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword'])
-            && request.resource.data.mustChangePassword == false);
-      allow delete: if isManagement();
+      allow write: if false;
     }
 
-    // Links each login to a team member and role (used by these rules)
+    // Links each login to a team member and role (used by these rules).
     match /auth_map/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isManagement());
-      allow create: if isManagement()
-        || (signedIn() && !setupDone()
-            && request.auth.uid == uid
-            && request.resource.data.role == 'management');
-      allow update, delete: if isManagement();
+      allow write: if false;
+    }
+
+    // Scrambled passwords: only the CRM server may touch these.
+    match /secrets/{memberId} {
+      allow read, write: if false;
     }
 
     // Settings
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create: if (docId == 'setup' && signedIn() && !setupDone()
-                         && existsAfter(/databases/$(database)/documents/auth_map/$(request.auth.uid)))
-                    || (isMember() && docId != 'passwords' && docId != 'setup');
+      allow create: if isMember() && docId != 'passwords' && docId != 'setup';
       allow update: if isMember() && docId != 'passwords' && docId != 'setup';
       allow delete: if (docId == 'passwords' && isManagement())
                     || (isMember() && docId != 'passwords' && docId != 'setup');

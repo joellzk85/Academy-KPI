@@ -3,9 +3,15 @@ import path from "path";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
+import { registerAuthRoutes } from "./serverAuth";
 
 // Load environment variables
 dotenv.config();
+
+// Never let one failed background request take the whole CRM offline.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled background error (server kept running):", reason);
+});
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -33,6 +39,9 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
+
+  // Login and team management (passwords are checked here, on the server)
+  registerAuthRoutes(app);
 
   // API Routes
   app.get("/api/health", (req, res) => {
