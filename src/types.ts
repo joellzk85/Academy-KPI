@@ -73,6 +73,8 @@ export interface Representative {
   id: string;
   name: string;
   email?: string;
+  role?: 'rep' | 'admin' | 'management';
+  kpiTemplate?: string;   // KPI template chosen by Management (see src/lib/kpi.ts)
   kpi: {
     salesFigure: number[];
     proposals: number[];

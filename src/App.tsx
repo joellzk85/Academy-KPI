@@ -34,9 +34,11 @@ import HomeDashboard from './components/HomeDashboard';
 import RepDetailDashboard, { getInitialPipelinesForRep } from './components/RepDetailDashboard';
 import ManagementDashboard from './components/ManagementDashboard';
 import TeamManager from './components/TeamManager';
+import DataTools from './components/DataTools';
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, ChatMessage, TeamMember, ROLE_LABELS } from './types';
+import { metricsFor } from './lib/kpi';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -176,31 +178,20 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const isManagement = currentMember.role === 'management';
   const isRep = currentMember.role === 'rep';
 
-  // Rep workspace data (KPI + targets) keyed by team member id.
-  const [repDocs, setRepDocs] = useState<Record<string, { kpi?: Representative['kpi']; targets?: Representative['targets'] }>>({});
+  // Per-person KPI settings (template + targets) keyed by team member id.
+  const [repDocs, setRepDocs] = useState<Record<string, { targets?: Representative['targets']; kpiTemplate?: string }>>({});
+  // Typed-in weekly KPI numbers, one document per person per month: "<memberId>_<MMM-YY>".
+  const [monthKpiDocs, setMonthKpiDocs] = useState<Record<string, Representative['kpi']>>({});
 
-  // People with a sales workspace: active reps and admins. Names come from Team.
-  const representatives: Representative[] = React.useMemo(() => {
-    return teamMembers
-      .filter(m => m.active && (m.role === 'rep' || m.role === 'admin'))
-      .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'rep' ? -1 : 1))
-      .map(m => ({
-        id: m.id,
-        name: m.name,
-        kpi: repDocs[m.id]?.kpi || emptyKpi(),
-        targets: repDocs[m.id]?.targets || DEFAULT_TARGETS
-      }));
-  }, [teamMembers, repDocs]);
-
-  const setRepresentatives = (updater: Representative[] | ((prev: Representative[]) => Representative[])) => {
-    const next = typeof updater === 'function' ? (updater as any)(representatives) : updater;
-    setRepDocs(prev => {
-      const copy = { ...prev };
-      next.forEach((r: Representative) => {
-        copy[r.id] = { kpi: r.kpi, targets: r.targets };
-      });
-      return copy;
+  // Automatic KPIs (counted from deals) are never typed in, so any old typed
+  // numbers for them are ignored.
+  const withoutAutoKpis = (person: { id: string; role?: string; kpiTemplate?: string; targets?: any }, kpi: Representative['kpi'] | undefined) => {
+    const base: any = JSON.parse(JSON.stringify(kpi || emptyKpi()));
+    metricsFor(person).forEach(m => {
+      if (m.auto) base[m.key] = [0, 0, 0, 0, 0];
+      else if (!Array.isArray(base[m.key])) base[m.key] = [0, 0, 0, 0, 0];
     });
+    return base as Representative['kpi'];
   };
 
   const repIdsRef = React.useRef<string[]>([]);
@@ -213,7 +204,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   };
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [managementView, setManagementView] = useState<'dashboard' | 'team'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'team' | 'data'>('dashboard');
 
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
     const saved = localStorage.getItem('next_events');
@@ -300,75 +291,45 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     return 'JUL-26';
   });
 
-  // Handle selected month changing
-  const handleMonthChange = async (newMonth: string) => {
-    // 1. Save current representative KPIs for the old month
-    const storedKpis = localStorage.getItem('next_month_kpis_dict');
-    const dict = storedKpis ? JSON.parse(storedKpis) : {};
-    
-    for (const rep of representatives) {
-      const key = `${rep.id}_${selectedMonth}`;
-      dict[key] = rep.kpi;
-      try {
-        await setDoc(doc(db, 'month_kpis', key), { kpi: sanitizeKpiForFirestore(rep.kpi), repId: rep.id, month: selectedMonth });
-      } catch (err) {
-        console.error("Firestore save month KPI failed:", err);
-      }
-    }
-    localStorage.setItem('next_month_kpis_dict', JSON.stringify(dict));
-
-    // 2. Load KPIs for the new month or set default empty KPI
-    const updatedReps = await Promise.all(representatives.map(async (rep) => {
-      const key = `${rep.id}_${newMonth}`;
-      let monthKpi = dict[key];
-
-      try {
-        const docSnap = await getDoc(doc(db, 'month_kpis', key));
-        if (docSnap.exists()) {
-          monthKpi = hydrateKpi(docSnap.data().kpi);
-        }
-      } catch (err) {
-        console.error("Firestore getDoc month KPI failed:", err);
-      }
-
-      if (!monthKpi) {
-        monthKpi = {
-          salesFigure: [0, 0, 0, 0, 0],
-          proposals: [0, 0, 0, 0, 0],
-          preview: [0, 0, 0, 0, 0]
+  // People with a sales workspace: active reps and admins. Names come from Team,
+  // KPI settings from their rep document, typed-in numbers from this month's KPI document.
+  const representatives: Representative[] = React.useMemo(() => {
+    return teamMembers
+      .filter(m => m.active && (m.role === 'rep' || m.role === 'admin'))
+      .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'rep' ? -1 : 1))
+      .map(m => {
+        const settings = repDocs[m.id] || {};
+        const person = { id: m.id, role: m.role, kpiTemplate: settings.kpiTemplate, targets: settings.targets || DEFAULT_TARGETS };
+        return {
+          id: m.id,
+          name: m.name,
+          role: m.role,
+          kpiTemplate: settings.kpiTemplate,
+          targets: settings.targets || DEFAULT_TARGETS,
+          kpi: withoutAutoKpis(person, monthKpiDocs[`${m.id}_${selectedMonth}`])
         };
-      }
-      return { ...rep, kpi: monthKpi };
-    }));
+      });
+  }, [teamMembers, repDocs, monthKpiDocs, selectedMonth]);
 
-    // 3. Save states
-    setRepresentatives(updatedReps);
+  // Switching month only changes what is shown; nothing is copied or overwritten.
+  const handleMonthChange = async (newMonth: string) => {
     setSelectedMonth(newMonth);
     localStorage.setItem('next_selected_month', newMonth);
-
-    // Push updated representatives with targets / details to Firestore
-    for (const r of updatedReps) {
-      try {
-        await setDoc(doc(db, 'reps', r.id), toFirestoreRep(r), { merge: true });
-      } catch (err) {
-        console.error("Firestore rep update failed on month change:", err);
-      }
-    }
   };
 
   // Real-time Firestore synchronizer for rep workspaces (KPI + targets only)
   useEffect(() => {
     if (!db) return;
     const unsubscribe = onSnapshot(collection(db, 'reps'), (snapshot) => {
-      const next: Record<string, { kpi?: Representative['kpi']; targets?: Representative['targets'] }> = {};
+      const next: Record<string, { targets?: Representative['targets']; kpiTemplate?: string }> = {};
       snapshot.forEach((docSnap) => {
-        const data = fromFirestoreRep({ ...docSnap.data() });
-        next[docSnap.id] = { kpi: data.kpi, targets: data.targets };
+        const data: any = docSnap.data();
+        next[docSnap.id] = { targets: data.targets, kpiTemplate: data.kpiTemplate };
       });
       setRepDocs(next);
     }, (err) => console.error('Rep workspaces failed to load:', err));
     return () => unsubscribe();
-  }, [selectedMonth]);
+  }, []);
 
   // Real-time Firestore synchronizer for Calendar Events
   useEffect(() => {
@@ -499,23 +460,14 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       }
     });
 
-    // 5. Month KPIs Real-time Sync
+    // 5. Month KPIs Real-time Sync (typed-in weekly numbers per person per month)
     const unsubscribeMonthKpis = onSnapshot(collection(db, 'month_kpis'), (snapshot) => {
-      const storedKpis = localStorage.getItem('next_month_kpis_dict');
-      const dict = storedKpis ? JSON.parse(storedKpis) : {};
-      let changed = false;
+      const next: Record<string, any> = {};
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data && data.kpi) {
-          const key = docSnap.id;
-          dict[key] = hydrateKpi(data.kpi);
-          changed = true;
-        }
+        if (data && data.kpi) next[docSnap.id] = hydrateKpi(data.kpi);
       });
-      if (changed) {
-        localStorage.setItem('next_month_kpis_dict', JSON.stringify(dict));
-        setMonthKpisSync(Object.values(dict));
-      }
+      setMonthKpiDocs(next);
     });
 
     return () => {
@@ -527,15 +479,17 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     };
   }, []);
 
-  // Sync back local representative & KPI state changes to local storage for caching
+  // Year-to-date figures on Home and Management read this cache.
   useEffect(() => {
-    const storedKpis = localStorage.getItem('next_month_kpis_dict');
-    const dict = storedKpis ? JSON.parse(storedKpis) : {};
-    representatives.forEach(rep => {
-      dict[`${rep.id}_${selectedMonth}`] = rep.kpi;
+    const dict: Record<string, any> = {};
+    const people = teamMembers.map(m => ({ id: m.id, role: m.role, kpiTemplate: repDocs[m.id]?.kpiTemplate, targets: repDocs[m.id]?.targets }));
+    Object.entries(monthKpiDocs).forEach(([key, kpi]) => {
+      const person = people.find(p => key.startsWith(p.id + '_'));
+      dict[key] = person ? withoutAutoKpis(person, kpi as any) : kpi;
     });
     localStorage.setItem('next_month_kpis_dict', JSON.stringify(dict));
-  }, [representatives, selectedMonth]);
+    setMonthKpisSync(Object.values(dict));
+  }, [monthKpiDocs, repDocs, teamMembers]);
 
   // Real-time Date & Time updates
   useEffect(() => {
@@ -660,34 +614,25 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     }
   };
 
-  // Handlers for DetailDashboard metrics modification
+  // Saves typed-in weekly KPI numbers for one person for the selected month.
   const handleUpdateRepKpi = async (repId: string, updatedKpi: Representative['kpi']) => {
-    const targetRep = representatives.find(rep => rep.id === repId);
-    if (targetRep) {
-      const updatedRep = { ...targetRep, kpi: updatedKpi };
-      setRepresentatives(prev => prev.map(rep => rep.id === repId ? updatedRep : rep));
-      try {
-        await setDoc(doc(db, 'reps', repId), toFirestoreRep(updatedRep), { merge: true });
-        
-        // Also update month_kpis collection to maintain historical month integrity across all devices
-        const key = `${repId}_${selectedMonth}`;
-        await setDoc(doc(db, 'month_kpis', key), { kpi: sanitizeKpiForFirestore(updatedKpi), repId, month: selectedMonth });
-      } catch (err) {
-        console.error("Firestore update rep KPI failed:", err);
-      }
+    const key = `${repId}_${selectedMonth}`;
+    setMonthKpiDocs(prev => ({ ...prev, [key]: updatedKpi }));
+    try {
+      await setDoc(doc(db, 'month_kpis', key), { kpi: sanitizeKpiForFirestore(updatedKpi), repId, month: selectedMonth });
+    } catch (err) {
+      console.error("Firestore update rep KPI failed:", err);
+      showToast('Could not save KPI numbers. You can only edit your own KPIs.');
     }
   };
 
   const handleUpdateRepTargets = async (repId: string, updatedTargets: Representative['targets']) => {
-    const targetRep = representatives.find(rep => rep.id === repId);
-    if (targetRep) {
-      const updatedRep = { ...targetRep, targets: updatedTargets };
-      setRepresentatives(prev => prev.map(rep => rep.id === repId ? updatedRep : rep));
-      try {
-        await setDoc(doc(db, 'reps', repId), toFirestoreRep(updatedRep), { merge: true });
-      } catch (err) {
-        console.error("Firestore update rep targets failed:", err);
-      }
+    setRepDocs(prev => ({ ...prev, [repId]: { ...(prev[repId] || {}), targets: updatedTargets } }));
+    try {
+      await setDoc(doc(db, 'reps', repId), { targets: updatedTargets }, { merge: true });
+    } catch (err) {
+      console.error("Firestore update rep targets failed:", err);
+      showToast('Could not save targets. Only Management can change targets.');
     }
   };
 
@@ -907,7 +852,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team', 'Team']] as const).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -923,6 +868,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               </div>
               {managementView === 'team' ? (
                 <TeamManager currentMember={currentMember} teamMembers={teamMembers} />
+              ) : managementView === 'data' ? (
+                <DataTools teamMembers={teamMembers} />
               ) : (
               <ManagementDashboard
                 reps={representatives}
@@ -937,6 +884,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 selectedMonth={selectedMonth}
                 onMonthChange={handleMonthChange}
                 onOpenTeam={() => setManagementView('team')}
+                pipelinesSync={pipelinesSync}
               />
               )}
             </motion.div>
@@ -1003,6 +951,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   onAskCopilot={(prompt) => handleSendChatMessage(prompt)}
                   selectedMonth={selectedMonth}
                   onMonthChange={handleMonthChange}
+                  viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                 />
               ) : (
                 <div className="text-center py-12 bg-white rounded-xl border border-slate-200">

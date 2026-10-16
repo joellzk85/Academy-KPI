@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 1, server-checked logins)
+// NEXT Academy CRM database rules (Phase 2A)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -19,6 +19,12 @@ service cloud.firestore {
     }
     function isManagement() {
       return isMember() && get(myLinkPath()).data.role == 'management';
+    }
+    function isStaff() {
+      return isMember() && get(myLinkPath()).data.role in ['admin', 'management'];
+    }
+    function ownerOf(data) {
+      return data.get('ownerId', data.get('creatorId', ''));
     }
 
     // People: names and roles (shown on the login screen).
@@ -48,12 +54,39 @@ service cloud.firestore {
                     || (isMember() && docId != 'passwords' && docId != 'setup');
     }
 
-    // All CRM work data: team members only
+    // Deals: reps change only their own; anyone asked to help may tick "done".
+    match /pipelines/{dealId} {
+      allow read: if isMember();
+      allow create: if isStaff()
+        || (isMember() && request.resource.data.ownerId == request.auth.uid);
+      allow update: if isStaff()
+        || (isMember() && ownerOf(resource.data) == request.auth.uid)
+        || (isMember()
+            && request.auth.uid in resource.data.get('taggedRepIds', [])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completedTags']));
+      allow delete: if isStaff() || (isMember() && ownerOf(resource.data) == request.auth.uid);
+    }
+
+    // KPI settings per person (template and targets): Management only.
+    match /reps/{memberId} {
+      allow read: if isMember();
+      allow write: if isManagement();
+    }
+
+    // Typed-in weekly KPI numbers: your own, or Admin/Management for anyone.
+    match /month_kpis/{key} {
+      allow read: if isMember();
+      allow create, update: if isStaff()
+        || (isMember() && request.resource.data.repId == request.auth.uid);
+      allow delete: if isStaff();
+    }
+
+    // All other CRM work data: team members only
     match /{coll}/{docId=**} {
       allow read, write: if isMember() && coll in [
         'admin_records', 'appointments', 'client_payments', 'clients',
-        'course_outlines', 'events', 'links', 'month_kpis', 'payments',
-        'pipelines', 'project_pls', 'quotations', 'reps', 'tasks',
+        'course_outlines', 'events', 'links', 'payments',
+        'project_pls', 'quotations', 'tasks',
         'trainers_directory', 'venues_directory'
       ];
     }

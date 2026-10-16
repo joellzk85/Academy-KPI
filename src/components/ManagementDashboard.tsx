@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Representative } from '../types';
 import { getRepMetrics } from '../initialData';
+import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
 import { getDeletedPipelineIds } from './RepDetailDashboard';
 import { 
   TrendingUp, 
@@ -252,77 +253,36 @@ export default function ManagementDashboard({
     return allMonths.slice(0, selIndex + 1).filter(m => m.endsWith(`-${yearSuffix}`));
   };
 
-  const getRepPipelineSalesForMonth = (repId: string, targetMonth: string): number => {
-    try {
-      return allPipelines
-        .filter((p: any) => {
-          if (p.repId !== repId) return false;
-          if (p.status !== 'Won') return false;
-          const dateStr = p.proposalSentDate || p.requestDate || '';
+  const allDeals: any[] = pipelinesSync && pipelinesSync.length > 0 ? pipelinesSync : allPipelines;
 
-          // Month filter
-          const monthMap: Record<string, string> = {
-            'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-            'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-          };
-          const parts = targetMonth.split('-');
-          if (parts.length === 2) {
-            const m = monthMap[parts[0]];
-            const y = '20' + parts[1];
-            if (m && y) {
-              const prefix = `${y}-${m}`;
-              if (!dateStr.startsWith(prefix)) return false;
-            }
-          }
-          return true;
-        })
-        .reduce((sum: number, p: any) => sum + (parseFloat(p.proposalValue) || 0), 0);
-    } catch {
-      return 0;
-    }
+  // Labels and targets for one KPI slot, taken from the person's KPI template.
+  const metricOf = (rep: Representative, key: string) => getRepMetrics(rep).find(m => m.key === key);
+  const metricValueText = (rep: Representative, key: string, value: number) => {
+    const m = metricOf(rep, key);
+    if (!m) return '—';
+    return m.isRM ? `RM ${Math.round(value).toLocaleString()}` : `${value} ${m.label}`;
+  };
+  const metricTargetText = (rep: Representative, key: string) => {
+    const m = metricOf(rep, key);
+    if (!m) return '';
+    return `Target: ${m.isRM ? 'RM ' + m.targetVal.toLocaleString() : m.targetVal} (${m.targetLabel})`;
+  };
+
+  // Sales count in the month a deal was WON, for the deal's owner only.
+  const getRepPipelineSalesForMonth = (repId: string, targetMonth: string): number => {
+    return countAuto('won', allDeals, repId, targetMonth);
   };
 
   // Tracks Proposal-Sent activity and Appointment-ticked activity from the shared
   // pipeline log for a given rep/month, so KPI scores on the management side stay
   // in sync with what each rep's own KPI page already counts.
   const getRepPipelineActivityForMonth = (repId: string, targetMonth: string, type: 'proposals' | 'appointments'): number => {
-    try {
-      return allPipelines.filter((p: any) => {
-        const ownerId = p.ownerId || p.creatorId || p.repId;
-        if (ownerId !== repId) return false;
-
-        const monthMap: Record<string, string> = {
-          'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-          'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-        };
-        const parts = targetMonth.split('-');
-        const checkMonth = (dateStr: string) => {
-          if (parts.length !== 2) return true;
-          const m = monthMap[parts[0]];
-          const y = '20' + parts[1];
-          if (!m || !y) return true;
-          return dateStr.startsWith(`${y}-${m}`);
-        };
-
-        if (type === 'proposals') {
-          const dateStr = p.proposalSentDate || '';
-          if (!dateStr || dateStr.toLowerCase() === 'not yet') return false;
-          return checkMonth(dateStr);
-        } else {
-          if (!p.isAppointment && !p.appointmentTicked) return false;
-          const dateStr = p.requestDate || '';
-          if (!dateStr) return false;
-          return checkMonth(dateStr);
-        }
-      }).length;
-    } catch {
-      return 0;
-    }
+    return countAuto(type, allDeals, repId, targetMonth);
   };
 
   // Math metrics
   const activeMonthSales = reps.reduce((sum, r) => {
-    if (r.id === 'atiqa') return sum; // Atiqa uses performance ratings (1-5) instead of RM sales!
+    if (!salesIsFromDeals(r)) return sum;
     const manualSales = (r.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0);
     return sum + manualSales + getRepPipelineSalesForMonth(r.id, selectedMonth);
   }, 0);
@@ -333,7 +293,7 @@ export default function ManagementDashboard({
     const ytdMonthsList = getYTDMonths(selectedMonth);
 
     return reps.reduce((sum, r) => {
-      if (r.id === 'atiqa') return sum;
+      if (!salesIsFromDeals(r)) return sum;
       let repYTDSum = 0;
       ytdMonthsList.forEach(m => {
         let monthKpi = kpisDict[`${r.id}_${m}`];
@@ -349,12 +309,12 @@ export default function ManagementDashboard({
   })();
 
   const numReps = reps.length;
-  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals')), 0);
-  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments')), 0);
+  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + autoValueFor(r, 'proposals', allDeals, selectedMonth), 0);
+  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + autoValueFor(r, 'preview', allDeals, selectedMonth), 0);
 
   // Targets totals
   const totalSalesTargetTeam = reps.reduce((sum, r) => {
-    if (r.id === 'atiqa') return sum;
+    if (!salesIsFromDeals(r)) return sum;
     return sum + (r.targets?.salesFigure ?? 30000);
   }, 0);
   const totalProposalsTargetTeam = reps.length * 10; // 2 per week * 5 weeks = 10 per rep
@@ -362,11 +322,11 @@ export default function ManagementDashboard({
 
   // Calculated overall score per rep helper
   const getRepScores = (rep: Representative) => {
-    const pipelineSales = rep.id === 'atiqa' ? 0 : getRepPipelineSalesForMonth(rep.id, selectedMonth);
+    const pipelineSales = (salesIsFromDeals(rep) ? getRepPipelineSalesForMonth(rep.id, selectedMonth) : 0);
     const totalSales = (rep.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0) + pipelineSales;
-    const pipelineProposals = rep.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(rep.id, selectedMonth, 'proposals');
+    const pipelineProposals = autoValueFor(rep, 'proposals', allDeals, selectedMonth);
     const totalProposals = (rep.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + pipelineProposals;
-    const pipelinePreviews = rep.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(rep.id, selectedMonth, 'appointments');
+    const pipelinePreviews = autoValueFor(rep, 'preview', allDeals, selectedMonth);
     const totalPreview = (rep.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + pipelinePreviews;
 
     const metricsList = getRepMetrics(rep);
@@ -427,23 +387,12 @@ export default function ManagementDashboard({
   );
 
   // Targets Edit handler
-  const handleStartEditingTargets = (rep: Representative) => {
-    setActiveTab('targets');
-    setEditingTargetsId(rep.id);
-    setTargetSales((rep.targets?.salesFigure ?? (rep.id === 'atiqa' ? 25 : 30000)).toString());
-    setTargetProposals((rep.targets?.proposals ?? (rep.id === 'atiqa' ? 1 : 2)).toString());
-    setTargetPreview((rep.targets?.preview ?? (rep.id === 'atiqa' ? 20 : 1)).toString());
+  // KPI templates and targets are now set per person in Management → Team.
+  const handleStartEditingTargets = (_rep: Representative) => {
+    onOpenTeam();
   };
-
   const handleSaveTargets = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingTargetsId) return;
-    const isAtiqa = editingTargetsId === 'atiqa';
-    onUpdateRepTargets(editingTargetsId, {
-      salesFigure: parseFloat(targetSales) || (isAtiqa ? 25 : 30000),
-      proposals: parseInt(targetProposals) || (isAtiqa ? 1 : 2),
-      preview: parseInt(targetPreview) || (isAtiqa ? 20 : 1)
-    });
     setEditingTargetsId(null);
   };
 
@@ -885,7 +834,7 @@ export default function ManagementDashboard({
                         <td className="p-4">
                           <div className="space-y-1">
                             <p className="font-extrabold font-mono text-slate-800">
-                              {rep.id === 'atiqa' ? `${metrics.totalSales} Rating` : `RM ${metrics.totalSales.toLocaleString()}`}
+                              {metricValueText(rep, 'salesFigure', metrics.totalSales)}
                             </p>
                             <div className="w-24 bg-slate-100 h-1 rounded-full overflow-hidden">
                               <div
@@ -894,7 +843,7 @@ export default function ManagementDashboard({
                               />
                             </div>
                             <p className="text-[8px] font-bold text-slate-400 uppercase font-mono">
-                              {rep.id === 'atiqa' ? `Target: 25 (5/wk)` : `Target: RM ${(rep.targets?.salesFigure ?? 30000).toLocaleString()}`}
+                              {metricTargetText(rep, 'salesFigure')}
                             </p>
                           </div>
                         </td>
@@ -902,20 +851,20 @@ export default function ManagementDashboard({
                         {/* Proposals Sent */}
                         <td className="p-4 text-center">
                           <p className="font-black font-mono text-slate-800">
-                            {rep.id === 'atiqa' ? `${metrics.totalProposals} Claims` : `${metrics.totalProposals} / 10`}
+                            {metricValueText(rep, 'proposals', metrics.totalProposals)}
                           </p>
                           <span className="text-[9px] text-slate-400 block font-mono">
-                            {rep.id === 'atiqa' ? `${metrics.proposalsScore}% of quota` : `${metrics.proposalsScore}% of weekly quota`}
+                            {`${metrics.proposalsScore}% of target`}
                           </span>
                         </td>
 
                         {/* Previews Achieved */}
                         <td className="p-4 text-center">
                           <p className="font-black font-mono text-slate-800">
-                            {rep.id === 'atiqa' ? `${metrics.totalPreview} / 20` : `${metrics.totalPreview} / ${rep.targets?.preview ?? 1}`}
+                            {metricValueText(rep, 'preview', metrics.totalPreview)}
                           </p>
                           <span className="text-[9px] text-slate-400 block font-mono">
-                            {rep.id === 'atiqa' ? `${metrics.previewScore}% of target` : `${metrics.previewScore}% month limit`}
+                            {`${metrics.previewScore}% of target`}
                           </span>
                         </td>
 
@@ -1124,11 +1073,11 @@ export default function ManagementDashboard({
               </div>
 
               <button
-                onClick={() => setShowBulkModal(true)}
+                onClick={onOpenTeam}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
               >
                 <Sliders className="w-3.5 h-3.5" />
-                Team Bulk Targets Setup
+                Set KPIs and targets in Team
               </button>
             </div>
 
@@ -1211,24 +1160,14 @@ export default function ManagementDashboard({
                       </div>
 
                       <div className="space-y-2 text-xs">
-                        <div className="flex justify-between items-center text-slate-500">
-                          <span>Sales Target (RM):</span>
-                          <span className="font-mono font-black text-slate-800">
-                            RM {(rep.targets?.salesFigure ?? 30000).toLocaleString()}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-slate-500">
-                          <span>Weekly Proposals:</span>
-                          <span className="font-mono font-black text-slate-800">
-                            {rep.targets?.proposals ?? 2} proposals / wk
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-slate-500">
-                          <span>Monthly Previews:</span>
-                          <span className="font-mono font-black text-slate-800">
-                            {rep.targets?.preview ?? 1} previews
-                          </span>
-                        </div>
+                        {getRepMetrics(rep).map(m => (
+                          <div key={m.key} className="flex justify-between items-center gap-3 text-slate-500">
+                            <span>{m.label}{m.auto ? ' (from deals)' : ''}</span>
+                            <span className="font-mono font-black text-slate-800 text-right">
+                              {m.isRM ? `RM ${m.targetVal.toLocaleString()}` : m.targetVal} <span className="font-normal text-slate-400">{m.targetLabel}</span>
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     </div>
 

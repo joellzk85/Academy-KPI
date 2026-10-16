@@ -142,6 +142,8 @@ export const MOTIVATIONAL_QUOTES: string[] = [
   "The secret of getting ahead is getting started."
 ];
 
+import { metricsFor } from './lib/kpi';
+
 export interface RepMetricConfig {
   key: 'salesFigure' | 'proposals' | 'preview' | 'extraMetric';
   label: string;
@@ -149,43 +151,11 @@ export interface RepMetricConfig {
   targetVal: number;
   isRM: boolean;
   weight: number;
+  auto?: 'won' | 'proposals' | 'appointments' | null;
 }
 
+// Each person's KPIs now come from the KPI template Management picks for
+// them in the Team tab (see src/lib/kpi.ts). No names are written in code.
 export function getRepMetrics(rep: Representative): RepMetricConfig[] {
-  if (rep.id === 'chee-cai') {
-    return [
-      { key: 'salesFigure', label: 'Closing RM', targetLabel: 'RM total / month', targetVal: rep.targets.salesFigure ?? 30000, isRM: true, weight: 0.60 },
-      { key: 'preview', label: 'Appointment', targetLabel: 'appointments / month', targetVal: rep.targets.preview ?? 25, isRM: false, weight: 0.20 },
-      { key: 'proposals', label: 'Proposal', targetLabel: 'proposals / month', targetVal: rep.targets.proposals ?? 120, isRM: false, weight: 0.20 }
-    ];
-  }
-  if (rep.id === 'alif') {
-    return [
-      { key: 'salesFigure', label: 'Closing RM', targetLabel: 'RM total / month', targetVal: rep.targets.salesFigure ?? 60000, isRM: true, weight: 0.60 },
-      { key: 'proposals', label: 'Appointment', targetLabel: 'appointments / month', targetVal: rep.targets.proposals ?? 12, isRM: false, weight: 0.20 },
-      { key: 'preview', label: 'Public Program', targetLabel: 'pax / month', targetVal: rep.targets.preview ?? 6, isRM: false, weight: 0.20 }
-    ];
-  }
-  if (rep.id === 'xin-ying') {
-    return [
-      { key: 'salesFigure', label: 'Closing RM', targetLabel: 'RM total / month', targetVal: rep.targets.salesFigure ?? 30000, isRM: true, weight: 0.50 },
-      { key: 'preview', label: 'Preview', targetLabel: 'previews / month', targetVal: rep.targets.preview ?? 1, isRM: false, weight: 0.17 },
-      { key: 'proposals', label: 'Proposal', targetLabel: 'proposals / month', targetVal: rep.targets.proposals ?? 8, isRM: false, weight: 0.17 },
-      { key: 'extraMetric', label: 'Trainer Opportunity Day', targetLabel: 'events / month', targetVal: rep.targets.extraMetric ?? 1, isRM: false, weight: 0.16 }
-    ];
-  }
-  if (rep.id === 'atiqa') {
-    return [
-      { key: 'salesFigure', label: 'Perf. Rating (1-5)', targetLabel: '5 / week (25 total)', targetVal: 25, isRM: false, weight: 0.50 },
-      { key: 'proposals', label: 'Claim Submission', targetLabel: '1 / month', targetVal: 1, isRM: false, weight: 0.40 },
-      { key: 'preview', label: 'Venue Database', targetLabel: '20 / month', targetVal: 20, isRM: false, weight: 0.10 }
-    ];
-  }
-  // Default/Fallback
-  return [
-    { key: 'salesFigure', label: 'Sales Figure (RM)', targetLabel: 'RM total / month', targetVal: rep.targets.salesFigure ?? 30000, isRM: true, weight: 0.60 },
-    { key: 'proposals', label: 'Proposals', targetLabel: '2 / week', targetVal: rep.targets.proposals ?? 2, isRM: false, weight: 0.20 },
-    { key: 'preview', label: 'Preview', targetLabel: '/ month', targetVal: rep.targets.preview ?? 1, isRM: false, weight: 0.20 }
-  ];
+  return metricsFor(rep as any);
 }
-

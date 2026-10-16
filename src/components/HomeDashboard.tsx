@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Representative, CalendarEvent } from '../types';
 import { getRepMetrics } from '../initialData';
+import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
 import { Plus, Calendar, ChevronLeft, ChevronRight, Edit3, Trash2, Megaphone, HelpCircle, Check, Users, RefreshCw } from 'lucide-react';
 import { initAuth, googleSignIn, googleSignOut, syncEventToGoogleCalendar } from '../lib/googleCalendar';
 
@@ -588,42 +589,14 @@ export default function HomeDashboard({
     return allMonths.slice(0, selIndex + 1).filter(m => m.endsWith(`-${yearSuffix}`));
   };
 
+  const allDeals: any[] = (() => {
+    if (pipelinesSync && pipelinesSync.length > 0) return pipelinesSync;
+    try { return JSON.parse(localStorage.getItem('next_pipelines_shared') || '[]'); } catch { return []; }
+  })();
+
+  // Sales count in the month a deal was WON, for the deal's owner only.
   const getRepPipelineSalesForMonth = (repId: string, targetMonth: string): number => {
-    try {
-      let pipes: any[] = [];
-      if (pipelinesSync && pipelinesSync.length > 0) {
-        pipes = pipelinesSync.filter((p: any) => p.ownerId === repId || p.creatorId === repId || p.taggedRepIds?.includes(repId));
-      } else {
-        const saved = localStorage.getItem(`next_pipelines_${repId}`);
-        if (saved) {
-          pipes = JSON.parse(saved);
-        }
-      }
-      return pipes
-        .filter((p: any) => {
-          if (p.status !== 'Won') return false;
-          const dateStr = p.proposalSentDate || p.requestDate || '';
-          
-          // Month filter
-          const monthMap: Record<string, string> = {
-            'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-            'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-          };
-          const parts = targetMonth.split('-');
-          if (parts.length === 2) {
-            const m = monthMap[parts[0]];
-            const y = '20' + parts[1];
-            if (m && y) {
-              const prefix = `${y}-${m}`;
-              if (!dateStr.startsWith(prefix)) return false;
-            }
-          }
-          return true;
-        })
-        .reduce((sum: number, p: any) => sum + (parseFloat(p.proposalValue) || 0), 0);
-    } catch {
-      return 0;
-    }
+    return countAuto('won', allDeals, repId, targetMonth);
   };
 
   const getRepPipelineSales = (repId: string): number => {
@@ -634,48 +607,12 @@ export default function HomeDashboard({
   // pipeline log for a given rep/month, mirroring the same logic used on each
   // rep's own KPI page, so the team-wide average score here doesn't undercount.
   const getRepPipelineActivityForMonth = (repId: string, targetMonth: string, type: 'proposals' | 'appointments'): number => {
-    try {
-      let pipes: any[] = [];
-      if (pipelinesSync && pipelinesSync.length > 0) {
-        pipes = pipelinesSync.filter((p: any) => (p.ownerId || p.creatorId) === repId);
-      } else {
-        const saved = localStorage.getItem(`next_pipelines_${repId}`);
-        if (saved) pipes = JSON.parse(saved);
-      }
-
-      const monthMap: Record<string, string> = {
-        'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-        'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-      };
-      const parts = targetMonth.split('-');
-      const checkMonth = (dateStr: string) => {
-        if (parts.length !== 2) return true;
-        const m = monthMap[parts[0]];
-        const y = '20' + parts[1];
-        if (!m || !y) return true;
-        return dateStr.startsWith(`${y}-${m}`);
-      };
-
-      return pipes.filter((p: any) => {
-        if (type === 'proposals') {
-          const dateStr = p.proposalSentDate || '';
-          if (!dateStr || dateStr.toLowerCase() === 'not yet') return false;
-          return checkMonth(dateStr);
-        } else {
-          if (!p.isAppointment && !p.appointmentTicked) return false;
-          const dateStr = p.requestDate || '';
-          if (!dateStr) return false;
-          return checkMonth(dateStr);
-        }
-      }).length;
-    } catch {
-      return 0;
-    }
+    return countAuto(type, allDeals, repId, targetMonth);
   };
 
   // Math metrics
   const activeMonthSales = reps.reduce((sum, r) => {
-    if (r.id === 'atiqa') return sum; // Atiqa uses performance ratings (1-5) instead of RM sales!
+    if (!salesIsFromDeals(r)) return sum;
     const manualSales = (r.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0);
     return sum + manualSales + getRepPipelineSales(r.id);
   }, 0);
@@ -686,7 +623,7 @@ export default function HomeDashboard({
     const ytdMonthsList = getYTDMonths(selectedMonth);
 
     return reps.reduce((sum, r) => {
-      if (r.id === 'atiqa') return sum;
+      if (!salesIsFromDeals(r)) return sum;
       let repYTDSum = 0;
       ytdMonthsList.forEach(m => {
         let monthKpi = kpisDict[`${r.id}_${m}`];
@@ -704,14 +641,14 @@ export default function HomeDashboard({
   const filteredYTDSales = totalSalesToDateYTD;
   
   const numReps = reps.length;
-  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals')), 0);
-  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments')), 0);
+  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + autoValueFor(r, 'proposals', allDeals, selectedMonth), 0);
+  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + autoValueFor(r, 'preview', allDeals, selectedMonth), 0);
 
   const avgTeamScore = numReps === 0 ? 0 : Math.round(reps.reduce((acc, r) => {
-    const pipelineSales = r.id === 'atiqa' ? 0 : getRepPipelineSales(r.id);
+    const pipelineSales = (salesIsFromDeals(r) ? getRepPipelineSales(r.id) : 0);
     const salesTotal = (r.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0) + pipelineSales;
-    const proposalsTotal = (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'proposals'));
-    const previewTotal = (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + (r.id === 'atiqa' ? 0 : getRepPipelineActivityForMonth(r.id, selectedMonth, 'appointments'));
+    const proposalsTotal = (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + autoValueFor(r, 'proposals', allDeals, selectedMonth);
+    const previewTotal = (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + autoValueFor(r, 'preview', allDeals, selectedMonth);
 
     const metricsList = getRepMetrics(r);
     const overall = metricsList.reduce((sum, metric) => {
@@ -734,7 +671,7 @@ export default function HomeDashboard({
 
   // Month and YTD sales targets / progress calculations
   const monthSalesTarget = reps.reduce((sum, r) => {
-    if (r.id === 'atiqa') return sum;
+    if (!salesIsFromDeals(r)) return sum;
     return sum + (r.targets?.salesFigure ?? 30000);
   }, 0);
   const monthSalesProgressPct = monthSalesTarget > 0 ? Math.min(100, Math.round((activeMonthSales / monthSalesTarget) * 100)) : 0;
@@ -1253,10 +1190,7 @@ export default function HomeDashboard({
                 <p className={`text-[10px] font-extrabold mt-1 uppercase tracking-wider font-sans leading-tight ${
                   shouldFlash ? 'text-white/90' : 'text-blue-600'
                 }`}>
-                  {rep.id === 'xin-ying' ? 'Super Manager' :
-                   rep.id === 'chee-cai' ? 'Unstoppable Lead Trainer & Sales' :
-                   rep.id === 'alif' ? 'Rising Sales' :
-                   rep.id === 'atiqa' ? 'Amazing Admin' : 'Representative'}
+                  {rep.role === 'admin' ? 'Admin' : 'Sales rep'}
                 </p>
                 <p className={`text-[9px] mt-1 uppercase tracking-wider font-mono ${
                   shouldFlash ? 'text-white/80 font-black' : 'text-slate-400'

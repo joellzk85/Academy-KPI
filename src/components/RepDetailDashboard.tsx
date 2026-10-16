@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Representative, GoogleLinks, Client } from '../types';
 import { getRepMetrics } from '../initialData';
+import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
 import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3, CheckSquare, Square, FolderCheck, Search, Layers, CheckCheck } from 'lucide-react';
 import QuotationGenerator from './QuotationGenerator';
 import CourseOutlineGenerator from './CourseOutlineGenerator';
@@ -10,6 +11,7 @@ import TrainerManager from './TrainerManager';
 import VenueManager from './VenueManager';
 import AppointmentManager from './AppointmentManager';
 import ClientPaymentManager from './ClientPaymentManager';
+import DealsBoard from './DealsBoard';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -21,6 +23,7 @@ interface RepDetailDashboardProps {
   onAskCopilot: (prompt: string) => void;
   selectedMonth: string;
   onMonthChange: (month: string) => void;
+  viewer?: { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 }
 
 type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments' | 'client_payments';
@@ -353,7 +356,8 @@ export default function RepDetailDashboard({
   onUpdateRepKpi,
   onAskCopilot,
   selectedMonth,
-  onMonthChange
+  onMonthChange,
+  viewer
 }: RepDetailDashboardProps) {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>(() => {
     const saved = localStorage.getItem(`next_active_subtab_${rep.id}`);
@@ -493,31 +497,23 @@ export default function RepDetailDashboard({
     if (day <= 28) return 3;
     return 4;
   }); // 0-indexed: Week 1 is 0
-  const [commissionAmount, setCommissionAmount] = useState('');
-  const [commissionProposals, setCommissionProposals] = useState('');
-  const [commissionPreview, setCommissionPreview] = useState('');
+  // Quick key-in for the KPIs that are typed in (automatic ones come from deals).
+  const [commissionValues, setCommissionValues] = useState<Record<string, string>>({});
+  const manualMetrics = getRepMetrics(rep).filter(m => !m.auto);
 
   const handleCommissionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const updatedKpi = JSON.parse(JSON.stringify(rep.kpi));
-    
-    // Key in Commission allows logging sales and updating proposals or previews
-    const amountVal = parseFloat(commissionAmount) || 0;
-    const propsVal = parseInt(commissionProposals) || 0;
-    const previewVal = parseInt(commissionPreview) || 0;
-
-    updatedKpi.salesFigure[selectedWeek] += amountVal;
-    if (propsVal > 0) updatedKpi.proposals[selectedWeek] += propsVal;
-    if (previewVal > 0) updatedKpi.preview[selectedWeek] += previewVal;
-
+    manualMetrics.forEach(m => {
+      let val = parseFloat(commissionValues[m.key] || '') || 0;
+      if (/rating/i.test(m.label)) val = Math.max(0, Math.min(5, val));
+      if (!Array.isArray(updatedKpi[m.key])) updatedKpi[m.key] = [0, 0, 0, 0, 0];
+      if (val) updatedKpi[m.key][selectedWeek] = (updatedKpi[m.key][selectedWeek] || 0) + val;
+    });
     onUpdateRepKpi(rep.id, updatedKpi);
     setEditKpi(updatedKpi);
     setShowCommissionModal(false);
-    
-    // Reset fields
-    setCommissionAmount('');
-    setCommissionProposals('');
-    setCommissionPreview('');
+    setCommissionValues({});
   };
 
   // Payment states for Raise Payment Form (Ying) with backwards compatibility and unified shared key
@@ -531,7 +527,7 @@ export default function RepDetailDashboard({
       }
     }
     // Backward compatibility: try to load from individual reps and merge
-    const repsList = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+    const repsList = reps.map(r => r.id);
     let merged: any[] = [];
     repsList.forEach(id => {
       const saved = localStorage.getItem(`next_payments_${id}`);
@@ -541,7 +537,7 @@ export default function RepDetailDashboard({
           const mapped = itemsList.map((p: any) => ({
             ...p,
             repId: p.repId || id,
-            repName: p.repName || (id === 'xin-ying' ? 'Xin Ying' : (id === 'atiqa' ? 'Atiqa' : id)),
+            repName: p.repName || reps.find(r => r.id === id)?.name || id,
             status: p.status || 'Approved'
           }));
           merged = [...merged, ...mapped];
@@ -1270,7 +1266,7 @@ export default function RepDetailDashboard({
     }
     
     const combined: any[] = [];
-    const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+    const repIds = reps.map(r => r.id);
     repIds.forEach(id => {
       let repPipes: any[] = [];
       const localSaved = localStorage.getItem(`next_pipelines_${id}`);
@@ -1449,7 +1445,7 @@ export default function RepDetailDashboard({
         localStorage.setItem('next_pipelines_shared', JSON.stringify(firestorePipes));
         
         // Sync back to individual keys
-        const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+        const repIds = reps.map(r => r.id);
         repIds.forEach(id => {
           const ownedPipes = firestorePipes.filter(p => p.ownerId === id || p.creatorId === id || p.taggedRepIds?.includes(id));
           localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
@@ -1777,7 +1773,7 @@ export default function RepDetailDashboard({
     }
 
     // Sync back to individual keys
-    const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
+    const repIds = reps.map(r => r.id);
     repIds.forEach(id => {
       const ownedPipes = updated.filter(p => p.ownerId === id || p.creatorId === id || p.taggedRepIds?.includes(id));
       localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
@@ -1809,14 +1805,7 @@ export default function RepDetailDashboard({
     if (!taskDetail.trim() || !taskDateline) return;
 
     const targetRepId = taskAssignedToId || rep.id;
-    const repNameMap: Record<string, string> = {
-      'xin-ying': 'Xin Ying',
-      'chee-cai': 'Chee Cai',
-      'alif': 'Alif',
-      'atiqa': 'Atiqa',
-      'new-guy': 'New Guy'
-    };
-    const targetRepName = repNameMap[targetRepId] || targetRepId;
+    const targetRepName = reps.find(r => r.id === targetRepId)?.name || targetRepId;
 
     const newTask: any = {
       id: `task_${Date.now()}`,
@@ -2013,120 +2002,27 @@ export default function RepDetailDashboard({
     // This maintains clean, real-time sync between the collaborative pipelines log and individual KPI panels.
   };
 
+  // Automatic KPIs, counted from deals owned by this person.
+  // Sales count in the week/month the deal was WON.
   const getPipelineSalesForWeek = (weekIdx: number): number => {
-    return pipelines
-      .filter(p => {
-        if (p.status !== 'Won') return false;
-        
-        // Filter by the current representative's ID as the OWNER
-        const currentOwnerId = p.ownerId || p.creatorId || rep.id;
-        if (currentOwnerId !== rep.id) return false;
-
-        const dateStr = p.proposalSentDate || p.requestDate || '';
-        
-        // Month filter
-        const monthMap: Record<string, string> = {
-          'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-          'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-        };
-        const parts = selectedMonth.split('-');
-        if (parts.length === 2) {
-          const m = monthMap[parts[0]];
-          const y = '20' + parts[1];
-          if (m && y) {
-            const prefix = `${y}-${m}`;
-            if (!dateStr.startsWith(prefix)) return false;
-          }
-        }
-        
-        return getWeekFromDate(dateStr) === weekIdx;
-      })
-      .reduce((sum, p) => sum + (parseFloat(p.proposalValue) || 0), 0);
+    return salesIsFromDeals(rep) ? countAuto('won', pipelines, rep.id, selectedMonth, weekIdx) : 0;
   };
-
-  const getPipelineProposalsForWeek = (weekIdx: number): number => {
-    if (rep.id === 'atiqa') return 0;
-    return pipelines
-      .filter(p => {
-        // Filter by the current representative's ID as the OWNER
-        const currentOwnerId = p.ownerId || p.creatorId || rep.id;
-        if (currentOwnerId !== rep.id) return false;
-
-        const dateStr = p.proposalSentDate || '';
-        if (!dateStr || dateStr.toLowerCase() === 'not yet') return false;
-        
-        // Month filter
-        const monthMap: Record<string, string> = {
-          'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-          'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-        };
-        const parts = selectedMonth.split('-');
-        if (parts.length === 2) {
-          const m = monthMap[parts[0]];
-          const y = '20' + parts[1];
-          if (m && y) {
-            const prefix = `${y}-${m}`;
-            if (!dateStr.startsWith(prefix)) return false;
-          }
-        }
-        
-        return getWeekFromDate(dateStr) === weekIdx;
-      }).length;
-  };
-
-  const getPipelineAppointmentsForWeek = (weekIdx: number): number => {
-    if (rep.id === 'atiqa') return 0;
-    return pipelines
-      .filter(p => {
-        // Filter by the current representative's ID as the OWNER
-        const currentOwnerId = p.ownerId || p.creatorId || rep.id;
-        if (currentOwnerId !== rep.id) return false;
-
-        // Ticked/marked as an appointment
-        if (!p.isAppointment && !p.appointmentTicked) return false;
-
-        const dateStr = p.requestDate || '';
-        if (!dateStr) return false;
-        
-        // Month filter
-        const monthMap: Record<string, string> = {
-          'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-          'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-        };
-        const parts = selectedMonth.split('-');
-        if (parts.length === 2) {
-          const m = monthMap[parts[0]];
-          const y = '20' + parts[1];
-          if (m && y) {
-            const prefix = `${y}-${m}`;
-            if (!dateStr.startsWith(prefix)) return false;
-          }
-        }
-        
-        return getWeekFromDate(dateStr) === weekIdx;
-      }).length;
-  };
-
+  const getPipelineProposalsForWeek = (weekIdx: number): number => countAuto('proposals', pipelines, rep.id, selectedMonth, weekIdx);
+  const getPipelineAppointmentsForWeek = (weekIdx: number): number => countAuto('appointments', pipelines, rep.id, selectedMonth, weekIdx);
   const getPipelineMetricForWeek = (key: string, weekIdx: number): number => {
-    if (rep.id === 'atiqa') return 0;
-    const label = getMetricLabel(key);
-    if (label === 'Appointment' || label === 'Preview') {
-      return getPipelineAppointmentsForWeek(weekIdx);
-    }
-    if (label === 'Proposal') {
-      return getPipelineProposalsForWeek(weekIdx);
-    }
-    return 0;
+    if (key === 'salesFigure') return getPipelineSalesForWeek(weekIdx);
+    return autoValueFor(rep, key as any, pipelines, selectedMonth, weekIdx);
   };
+  const isRatingMetric = (key: string) => /rating/i.test(metricsList.find(m => m.key === key)?.label || '');
 
   // Get totals
-  const totalSalesFromPipeline = rep.id === 'atiqa' ? 0 : [0, 1, 2, 3, 4].reduce((sum, wk) => sum + getPipelineSalesForWeek(wk), 0);
+  const totalSalesFromPipeline = [0, 1, 2, 3, 4].reduce((sum, wk) => sum + getPipelineSalesForWeek(wk), 0);
   const totalSales = sumArray(rep.kpi?.salesFigure ?? []) + totalSalesFromPipeline;
   
-  const totalProposalsFromPipeline = rep.id === 'atiqa' ? 0 : [0, 1, 2, 3, 4].reduce((sum, wk) => sum + getPipelineMetricForWeek('proposals', wk), 0);
+  const totalProposalsFromPipeline = [0, 1, 2, 3, 4].reduce((sum, wk) => sum + getPipelineMetricForWeek('proposals', wk), 0);
   const totalProposals = sumArray(rep.kpi?.proposals ?? []) + totalProposalsFromPipeline;
   
-  const totalPreviewFromPipeline = rep.id === 'atiqa' ? 0 : [0, 1, 2, 3, 4].reduce((sum, wk) => sum + getPipelineMetricForWeek('preview', wk), 0);
+  const totalPreviewFromPipeline = [0, 1, 2, 3, 4].reduce((sum, wk) => sum + getPipelineMetricForWeek('preview', wk), 0);
   const totalPreview = sumArray(rep.kpi?.preview ?? []) + totalPreviewFromPipeline;
 
   // Score badge color logic
@@ -2305,7 +2201,7 @@ export default function RepDetailDashboard({
   const handleCellChange = (metric: keyof Representative['kpi'], weekIdx: number, val: string) => {
     const updated = { ...editKpi };
     let num = parseFloat(val) || 0;
-    if (rep.id === 'atiqa' && metric === 'salesFigure') {
+    if (isRatingMetric(metric as string)) {
       if (num < 0) num = 0;
       if (num > 5) num = 5;
     }
@@ -2533,10 +2429,7 @@ export default function RepDetailDashboard({
               Reps Operations Console
             </span>
             <span className="text-[11px] font-black text-blue-600 uppercase tracking-wider mt-0.5 font-sans">
-              {rep.id === 'xin-ying' ? 'Super Manager' :
-               rep.id === 'chee-cai' ? 'Unstoppable Lead Trainer & Sales' :
-               rep.id === 'alif' ? 'Rising Sales' :
-               rep.id === 'atiqa' ? 'Amazing Admin' : 'Representative'}
+              {rep.role === 'admin' ? 'Admin' : 'Sales rep'}
             </span>
           </div>
         </div>
@@ -2588,7 +2481,7 @@ export default function RepDetailDashboard({
                   : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
               }`}
             >
-              📈 Pipeline Management {pipelines.some(isOverdue) ? '🚨 OVERDUE' : pipelines.some(p => p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id)) ? '⚠️' : ''}
+              📈 Deals {pipelines.some(isOverdue) ? '🚨 Follow-up overdue' : pipelines.some(p => p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id)) ? '⚠️ Help asked' : ''}
             </button>
 
             <button 
@@ -2672,7 +2565,7 @@ export default function RepDetailDashboard({
               💰 Client Payments
             </button>
 
-            {(rep.id === 'xin-ying' || rep.id === 'atiqa') && (
+            {rep.role === 'admin' && (
               <>
                 <button 
                   onClick={() => handleSubTabChange('payment')}
@@ -2943,7 +2836,7 @@ export default function RepDetailDashboard({
                         const isSales = metric.isRM;
                         const extraFromPipeline = isSales 
                           ? totalSalesFromPipeline 
-                          : (rep.id === 'atiqa' ? 0 : [0, 1, 2, 3, 4].reduce((sum, wk) => sum + getPipelineMetricForWeek(metric.key, wk), 0));
+                          : [0, 1, 2, 3, 4].reduce((sum, wk) => sum + getPipelineMetricForWeek(metric.key, wk), 0);
                         const total = sumArray(rowVals) + extraFromPipeline;
                         
                         const totalTarget = metric.targetVal;
@@ -2952,24 +2845,27 @@ export default function RepDetailDashboard({
 
                         return (
                           <tr key={metric.key} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="p-4 font-black text-slate-800">{metric.label}</td>
+                            <td className="p-4 font-black text-slate-800">
+                              {metric.label}
+                              {metric.auto && <span className="mt-0.5 block text-[10px] font-semibold normal-case tracking-normal text-accent">Counted from deals</span>}
+                            </td>
                             
                             {/* Wk1 to Wk5 cells */}
                             {[0, 1, 2, 3, 4].map((wk) => {
                               const wkExtra = isSales 
                                 ? getPipelineSalesForWeek(wk) 
-                                : (rep.id !== 'atiqa' ? getPipelineMetricForWeek(metric.key, wk) : 0);
+                                : getPipelineMetricForWeek(metric.key, wk);
                               const val = (rowVals[wk] || 0) + wkExtra;
                               return (
                                 <td key={wk} className="p-4 text-center">
-                                  {isEditingKpi ? (
+                                  {isEditingKpi && !metric.auto ? (
                                     <input 
                                       type="number" 
                                       value={rowVals[wk] || ''}
                                       onChange={(e) => handleCellChange(kpiKey, wk, e.target.value)}
                                       className="w-16 text-center border border-slate-200 rounded p-1 text-xs text-slate-800 focus:ring-1 focus:ring-blue-500"
-                                      min={rep.id === 'atiqa' && kpiKey === 'salesFigure' ? 0 : undefined}
-                                      max={rep.id === 'atiqa' && kpiKey === 'salesFigure' ? 5 : undefined}
+                                      min={isRatingMetric(kpiKey as string) ? 0 : undefined}
+                                      max={isRatingMetric(kpiKey as string) ? 5 : undefined}
                                     />
                                   ) : (
                                     <span className={val === 0 ? 'text-slate-300 font-semibold' : 'font-semibold font-mono text-slate-700'}>
@@ -3018,7 +2914,7 @@ export default function RepDetailDashboard({
                       title="Key in weekly commission, closed sales & pipeline metrics"
                     >
                       <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-                      {rep.id === 'atiqa' ? 'Log KPI Values' : '$ Key In Commission / Sales'}
+                      {salesIsFromDeals(rep) ? 'Key in weekly KPIs' : 'Log KPI values'}
                     </button>
 
                     {isEditingKpi ? (
@@ -3055,9 +2951,7 @@ export default function RepDetailDashboard({
                       OVERALL PERFORMANCE SCORE
                     </span>
                     <h5 className="text-sm font-black uppercase text-slate-100">
-                      {rep.id === 'atiqa'
-                        ? 'WEEKLY PIPELINE KPI METRICS INDEX (50% Rating · 40% Claims · 10% Venue)'
-                        : 'WEEKLY PIPELINE KPI METRICS INDEX (60% Sales · 20% Proposals · 20% Preview)'}
+                      {'KPI SCORE: ' + metricsList.map(m => `${Math.round(m.weight * 100)}% ${m.label}`).join(', ')}
                     </h5>
                   </div>
 
@@ -3536,10 +3430,10 @@ export default function RepDetailDashboard({
                         {[0, 1, 2, 3, 4].map((wk) => {
                           let val = 0;
                           if (metric.isRM) {
-                            val = rep.kpi.salesFigure[wk] + (rep.id !== 'atiqa' ? getPipelineSalesForWeek(wk) : 0);
+                            val = rep.kpi.salesFigure[wk] + getPipelineSalesForWeek(wk);
                           } else {
                             const kpiArray = (rep.kpi[metric.key as keyof Representative['kpi']] || []) as number[];
-                            val = (kpiArray[wk] || 0) + (rep.id !== 'atiqa' ? getPipelineMetricForWeek(metric.key, wk) : 0);
+                            val = (kpiArray[wk] || 0) + getPipelineMetricForWeek(metric.key, wk);
                           }
 
                           return (
@@ -3887,862 +3781,15 @@ export default function RepDetailDashboard({
 
             </div>
           ) : activeSubTab === 'pipeline' ? (
-            /* PIPELINE MANAGEMENT ENGINE */
-            <div className="space-y-6">
-              {pipelineUndoMessage && (
-                <div className="bg-slate-900 text-white rounded-xl p-3 px-4 flex items-center justify-between text-xs shadow-md animate-fade-in border border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                    <span>{pipelineUndoMessage}</span>
-                  </div>
-                  <button
-                    onClick={handlePipelineUndo}
-                    className="flex items-center gap-1.5 text-[11px] font-black text-blue-400 hover:text-blue-300 bg-white/10 hover:bg-white/15 px-3 py-1 rounded-lg transition-all uppercase tracking-wider cursor-pointer"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" /> Undo
-                  </button>
-                </div>
-              )}
-              {pipelines.filter(p => p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id)).map(p => (
-                <div key={`alert_pipe_${p.id}`} className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-900 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-2xs">
-                  <div className="flex items-start gap-3">
-                    <span className="text-xl font-mono">📢</span>
-                    <div>
-                      <h4 className="font-extrabold text-xs uppercase tracking-wider text-amber-950 flex items-center gap-1.5 font-display">
-                        Tagged in Pipeline Opportunity by {p.creatorName || p.creatorId || 'Team'}
-                      </h4>
-                      <p className="text-[11px] text-amber-800 font-semibold mt-0.5">
-                        You are tagged on: <strong className="text-amber-950 font-black">{p.client}</strong> ({p.courseName || 'Training'}).
-                        {p.tagNote && ` Message: "${p.tagNote}"`}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      let updatedPipe: any = null;
-                      const updated = pipelines.map(item => {
-                        if (item.id === p.id) {
-                          const completed = [...(item.completedTags || [])];
-                          if (!completed.includes(rep.id)) {
-                            completed.push(rep.id);
-                          }
-                          updatedPipe = { ...item, completedTags: completed };
-                          return updatedPipe;
-                        }
-                        return item;
-                      });
-                      setPipelines(updated);
-                      localStorage.setItem('next_pipelines_shared', JSON.stringify(updated));
-                      if (updatedPipe) {
-                        try {
-                          await setDoc(doc(db, 'pipelines', updatedPipe.id), updatedPipe);
-                        } catch (err) {
-                          console.error("Firestore tag complete failed:", err);
-                        }
-                      }
-                      
-                      // Sync back
-                      const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
-                      repIds.forEach(id => {
-                        const ownedPipes = updated.filter(item => item.ownerId === id || item.creatorId === id || item.taggedRepIds?.includes(id));
-                        localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
-                      });
-                    }}
-                    className="self-end md:self-center bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black uppercase tracking-wider px-3.5 py-1.5 rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap font-sans"
-                  >
-                    ✓ Complete Tag Action
-                  </button>
-                </div>
-              ))}
-
-              {/* Pipeline summary metrics */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="pipeline-metrics-grid">
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">
-                    Total Pipeline Value
-                  </span>
-                  <span className="text-xl font-mono font-black text-blue-600 block mt-1">
-                    RM {pipelines.reduce((sum, item) => sum + item.proposalValue, 0).toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">
-                    Won Deals Value
-                  </span>
-                  <span className="text-xl font-mono font-black text-emerald-600 block mt-1">
-                    RM {pipelines.filter(i => i.status === 'Won').reduce((sum, item) => sum + item.proposalValue, 0).toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">
-                    Pending Opportunities
-                  </span>
-                  <span className="text-xl font-mono font-black text-amber-600 block mt-1">
-                    {pipelines.filter(i => i.status === 'Pending').length} active
-                  </span>
-                </div>
-
-                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">
-                    Win Ratio
-                  </span>
-                  <span className="text-xl font-sans font-black text-slate-800 block mt-1">
-                    {pipelines.length > 0
-                      ? Math.round((pipelines.filter(i => i.status === 'Won').length / pipelines.length) * 100)
-                      : 0}%
-                  </span>
-                </div>
-              </div>
-
-              {/* Main Log/Form wrapper */}
-              <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden" id="pipeline-form-card">
-                <div className={`p-4 text-white flex items-center justify-between ${editingPipeId ? 'bg-blue-600' : 'bg-emerald-600'}`}>
-                  <h4 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
-                    <TrendingUp className="w-4 h-4 text-white" />
-                    {editingPipeId ? 'EDIT PIPELINE ENTRY' : `ADD NEW PIPELINE ENTRY - ${rep.name.toUpperCase()}`}
-                  </h4>
-                  <span className={`text-[10px] font-bold px-3 py-1.5 rounded border flex items-center gap-1 font-mono ${editingPipeId ? 'bg-blue-700 border-blue-800' : 'bg-emerald-700 border-emerald-800'}`}>
-                    <Clock className="w-3.5 h-3.5" />
-                    STATUS: {editingPipeId ? 'EDIT MODE' : 'ACTIVE ENGINE'}
-                  </span>
-                </div>
-
-                <div className="p-6">
-                  {pipelineError && (
-                    <div className="mb-4 bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-700 font-bold flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 animate-bounce" />
-                      <span>{pipelineError}</span>
-                    </div>
-                  )}
-                  <form onSubmit={handleRaisePipelineSubmit} className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 flex items-center gap-1.5">
-                          Client Name
-                          {matchedPipeClient && (
-                            <span className="inline-flex items-center gap-0.5 text-violet-600 font-mono normal-case text-[9px] bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">
-                              <Users className="w-2.5 h-2.5" />
-                              Linked
-                            </span>
-                          )}
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          list="pipeline-client-suggestions"
-                          placeholder="Search existing client, or type a new one"
-                          value={pipeClient}
-                          onChange={(e) => setPipeClient(e.target.value)}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
-                        />
-                        <datalist id="pipeline-client-suggestions">
-                          {clientDirectory.map(c => (
-                            <option key={c.id} value={c.companyName} />
-                          ))}
-                        </datalist>
-                        {pipeClient.trim() && !matchedPipeClient && (
-                          <button
-                            type="button"
-                            onClick={handleQuickAddClientFromPipeline}
-                            className="mt-1 text-[10px] text-violet-600 hover:text-violet-700 font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Plus className="w-3 h-3" />
-                            Save "{pipeClient.trim()}" to Client Database
-                          </button>
-                        )}
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Course or Teambuilding Name
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. React Workshop or Corporate Retreat"
-                          value={pipeCourseName}
-                          onChange={(e) => setPipeCourseName(e.target.value)}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Request Date
-                        </label>
-                        <input
-                          type="date"
-                          required
-                          value={pipeRequestDate}
-                          onChange={(e) => setPipeRequestDate(e.target.value)}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white font-mono"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Training Date (if known)
-                        </label>
-                        <input
-                          type="date"
-                          value={pipeTrainingDate}
-                          onChange={(e) => setPipeTrainingDate(e.target.value)}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white font-mono"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Training or Teambuilding
-                        </label>
-                        <select
-                          value={pipeType}
-                          onChange={(e) => setPipeType(e.target.value as any)}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
-                        >
-                          <option value="Training">Training</option>
-                          <option value="Teambuilding">Teambuilding</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <label className="block text-[10px] font-black text-slate-500 uppercase">
-                            Proposal Sent Date
-                          </label>
-                          <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={pipeProposalNotSentYet}
-                              onChange={(e) => setPipeProposalNotSentYet(e.target.checked)}
-                              className="rounded border-slate-200 text-emerald-600 focus:ring-emerald-500 w-3 h-3 cursor-pointer"
-                            />
-                            <span>Not sent yet</span>
-                          </label>
-                        </div>
-                        <input
-                          type={pipeProposalNotSentYet ? "text" : "date"}
-                          required={!pipeProposalNotSentYet}
-                          disabled={pipeProposalNotSentYet}
-                          value={pipeProposalNotSentYet ? "Not Sent Yet" : pipeProposalSentDate}
-                          onChange={(e) => setPipeProposalSentDate(e.target.value)}
-                          className={`w-full text-xs border rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500 font-mono transition-all ${
-                            pipeProposalNotSentYet 
-                              ? 'bg-slate-50 border-slate-200 text-slate-400 font-black uppercase text-[10px] tracking-wider' 
-                              : 'bg-white border-slate-200 text-slate-800'
-                          }`}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Proposal Value (RM)
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2.5 text-slate-400 text-xs font-black font-mono">RM</span>
-                          <input
-                            type="number"
-                            required
-                            placeholder="e.g. 15000"
-                            value={pipeProposalValue}
-                            onChange={(e) => setPipeProposalValue(e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white font-mono"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Follow Up Date
-                        </label>
-                        <input
-                          type="date"
-                          value={pipeFollowUpDate}
-                          onChange={(e) => setPipeFollowUpDate(e.target.value)}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white font-mono"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Status
-                        </label>
-                        <select
-                          value={pipeStatus}
-                          onChange={(e) => setPipeStatus(e.target.value as any)}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
-                        >
-                          <option value="Pending">Pending</option>
-                          <option value="Won">Won</option>
-                          <option value="Lost">Lost</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5 flex items-center gap-1">
-                          Client Owner <span className="text-[9px] text-emerald-600 font-normal lowercase">(belongs to rep)</span>
-                        </label>
-                        <select
-                          value={pipeOwnerId}
-                          onChange={(e) => setPipeOwnerId(e.target.value)}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white font-bold"
-                        >
-                          {reps?.map(r => (
-                            <option key={r.id} value={r.id}>
-                              {r.name} {r.id === rep.id ? '(You)' : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="flex flex-col justify-end">
-                        <span className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Appointment Tracking
-                        </span>
-                        <label className="flex items-center gap-2 text-slate-700 cursor-pointer select-none bg-white border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 transition-all h-[38px] w-full">
-                          <input
-                            type="checkbox"
-                            id="pipeAppointmentTickedCheckbox"
-                            checked={pipeAppointmentTicked}
-                            onChange={(e) => setPipeAppointmentTicked(e.target.checked)}
-                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
-                          />
-                          <span className="text-xs font-bold text-slate-700 uppercase">Appointment Scheduled</span>
-                        </label>
-                      </div>
-
-                      <div className="md:col-span-2 border border-slate-100 rounded-lg p-3 bg-slate-50/50 space-y-3">
-                        <div className="space-y-1.5">
-                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                            Tag Team Members for Help (Select Multiple)
-                          </label>
-                          <div className="flex flex-wrap gap-x-4 gap-y-2">
-                            {[
-                              { id: 'xin-ying', name: 'Xin Ying' },
-                              { id: 'alif', name: 'Alif' },
-                              { id: 'chee-cai', name: 'Chee Cai' },
-                              { id: 'atiqa', name: 'Atiqa' },
-                              { id: 'new-guy', name: 'New Guy' }
-                            ].filter(m => m.id !== rep.id).map(m => {
-                              const isChecked = pipeTaggedRepIds.includes(m.id);
-                              return (
-                                <label key={m.id} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer hover:text-emerald-600 transition-colors">
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={() => {
-                                      if (isChecked) {
-                                        setPipeTaggedRepIds(pipeTaggedRepIds.filter(id => id !== m.id));
-                                      } else {
-                                        setPipeTaggedRepIds([...pipeTaggedRepIds, m.id]);
-                                      }
-                                    }}
-                                    className="rounded border-slate-350 text-emerald-650 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer"
-                                  />
-                                  <span>{m.name}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                            Tag Note / Comment Box
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="e.g. Please follow up on this deal with Maybank."
-                            value={pipeTagNote}
-                            onChange={(e) => setPipeTagNote(e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="md:col-span-1">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                          Opportunity Notes (General)
-                        </label>
-                        <textarea
-                          placeholder="e.g. Discussed with HR, they prefer physical training instead of virtual. Follow-up is critical."
-                          value={pipeNotes}
-                          onChange={(e) => setPipeNotes(e.target.value)}
-                          rows={4}
-                          className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500 bg-white resize-none"
-                          style={{ minHeight: "115px" }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
-                      {editingPipeId && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingPipeId(null);
-                            setPipeClient('');
-                            setPipeCourseName('');
-                            setPipeRequestDate(new Date().toISOString().substring(0, 10));
-                            setPipeTrainingDate('');
-                            setPipeType('Training');
-                            setPipeProposalSentDate(new Date().toISOString().substring(0, 10));
-                            setPipeProposalValue('');
-                            setPipeFollowUpDate('');
-                            setPipeStatus('Pending');
-                            setPipeTaggedRepIds([]);
-                            setPipeTagNote('');
-                            setPipeNotes('');
-                            setPipeProposalNotSentYet(false);
-                            setPipeAppointmentTicked(false);
-                          }}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider px-5 py-2.5 rounded-xl transition-all border border-slate-200 cursor-pointer"
-                        >
-                          Cancel Edit
-                        </button>
-                      )}
-                      <button
-                        type="submit"
-                        className={`text-white font-black text-xs uppercase tracking-wider px-6 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${editingPipeId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
-                      >
-                        {editingPipeId ? (
-                          <>
-                            <Save className="w-4 h-4" />
-                            Save Changes
-                          </>
-                        ) : (
-                          <>
-                            <Plus className="w-4 h-4" />
-                            Log Pipeline Deal
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-
-              {/* Pipeline List Board */}
-              <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden" id="pipeline-table-card">
-                <div className="p-4 bg-slate-800 text-white flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <h4 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
-                    <Briefcase className="w-4 h-4 text-slate-300" />
-                    PAST PIPELINE OPPORTUNITIES ({pipelines.length})
-                  </h4>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        placeholder="Search client, course..."
-                        value={pipelineSearchQuery}
-                        onChange={(e) => {
-                          setPipelineSearchQuery(e.target.value);
-                          setPipelineCurrentPage(1);
-                        }}
-                        className="pl-8 pr-3 py-1.5 text-[10px] border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 bg-slate-700 placeholder-slate-400 w-48 font-medium"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-black uppercase text-slate-400 font-mono">Sort by:</span>
-                      <select
-                        value={pipelineSortBy}
-                        onChange={(e) => setPipelineSortBy(e.target.value as any)}
-                        className="bg-slate-700 text-white text-[10px] font-black uppercase rounded px-2.5 py-1 focus:outline-none border border-slate-600 font-mono cursor-pointer"
-                      >
-                        <option value="latest">Latest</option>
-                        <option value="oldest">Oldest</option>
-                        <option value="pending">Pending</option>
-                        <option value="won">Won</option>
-                        <option value="lost">Lost</option>
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-black uppercase text-slate-400 font-mono">Show:</span>
-                      <select
-                        value={pipelinePageSize}
-                        onChange={(e) => {
-                          setPipelinePageSize(Number(e.target.value) as 10 | 20 | 30);
-                          setPipelineCurrentPage(1);
-                        }}
-                        className="bg-slate-700 text-white text-[10px] font-black uppercase rounded px-2.5 py-1 focus:outline-none border border-slate-600 font-mono cursor-pointer"
-                      >
-                        <option value={10}>10</option>
-                        <option value={20}>20</option>
-                        <option value={30}>30</option>
-                      </select>
-                    </div>
-                    <span className="text-[10px] bg-slate-700 text-slate-300 font-bold px-2.5 py-1 rounded font-mono">
-                      Realtime Logs
-                    </span>
-                  </div>
-                </div>
-
-                {pipelines.length === 0 ? (
-                   <div className="p-8 text-center text-slate-400 text-xs italic bg-slate-50/50">
-                    No pipeline opportunities loaded yet. Fill in the form above to add logs.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                          <th className="p-4">request date</th>
-                          <th className="p-4">Training or Teambuilding</th>
-                          <th className="p-4">Proposal Sent date</th>
-                          <th className="p-4 text-right">Proposal Value</th>
-                          <th className="p-4">Follow up date</th>
-                          <th className="p-4 text-center">Status</th>
-                          <th className="p-4 text-center">Docs</th>
-                          <th className="p-4 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700 font-sans text-xs">
-                        {(() => {
-                          const filtered = pipelines.filter(p => {
-                            const q = pipelineSearchQuery.trim().toLowerCase();
-                            if (!q) return true;
-                            return (p.client || '').toLowerCase().includes(q) || (p.courseName || '').toLowerCase().includes(q);
-                          });
-                          const sorted = [...filtered].sort((a, b) => {
-                            if (pipelineSortBy === 'latest') {
-                              return new Date(b.requestDate || b.proposalSentDate || 0).getTime() - new Date(a.requestDate || a.proposalSentDate || 0).getTime();
-                            }
-                            if (pipelineSortBy === 'oldest') {
-                              return new Date(a.requestDate || a.proposalSentDate || 0).getTime() - new Date(b.requestDate || b.proposalSentDate || 0).getTime();
-                            }
-                            if (pipelineSortBy === 'pending') {
-                              if (a.status === 'Pending' && b.status !== 'Pending') return -1;
-                              if (a.status !== 'Pending' && b.status === 'Pending') return 1;
-                              return 0;
-                            }
-                            if (pipelineSortBy === 'won') {
-                              if (a.status === 'Won' && b.status !== 'Won') return -1;
-                              if (a.status !== 'Won' && b.status === 'Won') return 1;
-                              return 0;
-                            }
-                            if (pipelineSortBy === 'lost') {
-                              if (a.status === 'Lost' && b.status !== 'Lost') return -1;
-                              if (a.status !== 'Lost' && b.status === 'Lost') return 1;
-                              return 0;
-                            }
-                            return 0;
-                          });
-                          const startIdx = (pipelineCurrentPage - 1) * pipelinePageSize;
-                          const paginated = sorted.slice(startIdx, startIdx + pipelinePageSize);
-                          return paginated;
-                        })().map((p) => {
-                          const isTaggedPending = p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id);
-                          return (
-                            <tr key={p.id} className={`transition-all duration-300 ${
-                              isTaggedPending
-                                ? 'bg-amber-50/70 border-l-4 border-l-amber-500 hover:bg-amber-100/70 animate-[pulse_3s_infinite]'
-                                : isOverdue(p) 
-                                  ? 'bg-rose-50/70 border-l-4 border-l-rose-500 hover:bg-rose-100/70' 
-                                  : p.isDuplicate 
-                                    ? 'bg-purple-50/10 hover:bg-slate-50/50' 
-                                    : 'hover:bg-slate-50/50'
-                            }`}>
-                              <td className="p-4 font-mono font-bold text-slate-500">{p.requestDate}</td>
-                              <td className="p-4">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-extrabold text-slate-800">{p.client}</span>
-                                  {p.clientId && (
-                                    <span title="Linked to Client Database" className="inline-flex items-center text-violet-500">
-                                      <Users className="w-3 h-3" />
-                                    </span>
-                                  )}
-                                </div>
-                                <span className="text-[10px] text-slate-400 block font-mono mt-0.5">{p.courseName}</span>
-                                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                                  <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-slate-100 text-slate-600 font-mono">
-                                    {p.type}
-                                  </span>
-                                  <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-blue-50 text-blue-700 font-mono">
-                                    👤 Creator: {p.creatorName || p.creatorId || 'Team'}
-                                  </span>
-                                  <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-indigo-50 text-indigo-700 font-mono">
-                                    💼 Owner: {p.ownerName || p.ownerId || 'Team'}
-                                  </span>
-                                  {(p.isAppointment || p.appointmentTicked) && (
-                                    <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-[#FFFBEB] text-[#D97706] border border-[#FEF3C7] font-mono uppercase flex items-center gap-0.5">
-                                      📅 Appointment
-                                    </span>
-                                  )}
-                                </div>
-
-                                {p.notes && (
-                                  <div className="mt-2.5 bg-blue-50/30 border border-blue-100/50 rounded-lg p-2 max-w-sm">
-                                    <div className="text-[9px] font-black uppercase text-blue-500 tracking-wider">
-                                      Opportunity Notes
-                                    </div>
-                                    <p className="text-[10px] text-slate-700 font-medium">
-                                      {p.notes}
-                                    </p>
-                                  </div>
-                                )}
-
-                                {/* Collaborative Tag Info directly on row */}
-                                {p.taggedRepIds && p.taggedRepIds.length > 0 && (
-                                  <div className="mt-2.5 bg-slate-50 border border-slate-150 rounded-lg p-2 max-w-sm space-y-1">
-                                    <div className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
-                                      Collaboration Tags
-                                    </div>
-                                    <div className="flex flex-wrap gap-1">
-                                      {p.taggedRepIds.map(id => {
-                                        const isDone = p.completedTags?.includes(id);
-                                        return (
-                                          <span key={id} className={`text-[8px] font-bold px-1.5 py-0.5 rounded font-mono ${
-                                            isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                                          }`}>
-                                            @{reps.find(r => r.id === id)?.name || id} {isDone ? '✓ Done' : '⏳ Pending'}
-                                          </span>
-                                        );
-                                      })}
-                                    </div>
-                                    {p.tagNote && (
-                                      <p className="text-[10px] text-slate-600 italic bg-white border border-slate-100 p-1.5 rounded mt-1">
-                                        "{p.tagNote}"
-                                      </p>
-                                    )}
-                                    
-                                    {/* Mark Done directly on row if tagged */}
-                                    {p.taggedRepIds.includes(rep.id) && !p.completedTags?.includes(rep.id) && (
-                                      <button
-                                        type="button"
-                                        onClick={async () => {
-                                          let updatedPipe: any = null;
-                                          const updated = pipelines.map(item => {
-                                            if (item.id === p.id) {
-                                              const completed = [...(item.completedTags || [])];
-                                              if (!completed.includes(rep.id)) {
-                                                completed.push(rep.id);
-                                              }
-                                              updatedPipe = { ...item, completedTags: completed };
-                                              return updatedPipe;
-                                            }
-                                            return item;
-                                          });
-                                          setPipelines(updated);
-                                          localStorage.setItem('next_pipelines_shared', JSON.stringify(updated));
-                                          if (updatedPipe) {
-                                            try {
-                                              await setDoc(doc(db, 'pipelines', updatedPipe.id), updatedPipe);
-                                            } catch (err) {
-                                              console.error("Firestore tag complete failed:", err);
-                                            }
-                                          }
-                                          
-                                          // Sync back
-                                          const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
-                                          repIds.forEach(id => {
-                                            const ownedPipes = updated.filter(item => item.ownerId === id || item.creatorId === id || item.taggedRepIds?.includes(id));
-                                            localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
-                                          });
-                                        }}
-                                        className="mt-1 w-full text-center bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase py-1 rounded transition-all cursor-pointer"
-                                      >
-                                        ✓ Complete My Tag Action
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-                            <td className="p-4 font-mono font-bold text-slate-500">{p.proposalSentDate}</td>
-                            <td className="p-4 text-right font-mono font-black text-slate-800">
-                              RM {parseFloat(p.proposalValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-4 font-mono text-slate-500 font-semibold">{p.followUpDate || 'TBD'}</td>
-                            <td className="p-4 text-center">
-                              {p.status === 'Won' ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-black text-[9px] uppercase tracking-wider">
-                                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                  Won
-                                </span>
-                              ) : p.status === 'Lost' ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-50 border border-rose-200 text-rose-700 font-black text-[9px] uppercase tracking-wider">
-                                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                                  Lost
-                                </span>
-                              ) : (
-                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded font-black text-[9px] uppercase tracking-wider border ${
-                                  isOverdue(p)
-                                    ? 'bg-rose-100 border-rose-300 text-rose-700 animate-pulse'
-                                    : 'bg-amber-50 border-amber-200 text-amber-700'
-                                }`}>
-                                  <AlertCircle className={`w-3.5 h-3.5 ${isOverdue(p) ? 'text-rose-600' : 'text-amber-500'}`} />
-                                  {isOverdue(p) ? 'OVERDUE (2+ Days)' : 'Pending'}
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-4 text-center">
-                              {p.status === 'Won' ? (
-                                <div className="flex flex-col items-center gap-1">
-                                  {(() => {
-                                    const linkedQuote = quotationsForPipelines.find(q => q.pipelineId === p.id);
-                                    return linkedQuote ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => setActiveSubTab('quotation')}
-                                        className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
-                                        title="Open in Quotation Generator"
-                                      >
-                                        📄 {linkedQuote.refNumber}
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleCreateQuotationForPipeline(p)}
-                                        className="text-[9px] font-black text-slate-400 hover:text-blue-600 border border-dashed border-slate-300 hover:border-blue-300 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
-                                      >
-                                        + Quotation
-                                      </button>
-                                    );
-                                  })()}
-                                  {(() => {
-                                    const linkedOutline = outlinesForPipelines.find(o => o.pipelineId === p.id);
-                                    return linkedOutline ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => setActiveSubTab('course_outline')}
-                                        className="text-[9px] font-black text-emerald-600 hover:text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
-                                        title="Open in Course Outline Generator"
-                                      >
-                                        📘 {linkedOutline.refNumber}
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleCreateOutlineForPipeline(p)}
-                                        className="text-[9px] font-black text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 hover:border-emerald-300 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
-                                      >
-                                        + Outline
-                                      </button>
-                                    );
-                                  })()}
-                                </div>
-                              ) : (
-                                <span className="text-slate-300 text-[10px]">—</span>
-                              )}
-                            </td>
-                            <td className="p-4 text-right">
-                              <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingPipeId(p.id);
-                                    setPipeClient(p.client);
-                                    setPipeClientId(p.clientId || '');
-                                    setPipeCourseName(p.courseName);
-                                    setPipeRequestDate(p.requestDate);
-                                    setPipeTrainingDate(p.trainingDate || p.potentialDate || '');
-                                    setPipeType(p.type);
-                                    setPipeProposalSentDate(p.proposalSentDate === 'not yet' ? new Date().toISOString().substring(0, 10) : p.proposalSentDate);
-                                    setPipeProposalNotSentYet(p.proposalSentDate === 'not yet');
-                                    setPipeProposalValue(p.proposalValue.toString());
-                                    setPipeFollowUpDate(p.followUpDate === 'TBD' ? '' : p.followUpDate);
-                                    setPipeStatus(p.status);
-                                    setPipeOwnerId(p.ownerId || p.creatorId || rep.id);
-                                    setPipeTaggedRepIds(p.taggedRepIds || []);
-                                    setPipeTagNote(p.tagNote || '');
-                                    setPipeNotes(p.notes || '');
-                                    setPipeAppointmentTicked(p.isAppointment || p.appointmentTicked || false);
-                                    
-                                    // Scroll to form nicely
-                                    const cardEl = document.getElementById('pipeline-form-card');
-                                    if (cardEl) {
-                                      cardEl.scrollIntoView({ behavior: 'smooth' });
-                                    }
-                                  }}
-                                  className="text-blue-500 hover:text-blue-700 p-1 rounded hover:bg-blue-50 transition-colors cursor-pointer"
-                                  title="Edit Opportunity"
-                                >
-                                  <FileText className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    if (window.confirm("Are you sure you want to delete this opportunity?")) {
-                                      setPreviousPipelines(JSON.parse(JSON.stringify(pipelines)));
-                                      setPipelineUndoMessage('Opportunity deleted successfully.');
-                                      const updated = pipelines.filter(item => item.id !== p.id);
-                                      setPipelines(updated);
-                                      localStorage.setItem('next_pipelines_shared', JSON.stringify(updated));
-                                      try {
-                                        await deleteDoc(doc(db, 'pipelines', p.id));
-                                        markPipelineDeleted(p.id);
-                                      } catch (err) {
-                                        console.error("Firestore delete pipeline failed:", err);
-                                      }
-                                      
-                                      // Sync back to individual keys
-                                      const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
-                                      repIds.forEach(id => {
-                                        const ownedPipes = updated.filter(item => item.ownerId === id || item.creatorId === id || item.taggedRepIds?.includes(id));
-                                        localStorage.setItem(`next_pipelines_${id}`, JSON.stringify(ownedPipes));
-                                      });
-
-                                      adjustKpiForPipelineChange(p, undefined);
-                                      logPipelineHistory(p, 'Deleted', `Deleted opportunity log for client ${p.client}.`);
-                                    }
-                                  }}
-                                  className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-                                  title="Delete Opportunity Log"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {/* Pagination controls */}
-                {(() => {
-                  const filteredCount = pipelines.filter(p => {
-                    const q = pipelineSearchQuery.trim().toLowerCase();
-                    if (!q) return true;
-                    return (p.client || '').toLowerCase().includes(q) || (p.courseName || '').toLowerCase().includes(q);
-                  }).length;
-                  const totalPages = Math.max(1, Math.ceil(filteredCount / pipelinePageSize));
-                  if (filteredCount === 0) return null;
-                  return (
-                    <div className="flex items-center justify-between p-3 bg-slate-50 border-t border-slate-150 text-[10px] font-bold text-slate-500">
-                      <span>
-                        Showing {Math.min((pipelineCurrentPage - 1) * pipelinePageSize + 1, filteredCount)}–{Math.min(pipelineCurrentPage * pipelinePageSize, filteredCount)} of {filteredCount}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          disabled={pipelineCurrentPage <= 1}
-                          onClick={() => setPipelineCurrentPage(p => Math.max(1, p - 1))}
-                          className="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                        >
-                          Prev
-                        </button>
-                        <span className="px-2">Page {pipelineCurrentPage} of {totalPages}</span>
-                        <button
-                          type="button"
-                          disabled={pipelineCurrentPage >= totalPages}
-                          onClick={() => setPipelineCurrentPage(p => Math.min(totalPages, p + 1))}
-                          className="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                        >
-                          Next
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-
-            </div>
+            <DealsBoard
+              owner={rep}
+              people={reps}
+              viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }}
+              onCreateQuotation={handleCreateQuotationForPipeline}
+              onCreateOutline={handleCreateOutlineForPipeline}
+              onOpenQuotations={() => setActiveSubTab('quotation')}
+              onOpenOutlines={() => setActiveSubTab('course_outline')}
+            />
           ) : activeSubTab === 'tasks' ? (
             /* PENDING TASKS LOG SYSTEM */
             <div className="space-y-6">
@@ -4835,13 +3882,7 @@ export default function RepDetailDashboard({
                         className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white"
                       >
                         <option value="">-- Assign to Myself ({rep.name}) --</option>
-                        {[
-                          { id: 'xin-ying', name: 'Xin Ying' },
-                          { id: 'chee-cai', name: 'Chee Cai' },
-                          { id: 'alif', name: 'Alif' },
-                          { id: 'atiqa', name: 'Atiqa' },
-                          { id: 'new-guy', name: 'New Guy' }
-                        ].filter(m => m.id !== rep.id).map(m => (
+                        {reps.filter(m => m.id !== rep.id).map(m => (
                           <option key={m.id} value={m.id}>{m.name}</option>
                         ))}
                       </select>
@@ -7345,104 +6386,52 @@ export default function RepDetailDashboard({
 
       </div>
 
-      {/* Commission modal Key-In */}
+      {/* Quick KPI key-in */}
       {showCommissionModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-150 space-y-4">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-              <DollarSign className="w-4 h-4 text-emerald-500" />
-              {rep.id === 'atiqa' ? 'Log KPI Activity Values' : '$ Key In Commission & Activity'}
-            </h3>
-            
-            <form onSubmit={handleCommissionSubmit} className="space-y-3 text-left">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Select Active Week</label>
-                <select 
-                  value={selectedWeek}
-                  onChange={(e) => setSelectedWeek(parseInt(e.target.value))}
-                  className="w-full text-xs border border-slate-200 rounded px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
-                >
-                  <option value={0}>Week 1</option>
-                  <option value={1}>Week 2</option>
-                  <option value={2}>Week 3</option>
-                  <option value={3}>Week 4</option>
-                  <option value={4}>Week 5</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  {rep.id === 'atiqa' ? 'Perf. Rating (1-5)' : 'Sales Closed (RM)'}
-                </label>
-                <input 
-                  type="number" 
-                  required
-                  placeholder={rep.id === 'atiqa' ? 'Rating e.g. 5' : 'e.g. 15000'} 
-                  value={commissionAmount}
-                  onChange={(e) => {
-                    let val = e.target.value;
-                    if (rep.id === 'atiqa') {
-                      const num = parseFloat(val);
-                      if (num > 5) val = '5';
-                      if (num < 0) val = '0';
-                    }
-                    setCommissionAmount(val);
-                  }}
-                  className="w-full text-xs border border-slate-200 rounded px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                  min={rep.id === 'atiqa' ? 0 : undefined}
-                  max={rep.id === 'atiqa' ? 5 : undefined}
-                />
-              </div>
-
-              <div className="border-t border-slate-100 pt-3 mt-3">
-                <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 font-display">
-                  Optional Activity Log Metrics
-                </span>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[9px] font-bold text-slate-400 mb-1">
-                      {rep.id === 'atiqa' ? 'Add Claim Subm.' : 'Add Proposals'}
-                    </label>
-                    <input 
-                      type="number" 
-                      placeholder="e.g. 1" 
-                      value={commissionProposals}
-                      onChange={(e) => setCommissionProposals(e.target.value)}
-                      className="w-full text-xs border border-slate-200 rounded px-3.5 py-1.5 text-slate-800 focus:outline-none font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-bold text-slate-400 mb-1">
-                      {rep.id === 'atiqa' ? 'Add Venue Entries' : 'Add Previews'}
-                    </label>
-                    <input 
-                      type="number" 
-                      placeholder="e.g. 5" 
-                      value={commissionPreview}
-                      onChange={(e) => setCommissionPreview(e.target.value)}
-                      className="w-full text-xs border border-slate-200 rounded px-3.5 py-1.5 text-slate-800 focus:outline-none font-mono"
-                    />
-                  </div>
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-line space-y-4 font-sans text-ink">
+            <h3 className="text-lg font-bold">Key in weekly KPIs</h3>
+            {manualMetrics.length === 0 ? (
+              <>
+                <p className="text-[15px] leading-relaxed text-ink-soft">
+                  All of {rep.name}'s KPIs are counted automatically from deals, so there's nothing to key in. Move deals through their stages on the Deals screen instead.
+                </p>
+                <div className="flex justify-end">
+                  <button type="button" onClick={() => setShowCommissionModal(false)} className="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-surface">Close</button>
                 </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 mt-3">
-                <button 
-                  type="button" 
-                  onClick={() => setShowCommissionModal(false)}
-                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-4 py-2 rounded transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded transition-colors"
-                >
-                  {rep.id === 'atiqa' ? 'Log KPI activity' : 'Log Sale closed'}
-                </button>
-              </div>
-            </form>
+              </>
+            ) : (
+              <form onSubmit={handleCommissionSubmit} className="space-y-4">
+                <div>
+                  <label htmlFor="kpi-week" className="mb-1.5 block text-sm font-semibold">Week</label>
+                  <select id="kpi-week" value={selectedWeek} onChange={(e) => setSelectedWeek(parseInt(e.target.value))} className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none">
+                    {[0, 1, 2, 3, 4].map(w => <option key={w} value={w}>Week {w + 1}</option>)}
+                  </select>
+                </div>
+                {manualMetrics.map(m => (
+                  <div key={m.key}>
+                    <label htmlFor={`kpi-${m.key}`} className="mb-1.5 block text-sm font-semibold">
+                      {m.label} <span className="font-normal text-ink-soft">(add to this week)</span>
+                    </label>
+                    <input
+                      id={`kpi-${m.key}`}
+                      type="number"
+                      min={0}
+                      max={/rating/i.test(m.label) ? 5 : undefined}
+                      value={commissionValues[m.key] || ''}
+                      onChange={(e) => setCommissionValues(v => ({ ...v, [m.key]: e.target.value }))}
+                      className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none"
+                      placeholder="0"
+                    />
+                  </div>
+                ))}
+                <p className="text-sm text-ink-soft">Closing RM, appointments, proposals and previews are counted from deals, so they aren't keyed in here.</p>
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setShowCommissionModal(false)} className="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-surface">Cancel</button>
+                  <button type="submit" className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]">Save KPIs</button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { Eye, EyeOff, KeyRound, Loader2, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Eye, EyeOff, Gauge, KeyRound, Loader2, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
+import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { KPI_TEMPLATES, templateById, defaultTemplateIdFor, metricsFor } from '../lib/kpi';
 import { db, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember, TeamRole, ROLE_LABELS } from '../types';
 
@@ -78,6 +79,7 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
 }
 
 type DialogState =
+  | { kind: 'kpi'; member: TeamMember }
   | { kind: 'reset'; member: TeamMember }
   | { kind: 'reactivate'; member: TeamMember }
   | { kind: 'remove'; member: TeamMember; openDeals: { id: string; client: string }[] | null }
@@ -100,6 +102,61 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
   const [transferTo, setTransferTo] = useState('');
   const [dialogError, setDialogError] = useState('');
   const [dialogBusy, setDialogBusy] = useState(false);
+
+  // KPI settings per person (template + targets), stored in reps/<memberId>.
+  const [kpiDocs, setKpiDocs] = useState<Record<string, any>>({});
+  useEffect(() => onSnapshot(collection(db, 'reps'), snap => {
+    const next: Record<string, any> = {};
+    snap.forEach(d => { next[d.id] = d.data(); });
+    setKpiDocs(next);
+  }), []);
+  const [kpiTemplate, setKpiTemplate] = useState('');
+  const [kpiTargets, setKpiTargets] = useState<Record<string, string>>({});
+
+  const kpiSummary = (m: TeamMember) => {
+    const chosen = templateById(kpiDocs[m.id]?.kpiTemplate);
+    return chosen ? chosen.name : `${templateById(defaultTemplateIdFor(m.role))!.name} (default)`;
+  };
+
+  const openKpi = (m: TeamMember) => {
+    const saved = kpiDocs[m.id] || {};
+    const tplId = templateById(saved.kpiTemplate) ? saved.kpiTemplate : defaultTemplateIdFor(m.role);
+    const resolved = metricsFor({ id: m.id, role: m.role, kpiTemplate: saved.kpiTemplate, targets: saved.targets });
+    const t: Record<string, string> = {};
+    resolved.forEach(x => { t[x.key] = String(x.targetVal); });
+    setKpiTemplate(tplId);
+    setKpiTargets(t);
+    setDialogError('');
+    setDialog({ kind: 'kpi', member: m });
+  };
+
+  const chooseTemplate = (id: string) => {
+    setKpiTemplate(id);
+    const t: Record<string, string> = {};
+    templateById(id)?.metrics.forEach(x => { t[x.key] = String(x.defaultTarget); });
+    setKpiTargets(t);
+  };
+
+  const saveKpi = async () => {
+    if (!dialog || dialog.kind !== 'kpi') return;
+    const tpl = templateById(kpiTemplate);
+    if (!tpl) return setDialogError('Choose a KPI set.');
+    const targets: Record<string, number> = {};
+    for (const m of tpl.metrics) {
+      const v = Number(kpiTargets[m.key]);
+      if (!Number.isFinite(v) || v <= 0) return setDialogError(`Enter a target above 0 for ${m.label}.`);
+      targets[m.key] = v;
+    }
+    setDialogBusy(true);
+    try {
+      await setDoc(doc(db, 'reps', dialog.member.id), { kpiTemplate: tpl.id, targets }, { merge: true });
+      flash('ok', `${dialog.member.name}'s KPIs have been saved.`);
+      closeDialog();
+    } catch (err) {
+      setDialogError(friendlyError(err));
+      setDialogBusy(false);
+    }
+  };
 
   const roleOrder: Record<TeamRole, number> = { management: 0, admin: 1, rep: 2 };
   const activeMembers = useMemo(
@@ -287,6 +344,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                     </p>
                     <p className="mt-0.5 text-sm text-ink-soft">
                       {m.mustChangePassword ? 'Has not set their own password yet' : 'Active'}
+                      {m.role !== 'management' && <span className="block">KPIs: {kpiSummary(m)}</span>}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -303,6 +361,11 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                       <option value="admin">{ROLE_LABELS.admin}</option>
                       <option value="management">{ROLE_LABELS.management}</option>
                     </select>
+                    {m.role !== 'management' && (
+                      <button type="button" className={secondaryBtn} onClick={() => openKpi(m)}>
+                        <Gauge className="h-3.5 w-3.5" /> KPIs
+                      </button>
+                    )}
                     {!isMe && (
                       <>
                         <button type="button" className={secondaryBtn} onClick={() => setDialog({ kind: 'reset', member: m })}>
@@ -389,6 +452,47 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
       </div>
 
       {/* Dialogs */}
+      {dialog && dialog.kind === 'kpi' && (
+        <Dialog title={`KPIs for ${dialog.member.name}`} onClose={closeDialog}>
+          <p className="mb-3 text-[15px] leading-relaxed text-ink-soft">Choose the KPI set, then adjust the monthly targets. KPIs marked "from deals" are counted automatically.</p>
+          <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+            {KPI_TEMPLATES.map(t => (
+              <label key={t.id} className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 ${kpiTemplate === t.id ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface'}`}>
+                <input type="radio" name="kpi-tpl" checked={kpiTemplate === t.id} onChange={() => chooseTemplate(t.id)} className="mt-1 accent-[#0E6E62]" />
+                <span>
+                  <span className="block text-[15px] font-semibold">{t.name}</span>
+                  <span className="block text-sm text-ink-soft">{t.description}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-4 space-y-3">
+            {templateById(kpiTemplate)?.metrics.map(m => (
+              <div key={m.key} className="flex items-center justify-between gap-3">
+                <label htmlFor={`kt-${m.key}`} className="text-sm font-semibold">
+                  {m.label}
+                  <span className="block font-normal text-ink-soft">{m.targetLabel}{m.auto ? ', from deals' : ', typed in weekly'}</span>
+                </label>
+                <input
+                  id={`kt-${m.key}`}
+                  inputMode="decimal"
+                  value={kpiTargets[m.key] || ''}
+                  onChange={e => { setKpiTargets(t => ({ ...t, [m.key]: e.target.value.replace(/[^0-9.]/g, '') })); setDialogError(''); }}
+                  className="w-32 rounded-lg border border-line bg-white px-3 py-2 text-right text-[15px] focus:border-accent focus:outline-none"
+                />
+              </div>
+            ))}
+          </div>
+          {dialogError && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{dialogError}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" className={secondaryBtn} onClick={closeDialog}>Cancel</button>
+            <button type="button" className={primaryBtn} disabled={dialogBusy} onClick={saveKpi}>
+              {dialogBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save KPIs
+            </button>
+          </div>
+        </Dialog>
+      )}
       {dialog && (dialog.kind === 'reset' || dialog.kind === 'reactivate') && (
         <Dialog title={dialog.kind === 'reset' ? `Set a new password for ${dialog.member.name}` : `Give ${dialog.member.name} access again`} onClose={closeDialog}>
           <p className="mb-4 text-[15px] leading-relaxed text-ink-soft">
