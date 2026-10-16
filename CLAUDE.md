@@ -124,11 +124,11 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 
 - **Phase 2B** (pushed 2026-10-16, see section 6): admin checklist on won deals (including after-training steps JD14, certificates, training report, output assessment), Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. Live, rules published, tested OK by Joel. Reps see checklists read-only (Joel confirmed, see section 6).
 
-- **Phase 2C** (built 2026-10-16, see section 6a): programme list with HRDC registration, HRDC queries, grant gate. Status: check the to-dos below.
+- **Phase 2C** (pushed 2026-10-16, see section 6a): programme list with HRDC registration, HRDC queries, grant gate. Live, rules published, tested OK by Joel ("ok can").
 
 ### Joel's open to-dos (check with him)
 0. **Phase 2B go-live:** done and tested by Joel on 2026-10-16. Rules published.
-0a. **Phase 2C go-live:** once live, publish the new `firestore.rules` (it adds `programmes` and `hrdc_queries`). Then test: add programmes in Admin work → Programmes; pick a programme on a deal; an HRDC deal with an unapproved programme can't tick "Apply grant"; log an HRDC query and see it flagged in the work queue; a rep sees queries but can't add them.
+0a. **Phase 2C go-live:** done and tested by Joel on 2026-10-16. Rules published.
 1. Set each person's KPI template and targets in Management → Team.
 2. Link old records in Data tools (ask for a screenshot of the matches before he clicks Link).
 3. ~~Test a deal from new to won and check it shows in that month's KPIs.~~ Done 2026-10-16: works.
