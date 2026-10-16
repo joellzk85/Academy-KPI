@@ -198,11 +198,14 @@ What was built:
 - The old rep-workspace tabs "Client Payments" and "Raise Payment" are hidden. Their code (including the hardcoded `xin-ying` approval logic) is still in `RepDetailDashboard.tsx` and `ClientPaymentManager.tsx` but can no longer be reached. Delete it in the Phase 4 tidy-up. Old `payments` and `client_payments` data stay until cleared in Data tools.
 
 ### Later phases
-- **Phase 4A, "My home" page (agreed design, PARKED 2026-10-16; Joel: "let's revisit this next time if needed". Don't build until he says so).**
-  - Joel's decision: no fixed screen per role. Each person chooses their own home-page cards and order (a "Customise" button). Nobody, including Management, sets anyone else's page. The choice is saved to the login (needs a small rule: each person writes only their own layout doc).
-  - "My home" becomes the first page after login; the team-workspace page stays one click away. Cards link to where you act.
-  - Card library (Joel didn't know which he wanted, so this list is the start; easy to change): My KPI vs target (rep, admin); My follow-ups due or overdue (rep, admin); My won deals with admin progress and payment status (rep); Team KPI vs target (mgmt); Pipeline by stage and stuck deals (mgmt); New won deals handover (admin, mgmt); Due now: checklist steps, HRDC queries, after-training paperwork (admin, mgmt); Next 14 days of trainings with readiness (all; reps see only their own); Money jobs: claims to submit, invoices to send, payments to chase, payouts to pay, rejected requests (admin, mgmt); Waiting for my approval (mgmt); Money position and profit this month (mgmt); Programmes waiting on HRDC (admin, mgmt); Notices and calendar (all). Reps can never pick money or approval cards.
-  - Starting cards: Rep: KPI, follow-ups, won deals, next 14 days, notices. Admin: new won deals, due now, money jobs, next 14 days, programmes waiting. Management: approvals, money position, team KPI, pipeline and stuck deals, next 14 days.
+- **Phase 4A, "My home" page (built 2026-10-16; Joel decided to build it instead of waiting).**
+  - **Team workspaces page removed.** Everyone lands on **My home** after login (`selectedRepId` starts null). The top-bar "Team workspaces" button is now "My home".
+  - Layout in Joel's order: shortcuts bar (My workspace; Admin work and "Open a teammate's workspace" for Admin and Management; Management for Management), then **1. Calendar**, **2. Performance rings**, **3. My cards**.
+  - Calendar and Notices reuse the old `HomeDashboard` parts through a `section` prop ('calendar' or 'notices'), so Google Calendar sync and event tagging still work. Its rep cards, KPI tiles and month selector are no longer shown anywhere.
+  - **Rings** (Joel's design): one ring pair each. The big outer ring is year-to-date sales won (RM) against the yearly target; the small inner ring is this month against the monthly target. Year = Jan to Dec. Yearly target = monthly Closing RM target x 12. Counted by won date, like the KPIs. Admin and Management see **Company** (all won deals against the sum of sellers' targets). Anyone with a Closing RM target sees **Me**. Management also sees small rings for each person. **Reps see only "Me"** (default: Joel was asked whether reps should see Company and didn't answer; the switch is `showCompany` in `MyHome.tsx`).
+  - **My cards**: each person picks and orders their own (Customise), saved in `user_prefs/{memberId}.homeCards` (rule: only that person can read or write it). Library and roles are in `CARDS` in `src/components/MyHome.tsx`. Defaults: rep = follow-ups, my KPI, next 14 days, my won deals, notices. Admin = new won deals, due now, money jobs, next 14 days, notices. Management = approvals, money position, pipeline and stuck deals, next 14 days, notices. There's no separate "Team KPI" card because the per-person rings cover it.
+  - Admin work can be opened on a chosen tab (`initialView`) from the cards.
+  - **Rules to publish:** `user_prefs` was added to `firestore.rules`. Until it's published, Customise can't save (everyone still sees the defaults).
 - **Tidy-up (done and pushed 2026-10-16):**
   - Removed every fallback to made-up sample deals ("Petronas Digital", "Maybank HQ", ...). They were in Home, Management, the rep workspace and the "URGENT" notices in `App.tsx`. Deals now come only from the live database (`pipelinesSync`).
   - Replaced hardcoded staff ids: Admin Records editing is now `rep.role === 'admin'` (it was two named ids, so new admins couldn't edit), and the quotation tag list uses the real team.
@@ -212,9 +215,9 @@ What was built:
   - Left on purpose: the hidden demo course-outline template owned by `'xin-ying'` in `CourseOutlineGenerator.tsx` (nobody can see it), and localStorage cache key names containing an email (they only name a browser cache).
 - **Still open from the tidy-up:**
   - **Old "P&L" tab retired** (Joel, 2026-10-16): its button, screen and demo-data writer were removed, and a saved 'pl' tab redirects to Deals. Its state and handlers (`projectPLs`, `getDefaultProjectPLs`, tabulation helpers) are still in `RepDetailDashboard.tsx` but can no longer be reached. Delete them during the screen redesign. Old `project_pls` data stays until cleared in Data tools.
-  - **"Admin work" moved (Joel, 2026-10-16):** it is no longer in the top bar. It is a card at the top of the Team workspaces page, shown only to Admin and Management, with a "Back to Team workspaces" link.
+  - **"Admin work" moved (Joel, 2026-10-16):** it is no longer in the top bar. It is a shortcut on My home, shown only to Admin and Management, with a "Back to My home" link.
   - Redesign the remaining old cramped screens in the new style.
-- **Phase 4B, dashboards:** see Phase 4A ("My home" page, parked) for the agreed approach. It replaces the earlier "home screen per role" idea.
+- **Phase 4B:** ideas for more My home cards can come from how the team uses it.
 
 ## 7. How to start each session
 
