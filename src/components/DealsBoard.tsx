@@ -12,6 +12,8 @@ import {
 import { progress } from '../lib/checklist';
 import DealChecklist, { startChecklist, useChecklistSettings } from './DealChecklist';
 import HrdcQueries from './HrdcQueries';
+import DealAppointmentBox from './DealAppointmentBox';
+import { apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import MoneyPanel, { RepMoneyStatus, useMoneySettings } from './Money';
 import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
@@ -161,10 +163,13 @@ export default function DealsBoard({
       return { text: `Won ${formatDate(dealWonDate(p))}${pr ? `, admin ${pr.done} of ${pr.total}` : ''}`, urgent: false };
     }
     if (st === 'lost') return { text: p.lostReason ? `Lost: ${p.lostReason}` : 'Lost', urgent: false };
+    const ap = apptOf(p);
+    if (apptOverdue(p, today)) return { text: `Appointment on ${formatDate(ap!.date)} not logged`, urgent: true };
+    if (ap?.status === 'booked') return { text: `Appointment ${formatDate(ap.date)}${ap.time ? `, ${apptTime(ap.time)}` : ''}`, urgent: false };
     if (fu && fu < today) return { text: `Follow-up overdue (${formatDate(fu)})`, urgent: true };
     if (st === 'lead') {
       const age = p.requestDate ? (Date.now() - new Date(p.requestDate).getTime()) / 86400000 : 0;
-      return { text: fu ? `Follow up ${formatDate(fu)}` : 'Book an appointment', urgent: age > 2 && !fu };
+      return { text: fu ? `Follow up ${formatDate(fu)}` : 'Book an appointment or send the proposal', urgent: age > 2 && !fu };
     }
     if (st === 'appointment') return { text: 'Send the proposal', urgent: false };
     return { text: fu ? `Follow up ${formatDate(fu)}` : 'Follow up on the proposal', urgent: false };
@@ -279,8 +284,6 @@ export default function DealsBoard({
     }
   };
 
-  const toAppointment = (p: any) =>
-    writeStage(p, { stage: 'appointment', appointmentDate: todayIso(), appointmentTicked: true }, 'Appointment held');
 
   const toProposal = (p: any) => {
     if (dealValue(p) <= 0) return setStageError('Add the proposal value (Edit details) before marking the proposal as sent.');
@@ -478,7 +481,8 @@ export default function DealsBoard({
               lostNote={lostNote} setLostNote={setLostNote}
               onClose={() => setOpenId(null)}
               onEdit={() => startEdit(openDeal)}
-              onAppointment={() => toAppointment(openDeal)}
+              programmes={programmes}
+              onApptDone={flash}
               onProposal={() => toProposal(openDeal)}
               onWon={() => confirmWon(openDeal)}
               onLost={() => confirmLost(openDeal)}
@@ -630,7 +634,8 @@ function DealPanel(props: {
   stagePanel: null | 'won' | 'lost'; setStagePanel: (v: null | 'won' | 'lost') => void; stageError: string;
   wonDate: string; setWonDate: (v: string) => void; lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
-  onClose: () => void; onEdit: () => void; onAppointment: () => void; onProposal: () => void;
+  onClose: () => void; onEdit: () => void; onProposal: () => void;
+  programmes: Programme[]; onApptDone: (msg: string) => void;
   onWon: () => void; onLost: () => void; onReopen: () => void;
   onCreateQuotation: () => void; onCreateOutline: () => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
 }) {
@@ -671,8 +676,7 @@ function DealPanel(props: {
       {props.editable ? (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
-            {st === 'lead' && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onAppointment}>Appointment held</button>}
-            {(st === 'lead' || st === 'appointment') && <button type="button" disabled={props.busy} className={st === 'appointment' ? 'inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]' : btnSecondary} onClick={props.onProposal}>Proposal sent</button>}
+            {(st === 'lead' || st === 'appointment') && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onProposal}>Proposal sent</button>}
             {OPEN_STAGES.includes(st) && (
               <>
                 <button type="button" className={st === 'proposal' ? 'inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]' : btnSecondary} onClick={() => props.setStagePanel('won')}><Trophy className="h-4 w-4" /> Mark won</button>
@@ -718,6 +722,9 @@ function DealPanel(props: {
       ) : (
         <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">Only {props.ownerName}, Admin and Management can change this deal.</p>
       )}
+
+      {/* Appointment (optional, one per deal) */}
+      <DealAppointmentBox deal={p} viewer={props.viewer} editable={props.editable} programmes={props.programmes} client={props.client} onDone={props.onApptDone} />
 
       {/* Details */}
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">

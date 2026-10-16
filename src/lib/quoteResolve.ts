@@ -5,6 +5,7 @@
 //   training date                <- the deal
 //   owner                        <- the deal's owner
 //   venue / trainer              <- venue list / trainer list
+//   participants                 <- the deal (when recorded at the appointment)
 // The quotation's own text fields are only used when it has no link yet (older quotations),
 // and to hold the locked copy once it is marked as sent.
 
@@ -70,6 +71,9 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
   } else if (!q.company) {
     issues.push('Choose the deal or client this quotation is for.');
   }
+
+  // Number of participants agreed at the appointment lives on the deal.
+  if (deal?.participants) out.participants = `Up to ${deal.participants} pax`;
 
   const venue = q.venueId ? s.venues.find(v => v.id === q.venueId) : null;
   if (venue) out.venue = venue.name || '';

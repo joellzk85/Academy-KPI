@@ -14,6 +14,7 @@ import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/
 import { MoneyIn, MoneyOut, canDecide, dealPL, isPaid, moneyFlags } from '../lib/money';
 import { useChecklistSettings } from './DealChecklist';
 import { useMoneySettings } from './Money';
+import { MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -22,7 +23,7 @@ type Viewer = { id: string; name: string; role: Role };
 // Each person picks their own cards (saved in user_prefs/{their id}). Roles limit what can be picked.
 type CardId =
   | 'follow_ups' | 'my_kpi' | 'my_won' | 'next14' | 'new_won' | 'due_now' | 'money_jobs'
-  | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices';
+  | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments';
 
 const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'follow_ups', title: 'My follow-ups', roles: ['rep', 'admin', 'management'] },
@@ -35,6 +36,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'approvals', title: 'Waiting for my approval', roles: ['management'] },
   { id: 'money_position', title: 'Money position', roles: ['management'] },
   { id: 'pipeline', title: 'Pipeline and stuck deals', roles: ['management'] },
+  { id: 'team_appointments', title: 'Team appointments this week', roles: ['admin', 'management'] },
   { id: 'programmes_waiting', title: 'Programmes waiting on HRDC', roles: ['admin', 'management'] },
   { id: 'notices', title: 'Notices', roles: ['rep', 'admin', 'management'] },
 ];
@@ -43,7 +45,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
 const DEFAULT_CARDS: Record<Role, CardId[]> = {
   rep: ['follow_ups', 'my_kpi', 'next14', 'my_won'],
   admin: ['new_won', 'due_now', 'money_jobs', 'next14'],
-  management: ['approvals', 'money_position', 'pipeline', 'next14'],
+  management: ['approvals', 'money_position', 'pipeline', 'team_appointments', 'next14'],
 };
 
 const btnSecondary =
@@ -423,18 +425,28 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
 
   switch (id) {
     case 'follow_ups': {
+      const appts: Item[] = c.deals
+        .filter(p => c.mine(p) && apptOf(p)?.status === 'booked')
+        .map(p => ({ p, a: apptOf(p)!, d: daysUntil(apptOf(p)!.date, c.today) ?? 99 }))
+        .filter(x => x.d <= 7)
+        .sort((a, b) => a.d - b.d)
+        .map(({ p, a, d }) => ({
+          key: `appt_${p.id}`, title: `Appointment: ${c.clientName(p)}`, onClick: () => c.openDeal(p),
+          sub: apptOverdue(p, c.today) ? `Held ${formatDate(a.date)}? Log what happened` : d === 0 ? `Today${a.time ? `, ${apptTime(a.time)}` : ''} · ${MODE_LABELS[a.mode]}` : `${formatDate(a.date)}${a.time ? `, ${apptTime(a.time)}` : ''} · ${MODE_LABELS[a.mode]}`,
+          level: apptOverdue(p, c.today) ? 'danger' as const : d <= 0 ? 'attention' as const : undefined,
+        }));
       const soon = c.deals
         .filter(p => c.mine(p) && OPEN_STAGES.includes(dealStage(p)) && ymd(p.followUpDate))
         .map(p => ({ p, d: daysUntil(ymd(p.followUpDate), c.today) ?? 99 }))
         .filter(x => x.d <= 7)
         .sort((a, b) => a.d - b.d);
       return {
-        items: soon.map(({ p, d }) => ({
+        items: [...appts, ...soon.map(({ p, d }) => ({
           key: p.id, title: c.clientName(p), onClick: () => c.openDeal(p),
           sub: d < 0 ? `Overdue by ${-d} day${d === -1 ? '' : 's'} (${STAGE_LABELS[dealStage(p)]})` : d === 0 ? 'Follow up today' : `Follow up ${formatDate(ymd(p.followUpDate))}`,
           level: d < 0 ? 'danger' : d === 0 ? 'attention' : undefined,
-        })),
-        empty: 'No follow-ups due in the next 7 days.',
+        } as Item))],
+        empty: 'No follow-ups or appointments in the next 7 days.',
       };
     }
     case 'my_kpi': {
@@ -576,13 +588,14 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     case 'pipeline': {
       const open = c.deals.filter(p => OPEN_STAGES.includes(dealStage(p)));
       const stuck = open.filter(p => {
+        if (apptOverdue(p, c.today)) return true;
         const fu = ymd(p.followUpDate);
         if (fu && fu < c.today) return true;
         const sent = ymd(p.proposalSentDate);
         return dealStage(p) === 'proposal' && !fu && sent && (daysUntil(sent, c.today) ?? 0) <= -7;
       });
       return {
-        items: stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` })),
+        items: stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${apptOverdue(p, c.today) ? `appointment on ${formatDate(apptOf(p)!.date)} not logged` : ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` })),
         empty: 'No stuck deals.',
         footer: (
           <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3">
@@ -592,6 +605,31 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
             })}
           </div>
         ),
+      };
+    }
+    case 'team_appointments': {
+      const t = new Date(c.today + 'T00:00:00');
+      const mon = new Date(t); mon.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const from = iso(mon), to = iso(sun);
+      const list = c.deals
+        .map(p => ({ p, a: apptOf(p) }))
+        .filter(x => x.a && !x.a.legacy && x.a.date >= from && x.a.date <= to)
+        .sort((x, y) => x.a!.date.localeCompare(y.a!.date));
+      return {
+        items: list.map(({ p, a }) => {
+          const late = apptLateDays(a!);
+          const held = a!.status === 'held';
+          return {
+            key: p.id, title: `${c.clientName(p)} · ${c.nameOf(dealOwnerId(p))}`, onClick: () => c.openDeal(p),
+            level: apptOverdue(p, c.today) ? 'danger' as const : held && late > 3 ? 'attention' as const : undefined,
+            sub: held
+              ? `Held ${formatDate(a!.date)}${a!.outcome ? ` · ${a!.outcome}` : ''}${a!.nextStep ? ` · Next: ${a!.nextStep}` : ''}${late > 3 ? ` · logged ${late} days late` : ''}`
+              : apptOverdue(p, c.today) ? `Booked ${formatDate(a!.date)}, not logged` : `Booked ${formatDate(a!.date)}${a!.time ? `, ${apptTime(a!.time)}` : ''} · ${MODE_LABELS[a!.mode]}`,
+          };
+        }),
+        empty: 'No appointments this week.',
       };
     }
     case 'programmes_waiting': {

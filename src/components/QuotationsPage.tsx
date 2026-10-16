@@ -503,7 +503,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
               <div className="mt-1">{goto('venue', 'Venue not listed? Add it in Venues')}</div>
             </div>
             <div><label className={label} htmlFor="q-time">Time</label><input id="q-time" value={q.time} onChange={e => set({ time: e.target.value })} className={input} placeholder="9:00 AM – 5:00 PM" /></div>
-            <div><label className={label} htmlFor="q-pax">Participants</label><input id="q-pax" value={q.participants} onChange={e => set({ participants: e.target.value })} className={input} placeholder="Up to 25 pax" /></div>
+            <div><label className={label} htmlFor="q-pax">Participants{r.deal?.participants ? ' (from the deal)' : ''}</label><input id="q-pax" value={r.deal?.participants ? shownQ.participants : q.participants} disabled={!!r.deal?.participants} onChange={e => set({ participants: e.target.value })} className={input} placeholder="Up to 25 pax" /></div>
             <div><label className={label} htmlFor="q-prov">Prepared by (as printed)</label><input id="q-prov" value={q.trainingProvider} onChange={e => set({ trainingProvider: e.target.value })} className={input} /></div>
           </div>
         </Card>
