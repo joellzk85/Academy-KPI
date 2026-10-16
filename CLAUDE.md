@@ -203,7 +203,18 @@ What was built:
   - "My home" becomes the first page after login; the team-workspace page stays one click away. Cards link to where you act.
   - Card library (Joel didn't know which he wanted, so this list is the start; easy to change): My KPI vs target (rep, admin); My follow-ups due or overdue (rep, admin); My won deals with admin progress and payment status (rep); Team KPI vs target (mgmt); Pipeline by stage and stuck deals (mgmt); New won deals handover (admin, mgmt); Due now: checklist steps, HRDC queries, after-training paperwork (admin, mgmt); Next 14 days of trainings with readiness (all; reps see only their own); Money jobs: claims to submit, invoices to send, payments to chase, payouts to pay, rejected requests (admin, mgmt); Waiting for my approval (mgmt); Money position and profit this month (mgmt); Programmes waiting on HRDC (admin, mgmt); Notices and calendar (all). Reps can never pick money or approval cards.
   - Starting cards: Rep: KPI, follow-ups, won deals, next 14 days, notices. Admin: new won deals, due now, money jobs, next 14 days, programmes waiting. Management: approvals, money position, team KPI, pipeline and stuck deals, next 14 days.
-- **Phase 4, dashboards:** a home screen per role. Reps get their deals and KPI vs target. Admin gets the work queue. Management gets pipeline value by stage, team KPI, stuck deals, money owed and profit per training. Add alerts. Tidy-ups: the 13 npm security warnings, the large JS bundle (about 1.7 MB), the remaining localStorage fallbacks and old hardcoded IDs in Home and Management, and redesign of the remaining old screens. Joel finds the **"Admin work" tab in the top bar odd** and wants all screen-layout fixes done together later. Ask him where it should live when doing the screen redesign.
+- **Tidy-up (done 2026-10-16):**
+  - Removed every fallback to made-up sample deals ("Petronas Digital", "Maybank HQ", ...). They were in Home, Management, the rep workspace and the "URGENT" notices in `App.tsx`. Deals now come only from the live database (`pipelinesSync`).
+  - Replaced hardcoded staff ids: Admin Records editing is now `rep.role === 'admin'` (it was two named ids, so new admins couldn't edit), and the quotation tag list uses the real team.
+  - Deleted the retired payment screens (`ClientPaymentManager.tsx`, the "Raise Payment" block, `payments` state and sync in `RepDetailDashboard.tsx`).
+  - `npm audit fix` cut the warnings from 13 to 4. The remaining 4 are `@grpc/grpc-js` inside the Firebase SDK, in a part used only on servers, not in the browser. npm's "fix" would downgrade Firebase to v9 and break the app, so don't apply `--force`.
+  - Faster loading: the big screens are `React.lazy` in `App.tsx`, and `vite.config.ts` splits firebase, react and vendor code into separate files. The login page now downloads about 1.08 MB instead of 1.75 MB (gzip about 293 KB instead of 430 KB). Firebase (527 KB) is the largest remaining file; the size warning for it is expected.
+  - Left on purpose: the hidden demo course-outline template owned by `'xin-ying'` in `CourseOutlineGenerator.tsx` (nobody can see it), and localStorage cache key names containing an email (they only name a browser cache).
+- **Still open from the tidy-up:**
+  - **Old "P&L" tab in each workspace** (project P&Ls, `project_pls`): the first time it opens it writes demo projects ("Petronas Digital ...") to the database, and it overlaps the real per-deal P&L from Phase 3. Ask Joel whether to retire it (recommended) or keep it.
+  - **"Admin work" tab position:** Joel finds it odd in the top bar. Ask him where it should live during the screen redesign.
+  - Redesign the remaining old cramped screens in the new style.
+- **Phase 4B, dashboards:** see Phase 4A ("My home" page, parked) for the agreed approach. It replaces the earlier "home screen per role" idea.
 
 ## 7. How to start each session
 

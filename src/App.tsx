@@ -30,12 +30,13 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 
 // Core components & initial datasets
 import Logo from './components/Logo';
-import HomeDashboard from './components/HomeDashboard';
-import RepDetailDashboard from './components/RepDetailDashboard';
-import ManagementDashboard from './components/ManagementDashboard';
-import TeamManager from './components/TeamManager';
-import DataTools from './components/DataTools';
-import WorkQueue from './components/WorkQueue';
+// The big screens load only when first opened, so the login page appears faster.
+const HomeDashboard = React.lazy(() => import('./components/HomeDashboard'));
+const RepDetailDashboard = React.lazy(() => import('./components/RepDetailDashboard'));
+const ManagementDashboard = React.lazy(() => import('./components/ManagementDashboard'));
+const TeamManager = React.lazy(() => import('./components/TeamManager'));
+const DataTools = React.lazy(() => import('./components/DataTools'));
+const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, ChatMessage, TeamMember, ROLE_LABELS } from './types';
@@ -866,6 +867,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
           </button>)}
         </div>}
 
+        <React.Suspense fallback={<p className="flex items-center gap-2 py-10 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}>
         <AnimatePresence mode="wait">
           {currentTab === 'admin' && isStaff ? (
             /* D. ADMIN WORK QUEUE */
@@ -1009,6 +1011,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
             </motion.div>
           )}
         </AnimatePresence>
+        </React.Suspense>
 
       </main>
 
