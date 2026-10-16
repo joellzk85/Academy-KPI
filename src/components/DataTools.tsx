@@ -15,13 +15,12 @@ const LINKED_COLLECTIONS: { name: string; label: string }[] = [
   { name: 'course_outlines', label: 'course outlines' },
 ];
 
-// Data agreed to be cleared when the new structure goes in.
+// Data Joel chose to clear (2026-10-16): everything old except KPI history (month_kpis), which he keeps.
 const CLEAR_COLLECTIONS: { name: string; label: string }[] = [
   { name: 'appointments', label: 'Appointments' },
   { name: 'admin_records', label: 'Admin checklists' },
   { name: 'payments', label: 'Payment vouchers' },
   { name: 'client_payments', label: 'Client payments' },
-  { name: 'month_kpis', label: 'KPI history' },
   { name: 'events', label: 'Calendar events' },
   { name: 'tasks', label: 'Tasks' },
   { name: 'project_pls', label: 'P&L sheets' },
@@ -168,7 +167,7 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
       }
       oldWorkspaces.forEach(id => ops.push(b => b.delete(doc(db, 'reps', id))));
       await commitInChunks(ops);
-      setClearMsg({ ok: true, text: `Cleared ${ops.length} old record${ops.length === 1 ? '' : 's'}. Clients, venues, trainers, quotations, deals and course outlines were kept.` });
+      setClearMsg({ ok: true, text: `Cleared ${ops.length} old record${ops.length === 1 ? '' : 's'}. Everything else, including KPI history, was kept.` });
       setConfirmClear(false);
       setUnderstood(false);
       await load();
@@ -245,7 +244,7 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
       <section className="rounded-2xl border border-line bg-white p-5">
         <h3 className="flex items-center gap-2 font-bold"><Trash2 className="h-4 w-4 text-danger" /> Clear old data</h3>
         <p className="mt-1 text-[15px] leading-relaxed text-ink-soft">
-          Removes the old data you agreed to drop, so the rebuilt screens start clean. Your clients, venues, trainers, quotations, deals and course outlines are kept.
+          Removes the old data you agreed to drop, so the rebuilt screens start clean. Your clients, venues, trainers, programmes, quotations, deals, course outlines, KPI history, checklists, HRDC queries and money records are kept.
         </p>
         {clearCounts === null ? (
           <p className="mt-4 flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Counting…</p>
@@ -268,7 +267,7 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
             ) : (
               <div className="mt-4 rounded-xl border border-danger/30 bg-danger-soft p-4">
                 <p className="flex items-center gap-2 font-semibold text-danger"><AlertTriangle className="h-4 w-4" /> This permanently deletes {totalToClear} records</p>
-                <p className="mt-1 text-sm text-danger">It can't be undone. Any KPI numbers typed in since this update went live are also cleared.</p>
+                <p className="mt-1 text-sm text-danger">It can't be undone. KPI history and everything listed as kept above are not touched.</p>
                 <label className="mt-3 flex items-center gap-2 text-sm text-danger">
                   <input type="checkbox" checked={understood} onChange={e => setUnderstood(e.target.checked)} className="h-4 w-4 accent-[#B42318]" />
                   I understand, delete these records

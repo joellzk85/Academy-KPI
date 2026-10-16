@@ -19,7 +19,9 @@ import {
   Key,
   LogOut,
   KeyRound,
-  UserCircle2
+  UserCircle2,
+  ClipboardCheck,
+  ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -747,18 +749,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               >
                 Team workspaces
               </button>
-              {isStaff && (
-                <button
-                  onClick={() => handleSwitchTab('admin')}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    currentTab === 'admin'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  Admin work
-                </button>
-              )}
 {isManagement && (              <button
                 onClick={() => handleSwitchTab('management')}
                 className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
@@ -834,7 +824,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       <main className="flex-1 py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         
         {/* Mobile Tab switcher (visible only on small screens) */}
-        {isStaff && <div className="flex md:hidden items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 mb-6">
+        {isManagement && <div className="flex md:hidden items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 mb-6">
           <button
             onClick={() => handleSwitchTab('operations')}
             className={`flex-1 text-center py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
@@ -844,16 +834,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
             }`}
           >
             Operations
-          </button>
-          <button
-            onClick={() => handleSwitchTab('admin')}
-            className={`flex-1 text-center py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-              currentTab === 'admin'
-                ? 'bg-white text-blue-600 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Admin work
           </button>
 {isManagement && (          <button
             onClick={() => handleSwitchTab('management')}
@@ -878,6 +858,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
+              <button type="button" onClick={() => handleSwitchTab('operations')} className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-accent hover:underline">
+                <ArrowLeft className="h-4 w-4" /> Back to Team workspaces
+              </button>
               <WorkQueue
                 viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                 people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name }))}
@@ -939,6 +922,21 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
+              {/* Admin work: only Admin and Management see this card. */}
+              {isStaff && (
+                <button
+                  type="button"
+                  onClick={() => handleSwitchTab('admin')}
+                  className="mb-6 flex w-full items-center gap-4 rounded-2xl border border-line bg-white p-5 text-left font-sans text-ink shadow-xs transition-colors hover:border-accent hover:bg-accent-soft/40"
+                >
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent"><ClipboardCheck className="h-5 w-5" /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-lg font-bold">Admin work</span>
+                    <span className="block text-[15px] text-ink-soft">Work queue, money and approvals, programmes and checklist tasks.</span>
+                  </span>
+                  <ChevronRight className="h-5 w-5 shrink-0 text-ink-soft" />
+                </button>
+              )}
               <HomeDashboard
                 reps={representatives}
                 events={calendarEvents}

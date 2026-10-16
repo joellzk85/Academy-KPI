@@ -112,8 +112,8 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 ### Data policy (agreed)
 
 - **Keep:** clients, venues (`venues_directory`), trainers (`trainers_directory`), quotations, deals (`pipelines`), course outlines.
-- **Clear (only via the Data tools button, after Joel confirms):** appointments, admin_records, payments, client_payments, month_kpis, events, tasks, project_pls, links, old `reps` docs from the previous login system.
-- **Open question:** Joel mentioned wanting to keep "a few other" things. Before he clicks Clear, ask which items on the clear list he wants to keep, and update `DataTools.tsx` to skip them.
+- **Clear (only via the Data tools button, Joel clicks it himself):** appointments, admin_records, payments, client_payments, events, tasks, project_pls, links, and old `reps` docs from the previous login system.
+- **Decided 2026-10-16:** Joel keeps only **KPI history (`month_kpis`)** from the old clear list, so it was removed from `DataTools.tsx`. Everything else on the list is cleared, including calendar events, tasks and saved links, even though those screens still exist; they just start empty.
 
 ## 5. Status
 
@@ -130,11 +130,11 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 ### Joel's open to-dos (check with him)
 0. **Phase 2B go-live:** done and tested by Joel on 2026-10-16. Rules published.
 0a. **Phase 2C go-live:** done and tested by Joel on 2026-10-16. Rules published.
-0b. **Phase 3 go-live:** done and tested by Joel on 2026-10-16. Rules published. Still open: Joel fills in the HRDC claim deadline in Admin work → Money once he has checked HRD Corp's current guidelines.
-1. Set each person's KPI template and targets in Management → Team.
-2. Link old records in Data tools (ask for a screenshot of the matches before he clicks Link).
+0b. **Phase 3 go-live:** done and tested by Joel on 2026-10-16. Rules published. Claim deadline decided: HRD Corp allows 6 months, so the default is 180 days, with the reminder turning red after 14 days (`claimReminderDays`). Both can be changed in Admin work → Money.
+1. KPI templates and targets: Joel will adjust these himself in the Management portal later.
+2. Link old records: Joel will do it later in Management → Data tools (Claude can't log in). Ask for a screenshot of the suggested matches before he clicks Link records, and check every match.
 3. ~~Test a deal from new to won and check it shows in that month's KPIs.~~ Done 2026-10-16: works.
-4. Clear old data: only after the open question above is settled.
+4. Clear old data: Joel clicks it himself after linking (step 2), because clearing can't be undone. KPI history is kept.
 5. As a precaution, both Management people change their passwords once, because the database ran on old open rules until Phase 2A's rules were published.
 
 ## 6. Phase 2B, the handover to admin (built 2026-10-16; check its status in section 5)
@@ -190,7 +190,7 @@ What was built:
 - `money_in/{id}`: HRDC claim or client invoice on a deal (number, date, amount; then paid date and amount). Admin and Management record it. Everyone can read it, because reps see payment status only (`RepMoneyStatus`).
 - `money_out/{id}`: payment request (category, payee, amount, timing "Deposit before training" or "After training"). Statuses: pending → approved or rejected → paid. Admin and Management only.
   - The rules enforce that only a manager who did not raise the request can approve or reject it, so an Admin request can be decided by either manager and a manager's request only by the other. Only approved items can be marked paid. The UI hides Approve on your own request.
-- `config/money_settings`: `hrdcDeductionPct` (default 4), `overdueDays` (default 30), `claimDeadlineDays` (blank until Joel confirms HRD Corp's current rule; days after training).
+- `config/money_settings`: `hrdcDeductionPct` (default 4), `overdueDays` (default 30), `claimDeadlineDays` (default 180: HRD Corp allows 6 months; blank = no countdown), `claimReminderDays` (default 14: red reminder if the claim isn't submitted by then).
 - P&L per deal (`dealPL` in `src/lib/money.ts`): invoiced and claimed, minus HRDC %, minus any extra HRDC shortfall, minus approved and paid costs, equals profit. It also shows received, still to come in, still to pay out, and waiting for approval (not counted in costs).
 - Work queue flags (`moneyFlags`): HRDC claim not submitted after training (with deadline countdown once set), client invoice not sent (amber within 7 days of training, red after), payment overdue, HRDC paid less than expected, requests waiting for approval. A deal is "All done" only when its checklist is done, its queries are answered and its money is settled.
 - Screens: "Money" section on won deals (Deals panel and work queue). Admin work → Money lists approvals waiting, approved-to-pay, money still to come in, and the settings.
@@ -212,7 +212,7 @@ What was built:
   - Left on purpose: the hidden demo course-outline template owned by `'xin-ying'` in `CourseOutlineGenerator.tsx` (nobody can see it), and localStorage cache key names containing an email (they only name a browser cache).
 - **Still open from the tidy-up:**
   - **Old "P&L" tab retired** (Joel, 2026-10-16): its button, screen and demo-data writer were removed, and a saved 'pl' tab redirects to Deals. Its state and handlers (`projectPLs`, `getDefaultProjectPLs`, tabulation helpers) are still in `RepDetailDashboard.tsx` but can no longer be reached. Delete them during the screen redesign. Old `project_pls` data stays until cleared in Data tools.
-  - **"Admin work" tab position:** Joel finds it odd in the top bar. Ask him where it should live during the screen redesign.
+  - **"Admin work" moved (Joel, 2026-10-16):** it is no longer in the top bar. It is a card at the top of the Team workspaces page, shown only to Admin and Management, with a "Back to Team workspaces" link.
   - Redesign the remaining old cramped screens in the new style.
 - **Phase 4B, dashboards:** see Phase 4A ("My home" page, parked) for the agreed approach. It replaces the earlier "home screen per role" idea.
 

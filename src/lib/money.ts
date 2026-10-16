@@ -63,17 +63,22 @@ export interface MoneyOut {
 export interface MoneySettings {
   hrdcDeductionPct: number;            // HRDC keeps this % of each claim
   overdueDays: number;                 // invoice or claim unpaid this long = overdue
-  claimDeadlineDays: number | null;    // days after training to submit the HRDC claim (blank = no warning)
+  claimDeadlineDays: number | null;    // days after training to submit the HRDC claim (blank = no deadline countdown)
+  claimReminderDays: number;           // claim still not submitted this many days after training = red
 }
 
-export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: null };
+// HRD Corp allows 6 months to claim (Joel, 2026-10-16); he wants a red reminder after 14 days.
+export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14 };
 
 export function readMoneySettings(data: any): MoneySettings {
   const num = (v: any, d: number) => (Number.isFinite(Number(v)) && Number(v) >= 0 && v !== '' && v !== null ? Number(v) : d);
   return {
     hrdcDeductionPct: num(data?.hrdcDeductionPct, DEFAULT_MONEY_SETTINGS.hrdcDeductionPct),
     overdueDays: num(data?.overdueDays, DEFAULT_MONEY_SETTINGS.overdueDays),
-    claimDeadlineDays: data?.claimDeadlineDays === null || data?.claimDeadlineDays === undefined || data?.claimDeadlineDays === '' ? null : num(data.claimDeadlineDays, 0),
+    // Never saved = the default; saved blank = no deadline countdown.
+    claimDeadlineDays: data?.claimDeadlineDays === undefined ? DEFAULT_MONEY_SETTINGS.claimDeadlineDays
+      : data.claimDeadlineDays === null || data.claimDeadlineDays === '' ? null : num(data.claimDeadlineDays, 0),
+    claimReminderDays: num(data?.claimReminderDays, DEFAULT_MONEY_SETTINGS.claimReminderDays),
   };
 }
 
@@ -136,13 +141,14 @@ export function moneyFlags(deal: any, ins: MoneyIn[], outs: MoneyOut[], s: Money
 
   if (hrdc && !ins.some(m => m.source === 'hrdc') && days !== null && days < 0) {
     const since = -days;
+    const late = since >= s.claimReminderDays;   // red after the reminder period
     if (s.claimDeadlineDays !== null) {
       const left = s.claimDeadlineDays - since;
       flags.push(left < 0
         ? { level: 'danger', text: `HRDC claim deadline passed ${-left} day${left === -1 ? '' : 's'} ago` }
-        : { level: left <= 7 ? 'danger' : 'attention', text: `HRDC claim not submitted (deadline in ${left} day${left === 1 ? '' : 's'})` });
+        : { level: late ? 'danger' : 'attention', text: `HRDC claim not submitted, ${since} day${since === 1 ? '' : 's'} since training (deadline in ${left} day${left === 1 ? '' : 's'})` });
     } else {
-      flags.push({ level: 'attention', text: 'HRDC claim not submitted yet' });
+      flags.push({ level: late ? 'danger' : 'attention', text: `HRDC claim not submitted, ${since} day${since === 1 ? '' : 's'} since training` });
     }
   }
   if (client && !ins.some(m => m.source === 'client') && days !== null) {

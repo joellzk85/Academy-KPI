@@ -154,7 +154,7 @@ function InForm({ deal, source, viewer, settings, onDone }: { deal: any; source:
   return (
     <form onSubmit={save} className="space-y-3 rounded-xl border border-line bg-surface p-4">
       <p className="text-sm font-semibold">{source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}</p>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div><label className={small} htmlFor="mi-no">{source === 'hrdc' ? 'Claim / invoice no.' : 'Invoice no.'}</label><input id="mi-no" value={f.invoiceNo} onChange={e => setF(x => ({ ...x, invoiceNo: e.target.value }))} className={input} /></div>
         <div><label className={small} htmlFor="mi-date">{source === 'hrdc' ? 'Submitted on' : 'Invoice date'}</label><input id="mi-date" type="date" value={f.invoiceDate} onChange={e => setF(x => ({ ...x, invoiceDate: e.target.value }))} className={input} /></div>
         <div><label className={small} htmlFor="mi-amt">{source === 'hrdc' ? 'Amount claimed (RM)' : 'Amount (RM)'}</label><input id="mi-amt" inputMode="decimal" value={f.amount} onChange={e => setF(x => ({ ...x, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
@@ -430,19 +430,22 @@ function Section({ title, empty, children }: { title: string; empty: string; chi
 }
 
 function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; viewer: Viewer }) {
-  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string } | null>(null);
+  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string } | null>(null);
   const { busy, error, setError, run } = useRun();
   const [saved, setSaved] = useState(false);
-  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays) };
-  const set = (k: 'pct' | 'overdue' | 'deadline', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
+  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays) };
+  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
   const save = () => {
     const pct = Number(v.pct);
     const overdue = Number(v.overdue);
     if (!(pct >= 0 && pct < 100)) return setError('The HRDC deduction must be a percentage, for example 4.');
     if (!(overdue >= 1)) return setError('Overdue days must be at least 1.');
+    const reminder = Number(v.reminder);
+    if (!(reminder >= 1)) return setError('The claim reminder must be at least 1 day.');
+    if (v.deadline !== '' && Number(v.deadline) <= reminder) return setError('The claim deadline must be later than the reminder.');
     return run(async () => {
       await setDoc(doc(db, 'config', 'money_settings'), {
-        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline),
+        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder,
         updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name,
       });
       setF(null);
@@ -456,8 +459,9 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
         <div><label className={small} htmlFor="ms-pct">HRDC keeps (%)</label><input id="ms-pct" inputMode="decimal" value={v.pct} onChange={e => set('pct', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="ms-od">Overdue after (days)</label><input id="ms-od" inputMode="numeric" value={v.overdue} onChange={e => set('overdue', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="ms-dl">HRDC claim deadline (days after training)</label><input id="ms-dl" inputMode="numeric" value={v.deadline} onChange={e => set('deadline', e.target.value)} className={input} placeholder="Not set" /></div>
+        <div><label className={small} htmlFor="ms-rm">Claim reminder turns red after (days after training)</label><input id="ms-rm" inputMode="numeric" value={v.reminder} onChange={e => set('reminder', e.target.value)} className={input} /></div>
       </div>
-      <p className="text-sm text-ink-soft">Fill in the claim deadline only after checking HRD Corp's current guidelines. Until then, the work queue just reminds you that a claim hasn't been submitted.</p>
+      <p className="text-sm text-ink-soft">HRD Corp allows 6 months (180 days) after training to submit a claim. The work queue shows an amber reminder straight after training and turns it red after the reminder days, well before the deadline.</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       {saved && <p role="status" className="text-sm text-accent">Saved.</p>}
       <button type="button" disabled={busy || !f} onClick={save} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save settings</button>
