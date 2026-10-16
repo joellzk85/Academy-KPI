@@ -516,8 +516,11 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   }, []);
 
   // Handlers for HomeDashboard interactions
+  // Only Management can open other people's workspaces; everyone else only their own (Joel, 2026-10-16).
+  const canOpenWorkspace = (id: string) => isManagement || id === currentMember.id;
+
   const handleSelectRep = (rep: Representative) => {
-    if (isRep && rep.id !== currentMember.id) {
+    if (!canOpenWorkspace(rep.id)) {
       showToast('You can open your own workspace only.');
       return;
     }
@@ -535,7 +538,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
   // From the admin work queue: open a person's workspace on their Quotations tab.
   const handleOpenQuotationsFor = (repId: string) => {
-    const target = representatives.find(r => r.id === repId) || representatives.find(r => r.id === currentMember.id);
+    // Admin opens their own Quotations (which lists everyone's); Management can open the owner's.
+    const wanted = canOpenWorkspace(repId) ? repId : currentMember.id;
+    const target = representatives.find(r => r.id === wanted) || representatives.find(r => r.id === currentMember.id);
     if (!target) {
       showToast("That person's workspace isn't available. Open the quotation from a rep's workspace instead.");
       return;
@@ -743,7 +748,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
   const homeNav = {
     openWorkspace: (repId: string, subTab?: string) => {
-      if (isRep && repId !== currentMember.id) return;
+      if (!canOpenWorkspace(repId)) return;
       if (subTab) localStorage.setItem(`next_active_subtab_${repId}`, subTab);
       setRepSelectionSource('operations');
       setSelectedRepId(repId);

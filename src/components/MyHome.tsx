@@ -116,9 +116,11 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const nameOf = (id: string) => people.find(p => p.id === id)?.name || 'Former team member';
   const clientName = (p: any) => clients.find(c => c.id === p.clientId)?.companyName || p.client || 'No client';
   const hasWorkspace = (id: string) => representatives.some(r => r.id === id);
+  // Management can open anyone's workspace; everyone else only their own (Admin goes to the work queue).
   const openDeal = (p: any) => {
     const owner = dealOwnerId(p);
-    nav.openWorkspace(hasWorkspace(owner) ? owner : viewer.id, 'pipeline');
+    if (owner === viewer.id || viewer.role === 'management') return nav.openWorkspace(hasWorkspace(owner) ? owner : viewer.id, 'pipeline');
+    if (viewer.role === 'admin') return nav.openAdminWork('queue');
   };
 
   const wonDeals = useMemo(() => deals.filter(p => dealStage(p) === 'won'), [deals]);
@@ -137,7 +139,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
         )}
         {staff && <button type="button" className={btnSecondary} onClick={() => nav.openAdminWork()}><ClipboardCheck className="h-4 w-4 text-accent" /> Admin work</button>}
         {viewer.role === 'management' && <button type="button" className={btnSecondary} onClick={nav.openManagement}><ShieldCheck className="h-4 w-4 text-accent" /> Management</button>}
-        {staff && (
+        {viewer.role === 'management' && (
           <label className="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold">
             <Users className="h-4 w-4 text-accent" />
             <span className="sr-only">Open a teammate's workspace</span>
@@ -150,7 +152,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       </div>
 
       {/* 1. Calendar (small) and 2. Performance (one row) */}
-      <div className="grid items-start gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid items-stretch gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
         <CompactCalendar events={events} today={today} full={calendar} />
         <Performance viewer={viewer} representatives={representatives} deals={deals} today={today} />
       </div>
@@ -256,33 +258,61 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
   // Reps see only their own ring; Admin and Management also see the company.
   const showCompany = viewer.role !== 'rep';
 
-  const items: { key: string; label: string; ring: Ring }[] = [];
-  if (showCompany) items.push({ key: 'company', label: 'Company', ring: company });
-  if (meRing) items.push({ key: 'me', label: 'Me', ring: meRing });
-  if (viewer.role === 'management') sellers.filter(r => r.id !== viewer.id).forEach(r => items.push({ key: r.id, label: r.name, ring: ringFor(r) }));
+  // Main rings (Company and/or Me) are large with their figures beside them; Management also
+  // gets a row of small rings, one per person, underneath.
+  const main: { key: string; label: string; ring: Ring }[] = [];
+  if (showCompany) main.push({ key: 'company', label: 'Company', ring: company });
+  if (meRing) main.push({ key: 'me', label: 'Me', ring: meRing });
+  const team = viewer.role === 'management' ? sellers.filter(r => r.id !== viewer.id).map(r => ({ key: r.id, label: r.name, ring: ringFor(r) })) : [];
+  const tip = (label: string, ring: Ring) => `${label}\nYear ${year}: ${formatRM(ring.yearValue)} of ${formatRM(ring.yearTarget)} (${pct(ring.yearValue, ring.yearTarget)}%)\n${monthLabel}: ${formatRM(ring.monthValue)} of ${formatRM(ring.monthTarget)} (${pct(ring.monthValue, ring.monthTarget)}%)`;
 
   return (
-    <section className="rounded-2xl border border-line bg-white p-4">
+    <section className="flex h-full flex-col rounded-2xl border border-line bg-white p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-bold">Performance</h2>
         <span className="flex items-center gap-3 text-xs text-ink-soft">
-          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#0E6E62]" />Outer: year {year}</span>
-          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#5DB3A6]" />Inner: {monthLabel}</span>
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#0E6E62]" />Outer ring: year {year}</span>
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#5DB3A6]" />Inner ring: {monthLabel}</span>
         </span>
       </div>
-      {items.length === 0 ? (
+      {main.length === 0 && team.length === 0 ? (
         <p className="mt-2 text-ink-soft">No sales target is set for you yet.</p>
       ) : (
-        <div className="mt-3 flex gap-5 overflow-x-auto pb-1">
-          {items.map(({ key, label, ring }) => (
-            <div key={key} className="flex w-28 shrink-0 flex-col items-center text-center"
-              title={`${label}\nYear ${year}: ${formatRM(ring.yearValue)} of ${formatRM(ring.yearTarget)} (${pct(ring.yearValue, ring.yearTarget)}%)\n${monthLabel}: ${formatRM(ring.monthValue)} of ${formatRM(ring.monthTarget)} (${pct(ring.monthValue, ring.monthTarget)}%)`}>
-              <Rings ring={ring} size={88} />
-              <span className="mt-1 w-full truncate text-sm font-semibold">{label}</span>
-              <span className="text-xs text-ink-soft">{monthLabel.slice(0, 3)}: {pct(ring.monthValue, ring.monthTarget)}%</span>
-              <span className="whitespace-nowrap text-xs text-ink-soft">Year: {formatRM(ring.yearValue)}</span>
+        <div className="flex flex-1 flex-col justify-center gap-4 pt-3">
+          {main.length > 0 && (
+            <div className={`grid gap-4 ${main.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+              {main.map(({ key, label, ring }) => (
+                <div key={key} className="flex items-center gap-4 rounded-xl bg-surface p-3" title={tip(label, ring)}>
+                  <Rings ring={ring} size={124} />
+                  <div className="min-w-0 space-y-1.5">
+                    <p className="font-bold">{label}</p>
+                    <div>
+                      <p className="text-xs text-ink-soft">Year {year}</p>
+                      <p className="text-sm"><strong className="tabular-nums">{formatRM(ring.yearValue)}</strong> <span className="text-ink-soft">of {formatRM(ring.yearTarget)}</span></p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-ink-soft">{monthLabel}</p>
+                      <p className="text-sm"><strong className="tabular-nums">{formatRM(ring.monthValue)}</strong> <span className="text-ink-soft">of {formatRM(ring.monthTarget)} · {pct(ring.monthValue, ring.monthTarget)}%</span></p>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+          {team.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-semibold text-ink-soft">Each person</p>
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {team.map(({ key, label, ring }) => (
+                  <div key={key} className="flex w-20 shrink-0 flex-col items-center text-center" title={tip(label, ring)}>
+                    <Rings ring={ring} size={64} />
+                    <span className="mt-1 w-full truncate text-xs font-semibold">{label}</span>
+                    <span className="text-xs text-ink-soft">{pct(ring.monthValue, ring.monthTarget)}% {monthLabel.slice(0, 3)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>

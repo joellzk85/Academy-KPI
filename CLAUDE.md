@@ -208,6 +208,8 @@ What was built:
     - Calendar is now **small** (`CompactCalendar` in `MyHome.tsx`): a month grid with a dot on days with events. Pointing at (or tapping) a date shows that day's events underneath. "Add event / full calendar" opens the old full calendar (Google sync, attendees) inside the card.
     - Performance is **one row** next to the calendar: small ring pairs side by side (Company, Me, then each person for Management), scrolling sideways if there are many. Hovering a ring shows the full RM figures.
     - **Newsfeed (Notices) removed** from everyone's default cards. The card still exists in Customise if someone wants it back.
+  - **Only Management can open other people's workspaces** (Joel, 2026-10-16). Admin and reps only open their own (`canOpenWorkspace` in `App.tsx`). The "Open a teammate's workspace" picker is for Management only. Admin's deal links go to the work queue, and Admin's quotation links open their own Quotations (which lists everyone's). Admin can set a won deal's **training date in the work queue panel** (`TrainingDate` in `WorkQueue.tsx`).
+  - Performance layout (redone after Joel found it odd): large ring(s) for Company and/or Me with the figures beside them, in a card the same height as the calendar; Management also gets a row of small per-person rings.
   - Joel asked: everyone has their own My home (yes). Content depends on role, and each person's Customise choice affects only their own page.
   - Admin work can be opened on a chosen tab (`initialView`) from the cards.
   - **Rules to publish:** `user_prefs` was added to `firestore.rules`. Until it's published, Customise can't save (everyone still sees the defaults).

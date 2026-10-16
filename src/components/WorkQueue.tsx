@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { FUNDING_LABELS, FundingType, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso } from '../lib/deals';
@@ -273,7 +273,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
               <button type="button" onClick={() => setOpenId(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
-              <div><dt className="text-sm text-ink-soft">Training date</dt><dd className="font-semibold">{whenText(openDeal)}</dd></div>
+              <div><dt className="text-sm text-ink-soft">Training date</dt><dd className="font-semibold"><TrainingDate key={openDeal.id} deal={openDeal} viewer={viewer} label={whenText(openDeal)} /></dd></div>
               <div><dt className="text-sm text-ink-soft">Paid by</dt><dd className="font-semibold">{openDeal.fundingType ? FUNDING_LABELS[openDeal.fundingType as FundingType] : 'Not set'}</dd></div>
               <div><dt className="text-sm text-ink-soft">Rep</dt><dd className="font-semibold">{personName(dealOwnerId(openDeal))}</dd></div>
               <div><dt className="text-sm text-ink-soft">Value</dt><dd className="font-semibold">{dealValue(openDeal) ? formatRM(dealValue(openDeal)) : '—'}</dd></div>
@@ -283,7 +283,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
               )}
             </dl>
             {!/^\d{4}-\d{2}-\d{2}/.test(openDeal.trainingDate || '') && (
-              <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">No training date yet. Add it on the deal itself: open {personName(dealOwnerId(openDeal))}'s workspace, then Deals, then Edit details.</p>
+              <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">No training date yet. Click "Set" next to Training date to add it.</p>
             )}
             <section>
               <h4 className="mb-2 font-bold">Admin checklist</h4>
@@ -448,4 +448,35 @@ function ProgrammesView({ viewer }: { viewer: Viewer }) {
     return () => subs.forEach(u => u());
   }, []);
   return <ProgrammesManager programmes={programmes} deals={deals} viewer={viewer} />;
+}
+
+// Admin and Management can set a won deal's training date here, without opening the rep's workspace.
+function TrainingDate({ deal, viewer, label }: { deal: any; viewer: Viewer; label: string; key?: string }) {
+  const iso = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : '');
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(iso(deal.trainingDate));
+  const [error, setError] = useState('');
+  const save = async () => {
+    setError('');
+    try {
+      await updateDoc(doc(db, 'pipelines', deal.id), {
+        trainingDate: value,
+        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Training date set to ${formatDate(value) || 'none'}` }].slice(-40),
+      });
+      setEditing(false);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+  };
+  if (!editing) {
+    return <span>{label} <button type="button" className="ml-1 text-sm font-semibold text-accent hover:underline" onClick={() => setEditing(true)}>{iso(deal.trainingDate) ? 'Change' : 'Set'}</button></span>;
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <input type="date" value={value} onChange={e => setValue(e.target.value)} className="rounded-lg border border-line px-2 py-1 text-[15px] font-normal" aria-label="Training date" />
+      <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={save}>Save</button>
+      <button type="button" className="text-sm font-normal text-ink-soft hover:underline" onClick={() => setEditing(false)}>Cancel</button>
+      {error && <span className="text-sm text-danger">{error}</span>}
+    </span>
+  );
 }
