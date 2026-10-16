@@ -386,17 +386,10 @@ export default function ManagementDashboard({
             NEXT ACADEMY MANAGEMENT CONSOLE
           </h2>
           <p className="text-slate-400 text-xs md:text-sm max-w-2xl font-medium leading-relaxed">
-            Configure benchmarks, track team-wide ratios, update individual performance targets, and generate operations intelligence via server-side AI integrations.
+            Configure benchmarks, track team-wide ratios, update individual performance targets.
           </p>
         </div>
 
-        <button
-          onClick={() => onAskCopilot("Analyze the entire sales team's metrics for July 2026. Who is overperforming, who needs immediate support, and what is the overall team health forecast?")}
-          className="relative z-10 flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 active:scale-95 transition-all cursor-pointer"
-        >
-          <Sparkles className="w-4 h-4" />
-          GENERATE FULL CO-PILOT AUDIT
-        </button>
       </div>
 
       {/* Primary Sub-Navigation inside the Console */}
