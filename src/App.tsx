@@ -892,7 +892,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
             >
               <WorkQueue
                 viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
-                people={teamMembers.map(m => ({ id: m.id, name: m.name }))}
+                people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name }))}
                 onOpenQuotations={handleOpenQuotationsFor}
               />
             </motion.div>

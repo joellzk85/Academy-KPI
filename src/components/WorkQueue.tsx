@@ -8,6 +8,10 @@ import {
 } from '../lib/checklist';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import DealChecklist, { ProgressBar, startChecklist, useChecklistSettings } from './DealChecklist';
+import HrdcQueries from './HrdcQueries';
+import ProgrammesManager, { StatusChip } from './Programmes';
+import { Flag } from '../lib/checklist';
+import { HrdcQuery, Programme, grantBlockReason, isQueryOpen, isQueryOverdue } from '../lib/programmes';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -26,7 +30,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations }: {
   people: { id: string; name: string }[];
   onOpenQuotations: (repId: string) => void;   // opens that person's quotation library
 }) {
-  const [view, setView] = useState<'queue' | 'tasks'>('queue');
+  const [view, setView] = useState<'queue' | 'programmes' | 'tasks'>('queue');
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -35,7 +39,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations }: {
           <p className="mt-0.5 text-[15px] text-ink-soft">Every won deal and what still needs doing, soonest training first.</p>
         </div>
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5" role="tablist">
-          {([['queue', 'Work queue'], ['tasks', 'Checklist tasks']] as const).map(([k, t]) => (
+          {([['queue', 'Work queue'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks']] as const).map(([k, t]) => (
             <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
               className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === k ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>
               {t}
@@ -43,7 +47,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations }: {
           ))}
         </div>
       </div>
-      {view === 'queue' ? <Queue viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} /> : <TaskSettings viewer={viewer} />}
+      {view === 'queue' ? <Queue viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} /> : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : <TaskSettings viewer={viewer} />}
     </div>
   );
 }
@@ -55,6 +59,8 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
   const [checklists, setChecklists] = useState<Record<string, any>>({});
   const [quotes, setQuotes] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
+  const [programmes, setProgrammes] = useState<Programme[]>([]);
+  const [queries, setQueries] = useState<HrdcQuery[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = useState<'open' | 'flagged' | 'done'>('open');
   const [search, setSearch] = useState('');
@@ -69,6 +75,8 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
+      onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -85,11 +93,25 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
   };
 
   const won = useMemo(() => deals.filter(p => dealStage(p) === 'won'), [deals]);
+  const programmeOf = (p: any) => programmes.find(x => x.id === p.programmeId);
+  const courseOf = (p: any) => programmeOf(p)?.name || p.courseName || '';
+  const queriesOf = (p: any) => queries.filter(q => q.dealId === p.id);
+
   const rows = useMemo(() => won.filter(p => checklists[p.id]).map(p => {
     const cl = checklists[p.id];
     const pr = progress(cl.tasks, p.fundingType);
-    return { deal: p, pr, complete: pr.total > 0 && pr.done === pr.total, flags: checklistFlags(p, cl.tasks, settings, today) };
-  }), [won, checklists, settings, today]);
+    const open = queriesOf(p).filter(isQueryOpen);
+    const overdue = open.filter(q => isQueryOverdue(q, today));
+    const flags: Flag[] = [];
+    // HRDC queries come first: they need a reply by a set date.
+    overdue.forEach(q => flags.push({ level: 'danger', text: `HRDC query overdue (reply was due ${formatDate(q.replyBy)})` }));
+    open.filter(q => !overdue.includes(q)).forEach(q => flags.push({ level: 'danger', text: `HRDC query open, reply by ${formatDate(q.replyBy)}` }));
+    const grantTask = (cl.tasks || []).find((t: any) => t.kind === 'grant');
+    const block = grantBlockReason(p, programmeOf(p));
+    if (block && grantTask && !grantTask.done) flags.push({ level: 'attention', text: p.programmeId ? 'Programme not yet approved by HRDC' : 'Programme not picked from the list' });
+    flags.push(...checklistFlags(p, cl.tasks, settings, today));
+    return { deal: p, pr, overdue: overdue.length > 0, complete: pr.total > 0 && pr.done === pr.total && open.length === 0, flags };
+  }), [won, checklists, settings, today, queries, programmes]);
   const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
 
   const counts = {
@@ -101,9 +123,13 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
   const visible = useMemo(() => {
     const base = rows.filter(r => (filter === 'done' ? r.complete : filter === 'flagged' ? r.flags.some(f => f.level === 'danger') : !r.complete));
     const q = search.trim().toLowerCase();
-    const list = q ? base.filter(r => `${clientName(r.deal)} ${r.deal.courseName || ''} ${personName(dealOwnerId(r.deal))}`.toLowerCase().includes(q)) : base;
-    return list.sort((a, b) => (filter === 'done' ? byTrainingDate(b.deal, a.deal) : byTrainingDate(a.deal, b.deal)));
-  }, [rows, filter, search, clients, people]);
+    const list = q ? base.filter(r => `${clientName(r.deal)} ${courseOf(r.deal)} ${personName(dealOwnerId(r.deal))}`.toLowerCase().includes(q)) : base;
+    return list.sort((a, b) => {
+      if (filter === 'done') return byTrainingDate(b.deal, a.deal);
+      if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;   // overdue HRDC queries go to the top
+      return byTrainingDate(a.deal, b.deal);
+    });
+  }, [rows, filter, search, clients, people, programmes]);
 
   const openRow = rows.find(r => r.deal.id === openId);
   const openDeal = openRow?.deal || won.find(p => p.id === openId) || null;
@@ -176,7 +202,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
                 <button type="button" onClick={() => setOpenId(p.id)} className="grid w-full gap-2 px-5 py-3.5 text-left hover:bg-surface sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-center sm:gap-4">
                   <span className="min-w-0">
                     <span className="block truncate font-semibold">{clientName(p)}</span>
-                    <span className="block truncate text-sm text-ink-soft">{p.courseName || 'No programme'} · {personName(dealOwnerId(p))}</span>
+                    <span className="block truncate text-sm text-ink-soft">{courseOf(p) || 'No programme'} · {personName(dealOwnerId(p))}</span>
                   </span>
                   <span className="min-w-0 text-sm">
                     <span className="block font-semibold">{whenText(p)}</span>
@@ -211,7 +237,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-semibold">{clientName(p)}</span>
                     <span className="block truncate text-sm text-ink-soft">
-                      {p.courseName || 'No programme'} · {personName(dealOwnerId(p))} · won {formatDate(dealWonDate(p)) || 'earlier'} · {dealValue(p) ? formatRM(dealValue(p)) : '—'}
+                      {courseOf(p) || 'No programme'} · {personName(dealOwnerId(p))} · won {formatDate(dealWonDate(p)) || 'earlier'} · {dealValue(p) ? formatRM(dealValue(p)) : '—'}
                     </span>
                   </span>
                   <span className="text-sm text-ink-soft">{whenText(p)}</span>
@@ -231,7 +257,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <h3 className="truncate text-lg font-bold">{clientName(openDeal)}</h3>
-                <p className="text-[15px] text-ink-soft">{openDeal.courseName || 'No programme'}</p>
+                <p className="text-[15px] text-ink-soft">{courseOf(openDeal) || 'No programme'}</p>
               </div>
               <button type="button" onClick={() => setOpenId(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
@@ -241,6 +267,9 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
               <div><dt className="text-sm text-ink-soft">Rep</dt><dd className="font-semibold">{personName(dealOwnerId(openDeal))}</dd></div>
               <div><dt className="text-sm text-ink-soft">Value</dt><dd className="font-semibold">{dealValue(openDeal) ? formatRM(dealValue(openDeal)) : '—'}</dd></div>
               <div><dt className="text-sm text-ink-soft">Won on</dt><dd className="font-semibold">{formatDate(dealWonDate(openDeal)) || '—'}</dd></div>
+              {programmeOf(openDeal) && (
+                <div><dt className="text-sm text-ink-soft">Programme</dt><dd className="flex flex-wrap items-center gap-2 font-semibold"><StatusChip programme={programmeOf(openDeal)} />{programmeOf(openDeal)?.hrdcCode && <span className="text-sm font-normal text-ink-soft">Code {programmeOf(openDeal)?.hrdcCode}</span>}</dd></div>
+              )}
             </dl>
             {!/^\d{4}-\d{2}-\d{2}/.test(openDeal.trainingDate || '') && (
               <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">No training date yet. Add it on the deal itself: open {personName(dealOwnerId(openDeal))}'s workspace, then Deals, then Edit details.</p>
@@ -254,8 +283,15 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
                 viewer={viewer}
                 onCreateQuotation={() => createQuotation(openDeal)}
                 onOpenQuotations={() => onOpenQuotations(dealOwnerId(openDeal) || viewer.id)}
+                grantBlock={grantBlockReason(openDeal, programmeOf(openDeal))}
               />
             </section>
+            {(openDeal.fundingType === 'hrdc' || openDeal.fundingType === 'hrdc_topup') && (
+              <section>
+                <h4 className="mb-2 font-bold">HRDC queries</h4>
+                <HrdcQueries deal={openDeal} queries={queriesOf(openDeal)} viewer={viewer} people={people} />
+              </section>
+            )}
           </div>
         </div>
       )}
@@ -382,4 +418,18 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
       </div>
     </div>
   );
+}
+
+// ---------- Programmes (HRDC registration) ----------
+function ProgrammesView({ viewer }: { viewer: Viewer }) {
+  const [programmes, setProgrammes] = useState<Programme[]>([]);
+  const [deals, setDeals] = useState<any[]>([]);
+  useEffect(() => {
+    const subs = [
+      onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
+      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+    ];
+    return () => subs.forEach(u => u());
+  }, []);
+  return <ProgrammesManager programmes={programmes} deals={deals} viewer={viewer} />;
 }

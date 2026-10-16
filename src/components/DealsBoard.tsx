@@ -11,6 +11,9 @@ import {
 } from '../lib/deals';
 import { progress } from '../lib/checklist';
 import DealChecklist, { startChecklist, useChecklistSettings } from './DealChecklist';
+import HrdcQueries from './HrdcQueries';
+import { ProgrammePicker, StatusChip } from './Programmes';
+import { HrdcQuery, Programme, grantBlockReason } from '../lib/programmes';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -44,6 +47,7 @@ const STAGE_TONE: Record<DealStage, string> = {
 
 const emptyForm = () => ({
   clientId: '',
+  programmeId: '',
   courseName: '',
   type: 'Training',
   fundingType: '' as FundingType | '',
@@ -69,6 +73,8 @@ export default function DealsBoard({
   const [quotes, setQuotes] = useState<any[]>([]);
   const [outlines, setOutlines] = useState<any[]>([]);
   const [checklists, setChecklists] = useState<Record<string, any>>({});
+  const [programmes, setProgrammes] = useState<Programme[]>([]);
+  const [queries, setQueries] = useState<HrdcQuery[]>([]);
   const checklistSettings = useChecklistSettings();
   const [loaded, setLoaded] = useState(false);
 
@@ -93,6 +99,8 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'course_outlines')), s => setOutlines(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
+      onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
+      onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -100,6 +108,8 @@ export default function DealsBoard({
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
 
   const clientOf = (p: any) => clients.find(c => c.id === p.clientId);
+  const programmeOf = (p: any) => programmes.find(x => x.id === p.programmeId);
+  const courseOf = (p: any) => programmeOf(p)?.name || p.courseName || '';
   const clientName = (p: any) => clientOf(p)?.companyName || p.client || 'No client';
   const personName = (id: string) => people.find(r => r.id === id)?.name || 'Former team member';
   const canEdit = (p: any) => viewer.role !== 'rep' || dealOwnerId(p) === viewer.id;
@@ -124,9 +134,9 @@ export default function DealsBoard({
   const visible = useMemo(() => {
     const base = filter === 'tagged' ? taggedDeals : myDeals.filter(p => (filter === 'open' ? OPEN_STAGES.includes(dealStage(p)) : dealStage(p) === filter));
     const q = search.trim().toLowerCase();
-    const list = q ? base.filter(p => `${clientName(p)} ${p.courseName || ''}`.toLowerCase().includes(q)) : base;
+    const list = q ? base.filter(p => `${clientName(p)} ${courseOf(p)}`.toLowerCase().includes(q)) : base;
     return [...list].sort((a, b) => String(b.requestDate || b.id).localeCompare(String(a.requestDate || a.id)));
-  }, [filter, myDeals, taggedDeals, search, clients]);
+  }, [filter, myDeals, taggedDeals, search, clients, programmes]);
 
   const openDeal = deals.find(p => p.id === openId) || null;
 
@@ -161,7 +171,8 @@ export default function DealsBoard({
   const startEdit = (p: any) => {
     setForm({
       clientId: p.clientId && clients.some(c => c.id === p.clientId) ? p.clientId : '',
-      courseName: p.courseName || '',
+      programmeId: p.programmeId && programmes.some(x => x.id === p.programmeId) ? p.programmeId : '',
+      courseName: courseOf(p),
       type: p.type || 'Training',
       fundingType: (p.fundingType as FundingType) || '',
       proposalValue: dealValue(p) ? String(dealValue(p)) : '',
@@ -182,7 +193,8 @@ export default function DealsBoard({
     setFormError('');
     const client = clients.find(c => c.id === form.clientId);
     if (!client) return setFormError('Choose the client from the client list, or add them as a new client.');
-    if (!form.courseName.trim()) return setFormError('Enter the programme or training name.');
+    const programme = programmes.find(x => x.id === form.programmeId);
+    if (!programme) return setFormError('Choose the programme from the programme list, or add it as a new programme.');
     if (!form.fundingType) return setFormError('Choose how this training will be paid for.');
     const value = form.proposalValue.trim() === '' ? 0 : Number(form.proposalValue);
     if (!Number.isFinite(value) || value < 0) return setFormError('Enter the deal value as a number, for example 15000.');
@@ -202,7 +214,8 @@ export default function DealsBoard({
         id,
         clientId: client.id,
         client: client.companyName,
-        courseName: form.courseName.trim(),
+        programmeId: programme.id,
+        courseName: programme.name,
         type: form.type,
         fundingType: form.fundingType,
         proposalValue: value,
@@ -406,7 +419,7 @@ export default function DealsBoard({
                   <button type="button" onClick={() => { setOpenId(p.id); setStagePanel(null); setStageError(''); }} className="flex w-full flex-col gap-1.5 px-5 py-3.5 text-left hover:bg-surface sm:flex-row sm:items-center sm:gap-4">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{clientName(p)}</span>
-                      <span className="block truncate text-sm text-ink-soft">{p.courseName || 'No programme yet'}{p.type ? `, ${p.type}` : ''}</span>
+                      <span className="block truncate text-sm text-ink-soft">{courseOf(p) || 'No programme yet'}{p.type ? `, ${p.type}` : ''}</span>
                     </span>
                     <span className="flex flex-wrap items-center gap-2 sm:justify-end">
                       <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${STAGE_TONE[st]}`}>{STAGE_LABELS[st]}</span>
@@ -439,6 +452,10 @@ export default function DealsBoard({
               quotes={quotes.filter(q => q.pipelineId === openDeal.id)}
               outlines={outlines.filter(o => o.pipelineId === openDeal.id)}
               checklist={checklists[openDeal.id] || null}
+              programme={programmeOf(openDeal)}
+              courseName={courseOf(openDeal)}
+              queries={queries.filter(q => q.dealId === openDeal.id)}
+              team={[...people.map(r => ({ id: r.id, name: r.name })), ...(people.some(r => r.id === viewer.id) ? [] : [{ id: viewer.id, name: viewer.name }])]}
               busy={busy}
               stagePanel={stagePanel}
               setStagePanel={(v) => { setStagePanel(v); setStageError(''); }}
@@ -482,8 +499,17 @@ export default function DealsBoard({
                 />
               </div>
               <div>
-                <label htmlFor="d-course" className={label}>Programme or training name</label>
-                <input id="d-course" value={form.courseName} onChange={e => setForm(f => ({ ...f, courseName: e.target.value }))} className={input} placeholder="Leadership for new managers" />
+                <span className={label}>Programme</span>
+                <ProgrammePicker
+                  programmes={programmes}
+                  value={form.programmeId}
+                  legacyName={editing !== 'new' ? form.courseName : ''}
+                  viewer={viewer}
+                  onChange={pg => setForm(f => ({ ...f, programmeId: pg.id, courseName: pg.name }))}
+                />
+                {(form.fundingType === 'hrdc' || form.fundingType === 'hrdc_topup') && form.programmeId && programmes.find(x => x.id === form.programmeId)?.hrdcStatus !== 'approved' && (
+                  <p className="mt-1.5 text-sm text-attention">This programme isn't approved by HRDC yet. Admin must register it in the HRDC portal before the grant can be applied.</p>
+                )}
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
@@ -586,6 +612,7 @@ export default function DealsBoard({
 function DealPanel(props: {
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
   editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; checklist: any | null; busy: boolean;
+  programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
   stagePanel: null | 'won' | 'lost'; setStagePanel: (v: null | 'won' | 'lost') => void; stageError: string;
   wonDate: string; setWonDate: (v: string) => void; lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
@@ -598,13 +625,15 @@ function DealPanel(props: {
   const journey: DealStage[] = ['lead', 'appointment', 'proposal', 'won'];
   const reached = st === 'lost' ? -1 : journey.indexOf(st);
   const canUndoWin = props.viewer.role !== 'rep';
+  const isHrdcDeal = p.fundingType === 'hrdc' || p.fundingType === 'hrdc_topup';
+  const grantBlock = grantBlockReason(p, props.programme);
 
   return (
     <div className="space-y-6 text-ink">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h3 className="truncate text-lg font-bold">{props.clientName}</h3>
-          <p className="text-[15px] text-ink-soft">{p.courseName || 'No programme yet'}</p>
+          <p className="text-[15px] text-ink-soft">{props.courseName || 'No programme yet'}</p>
         </div>
         <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
       </div>
@@ -690,8 +719,16 @@ function DealPanel(props: {
         {props.client && <Detail term="Contact" value={[props.client.contactName, props.client.phone].filter(Boolean).join(', ') || '—'} />}
         {props.client && <Detail term="HRDC registered" value={props.client.hrdcRegistered ? 'Yes' : 'No'} />}
       </dl>
+      {props.programme && (
+        <p className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+          Programme: <StatusChip programme={props.programme} />{props.programme.hrdcCode && <span>HRDC code {props.programme.hrdcCode}</span>}
+        </p>
+      )}
       {!p.clientId && (
         <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">This older deal isn't linked to the client list yet. Use Edit details to pick the client.</p>
+      )}
+      {st !== 'lost' && grantBlock && (
+        <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">HRDC: {grantBlock}</p>
       )}
       {(p.taggedRepIds || []).length > 0 && (
         <p className="text-sm text-ink-soft">
@@ -721,7 +758,16 @@ function DealPanel(props: {
             viewer={props.viewer}
             onCreateQuotation={props.editable ? props.onCreateQuotation : undefined}
             onOpenQuotations={props.onOpenQuotations}
+            grantBlock={grantBlock}
           />
+        </section>
+      )}
+
+      {/* HRDC queries (HRDC-funded won deals) */}
+      {st === 'won' && isHrdcDeal && (
+        <section>
+          <h4 className="mb-2 font-bold">HRDC queries</h4>
+          <HrdcQueries deal={p} queries={props.queries} viewer={props.viewer} people={props.team} />
         </section>
       )}
 

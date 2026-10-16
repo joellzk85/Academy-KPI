@@ -52,7 +52,7 @@ export function ProgressBar({ done, total, label = true }: { done: number; total
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 export default function DealChecklist({
-  deal, checklist, quotes, viewer, onCreateQuotation, onOpenQuotations,
+  deal, checklist, quotes, viewer, onCreateQuotation, onOpenQuotations, grantBlock = '',
 }: {
   deal: any;
   checklist: any | null;           // deal_checklists document, or null if not started
@@ -60,6 +60,7 @@ export default function DealChecklist({
   viewer: Viewer;
   onCreateQuotation?: () => void;
   onOpenQuotations?: () => void;
+  grantBlock?: string;             // why the grant step can't be ticked yet (programme not HRDC approved)
 }) {
   const settings = useChecklistSettings();
   const [venues, setVenues] = useState<any[]>([]);
@@ -103,7 +104,7 @@ export default function DealChecklist({
     save(allTasks.map(t => (t.id === id ? { ...t, ...changes } : t)), action);
 
   const markDone = (t: ChecklistTask) => {
-    const gate = taskGate(t, quotes.length);
+    const gate = taskGate(t, quotes.length, grantBlock);
     if (gate) return setError(gate);
     return patch(t.id, { done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name }, `${t.label}: done`);
   };
@@ -183,6 +184,7 @@ export default function DealChecklist({
                 <p className="font-semibold">{t.label}{t.after && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">After training</span>}{t.oneOff && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">This deal only</span>}</p>
                 <TaskSummary t={t} venues={venues} trainers={trainers} quotes={quotes} withNote={!(editable && !t.done && !arranging)} />
                 {t.done && <p className="text-sm text-ink-soft">Done {formatDate(t.doneAt || '')} by {t.doneByName}</p>}
+                {t.kind === 'grant' && !t.done && grantBlock && <p className="mt-1 text-sm font-semibold text-attention">{grantBlock}</p>}
               </div>
               {editable && arranging ? (
                 <span className="flex shrink-0 items-center">

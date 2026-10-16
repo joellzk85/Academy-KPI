@@ -93,6 +93,10 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 - `src/components/WorkQueue.tsx`: the "Admin work" top tab (Admin and Management): work queue and the master "Checklist tasks" list.
 - `src/lib/dealDocs.ts`: builds a draft quotation from a deal (shared by the rep workspace and the work queue).
 - Collections added in 2B: `deal_checklists/{dealId}` (one per won deal: `tasks[]`, `history[]`), and `config/checklist_tasks` (master task list and `flagDays`).
+- `src/lib/programmes.ts`: programme HRDC status, HRDC query helpers, and `grantBlockReason` (an HRDC deal's grant can't be ticked until its programme is HRDC approved).
+- `src/components/Programmes.tsx`: the programme picker on the deal form (with quick add) and Admin work → Programmes.
+- `src/components/HrdcQueries.tsx`: HRDC queries on a deal (Deals panel and work queue).
+- Collections added in 2C: `programmes/{id}` (name, `hrdcStatus` not_registered/submitted/approved, `hrdcCode`, dates, notes) and `hrdc_queries/{id}` (`dealId`, `phase` before/during/after, question, received date, `replyBy`, handler, `answeredDate`, answer). Deals gained `programmeId`; `courseName` is kept in step with the programme name (including after a rename) for older screens.
 
 ### KPI templates (follow the current KPIs; agreed)
 
@@ -120,8 +124,11 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 
 - **Phase 2B** (pushed 2026-10-16, see section 6): admin checklist on won deals (including after-training steps JD14, certificates, training report, output assessment), Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. Live, rules published, tested OK by Joel. Reps see checklists read-only (Joel confirmed, see section 6).
 
+- **Phase 2C** (built 2026-10-16, see section 6a): programme list with HRDC registration, HRDC queries, grant gate. Status: check the to-dos below.
+
 ### Joel's open to-dos (check with him)
 0. **Phase 2B go-live:** done and tested by Joel on 2026-10-16. Rules published.
+0a. **Phase 2C go-live:** once live, publish the new `firestore.rules` (it adds `programmes` and `hrdc_queries`). Then test: add programmes in Admin work → Programmes; pick a programme on a deal; an HRDC deal with an unapproved programme can't tick "Apply grant"; log an HRDC query and see it flagged in the work queue; a rep sees queries but can't add them.
 1. Set each person's KPI template and targets in Management → Team.
 2. Link old records in Data tools (ask for a screenshot of the matches before he clicks Link).
 3. ~~Test a deal from new to won and check it shows in that month's KPIs.~~ Done 2026-10-16: works.
@@ -159,8 +166,23 @@ What was built:
 
 Not in 2B: training day (attendance, photos) and POs. Joel can add them as tasks himself, or they can become proper stages in Phase 3.
 
+## 6a. Phase 2C, HRDC work (built 2026-10-16)
+
+Joel's input: HRDC can raise **queries** before the training is approved, during the training, and after it's completed, and the team must attend to them. Some new programmes must be **pre-registered in the HRDC portal** and approved before they can be used for a client. Joel said "let's move on" without answering two detail questions, so these defaults were agreed (with his yes):
+- Programmes live in one list (Admin work → Programmes). Anyone can quick-add a programme from the deal form, but only as "Not registered". Only Admin and Management change its HRDC status, code and dates. Deals must pick a programme from the list. Older deals keep their typed name until edited.
+- HRDC query reply-by dates are typed from HRDC's email for each query, with no hardcoded deadline. "Handled by" can be any active team member and defaults to the person logging it. Admin and Management add, answer, reopen or delete queries. Reps see them read-only.
+- Gate: an HRDC or HRDC + top-up deal whose programme isn't HRDC approved (or isn't picked from the list) can't tick "Apply grant". The deal panel shows why.
+- Work queue: an open query is a red flag, an overdue query goes to the top, and a deal with open queries isn't "All done". A programme that isn't approved is an amber flag while the grant step is open. Programmes → "Waiting on HRDC" lists submitted programmes.
+- Still to confirm with Joel: whether HRDC gives a programme code on approval (the field is optional), and who usually handles queries.
+- A useful next step: add "Verify T3 attendance" as an after-training, HRDC-only checklist task (Joel can add it himself in Checklist tasks).
+
 ### Later phases
-- **Phase 3, money:** merge `payments` and `client_payments` into Money In (keyed by Admin) and Money Out (with the cross-approval rule above). Add funding type handling, HRDC claim tracking (claimed vs paid, top-up invoice for the shortfall, deadline warning), and real P&L per deal. Remove the remaining hardcoded `xin-ying` approval logic in `RepDetailDashboard.tsx`.
+- **Phase 3, money.** Joel's answers so far (2026-10-16):
+  - HRDC deals: after training, HR signs the JD14, T3 attendance is verified, we invoice (claim) HRDC, and HRDC pays and notifies us by email.
+  - Not fully HRDC (direct or top-up): invoice the client directly **before** training; the client pays **after** training.
+  - Money out: Admin or Management can request payment.
+  - Still to ask: does HRDC ever pay less than claimed, and if so, do we invoice the client the difference? Is the cross-approval rule below still right? Is anything paid before training (e.g. venue deposits)?
+  - Plan: merge `payments` and `client_payments` into Money In (keyed by Admin) and Money Out (with the cross-approval rule above). Add funding type handling, HRDC claim tracking (claimed vs paid, top-up invoice for the shortfall, deadline warning), and real P&L per deal. Remove the remaining hardcoded `xin-ying` approval logic in `RepDetailDashboard.tsx`.
 - **Phase 4, dashboards:** a home screen per role. Reps get their deals and KPI vs target. Admin gets the work queue. Management gets pipeline value by stage, team KPI, stuck deals, money owed and profit per training. Add alerts. Tidy-ups: the 13 npm security warnings, the large JS bundle (about 1.7 MB), the remaining localStorage fallbacks and old hardcoded IDs in Home and Management, and redesign of the remaining old screens. Joel finds the **"Admin work" tab in the top bar odd** and wants all screen-layout fixes done together later. Ask him where it should live when doing the screen redesign.
 
 ## 7. How to start each session

@@ -114,7 +114,8 @@ export function progress(tasks: ChecklistTask[] | undefined, fundingType?: strin
 }
 
 // What still has to be filled in before a task can be ticked. Empty = ready.
-export function taskGate(t: ChecklistTask, dealQuoteCount: number): string {
+export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = ''): string {
+  if (t.kind === 'grant' && grantBlock) return grantBlock;
   if (t.kind === 'grant' && !(t.grantNumber || '').trim()) return 'Enter the grant number once HRDC approves it.';
   if (t.kind === 'venue' && !t.venueId) return 'Choose the venue first.';
   if (t.kind === 'venue' && !t.venuePaid) return 'Tick "Venue paid" first.';
