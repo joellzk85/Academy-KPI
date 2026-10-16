@@ -118,7 +118,7 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 - **Login update:** server-checked passwords, no emails.
 - **Phase 2A** (commit `5c241f7`): Deals screen with stages and gates, client picker with quick add, funding type, quotations and outlines created from deals, KPI templates, deal-based KPIs counted by won date, per-person-per-month KPI storage, Data tools, and deal-ownership database rules (published).
 
-- **Phase 2B** (built 2026-10-16, see section 6): admin checklist on won deals, Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. After it's live: Joel publishes the new `firestore.rules`, then tests it (see the to-dos below).
+- **Phase 2B** (pushed 2026-10-16, see section 6): admin checklist on won deals (including after-training steps JD14, certificates, training report, output assessment), Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. After it's live: Joel publishes the new `firestore.rules`, then tests it (see the to-dos below).
 
 ### Joel's open to-dos (check with him)
 0. **Phase 2B go-live:** once the new build is live, publish the new rules. Then test: a rep marks a deal won and its checklist appears; Admin ticks steps in Admin work; a rep sees progress but can't tick; a rep can still create, edit and tag their own quotations; Admin can edit a rep's quotation.
@@ -154,7 +154,10 @@ What was built:
 - In their own workspace, Admin sees an "Everyone's / Mine" switch on Quotations.
 - Rules: `deal_checklists` can be read by everyone; the deal owner can only create it, and only Admin or Management can change it. `config/checklist_tasks` can be changed only by Admin or Management. `quotations` moved out of the open catch-all into owner-based rules; old templates with no owner stay editable by all.
 
-Not in 2B (possible later steps or tasks): training day (attendance, photos), post-training (JD14, certificates, training report), POs. Joel can add these as checklist tasks himself, or they can become proper stages in Phase 3.
+- After-training steps (added at Joel's request, 2026-10-16): JD14 (HRDC deals only), Certificates, Training report, Output assessment. These are simple ticks with notes, marked "After training". Any simple task can be set to Before or After training in Checklist tasks. Before training day only the before-training steps can raise flags. Once the date passes, open before-training steps are red, and open after-training steps show as an amber reminder.
+- New built-in tasks added in code are added automatically to a master list that was already saved (`readSettings` merges missing built-in ids). Ones Joel stopped using stay retired.
+
+Not in 2B: training day (attendance, photos) and POs. Joel can add them as tasks himself, or they can become proper stages in Phase 3.
 
 ### Later phases
 - **Phase 3, money:** merge `payments` and `client_payments` into Money In (keyed by Admin) and Money Out (with the cross-approval rule above). Add funding type handling, HRDC claim tracking (claimed vs paid, top-up invoice for the shortfall, deadline warning), and real P&L per deal. Remove the remaining hardcoded `xin-ying` approval logic in `RepDetailDashboard.tsx`.

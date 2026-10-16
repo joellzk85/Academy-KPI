@@ -17,6 +17,7 @@ export interface TaskTemplate {
   label: string;
   kind: TaskKind;
   appliesTo: AppliesTo;
+  after?: boolean;        // done after training day (post-training documents)
   retired?: boolean;      // hidden from new checklists, kept for the record
 }
 
@@ -25,6 +26,7 @@ export interface ChecklistTask {
   label: string;
   kind: TaskKind;
   appliesTo: AppliesTo;
+  after?: boolean;        // done after training day
   oneOff?: boolean;       // added for this deal only
   done: boolean;
   doneAt?: string;
@@ -69,11 +71,19 @@ export const DEFAULT_SETTINGS: ChecklistSettings = {
     { id: 'venue', label: 'Check venue + payment', kind: 'venue', appliesTo: 'all' },
     { id: 'materials', label: 'Prepare materials', kind: 'basic', appliesTo: 'all' },
     { id: 'trainer', label: 'Confirm trainer', kind: 'trainer', appliesTo: 'all' },
+    // After training day
+    { id: 'jd14', label: 'JD14', kind: 'basic', appliesTo: 'hrdc', after: true },
+    { id: 'certificates', label: 'Certificates', kind: 'basic', appliesTo: 'all', after: true },
+    { id: 'training_report', label: 'Training report', kind: 'basic', appliesTo: 'all', after: true },
+    { id: 'output_assessment', label: 'Output assessment', kind: 'basic', appliesTo: 'all', after: true },
   ],
 };
 
 export function readSettings(data: any): ChecklistSettings {
-  const tasks = Array.isArray(data?.tasks) && data.tasks.length ? data.tasks : DEFAULT_SETTINGS.tasks;
+  const saved: TaskTemplate[] = Array.isArray(data?.tasks) && data.tasks.length ? data.tasks : [];
+  // Built-in tasks added in later updates appear even if the list was saved before.
+  // Ones Joel stopped using stay in the saved list as "retired", so they never come back.
+  const tasks = saved.length ? [...saved, ...DEFAULT_SETTINGS.tasks.filter(d => !saved.some(t => t.id === d.id))] : DEFAULT_SETTINGS.tasks;
   const flagDays = Number.isFinite(Number(data?.flagDays)) && Number(data.flagDays) >= 0 ? Number(data.flagDays) : DEFAULT_SETTINGS.flagDays;
   return { tasks, flagDays };
 }
@@ -90,7 +100,7 @@ export function isHrdc(fundingType?: string): boolean {
 export function buildChecklist(settings: ChecklistSettings): ChecklistTask[] {
   return settings.tasks
     .filter(t => !t.retired)
-    .map(t => ({ id: t.id, label: t.label, kind: t.kind, appliesTo: t.appliesTo, done: false }));
+    .map(t => ({ id: t.id, label: t.label, kind: t.kind, appliesTo: t.appliesTo, after: !!t.after, done: false }));
 }
 
 // Tasks that apply to this deal, in the checklist's own order.
@@ -125,11 +135,20 @@ export interface Flag { level: 'danger' | 'attention'; text: string }
 // Red flags for the admin work queue.
 export function checklistFlags(deal: any, tasks: ChecklistTask[] | undefined, settings: ChecklistSettings, today: string): Flag[] {
   const list = applicableTasks(tasks, deal?.fundingType);
-  const open = list.filter(t => !t.done);
-  if (open.length === 0) return [];
+  const openAll = list.filter(t => !t.done);
+  if (openAll.length === 0) return [];
+  const open = openAll.filter(t => !t.after);          // must be done before training day
+  const openAfter = openAll.filter(t => t.after);      // post-training documents
+  const s = (n: number) => (n === 1 ? '' : 's');
   const days = daysUntil(deal?.trainingDate, today);
   if (days === null) return [{ level: 'attention', text: 'No training date yet' }];
-  if (days < 0) return [{ level: 'danger', text: `Training date has passed with ${open.length} step${open.length === 1 ? '' : 's'} open` }];
+  if (days < 0) {
+    const flags: Flag[] = [];
+    if (open.length) flags.push({ level: 'danger', text: `Training date has passed with ${open.length} step${s(open.length)} open` });
+    if (openAfter.length) flags.push({ level: 'attention', text: `After training: ${openAfter.map(t => t.label).join(', ')} still to do` });
+    return flags;
+  }
+  if (open.length === 0) return [];
   const flags: Flag[] = [];
   if (days <= settings.flagDays) {
     const when = days === 0 ? 'Training is today' : days === 1 ? 'Training is tomorrow' : `Training in ${days} days`;

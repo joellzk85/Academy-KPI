@@ -137,7 +137,7 @@ export default function DealChecklist({
 
   const missing = settings.tasks.filter(m => !m.retired && !allTasks.some(t => t.id === m.id));
   const addMissing = () =>
-    save([...allTasks, ...missing.map(m => ({ id: m.id, label: m.label, kind: m.kind, appliesTo: m.appliesTo, done: false }))], `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
+    save([...allTasks, ...missing.map(m => ({ id: m.id, label: m.label, kind: m.kind, appliesTo: m.appliesTo, after: !!m.after, done: false }))], `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
 
   const begin = async () => {
     setBusy(true);
@@ -180,7 +180,7 @@ export default function DealChecklist({
             <div className="flex items-start gap-3">
               {t.done ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-accent" /> : <Circle className="mt-0.5 h-5 w-5 shrink-0 text-ink-soft/50" />}
               <div className="min-w-0 flex-1">
-                <p className="font-semibold">{t.label}{t.oneOff && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">This deal only</span>}</p>
+                <p className="font-semibold">{t.label}{t.after && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">After training</span>}{t.oneOff && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">This deal only</span>}</p>
                 <TaskSummary t={t} venues={venues} trainers={trainers} quotes={quotes} withNote={!(editable && !t.done && !arranging)} />
                 {t.done && <p className="text-sm text-ink-soft">Done {formatDate(t.doneAt || '')} by {t.doneByName}</p>}
               </div>

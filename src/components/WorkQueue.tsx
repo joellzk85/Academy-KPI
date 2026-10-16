@@ -271,6 +271,7 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
   const [draft, setDraft] = useState<ChecklistSettings | null>(null);
   const [newLabel, setNewLabel] = useState('');
   const [newApplies, setNewApplies] = useState<AppliesTo>('all');
+  const [newAfter, setNewAfter] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -290,9 +291,10 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
     e.preventDefault();
     const label = newLabel.trim();
     if (!label) return;
-    setTasks([...s.tasks, { id: newTaskId(), label, kind: 'basic', appliesTo: newApplies }]);
+    setTasks([...s.tasks, { id: newTaskId(), label, kind: 'basic', appliesTo: newApplies, after: newAfter }]);
     setNewLabel('');
     setNewApplies('all');
+    setNewAfter(false);
   };
 
   const save = async () => {
@@ -333,6 +335,11 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
                 className={field} aria-label={`Which deals task ${i + 1} applies to`}>
                 {(Object.keys(APPLIES_LABELS) as AppliesTo[]).map(a => <option key={a} value={a}>{APPLIES_LABELS[a]}</option>)}
               </select>
+              <select value={t.after ? 'after' : 'before'} onChange={e => update(t.id, { after: e.target.value === 'after' })} disabled={t.retired || t.kind !== 'basic'}
+                className={field} aria-label={`When task ${i + 1} is done`}>
+                <option value="before">Before training</option>
+                <option value="after">After training</option>
+              </select>
               <span className="w-24 text-center">
                 {t.kind !== 'basic' && <span className="rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent" title="This step has its own fields">{KIND_LABELS[t.kind]}</span>}
               </span>
@@ -353,6 +360,10 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
           <select value={newApplies} onChange={e => setNewApplies(e.target.value as AppliesTo)} className={field} aria-label="Which deals the new task applies to">
             {(Object.keys(APPLIES_LABELS) as AppliesTo[]).map(a => <option key={a} value={a}>{APPLIES_LABELS[a]}</option>)}
           </select>
+          <select value={newAfter ? 'after' : 'before'} onChange={e => setNewAfter(e.target.value === 'after')} className={field} aria-label="When the new task is done">
+            <option value="before">Before training</option>
+            <option value="after">After training</option>
+          </select>
           <button type="submit" disabled={!newLabel.trim()} className={btnSecondary}><Plus className="h-4 w-4" /> Add task</button>
         </form>
       </div>
@@ -361,7 +372,7 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
         <label htmlFor="flag-days" className="mb-1.5 block text-sm font-semibold">Warn when training is this many days away</label>
         <input id="flag-days" type="number" min={0} max={60} value={s.flagDays}
           onChange={e => edit({ ...s, flagDays: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })} className={`${field} w-28`} />
-        <p className="mt-1.5 text-sm text-ink-soft">A deal turns red in the work queue if the grant isn't approved or the trainer isn't confirmed by then.</p>
+        <p className="mt-1.5 text-sm text-ink-soft">A deal turns red in the work queue if the grant isn't approved or the trainer isn't confirmed by then. After-training steps only show as a reminder once training day has passed.</p>
       </div>
 
       {msg && <p role="status" className={`rounded-lg px-3 py-2.5 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</p>}
