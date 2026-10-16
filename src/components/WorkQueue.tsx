@@ -9,6 +9,8 @@ import {
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import DealChecklist, { ProgressBar, startChecklist, useChecklistSettings } from './DealChecklist';
 import HrdcQueries from './HrdcQueries';
+import MoneyPanel, { MoneyOverview, useMoneySettings } from './Money';
+import { MoneyIn, MoneyOut, moneyFlags, moneySettled } from '../lib/money';
 import ProgrammesManager, { StatusChip } from './Programmes';
 import { Flag } from '../lib/checklist';
 import { HrdcQuery, Programme, grantBlockReason, isQueryOpen, isQueryOverdue } from '../lib/programmes';
@@ -30,7 +32,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations }: {
   people: { id: string; name: string }[];
   onOpenQuotations: (repId: string) => void;   // opens that person's quotation library
 }) {
-  const [view, setView] = useState<'queue' | 'programmes' | 'tasks'>('queue');
+  const [view, setView] = useState<'queue' | 'money' | 'programmes' | 'tasks'>('queue');
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -39,7 +41,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations }: {
           <p className="mt-0.5 text-[15px] text-ink-soft">Every won deal and what still needs doing, soonest training first.</p>
         </div>
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5" role="tablist">
-          {([['queue', 'Work queue'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks']] as const).map(([k, t]) => (
+          {([['queue', 'Work queue'], ['money', 'Money'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks']] as const).map(([k, t]) => (
             <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
               className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === k ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>
               {t}
@@ -47,7 +49,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations }: {
           ))}
         </div>
       </div>
-      {view === 'queue' ? <Queue viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} /> : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : <TaskSettings viewer={viewer} />}
+      {view === 'queue' ? <Queue viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} /> : view === 'money' ? <MoneyOverview viewer={viewer} /> : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : <TaskSettings viewer={viewer} />}
     </div>
   );
 }
@@ -61,6 +63,9 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
   const [clients, setClients] = useState<any[]>([]);
   const [programmes, setProgrammes] = useState<Programme[]>([]);
   const [queries, setQueries] = useState<HrdcQuery[]>([]);
+  const [moneyIn, setMoneyIn] = useState<MoneyIn[]>([]);
+  const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
+  const moneySettings = useMoneySettings();
   const [loaded, setLoaded] = useState(false);
   const [filter, setFilter] = useState<'open' | 'flagged' | 'done'>('open');
   const [search, setSearch] = useState('');
@@ -77,6 +82,8 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
       onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
+      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
+      onSnapshot(query(collection(db, 'money_out')), s => setMoneyOut(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -110,8 +117,11 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
     const block = grantBlockReason(p, programmeOf(p));
     if (block && grantTask && !grantTask.done) flags.push({ level: 'attention', text: p.programmeId ? 'Programme not yet approved by HRDC' : 'Programme not picked from the list' });
     flags.push(...checklistFlags(p, cl.tasks, settings, today));
-    return { deal: p, pr, overdue: overdue.length > 0, complete: pr.total > 0 && pr.done === pr.total && open.length === 0, flags };
-  }), [won, checklists, settings, today, queries, programmes]);
+    const mIn = moneyIn.filter(m => m.dealId === p.id);
+    const mOut = moneyOut.filter(m => m.dealId === p.id);
+    flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
+    return { deal: p, pr, overdue: overdue.length > 0, complete: pr.total > 0 && pr.done === pr.total && open.length === 0 && moneySettled(mIn, mOut), flags };
+  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings]);
   const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
 
   const counts = {
@@ -292,6 +302,11 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
                 <HrdcQueries deal={openDeal} queries={queriesOf(openDeal)} viewer={viewer} people={people} />
               </section>
             )}
+            <section>
+              <h4 className="mb-2 font-bold">Money</h4>
+              <MoneyPanel deal={openDeal} viewer={viewer} settings={moneySettings}
+                ins={moneyIn.filter(m => m.dealId === openDeal.id)} outs={moneyOut.filter(m => m.dealId === openDeal.id)} />
+            </section>
           </div>
         </div>
       )}

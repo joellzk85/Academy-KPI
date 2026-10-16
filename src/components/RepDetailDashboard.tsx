@@ -360,14 +360,13 @@ export default function RepDetailDashboard({
   onMonthChange,
   viewer
 }: RepDetailDashboardProps) {
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>(() => {
-    const saved = localStorage.getItem(`next_active_subtab_${rep.id}`);
-    return (saved as SubTab) || 'kpi';
-  });
-  const [subTabHistory, setSubTabHistory] = useState<SubTab[]>(() => {
-    const saved = localStorage.getItem(`next_active_subtab_${rep.id}`);
-    return [(saved as SubTab) || 'kpi'];
-  });
+  // The old payment screens were retired in Phase 3; anyone left on them lands on Deals.
+  const savedSubTab = (): SubTab => {
+    const saved = localStorage.getItem(`next_active_subtab_${rep.id}`) as SubTab | null;
+    return saved === 'payment' || saved === 'client_payments' ? 'pipeline' : saved || 'kpi';
+  };
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>(savedSubTab);
+  const [subTabHistory, setSubTabHistory] = useState<SubTab[]>(() => [savedSubTab()]);
 
   const handleSubTabChange = (newTab: SubTab) => {
     setSubTabHistory(prev => {
@@ -2524,31 +2523,11 @@ export default function RepDetailDashboard({
               📅 Appointments
             </button>
 
-            <button 
-              onClick={() => handleSubTabChange('client_payments')}
-              className={`w-full text-left p-3.5 rounded-lg text-xs font-black uppercase tracking-wider border transition-all ${
-                activeSubTab === 'client_payments' 
-                  ? 'bg-green-50 border-green-300 text-green-700 font-extrabold shadow-2xs' 
-                  : 'bg-white border-slate-200 text-green-700 hover:bg-green-50 hover:border-green-200'
-              }`}
-            >
-              💰 Client Payments
-            </button>
+            {/* Client Payments and Raise Payment were replaced in Phase 3 by Money on each won deal and Admin work → Money. */}
 
             {rep.role === 'admin' && (
               <>
-                <button 
-                  onClick={() => handleSubTabChange('payment')}
-                  className={`w-full text-left p-3.5 rounded-lg text-xs font-black uppercase tracking-wider border transition-all cursor-pointer ${
-                    activeSubTab === 'payment' 
-                      ? 'bg-orange-50 border-orange-300 text-orange-700 font-extrabold shadow-2xs' 
-                      : 'bg-white border-slate-200 text-orange-600 hover:bg-orange-50 hover:border-orange-200 font-extrabold'
-                  }`}
-                >
-                  💸 Raise Payment
-                </button>
-
-                <button 
+                <button
                   onClick={() => handleSubTabChange('admin_record')}
                   className={`w-full text-left p-3.5 rounded-lg text-xs font-black uppercase tracking-wider border transition-all cursor-pointer ${
                     activeSubTab === 'admin_record' 

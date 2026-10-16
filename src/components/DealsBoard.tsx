@@ -12,6 +12,8 @@ import {
 import { progress } from '../lib/checklist';
 import DealChecklist, { startChecklist, useChecklistSettings } from './DealChecklist';
 import HrdcQueries from './HrdcQueries';
+import MoneyPanel, { RepMoneyStatus, useMoneySettings } from './Money';
+import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
 import { HrdcQuery, Programme, grantBlockReason } from '../lib/programmes';
 
@@ -75,6 +77,9 @@ export default function DealsBoard({
   const [checklists, setChecklists] = useState<Record<string, any>>({});
   const [programmes, setProgrammes] = useState<Programme[]>([]);
   const [queries, setQueries] = useState<HrdcQuery[]>([]);
+  const [moneyIn, setMoneyIn] = useState<MoneyIn[]>([]);
+  const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
+  const moneySettings = useMoneySettings();
   const checklistSettings = useChecklistSettings();
   const [loaded, setLoaded] = useState(false);
 
@@ -101,7 +106,12 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
       onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
+      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
     ];
+    // Payouts and costs are for Admin and Management only.
+    if (viewer.role !== 'rep') {
+      subs.push(onSnapshot(query(collection(db, 'money_out')), s => setMoneyOut(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))));
+    }
     return () => subs.forEach(u => u());
   }, []);
 
@@ -455,6 +465,9 @@ export default function DealsBoard({
               programme={programmeOf(openDeal)}
               courseName={courseOf(openDeal)}
               queries={queries.filter(q => q.dealId === openDeal.id)}
+              moneyIn={moneyIn.filter(m => m.dealId === openDeal.id)}
+              moneyOut={moneyOut.filter(m => m.dealId === openDeal.id)}
+              moneySettings={moneySettings}
               team={[...people.map(r => ({ id: r.id, name: r.name })), ...(people.some(r => r.id === viewer.id) ? [] : [{ id: viewer.id, name: viewer.name }])]}
               busy={busy}
               stagePanel={stagePanel}
@@ -613,6 +626,7 @@ function DealPanel(props: {
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
   editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; checklist: any | null; busy: boolean;
   programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
+  moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; moneySettings: MoneySettings;
   stagePanel: null | 'won' | 'lost'; setStagePanel: (v: null | 'won' | 'lost') => void; stageError: string;
   wonDate: string; setWonDate: (v: string) => void; lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
@@ -768,6 +782,16 @@ function DealPanel(props: {
         <section>
           <h4 className="mb-2 font-bold">HRDC queries</h4>
           <HrdcQueries deal={p} queries={props.queries} viewer={props.viewer} people={props.team} />
+        </section>
+      )}
+
+      {/* Money (won deals): full view for Admin and Management, status only for reps */}
+      {st === 'won' && (
+        <section>
+          <h4 className="mb-2 font-bold">{props.viewer.role === 'rep' ? 'Payment status' : 'Money'}</h4>
+          {props.viewer.role === 'rep'
+            ? <RepMoneyStatus deal={p} ins={props.moneyIn} />
+            : <MoneyPanel deal={p} viewer={props.viewer} ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} />}
         </section>
       )}
 

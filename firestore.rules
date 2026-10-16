@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 2C)
+// NEXT Academy CRM database rules (Phase 3)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -45,13 +45,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Settings. The admin checklist's master task list: Admin and Management only.
+    // Settings. The admin checklist's master task list and money settings: Admin and Management only.
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks']))
-                            || (docId == 'checklist_tasks' && isStaff());
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings']))
+                            || (docId in ['checklist_tasks', 'money_settings'] && isStaff());
       allow delete: if (docId == 'passwords' && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks']));
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -90,6 +90,43 @@ service cloud.firestore {
     match /hrdc_queries/{queryId} {
       allow read: if isMember();
       allow write: if isStaff();
+    }
+
+    // Money in (Phase 3): HRDC claims and client invoices. Reps may see their
+    // payment status; only Admin and Management record or change them.
+    match /money_in/{id} {
+      allow read: if isMember();
+      allow write: if isStaff();
+    }
+
+    // Money out (Phase 3): payment requests. Admin and Management only.
+    // - Raised as "pending" by the person requesting it.
+    // - Approved or rejected only by a manager who did NOT raise it.
+    // - Only approved items can be marked paid (and that can be undone).
+    match /money_out/{id} {
+      function changedOnly(keys) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+      }
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.requestedById == request.auth.uid;
+      allow update: if isStaff() && (
+        // approve or reject
+        (isManagement()
+          && resource.data.status == 'pending'
+          && request.resource.data.status in ['approved', 'rejected']
+          && resource.data.requestedById != request.auth.uid
+          && request.resource.data.decidedById == request.auth.uid
+          && changedOnly(['status', 'decidedById', 'decidedByName', 'decidedAt', 'rejectReason']))
+        // mark paid, or undo paid
+        || (((resource.data.status == 'approved' && request.resource.data.status == 'paid')
+             || (resource.data.status == 'paid' && request.resource.data.status == 'approved'))
+          && changedOnly(['status', 'paidDate', 'paidRef', 'paidById', 'paidByName']))
+      );
+      allow delete: if isStaff()
+        && resource.data.status in ['pending', 'rejected']
+        && (resource.data.requestedById == request.auth.uid || isManagement());
     }
 
     // Quotations: reps change their own (or ones they're asked to help on);

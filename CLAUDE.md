@@ -124,11 +124,13 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 
 - **Phase 2B** (pushed 2026-10-16, see section 6): admin checklist on won deals (including after-training steps JD14, certificates, training report, output assessment), Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. Live, rules published, tested OK by Joel. Reps see checklists read-only (Joel confirmed, see section 6).
 
+- **Phase 3** (built 2026-10-16, see section 6b): money in and out per deal, cross-approval, P&L per deal, money flags, Admin work → Money. Status: check the to-dos below.
 - **Phase 2C** (pushed 2026-10-16, see section 6a): programme list with HRDC registration, HRDC queries, grant gate. Live, rules published, tested OK by Joel ("ok can").
 
 ### Joel's open to-dos (check with him)
 0. **Phase 2B go-live:** done and tested by Joel on 2026-10-16. Rules published.
 0a. **Phase 2C go-live:** done and tested by Joel on 2026-10-16. Rules published.
+0b. **Phase 3 go-live:** once live, publish the new `firestore.rules` (it adds `money_in`, `money_out` and `config/money_settings`). Then test the approval rule with both managers. Joel should also fill in the HRDC claim deadline in Admin work → Money once he has checked HRD Corp's current guidelines.
 1. Set each person's KPI template and targets in Management → Team.
 2. Link old records in Data tools (ask for a screenshot of the matches before he clicks Link).
 3. ~~Test a deal from new to won and check it shows in that month's KPIs.~~ Done 2026-10-16: works.
@@ -176,13 +178,26 @@ Joel's input: HRDC can raise **queries** before the training is approved, during
 - Still to confirm with Joel: whether HRDC gives a programme code on approval (the field is optional), and who usually handles queries.
 - A useful next step: add "Verify T3 attendance" as an after-training, HRDC-only checklist task (Joel can add it himself in Checklist tasks).
 
+## 6b. Phase 3, money (built 2026-10-16)
+
+Joel's answers (2026-10-16):
+- HRDC deals: after training, HR signs the JD14, T3 attendance is verified, we invoice (claim) HRDC, and HRDC pays and notifies us by email.
+- **HRDC always keeps 4%** and pays the rest. This is expected, not a shortfall to invoice the client for.
+- Not fully HRDC (direct or top-up): invoice the client directly **before** training; the client pays **after** training.
+- Money out: Admin or Management can request payment. The cross-approval rule is confirmed. Some **deposits are paid before training** (venue, bus, materials).
+
+What was built:
+- `money_in/{id}`: HRDC claim or client invoice on a deal (number, date, amount; then paid date and amount). Admin and Management record it. Everyone can read it, because reps see payment status only (`RepMoneyStatus`).
+- `money_out/{id}`: payment request (category, payee, amount, timing "Deposit before training" or "After training"). Statuses: pending → approved or rejected → paid. Admin and Management only.
+  - The rules enforce that only a manager who did not raise the request can approve or reject it, so an Admin request can be decided by either manager and a manager's request only by the other. Only approved items can be marked paid. The UI hides Approve on your own request.
+- `config/money_settings`: `hrdcDeductionPct` (default 4), `overdueDays` (default 30), `claimDeadlineDays` (blank until Joel confirms HRD Corp's current rule; days after training).
+- P&L per deal (`dealPL` in `src/lib/money.ts`): invoiced and claimed, minus HRDC %, minus any extra HRDC shortfall, minus approved and paid costs, equals profit. It also shows received, still to come in, still to pay out, and waiting for approval (not counted in costs).
+- Work queue flags (`moneyFlags`): HRDC claim not submitted after training (with deadline countdown once set), client invoice not sent (amber within 7 days of training, red after), payment overdue, HRDC paid less than expected, requests waiting for approval. A deal is "All done" only when its checklist is done, its queries are answered and its money is settled.
+- Screens: "Money" section on won deals (Deals panel and work queue). Admin work → Money lists approvals waiting, approved-to-pay, money still to come in, and the settings.
+- `src/components/Money.tsx` and `src/lib/money.ts`.
+- The old rep-workspace tabs "Client Payments" and "Raise Payment" are hidden. Their code (including the hardcoded `xin-ying` approval logic) is still in `RepDetailDashboard.tsx` and `ClientPaymentManager.tsx` but can no longer be reached. Delete it in the Phase 4 tidy-up. Old `payments` and `client_payments` data stay until cleared in Data tools.
+
 ### Later phases
-- **Phase 3, money.** Joel's answers so far (2026-10-16):
-  - HRDC deals: after training, HR signs the JD14, T3 attendance is verified, we invoice (claim) HRDC, and HRDC pays and notifies us by email.
-  - Not fully HRDC (direct or top-up): invoice the client directly **before** training; the client pays **after** training.
-  - Money out: Admin or Management can request payment.
-  - Still to ask: does HRDC ever pay less than claimed, and if so, do we invoice the client the difference? Is the cross-approval rule below still right? Is anything paid before training (e.g. venue deposits)?
-  - Plan: merge `payments` and `client_payments` into Money In (keyed by Admin) and Money Out (with the cross-approval rule above). Add funding type handling, HRDC claim tracking (claimed vs paid, top-up invoice for the shortfall, deadline warning), and real P&L per deal. Remove the remaining hardcoded `xin-ying` approval logic in `RepDetailDashboard.tsx`.
 - **Phase 4, dashboards:** a home screen per role. Reps get their deals and KPI vs target. Admin gets the work queue. Management gets pipeline value by stage, team KPI, stuck deals, money owed and profit per training. Add alerts. Tidy-ups: the 13 npm security warnings, the large JS bundle (about 1.7 MB), the remaining localStorage fallbacks and old hardcoded IDs in Home and Management, and redesign of the remaining old screens. Joel finds the **"Admin work" tab in the top bar odd** and wants all screen-layout fixes done together later. Ask him where it should live when doing the screen redesign.
 
 ## 7. How to start each session
