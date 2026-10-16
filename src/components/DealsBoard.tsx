@@ -9,6 +9,8 @@ import {
   DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM,
 } from '../lib/deals';
+import { progress } from '../lib/checklist';
+import DealChecklist, { startChecklist, useChecklistSettings } from './DealChecklist';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -66,6 +68,8 @@ export default function DealsBoard({
   const [clients, setClients] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [outlines, setOutlines] = useState<any[]>([]);
+  const [checklists, setChecklists] = useState<Record<string, any>>({});
+  const checklistSettings = useChecklistSettings();
   const [loaded, setLoaded] = useState(false);
 
   const [filter, setFilter] = useState<Filter>('open');
@@ -88,6 +92,7 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'course_outlines')), s => setOutlines(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -130,7 +135,11 @@ export default function DealsBoard({
     const st = dealStage(p);
     const today = todayIso();
     const fu = /^\d{4}-\d{2}-\d{2}/.test(p.followUpDate || '') ? p.followUpDate.slice(0, 10) : '';
-    if (st === 'won') return { text: `Won ${formatDate(dealWonDate(p))}`, urgent: false };
+    if (st === 'won') {
+      const cl = checklists[p.id];
+      const pr = cl ? progress(cl.tasks, p.fundingType) : null;
+      return { text: `Won ${formatDate(dealWonDate(p))}${pr ? `, admin ${pr.done} of ${pr.total}` : ''}`, urgent: false };
+    }
     if (st === 'lost') return { text: p.lostReason ? `Lost: ${p.lostReason}` : 'Lost', urgent: false };
     if (fu && fu < today) return { text: `Follow-up overdue (${formatDate(fu)})`, urgent: true };
     if (st === 'lead') {
@@ -227,7 +236,7 @@ export default function DealsBoard({
   };
 
   // ---------- Moving through stages ----------
-  const writeStage = async (p: any, changes: any, action: string) => {
+  const writeStage = async (p: any, changes: any, action: string): Promise<boolean> => {
     setBusy(true);
     setStageError('');
     try {
@@ -238,8 +247,10 @@ export default function DealsBoard({
       });
       setStagePanel(null);
       flash(action);
+      return true;
     } catch (err) {
       setStageError(friendlyError(err));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -254,12 +265,21 @@ export default function DealsBoard({
     return writeStage(p, { stage: 'proposal', proposalSentDate: sent }, 'Proposal sent');
   };
 
-  const confirmWon = (p: any) => {
+  const confirmWon = async (p: any) => {
     if (!p.clientId || !clients.some(c => c.id === p.clientId)) return setStageError('Link this deal to a client from the client list first (Edit details).');
     if (dealValue(p) <= 0) return setStageError('Add the deal value first (Edit details).');
     if (!p.fundingType) return setStageError('Choose how this training will be paid for first (Edit details).');
     if (!wonDate) return setStageError('Enter the date the deal was won.');
-    return writeStage(p, { stage: 'won', wonDate, lostReason: '', lostNote: '' }, `Won (${formatRM(dealValue(p))})`);
+    const ok = await writeStage(p, { stage: 'won', wonDate, lostReason: '', lostNote: '' }, `Won (${formatRM(dealValue(p))})`);
+    // Hand over to admin: the deal gets its checklist straight away.
+    if (ok) {
+      try {
+        await startChecklist(p, checklistSettings, viewer, checklists[p.id]);
+      } catch (err) {
+        console.error('Checklist could not be started:', err);
+        flash('Deal won. Admin can start its checklist from the work queue.');
+      }
+    }
   };
 
   const confirmLost = (p: any) => {
@@ -418,6 +438,7 @@ export default function DealsBoard({
               viewer={viewer}
               quotes={quotes.filter(q => q.pipelineId === openDeal.id)}
               outlines={outlines.filter(o => o.pipelineId === openDeal.id)}
+              checklist={checklists[openDeal.id] || null}
               busy={busy}
               stagePanel={stagePanel}
               setStagePanel={(v) => { setStagePanel(v); setStageError(''); }}
@@ -564,7 +585,7 @@ export default function DealsBoard({
 // ---------- Deal panel ----------
 function DealPanel(props: {
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
-  editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; busy: boolean;
+  editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; checklist: any | null; busy: boolean;
   stagePanel: null | 'won' | 'lost'; setStagePanel: (v: null | 'won' | 'lost') => void; stageError: string;
   wonDate: string; setWonDate: (v: string) => void; lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
@@ -688,6 +709,21 @@ function DealPanel(props: {
           <DocRow icon={<ClipboardList className="h-4 w-4" />} name="Course outlines" items={props.outlines.map(o => o.refNumber || o.courseTitle || o.id)} onOpen={props.onOpenOutlines} onCreate={props.editable ? props.onCreateOutline : undefined} createLabel="Create outline" />
         </div>
       </section>
+
+      {/* Admin checklist (after the deal is won) */}
+      {st === 'won' && (
+        <section>
+          <h4 className="mb-2 font-bold">Admin checklist</h4>
+          <DealChecklist
+            deal={p}
+            checklist={props.checklist}
+            quotes={props.quotes}
+            viewer={props.viewer}
+            onCreateQuotation={props.editable ? props.onCreateQuotation : undefined}
+            onOpenQuotations={props.onOpenQuotations}
+          />
+        </section>
+      )}
 
       {/* History */}
       {(p.history || []).length > 0 && (

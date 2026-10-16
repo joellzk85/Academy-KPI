@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 2A)
+// NEXT Academy CRM database rules (Phase 2B)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -45,13 +45,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Settings
+    // Settings. The admin checklist's master task list: Admin and Management only.
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create: if isMember() && docId != 'passwords' && docId != 'setup';
-      allow update: if isMember() && docId != 'passwords' && docId != 'setup';
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks']))
+                            || (docId == 'checklist_tasks' && isStaff());
       allow delete: if (docId == 'passwords' && isManagement())
-                    || (isMember() && docId != 'passwords' && docId != 'setup');
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -65,6 +65,33 @@ service cloud.firestore {
             && request.auth.uid in resource.data.get('taggedRepIds', [])
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completedTags']));
       allow delete: if isStaff() || (isMember() && ownerOf(resource.data) == request.auth.uid);
+    }
+
+    // Admin checklist per won deal (Phase 2B). Everyone can see progress.
+    // The deal's owner may start it when marking the deal won; only Admin and
+    // Management can tick, change or remove it.
+    match /deal_checklists/{dealId} {
+      allow read: if isMember();
+      allow create: if isStaff()
+        || (isMember() && ownerOf(get(/databases/$(database)/documents/pipelines/$(dealId)).data) == request.auth.uid);
+      allow update, delete: if isStaff();
+    }
+
+    // Quotations: reps change their own (or ones they're asked to help on);
+    // Admin and Management can change any. Old shared templates with no owner stay open.
+    match /quotations/{quoteId} {
+      function quotePeople(d) {
+        return [d.get('ownerId', ''), d.get('creatorId', '')];
+      }
+      allow read: if isMember();
+      allow create: if isStaff()
+        || (isMember() && request.auth.uid in quotePeople(request.resource.data));
+      allow update: if isStaff()
+        || (isMember() && (request.auth.uid in quotePeople(resource.data)
+                           || resource.data.get('taggedRepId', '') == request.auth.uid
+                           || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == '')));
+      allow delete: if isStaff()
+        || (isMember() && request.auth.uid in quotePeople(resource.data));
     }
 
     // KPI settings per person (template and targets): Management only.
@@ -86,7 +113,7 @@ service cloud.firestore {
       allow read, write: if isMember() && coll in [
         'admin_records', 'appointments', 'client_payments', 'clients',
         'course_outlines', 'events', 'links', 'payments',
-        'project_pls', 'quotations', 'tasks',
+        'project_pls', 'tasks',
         'trainers_directory', 'venues_directory'
       ];
     }

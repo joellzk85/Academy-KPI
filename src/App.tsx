@@ -35,6 +35,7 @@ import RepDetailDashboard, { getInitialPipelinesForRep } from './components/RepD
 import ManagementDashboard from './components/ManagementDashboard';
 import TeamManager from './components/TeamManager';
 import DataTools from './components/DataTools';
+import WorkQueue from './components/WorkQueue';
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, ChatMessage, TeamMember, ROLE_LABELS } from './types';
@@ -177,6 +178,7 @@ export default function App() {
 function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; teamMembers: TeamMember[] }) {
   const isManagement = currentMember.role === 'management';
   const isRep = currentMember.role === 'rep';
+  const isStaff = !isRep; // Admin or Management
 
   // Per-person KPI settings (template + targets) keyed by team member id.
   const [repDocs, setRepDocs] = useState<Record<string, { targets?: Representative['targets']; kpiTemplate?: string }>>({});
@@ -224,14 +226,15 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   });
 
   // Track if we came from operations or management to handle the Back button correctly
-  const [repSelectionSource, setRepSelectionSource] = useState<'operations' | 'management'>(() => {
+  const [repSelectionSource, setRepSelectionSource] = useState<'operations' | 'admin' | 'management'>(() => {
     const saved = localStorage.getItem('next_rep_selection_source');
-    return (saved as 'operations' | 'management') || 'operations';
+    return (saved as 'operations' | 'admin' | 'management') || 'operations';
   });
 
-  // Tab State ('operations' | 'management')
-  const [currentTab, setCurrentTab] = useState<'operations' | 'management'>(() => {
+  // Tab State ('operations' | 'admin' | 'management')
+  const [currentTab, setCurrentTab] = useState<'operations' | 'admin' | 'management'>(() => {
     const saved = localStorage.getItem('next_current_tab');
+    if (saved === 'admin' && isStaff) return 'admin';
     if (!isManagement) return 'operations';
     return (saved as 'operations' | 'management') || 'operations';
   });
@@ -518,10 +521,24 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     setCurrentTab('operations');
   };
 
-  const handleSwitchTab = (tab: 'operations' | 'management') => {
+  const handleSwitchTab = (tab: 'operations' | 'admin' | 'management') => {
     if (tab === 'management' && !isManagement) return;
+    if (tab === 'admin' && !isStaff) return;
     setCurrentTab(tab);
     setSelectedRepId(null);
+  };
+
+  // From the admin work queue: open a person's workspace on their Quotations tab.
+  const handleOpenQuotationsFor = (repId: string) => {
+    const target = representatives.find(r => r.id === repId) || representatives.find(r => r.id === currentMember.id);
+    if (!target) {
+      showToast("That person's workspace isn't available. Open the quotation from a rep's workspace instead.");
+      return;
+    }
+    localStorage.setItem(`next_active_subtab_${target.id}`, 'quotation');
+    setRepSelectionSource('admin');
+    setSelectedRepId(target.id);
+    setCurrentTab('operations');
   };
 
   const handleLogout = async () => {
@@ -743,6 +760,18 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               >
                 Team workspaces
               </button>
+              {isStaff && (
+                <button
+                  onClick={() => handleSwitchTab('admin')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    currentTab === 'admin'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Admin work
+                </button>
+              )}
 {isManagement && (              <button
                 onClick={() => handleSwitchTab('management')}
                 className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
@@ -818,7 +847,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       <main className="flex-1 py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         
         {/* Mobile Tab switcher (visible only on small screens) */}
-        {isManagement && <div className="flex md:hidden items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 mb-6">
+        {isStaff && <div className="flex md:hidden items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 mb-6">
           <button
             onClick={() => handleSwitchTab('operations')}
             className={`flex-1 text-center py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
@@ -828,6 +857,16 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
             }`}
           >
             Operations
+          </button>
+          <button
+            onClick={() => handleSwitchTab('admin')}
+            className={`flex-1 text-center py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+              currentTab === 'admin'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Admin work
           </button>
 {isManagement && (          <button
             onClick={() => handleSwitchTab('management')}
@@ -842,7 +881,22 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
         </div>}
 
         <AnimatePresence mode="wait">
-          {currentTab === 'management' ? (
+          {currentTab === 'admin' && isStaff ? (
+            /* D. ADMIN WORK QUEUE */
+            <motion.div
+              key="admin"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.25 }}
+            >
+              <WorkQueue
+                viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+                people={teamMembers.map(m => ({ id: m.id, name: m.name }))}
+                onOpenQuotations={handleOpenQuotationsFor}
+              />
+            </motion.div>
+          ) : currentTab === 'management' ? (
             /* C. MANAGEMENT VIEW */
             <motion.div
               key="management"
@@ -942,6 +996,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   onBack={() => {
                     if (repSelectionSource === 'management') {
                       setCurrentTab('management');
+                    } else if (repSelectionSource === 'admin' && isStaff) {
+                      setCurrentTab('admin');
                     } else {
                       setCurrentTab('operations');
                     }

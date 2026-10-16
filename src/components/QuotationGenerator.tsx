@@ -11,6 +11,7 @@ interface QuotationGeneratorProps {
   reps?: Representative[];
   key?: string;
   requestManagerPermission?: (action: () => void) => void;
+  viewer?: { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 }
 
 const DEFAULT_TERMS = [
@@ -57,7 +58,10 @@ const coursePresets = [
   { program: 'Digital Product Design Thinking', code: '10001681211', fee: 4500, trainer: 'Aris Rahman' }
 ];
 
-export default function QuotationGenerator({ rep, reps, requestManagerPermission }: QuotationGeneratorProps) {
+export default function QuotationGenerator({ rep, reps, requestManagerPermission, viewer }: QuotationGeneratorProps) {
+  // Admin and Management can see and edit everyone's quotations from their own workspace.
+  const canSeeEveryone = !!viewer && viewer.role !== 'rep' && viewer.id === rep.id;
+  const [showEveryone, setShowEveryone] = useState(true);
   // Quotations List state (permanently tied to lzk.joel@gmail.com)
   const [quotations, setQuotations] = useState<Quotation[]>(() => {
     const TIED_KEY = 'next_quotations_lzk.joel@gmail.com';
@@ -847,7 +851,7 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
       return false;
     }
 
-    if (!isSystemDefault && !isOwner && !isTagged) {
+    if (!isSystemDefault && !isOwner && !isTagged && !(canSeeEveryone && showEveryone)) {
       return false;
     }
 
@@ -1022,6 +1026,21 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            {canSeeEveryone && (
+              <div className="inline-flex rounded-lg border border-line bg-white p-0.5" role="group" aria-label="Whose quotations">
+                {([[true, "Everyone's"], [false, 'Mine']] as const).map(([v, t]) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => { setShowEveryone(v); setQuoteCurrentPage(1); }}
+                    aria-pressed={showEveryone === v}
+                    className={`rounded-md px-3 py-1 text-sm font-semibold ${showEveryone === v ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Search Input */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />

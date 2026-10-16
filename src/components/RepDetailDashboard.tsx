@@ -12,6 +12,7 @@ import VenueManager from './VenueManager';
 import AppointmentManager from './AppointmentManager';
 import ClientPaymentManager from './ClientPaymentManager';
 import DealsBoard from './DealsBoard';
+import { buildQuotationForDeal } from '../lib/dealDocs';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -1345,41 +1346,10 @@ export default function RepDetailDashboard({
   // The course line's training date is pre-filled from the pipeline's Training Date
   // (falls back to the older `potentialDate` field, then blank, so old records never break).
   const handleCreateQuotationForPipeline = async (p: any) => {
-    const newId = `q_${Date.now()}`;
     const linkedClient = clientDirectory.find(c => c.id === p.clientId);
-    const cleanQuote = {
-      id: newId,
-      refNumber: `1G/NA/${new Date().getFullYear()}${(new Date().getMonth()+1).toString().padStart(2,'0')}${new Date().getDate().toString().padStart(2,'0')}/${(quotationsForPipelines.length + 1).toString().padStart(2, '0')}`,
-      date: new Date().toISOString().substring(0, 10),
-      attn: linkedClient?.contactName && linkedClient.contactName !== 'N/A' ? linkedClient.contactName : '',
-      company: p.client || '',
-      address: linkedClient?.address || '',
-      venue: '',
-      time: '',
-      participants: '',
-      trainingProvider: '',
-      items: p.courseName ? [{
-        id: `item_${Date.now()}`,
-        no: 1,
-        program: p.courseName,
-        code: '',
-        date: formatTrainingDate(p.trainingDate || p.potentialDate),
-        trainer: '',
-        feePerDay: p.proposalValue || 0,
-        days: 1,
-        totalFee: p.proposalValue || 0,
-      }] : [],
-      remarks: [],
-      terms: [],
-      preparedBy: rep.name,
-      creatorId: rep.id,
-      ownerId: rep.id,
-      ownerName: rep.name,
-      clientId: p.clientId || '',
-      pipelineId: p.id,
-    };
+    const cleanQuote = buildQuotationForDeal(p, rep, rep, linkedClient, quotationsForPipelines.length);
     try {
-      await setDoc(doc(db, 'quotations', newId), cleanQuote);
+      await setDoc(doc(db, 'quotations', cleanQuote.id), cleanQuote);
       setActiveSubTab('quotation');
     } catch (err) {
       console.error('Create quotation for pipeline failed:', err);
@@ -2687,7 +2657,7 @@ export default function RepDetailDashboard({
           )}
 
           {activeSubTab === 'quotation' ? (
-            <QuotationGenerator key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
+            <QuotationGenerator key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} viewer={viewer} />
           ) : activeSubTab === 'course_outline' ? (
             <CourseOutlineGenerator key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'admin_record' ? (
