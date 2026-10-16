@@ -131,7 +131,9 @@ export interface QuotationItem {
   code: string;
   date: string;
   trainer: string;
-  trainerId?: string;
+  trainerId?: string;      // from the trainer list (live name while the quotation is a draft)
+  programmeId?: string;    // from the programme list (live name and HRDC code while a draft)
+  useDealDate?: boolean;   // show the linked deal's training date
   feePerDay: number;
   days: number;
   totalFee: number;
@@ -167,6 +169,11 @@ export interface Quotation {
   venueId?: string;
   pipelineId?: string;
   sharedWithIds?: string[];   // teammates who can open and edit this same quotation
+  // Draft = reads client, deal, programme, trainer and venue live. Sent = the text fields hold the locked copy that was sent.
+  status?: 'draft' | 'sent';
+  sentAt?: string;
+  sentById?: string;
+  sentByName?: string;
 }
 
 export interface CourseOutlineItem {

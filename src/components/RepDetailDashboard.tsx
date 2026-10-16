@@ -2262,7 +2262,7 @@ export default function RepDetailDashboard({
           )}
 
           {activeSubTab === 'quotation' ? (
-            <QuotationsPage key={rep.id} rep={rep} reps={reps} viewer={viewer} />
+            <QuotationsPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenTab={(t) => handleSubTabChange(t as SubTab)} />
           ) : activeSubTab === 'course_outline' ? (
             <CourseOutlineGenerator key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'admin_record' ? (

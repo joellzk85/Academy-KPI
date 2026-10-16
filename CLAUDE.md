@@ -224,6 +224,14 @@ What was built:
   - **Sharing (Joel)**: tagging no longer makes a copy. `quotation.sharedWithIds` lists teammates who can open and **edit the same quotation**; the rules allow updates by anyone in `sharedWithIds`. Old tagged copies (`taggedRepId`) still show under "Shared with me".
   - Removed: the "Select quote" drop-down (duplicate of the list), top Create/Delete, the 4 layout modes, Clear Metadata, Reset to Defaults, the 6 made-up programme presets, the duplicate "Quotation prepared by" field, per-term × buttons, undo banner, pagination. **Google Sheets sync removed for now; Joel wants to revisit it near the end.**
   - **Rules to publish:** the quotations rule now includes `sharedWithIds`.
+  - **One source of truth (Joel, 2026-10-16):** quotations no longer copy details. They link and read live through `src/lib/quoteResolve.ts` (`resolveQuotation`):
+    - company, attention, address from the **client list** (the linked deal's client); owner from the **deal**;
+    - each line's programme name and HRDC code from the **programme list** (`items[].programmeId`), trainer from the **trainer list** (`items[].trainerId`), training date from the **deal** (`items[].useDealDate`), venue from the **venue list** (`venueId`).
+    - Only quotation-specific things are typed: fee per day (first line starts at the deal value), days, time, participants, extra lines, remarks/terms, SST.
+    - **New quotation** first asks "Which deal is this for?" (or "client only"). `buildQuotationForDeal` (Deals and work queue) now links instead of copying.
+    - **Mark as sent** writes the resolved text into the quotation and sets `status: 'sent'` (locked, read-only, banner). **Revise** sets it back to draft so it reads live again. The list shows Draft or Sent.
+    - Older quotations without links keep and print their typed text until someone links a deal or client ("Old: ..." shown in the pickers).
+    - Missing source details (e.g. a client with no address) show as a "Fix these at the source" list, with links to the right tab.
 - **Tidy-up (done and pushed 2026-10-16):**
   - Removed every fallback to made-up sample deals ("Petronas Digital", "Maybank HQ", ...). They were in Home, Management, the rep workspace and the "URGENT" notices in `App.tsx`. Deals now come only from the live database (`pipelinesSync`).
   - Replaced hardcoded staff ids: Admin Records editing is now `rep.role === 'admin'` (it was two named ids, so new admins couldn't edit), and the quotation tag list uses the real team.
