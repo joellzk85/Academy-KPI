@@ -118,10 +118,10 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 - **Login update:** server-checked passwords, no emails.
 - **Phase 2A** (commit `5c241f7`): Deals screen with stages and gates, client picker with quick add, funding type, quotations and outlines created from deals, KPI templates, deal-based KPIs counted by won date, per-person-per-month KPI storage, Data tools, and deal-ownership database rules (published).
 
-- **Phase 2B** (pushed 2026-10-16, see section 6): admin checklist on won deals (including after-training steps JD14, certificates, training report, output assessment), Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. After it's live: Joel publishes the new `firestore.rules`, then tests it (see the to-dos below).
+- **Phase 2B** (pushed 2026-10-16, see section 6): admin checklist on won deals (including after-training steps JD14, certificates, training report, output assessment), Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. Live, rules published, tested OK by Joel. Reps see checklists read-only (Joel confirmed, see section 6).
 
 ### Joel's open to-dos (check with him)
-0. **Phase 2B go-live:** once the new build is live, publish the new rules. Then test: a rep marks a deal won and its checklist appears; Admin ticks steps in Admin work; a rep sees progress but can't tick; a rep can still create, edit and tag their own quotations; Admin can edit a rep's quotation.
+0. **Phase 2B go-live:** done and tested by Joel on 2026-10-16. Rules published.
 1. Set each person's KPI template and targets in Management → Team.
 2. Link old records in Data tools (ask for a screenshot of the matches before he clicks Link).
 3. ~~Test a deal from new to won and check it shows in that month's KPIs.~~ Done 2026-10-16: works.
@@ -150,9 +150,9 @@ What was built:
 - Admin can reorder, add or remove steps on a single deal ("Arrange, add or remove steps"), and pull in steps added to the master list later.
 - Admin work → Checklist tasks: the master list (rename, reorder, add, "Stop using", HRDC-only or all deals) plus the red-flag window (default 7 days). Changes affect deals won from then on.
 - Admin work → Work queue: won deals with checklists, soonest training first, with filters for In progress, Needs attention and All done. A red flag shows when training is within the window and the grant isn't approved or the trainer isn't confirmed, or when the training date has passed with steps open. Older won deals without a checklist are listed separately with a "Start checklist" button.
-- Reps see a read-only progress bar and step list on their won deals. The deal list shows "admin X of Y".
+- **Reps see the checklist read-only** (Joel confirmed 2026-10-16, after briefly considering hiding it): progress bar, each step done or not, and its details (who and when, notes, venue and paid status, trainer, grant number). They have no tick or edit buttons. The deal list shows "admin X of Y".
 - In their own workspace, Admin sees an "Everyone's / Mine" switch on Quotations.
-- Rules: `deal_checklists` can be read by everyone; the deal owner can only create it, and only Admin or Management can change it. `config/checklist_tasks` can be changed only by Admin or Management. `quotations` moved out of the open catch-all into owner-based rules; old templates with no owner stay editable by all.
+- Rules: `deal_checklists` can be read by every team member and changed only by Admin and Management; the deal owner can only create it (when marking the deal won). `config/checklist_tasks` can be changed only by Admin or Management. `quotations` moved out of the open catch-all into owner-based rules; old templates with no owner stay editable by all.
 
 - After-training steps (added at Joel's request, 2026-10-16): JD14 (HRDC deals only), Certificates, Training report, Output assessment. These are simple ticks with notes, marked "After training". Any simple task can be set to Before or After training in Checklist tasks. Before training day only the before-training steps can raise flags. Once the date passes, open before-training steps are red, and open after-training steps show as an amber reminder.
 - New built-in tasks added in code are added automatically to a master list that was already saved (`readSettings` merges missing built-in ids). Ones Joel stopped using stay retired.
@@ -161,7 +161,7 @@ Not in 2B: training day (attendance, photos) and POs. Joel can add them as tasks
 
 ### Later phases
 - **Phase 3, money:** merge `payments` and `client_payments` into Money In (keyed by Admin) and Money Out (with the cross-approval rule above). Add funding type handling, HRDC claim tracking (claimed vs paid, top-up invoice for the shortfall, deadline warning), and real P&L per deal. Remove the remaining hardcoded `xin-ying` approval logic in `RepDetailDashboard.tsx`.
-- **Phase 4, dashboards:** a home screen per role. Reps get their deals and KPI vs target. Admin gets the work queue. Management gets pipeline value by stage, team KPI, stuck deals, money owed and profit per training. Add alerts. Tidy-ups: the 13 npm security warnings, the large JS bundle (about 1.7 MB), the remaining localStorage fallbacks and old hardcoded IDs in Home and Management, and redesign of the remaining old screens.
+- **Phase 4, dashboards:** a home screen per role. Reps get their deals and KPI vs target. Admin gets the work queue. Management gets pipeline value by stage, team KPI, stuck deals, money owed and profit per training. Add alerts. Tidy-ups: the 13 npm security warnings, the large JS bundle (about 1.7 MB), the remaining localStorage fallbacks and old hardcoded IDs in Home and Management, and redesign of the remaining old screens. Joel finds the **"Admin work" tab in the top bar odd** and wants all screen-layout fixes done together later. Ask him where it should live when doing the screen redesign.
 
 ## 7. How to start each session
 
