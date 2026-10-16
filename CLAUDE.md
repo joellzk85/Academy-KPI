@@ -124,13 +124,13 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 
 - **Phase 2B** (pushed 2026-10-16, see section 6): admin checklist on won deals (including after-training steps JD14, certificates, training report, output assessment), Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. Live, rules published, tested OK by Joel. Reps see checklists read-only (Joel confirmed, see section 6).
 
-- **Phase 3** (built 2026-10-16, see section 6b): money in and out per deal, cross-approval, P&L per deal, money flags, Admin work → Money. Status: check the to-dos below.
+- **Phase 3** (pushed 2026-10-16, see section 6b): money in and out per deal, cross-approval, P&L per deal, money flags, Admin work → Money. Live, rules published, tested OK by Joel ("all okay").
 - **Phase 2C** (pushed 2026-10-16, see section 6a): programme list with HRDC registration, HRDC queries, grant gate. Live, rules published, tested OK by Joel ("ok can").
 
 ### Joel's open to-dos (check with him)
 0. **Phase 2B go-live:** done and tested by Joel on 2026-10-16. Rules published.
 0a. **Phase 2C go-live:** done and tested by Joel on 2026-10-16. Rules published.
-0b. **Phase 3 go-live:** once live, publish the new `firestore.rules` (it adds `money_in`, `money_out` and `config/money_settings`). Then test the approval rule with both managers. Joel should also fill in the HRDC claim deadline in Admin work → Money once he has checked HRD Corp's current guidelines.
+0b. **Phase 3 go-live:** done and tested by Joel on 2026-10-16. Rules published. Still open: Joel fills in the HRDC claim deadline in Admin work → Money once he has checked HRD Corp's current guidelines.
 1. Set each person's KPI template and targets in Management → Team.
 2. Link old records in Data tools (ask for a screenshot of the matches before he clicks Link).
 3. ~~Test a deal from new to won and check it shows in that month's KPIs.~~ Done 2026-10-16: works.
