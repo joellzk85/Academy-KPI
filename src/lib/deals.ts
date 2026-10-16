@@ -59,6 +59,12 @@ export function statusForStage(stage: DealStage): 'Pending' | 'Won' | 'Lost' {
   return stage === 'won' ? 'Won' : stage === 'lost' ? 'Lost' : 'Pending';
 }
 
+// Who may edit the appointment and delete the deal: the person who created it, or Management (Joel, 2026-10-16).
+// Older deals without a creator fall back to the owner.
+export function canManageDeal(p: any, viewer: { id: string; role: string }): boolean {
+  return viewer.role === 'management' || (p?.creatorId || dealOwnerId(p)) === viewer.id;
+}
+
 export function dealOwnerId(p: any): string {
   return p?.ownerId || p?.creatorId || '';
 }

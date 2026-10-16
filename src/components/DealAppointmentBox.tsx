@@ -119,10 +119,10 @@ export default function DealAppointmentBox({ deal, viewer, editable, programmes,
     <div className="rounded-xl border border-line bg-surface p-3.5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="font-semibold">Appointment held {formatDate(a.date)}{a.metWith ? ` with ${a.metWith}` : ''}{a.legacy ? '' : ` · ${MODE_LABELS[a.mode]}`}</p>
-        {editable && !a.legacy && <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => setMode('log')}><Pencil className="mr-1 inline h-3.5 w-3.5" />Edit</button>}
+        {editable && <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => setMode('log')}><Pencil className="mr-1 inline h-3.5 w-3.5" />Edit</button>}
       </div>
       {a.legacy ? (
-        <p className="text-sm text-ink-soft">Recorded before appointment details were kept.</p>
+        <p className="text-sm text-ink-soft">Recorded before appointment details were kept.{editable ? ' Click Edit to add them.' : ''}</p>
       ) : (
         <>
           {a.outcome && <p className="mt-1 text-[15px]"><span className="text-ink-soft">Outcome:</span> {a.outcome}</p>}

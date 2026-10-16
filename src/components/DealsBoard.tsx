@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import {
   AlertTriangle, Check, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import {
-  DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote,
+  DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM,
 } from '../lib/deals';
 import { progress } from '../lib/checklist';
@@ -331,6 +331,30 @@ export default function DealsBoard({
     return writeStage(p, { stage: back, wonDate: '', lostReason: '', lostNote: '' }, dealStage(p) === 'won' ? 'Win undone' : 'Deal reopened');
   };
 
+  // Delete a deal (creator or Management). Not allowed once it's won or has linked records.
+  const deleteDeal = async (p: any) => {
+    const linked: string[] = [];
+    if (dealStage(p) === 'won') linked.push('it is won');
+    const nq = quotes.filter(q => q.pipelineId === p.id).length;
+    if (nq) linked.push(`${nq} quotation${nq === 1 ? '' : 's'}`);
+    const nm = moneyIn.filter(m => m.dealId === p.id).length + moneyOut.filter(m => m.dealId === p.id).length;
+    if (nm) linked.push(`${nm} money record${nm === 1 ? '' : 's'}`);
+    const nh = queries.filter(q => q.dealId === p.id).length;
+    if (nh) linked.push(`${nh} HRDC quer${nh === 1 ? 'y' : 'ies'}`);
+    if (linked.length) return setStageError(`This deal can't be deleted because ${linked.join(', ')}. Use "Mark lost" instead.`);
+    if (!window.confirm(`Delete the deal for ${clientName(p)}? This can't be undone.`)) return;
+    setBusy(true);
+    try {
+      await deleteDoc(doc(db, 'pipelines', p.id));
+      setOpenId(null);
+      flash('Deal deleted');
+    } catch (err) {
+      setStageError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const markTagDone = async (p: any) => {
     try {
       await updateDoc(doc(db, 'pipelines', p.id), { completedTags: arrayUnion(viewer.id) });
@@ -502,6 +526,8 @@ export default function DealsBoard({
               onWon={() => confirmWon(openDeal)}
               onLost={() => confirmLost(openDeal)}
               onReopen={() => reopen(openDeal)}
+              canManage={canManageDeal(openDeal, viewer)}
+              onDelete={() => deleteDeal(openDeal)}
               onCreateQuotation={() => onCreateQuotation(openDeal)}
               onCreateOutline={() => onCreateOutline(openDeal)}
               onOpenQuotations={onOpenQuotations}
@@ -652,6 +678,7 @@ function DealPanel(props: {
   onClose: () => void; onEdit: () => void; onProposal: () => void; onAgreed: () => void; onQuoted: () => void;
   programmes: Programme[]; onApptDone: (msg: string) => void;
   onWon: () => void; onLost: () => void; onReopen: () => void;
+  canManage: boolean; onDelete: () => void;
   onCreateQuotation: () => void; onCreateOutline: () => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
 }) {
   const p = props.deal;
@@ -739,7 +766,7 @@ function DealPanel(props: {
       )}
 
       {/* Appointment (optional, one per deal) */}
-      <DealAppointmentBox deal={p} viewer={props.viewer} editable={props.editable} programmes={props.programmes} client={props.client} onDone={props.onApptDone} />
+      <DealAppointmentBox deal={p} viewer={props.viewer} editable={props.canManage} programmes={props.programmes} client={props.client} onDone={props.onApptDone} />
 
       {/* Details */}
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
@@ -816,6 +843,13 @@ function DealPanel(props: {
             ? <RepMoneyStatus deal={p} ins={props.moneyIn} />
             : <MoneyPanel deal={p} viewer={props.viewer} ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} />}
         </section>
+      )}
+
+      {props.canManage && (
+        <div className="border-t border-line pt-4">
+          <button type="button" disabled={props.busy} onClick={props.onDelete} className="inline-flex items-center gap-1.5 text-sm font-semibold text-danger hover:underline"><XCircle className="h-4 w-4" /> Delete deal</button>
+          {props.stageError && !props.editable && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{props.stageError}</p>}
+        </div>
       )}
 
       {/* History */}
