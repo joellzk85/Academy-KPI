@@ -24,6 +24,8 @@ interface HomeDashboardProps {
   quotationsSync?: any[];
   outlinesSync?: any[];
   monthKpisSync?: any[];
+  // Show only one part (used by My home). Leave out for the full page.
+  section?: 'calendar' | 'notices';
 }
 
 // Deals come only from the live database (no sample data).
@@ -184,7 +186,8 @@ export default function HomeDashboard({
   tasksSync,
   quotationsSync,
   outlinesSync,
-  monthKpisSync
+  monthKpisSync,
+  section
 }: HomeDashboardProps) {
   // Calendar state — defaults to today's actual month/year, not a hardcoded one
   const today = new Date();
@@ -581,7 +584,7 @@ export default function HomeDashboard({
     <div className="space-y-6" id="home-dashboard">
       
       {/* Top Row: Quick Month view selector */}
-      <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xs" id="home-month-selector">
+      {!section && <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xs" id="home-month-selector">
         <div className="flex items-center gap-2">
           <div className="p-2 bg-blue-50 border border-blue-100 text-blue-600 rounded-lg">
             <Calendar className="w-4 h-4" />
@@ -610,13 +613,13 @@ export default function HomeDashboard({
             ))}
           </select>
         </div>
-      </div>
+      </div>}
       
       {/* 4 Cards Row & Calendar */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+      {section !== 'notices' && <div className={section ? '' : 'grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch'}>
         
         {/* Left Side: 4 KPI Cards Grid */}
-        <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-4">
+        {!section && <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-4">
           
           {/* Card 1: Total Sales YTD (Dark Blue Theme) */}
           <div 
@@ -767,7 +770,7 @@ export default function HomeDashboard({
 
           </div>
 
-        </div>
+        </div>}
 
         {/* Right Side: July 2026 Calendar Widget (Perfect copy of the screenshot layout!) */}
         <div className="lg:col-span-5 bg-white border border-slate-200/80 rounded-xl p-5 shadow-xs flex flex-col justify-between">
@@ -970,10 +973,10 @@ export default function HomeDashboard({
 
         </div>
 
-      </div>
+      </div>}
 
       {/* Newsfeed / Notice Box */}
-      <div 
+      {section !== 'calendar' && <div 
         className="bg-white border border-slate-200/80 rounded-xl p-4 shadow-xs flex items-center gap-4 relative overflow-hidden"
         id="notice-ticker-panel"
       >
@@ -1031,10 +1034,10 @@ export default function HomeDashboard({
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Representative Selection Section (Direct Match to Bottom buttons) */}
-      <div className="space-y-4">
+      {!section && <div className="space-y-4">
         <div className="flex justify-between items-center">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider font-display">
             Next Academy Team Representatives
@@ -1103,7 +1106,7 @@ export default function HomeDashboard({
             );
           })}
         </div>
-      </div>
+      </div>}
 
       {/* Add Event Modal */}
       {showAddEventModal && (

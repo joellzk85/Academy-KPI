@@ -20,7 +20,6 @@ import {
   LogOut,
   KeyRound,
   UserCircle2,
-  ClipboardCheck,
   ArrowLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -39,6 +38,7 @@ const ManagementDashboard = React.lazy(() => import('./components/ManagementDash
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
 const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
+const MyHome = React.lazy(() => import('./components/MyHome'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, ChatMessage, TeamMember, ROLE_LABELS } from './types';
@@ -210,6 +210,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [managementView, setManagementView] = useState<'dashboard' | 'team' | 'data'>('dashboard');
+  const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks'>('queue');
 
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
     const saved = localStorage.getItem('next_events');
@@ -224,8 +225,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   // Active Representative Selection (reps can only ever open their own workspace)
   const [selectedRepId, setSelectedRepId] = useState<string | null>(() => {
     const saved = localStorage.getItem('next_selected_rep_id') || null;
-    if (isRep) return currentMember.id;
-    return saved;
+    // Everyone lands on My home after logging in.
+    return null;
   });
 
   // Track if we came from operations or management to handle the Back button correctly
@@ -709,6 +710,45 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
   const selectedRep = representatives.find(r => r.id === selectedRepId);
 
+  // The calendar and notices on My home reuse the old home page's parts.
+  const homeDashboardProps = {
+    reps: representatives,
+    events: calendarEvents,
+    notices: [...notices, ...getOverduePipelineNotices()],
+    onSelectRep: handleSelectRep,
+    onAddRep: () => {},
+    onAddEvent: handleAddEvent,
+    onDeleteEvent: handleDeleteEvent,
+    onAddNotice: handleAddNotice,
+    onDeleteNotice: handleDeleteNotice,
+    isManagementUnlocked: false,
+    onRequestManagementUnlock: () => {},
+    selectedMonth,
+    onMonthChange: handleMonthChange,
+    pipelinesSync,
+    tasksSync,
+    quotationsSync,
+    outlinesSync,
+    monthKpisSync,
+  };
+
+  const homeNav = {
+    openWorkspace: (repId: string, subTab?: string) => {
+      if (isRep && repId !== currentMember.id) return;
+      if (subTab) localStorage.setItem(`next_active_subtab_${repId}`, subTab);
+      setRepSelectionSource('operations');
+      setSelectedRepId(repId);
+      setCurrentTab('operations');
+    },
+    openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks') => {
+      if (!isStaff) return;
+      setAdminView(view || 'queue');
+      setCurrentTab('admin');
+      setSelectedRepId(null);
+    },
+    openManagement: () => handleSwitchTab('management'),
+  };
+
   // Formatted date string
   const formattedDate = currentTime.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -747,7 +787,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Team workspaces
+                My home
               </button>
 {isManagement && (              <button
                 onClick={() => handleSwitchTab('management')}
@@ -833,7 +873,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            Operations
+            My home
           </button>
 {isManagement && (          <button
             onClick={() => handleSwitchTab('management')}
@@ -859,12 +899,13 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <button type="button" onClick={() => handleSwitchTab('operations')} className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-accent hover:underline">
-                <ArrowLeft className="h-4 w-4" /> Back to Team workspaces
+                <ArrowLeft className="h-4 w-4" /> Back to My home
               </button>
               <WorkQueue
                 viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                 people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name }))}
                 onOpenQuotations={handleOpenQuotationsFor}
+                initialView={adminView}
               />
             </motion.div>
           ) : currentTab === 'management' ? (
@@ -922,48 +963,14 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
-              {/* Admin work: only Admin and Management see this card. */}
-              {isStaff && (
-                <button
-                  type="button"
-                  onClick={() => handleSwitchTab('admin')}
-                  className="mb-6 flex w-full items-center gap-4 rounded-2xl border border-line bg-white p-5 text-left font-sans text-ink shadow-xs transition-colors hover:border-accent hover:bg-accent-soft/40"
-                >
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent"><ClipboardCheck className="h-5 w-5" /></span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-lg font-bold">Admin work</span>
-                    <span className="block text-[15px] text-ink-soft">Work queue, money and approvals, programmes and checklist tasks.</span>
-                  </span>
-                  <ChevronRight className="h-5 w-5 shrink-0 text-ink-soft" />
-                </button>
-              )}
-              <HomeDashboard
-                reps={representatives}
-                events={calendarEvents}
-                notices={[...notices, ...getOverduePipelineNotices()]}
-                onSelectRep={handleSelectRep}
-                onAddRep={() => {}}
-                onAddEvent={handleAddEvent}
-                onDeleteEvent={handleDeleteEvent}
-                onAddNotice={handleAddNotice}
-                onDeleteNotice={handleDeleteNotice}
-                isManagementUnlocked={false}
-                onRequestManagementUnlock={() => {
-                  if (isManagement) {
-                    setCurrentTab('management');
-                    setManagementView('team');
-                    setSelectedRepId(null);
-                  } else {
-                    showToast('Only Management can add people. Ask them to add new team members in Management → Team.');
-                  }
-                }}
-                selectedMonth={selectedMonth}
-                onMonthChange={handleMonthChange}
-                pipelinesSync={pipelinesSync}
-                tasksSync={tasksSync}
-                quotationsSync={quotationsSync}
-                outlinesSync={outlinesSync}
-                monthKpisSync={monthKpisSync}
+              <MyHome
+                viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+                people={teamMembers.map(m => ({ id: m.id, name: m.name, role: m.role, active: m.active }))}
+                representatives={representatives}
+                deals={pipelinesSync}
+                calendar={<HomeDashboard {...homeDashboardProps} section="calendar" />}
+                notices={<HomeDashboard {...homeDashboardProps} section="notices" />}
+                nav={homeNav}
               />
             </motion.div>
           ) : (

@@ -27,12 +27,13 @@ const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink disabled:opacity-30';
 
-export default function WorkQueue({ viewer, people, onOpenQuotations }: {
+export default function WorkQueue({ viewer, people, onOpenQuotations, initialView = 'queue' }: {
   viewer: Viewer;
   people: { id: string; name: string }[];
   onOpenQuotations: (repId: string) => void;   // opens that person's quotation library
+  initialView?: 'queue' | 'money' | 'programmes' | 'tasks';   // which tab to open (from My home)
 }) {
-  const [view, setView] = useState<'queue' | 'money' | 'programmes' | 'tasks'>('queue');
+  const [view, setView] = useState<'queue' | 'money' | 'programmes' | 'tasks'>(initialView);
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex flex-wrap items-end justify-between gap-3">
