@@ -968,6 +968,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 people={teamMembers.map(m => ({ id: m.id, name: m.name, role: m.role, active: m.active }))}
                 representatives={representatives}
                 deals={pipelinesSync}
+                events={calendarEvents}
                 calendar={<HomeDashboard {...homeDashboardProps} section="calendar" />}
                 notices={<HomeDashboard {...homeDashboardProps} section="notices" />}
                 nav={homeNav}

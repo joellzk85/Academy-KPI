@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowDown, ArrowUp, Briefcase, ChevronRight, ClipboardCheck, Eye, EyeOff, LayoutGrid, Loader2, ShieldCheck, Users,
+  AlertTriangle, ArrowDown, ArrowUp, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardCheck, Eye, EyeOff, LayoutGrid, Loader2, ShieldCheck, Users,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { Representative } from '../types';
+import { CalendarEvent, Representative } from '../types';
 import {
   OPEN_STAGES, STAGE_LABELS, DealStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
 } from '../lib/deals';
@@ -39,10 +39,11 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'notices', title: 'Notices', roles: ['rep', 'admin', 'management'] },
 ];
 
+// Notices are off by default (Joel removed the newsfeed); anyone can switch the card back on.
 const DEFAULT_CARDS: Record<Role, CardId[]> = {
-  rep: ['follow_ups', 'my_kpi', 'next14', 'my_won', 'notices'],
-  admin: ['new_won', 'due_now', 'money_jobs', 'next14', 'notices'],
-  management: ['approvals', 'money_position', 'pipeline', 'next14', 'notices'],
+  rep: ['follow_ups', 'my_kpi', 'next14', 'my_won'],
+  admin: ['new_won', 'due_now', 'money_jobs', 'next14'],
+  management: ['approvals', 'money_position', 'pipeline', 'next14'],
 };
 
 const btnSecondary =
@@ -55,12 +56,13 @@ export interface MyHomeNav {
   openManagement: () => void;
 }
 
-export default function MyHome({ viewer, people, representatives, deals, calendar, notices, nav }: {
+export default function MyHome({ viewer, people, representatives, deals, events, calendar, notices, nav }: {
   viewer: Viewer;
   people: { id: string; name: string; role: Role; active: boolean }[];   // the Team list
   representatives: Representative[];   // people with a workspace (reps and admins), with KPI settings
   deals: any[];
-  calendar: React.ReactNode;
+  events: CalendarEvent[];
+  calendar: React.ReactNode;   // the full calendar (adding events, Google sync)
   notices: React.ReactNode;
   nav: MyHomeNav;
 }) {
@@ -145,11 +147,11 @@ export default function MyHome({ viewer, people, representatives, deals, calenda
         )}
       </div>
 
-      {/* 1. Calendar */}
-      <section>{calendar}</section>
-
-      {/* 2. Performance rings */}
-      <Performance viewer={viewer} representatives={representatives} deals={deals} today={today} />
+      {/* 1. Calendar (small) and 2. Performance (one row) */}
+      <div className="grid items-start gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+        <CompactCalendar events={events} today={today} full={calendar} />
+        <Performance viewer={viewer} representatives={representatives} deals={deals} today={today} />
+      </div>
 
       {/* 3. My cards */}
       <section className="space-y-3">
@@ -252,29 +254,33 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
   // Reps see only their own ring; Admin and Management also see the company.
   const showCompany = viewer.role !== 'rep';
 
+  const items: { key: string; label: string; ring: Ring }[] = [];
+  if (showCompany) items.push({ key: 'company', label: 'Company', ring: company });
+  if (meRing) items.push({ key: 'me', label: 'Me', ring: meRing });
+  if (viewer.role === 'management') sellers.filter(r => r.id !== viewer.id).forEach(r => items.push({ key: r.id, label: r.name, ring: ringFor(r) }));
+
   return (
-    <section className="space-y-3">
-      <h2 className="text-xl font-bold">Performance</h2>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {showCompany && <RingCard title="Company" ring={company} monthLabel={monthLabel} year={year} />}
-        {meRing && <RingCard title="Me" ring={meRing} monthLabel={monthLabel} year={year} />}
-        {!showCompany && !meRing && <p className="text-ink-soft">No sales target is set for you yet.</p>}
+    <section className="rounded-2xl border border-line bg-white p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-bold">Performance</h2>
+        <span className="flex items-center gap-3 text-xs text-ink-soft">
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#0E6E62]" />Outer: year {year}</span>
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#5DB3A6]" />Inner: {monthLabel}</span>
+        </span>
       </div>
-      {viewer.role === 'management' && sellers.length > 0 && (
-        <div className="rounded-2xl border border-line bg-white p-4">
-          <p className="mb-3 text-sm font-semibold text-ink-soft">Each person (outer ring year, inner ring {monthLabel})</p>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-            {sellers.map(r => {
-              const ring = ringFor(r);
-              return (
-                <div key={r.id} className="flex flex-col items-center text-center">
-                  <Rings ring={ring} size={96} />
-                  <span className="mt-1 text-sm font-semibold">{r.name}</span>
-                  <span className="text-xs text-ink-soft">{pct(ring.monthValue, ring.monthTarget)}% this month</span>
-                </div>
-              );
-            })}
-          </div>
+      {items.length === 0 ? (
+        <p className="mt-2 text-ink-soft">No sales target is set for you yet.</p>
+      ) : (
+        <div className="mt-3 flex gap-5 overflow-x-auto pb-1">
+          {items.map(({ key, label, ring }) => (
+            <div key={key} className="flex w-28 shrink-0 flex-col items-center text-center"
+              title={`${label}\nYear ${year}: ${formatRM(ring.yearValue)} of ${formatRM(ring.yearTarget)} (${pct(ring.yearValue, ring.yearTarget)}%)\n${monthLabel}: ${formatRM(ring.monthValue)} of ${formatRM(ring.monthTarget)} (${pct(ring.monthValue, ring.monthTarget)}%)`}>
+              <Rings ring={ring} size={88} />
+              <span className="mt-1 w-full truncate text-sm font-semibold">{label}</span>
+              <span className="text-xs text-ink-soft">{monthLabel.slice(0, 3)}: {pct(ring.monthValue, ring.monthTarget)}%</span>
+              <span className="whitespace-nowrap text-xs text-ink-soft">Year: {formatRM(ring.yearValue)}</span>
+            </div>
+          ))}
         </div>
       )}
     </section>
@@ -303,18 +309,67 @@ function Rings({ ring, size }: { ring: Ring; size: number }) {
   );
 }
 
-function RingCard({ title, ring, monthLabel, year }: { title: string; ring: Ring; monthLabel: string; year: string }) {
+// ---------- Small calendar ----------
+// A small month grid. Days with events get a dot; pointing at (or tapping) a day shows its events.
+// "Add event / full calendar" opens the full calendar with Google sync.
+const DOW = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+
+function CompactCalendar({ events, today, full }: { events: CalendarEvent[]; today: string; full: React.ReactNode }) {
+  const [cursor, setCursor] = useState(() => ({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) - 1 }));
+  const [hover, setHover] = useState<string | null>(null);
+  const [showFull, setShowFull] = useState(false);
+  const first = new Date(cursor.y, cursor.m, 1);
+  const lead = (first.getDay() + 6) % 7;   // weeks start on Monday
+  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
+  const iso = (d: number) => `${cursor.y}-${String(cursor.m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const byDay = useMemo(() => {
+    const m: Record<string, CalendarEvent[]> = {};
+    events.forEach(e => { if (e.date) (m[e.date.slice(0, 10)] ||= []).push(e); });
+    return m;
+  }, [events]);
+  const shift = (n: number) => setCursor(c => { const d = new Date(c.y, c.m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const cells: (number | null)[] = [...Array(lead).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const hoverEvents = hover ? byDay[hover] || [] : [];
+
   return (
-    <div className="rounded-2xl border border-line bg-white p-4">
-      <p className="mb-2 font-bold">{title}</p>
-      <div className="flex flex-wrap items-center gap-4">
-        <Rings ring={ring} size={150} />
-        <div className="space-y-1.5 text-sm text-ink-soft">
-          <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-[#0E6E62]" />Year {year}: <strong className="text-ink">{formatRM(ring.yearValue)}</strong> of {formatRM(ring.yearTarget)} ({pct(ring.yearValue, ring.yearTarget)}%)</p>
-          <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-[#5DB3A6]" />{monthLabel}: <strong className="text-ink">{formatRM(ring.monthValue)}</strong> of {formatRM(ring.monthTarget)} ({pct(ring.monthValue, ring.monthTarget)}%)</p>
-        </div>
+    <section className="rounded-2xl border border-line bg-white p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-2 font-bold"><CalendarDays className="h-4 w-4 text-accent" />{first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</h2>
+        <span className="flex">
+          <button type="button" className={iconBtn} onClick={() => shift(-1)} aria-label="Previous month"><ChevronLeft className="h-4 w-4" /></button>
+          <button type="button" className={iconBtn} onClick={() => shift(1)} aria-label="Next month"><ChevronRight className="h-4 w-4" /></button>
+        </span>
       </div>
-    </div>
+      <div className="mt-2 grid grid-cols-7 gap-0.5 text-center text-xs" onMouseLeave={() => setHover(null)}>
+        {DOW.map(d => <span key={d} className="py-1 font-semibold text-ink-soft">{d}</span>)}
+        {cells.map((d, i) => {
+          if (d === null) return <span key={`b${i}`} />;
+          const day = iso(d);
+          const count = byDay[day]?.length || 0;
+          const isToday = day === today;
+          return (
+            <button key={day} type="button" onMouseEnter={() => setHover(day)} onFocus={() => setHover(day)} onClick={() => setHover(h => (h === day ? null : day))}
+              className={`relative flex h-8 items-center justify-center rounded-md text-sm ${isToday ? 'bg-accent font-bold text-white' : hover === day ? 'bg-surface' : 'hover:bg-surface'}`}
+              aria-label={`${formatDate(day)}${count ? `, ${count} event${count === 1 ? '' : 's'}` : ''}`}>
+              {d}
+              {count > 0 && <span className={`absolute bottom-1 h-1 w-1 rounded-full ${isToday ? 'bg-white' : 'bg-accent'}`} />}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 min-h-[44px] rounded-lg bg-surface px-3 py-2 text-sm" aria-live="polite">
+        {hover ? (
+          <>
+            <p className="font-semibold">{formatDate(hover)}</p>
+            {hoverEvents.length === 0 ? <p className="text-ink-soft">No events</p> : hoverEvents.map(e => <p key={e.id} className="truncate text-ink-soft">{e.time ? `${e.time} · ` : ''}{e.title}</p>)}
+          </>
+        ) : <p className="text-ink-soft">Point at a date to see its events.</p>}
+      </div>
+      <button type="button" className="mt-2 text-sm font-semibold text-accent hover:underline" onClick={() => setShowFull(v => !v)}>
+        {showFull ? 'Hide full calendar' : 'Add event / full calendar'}
+      </button>
+      {showFull && <div className="mt-3">{full}</div>}
+    </section>
   );
 }
 
