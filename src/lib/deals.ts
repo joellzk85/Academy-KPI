@@ -3,19 +3,37 @@
 // carry over. New fields: stage, appointmentDate, wonDate, lostDate,
 // lostReason, fundingType. Older records without them are read sensibly.
 
-export type DealStage = 'lead' | 'appointment' | 'proposal' | 'won' | 'lost';
+// The journey (Joel, 2026-10-16): New -> Proposal sent (the pitch) -> Client agreed -> Quotation sent -> Won
+// (the client signed the quotation). The appointment is optional and can happen at any point before Won;
+// 'appointment' is kept as a stage only for deals that are new but have had a meeting.
+export type DealStage = 'lead' | 'appointment' | 'proposal' | 'agreed' | 'quoted' | 'won' | 'lost';
 export type FundingType = 'hrdc' | 'direct' | 'hrdc_topup';
 
-export const STAGE_ORDER: DealStage[] = ['lead', 'appointment', 'proposal', 'won', 'lost'];
-export const OPEN_STAGES: DealStage[] = ['lead', 'appointment', 'proposal'];
+export const STAGE_ORDER: DealStage[] = ['lead', 'appointment', 'proposal', 'agreed', 'quoted', 'won', 'lost'];
+export const OPEN_STAGES: DealStage[] = ['lead', 'appointment', 'proposal', 'agreed', 'quoted'];
+// The steps shown on the journey line (appointment is shown separately).
+export const JOURNEY: DealStage[] = ['lead', 'proposal', 'agreed', 'quoted', 'won'];
 
 export const STAGE_LABELS: Record<DealStage, string> = {
-  lead: 'Lead',
-  appointment: 'Appointment',
+  lead: 'New',
+  appointment: 'New (met)',
   proposal: 'Proposal sent',
+  agreed: 'Client agreed',
+  quoted: 'Quotation sent',
   won: 'Won',
   lost: 'Lost',
 };
+
+// For the journey line and filters, a new deal that has had its meeting counts as "New".
+export function journeyStage(st: DealStage): DealStage {
+  return st === 'appointment' ? 'lead' : st;
+}
+
+// Quotations are made only once the client has agreed to the proposal.
+export function canQuote(p: any): boolean {
+  const st = dealStage(p);
+  return st === 'agreed' || st === 'quoted' || st === 'won';
+}
 
 export const FUNDING_LABELS: Record<FundingType, string> = {
   hrdc: 'HRDC claimable',

@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
   AlertTriangle, ArrowLeft, Copy, Download, Eye, EyeOff, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Share2, Trash2, Unlock, Users, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Quotation, QuotationItem, Representative } from '../types';
-import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
+import { STAGE_LABELS, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
@@ -102,7 +102,8 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
     open(copy);
   };
 
-  const dealsForPicker = deals.filter(d => (staff && me.id === rep.id ? true : dealOwnerId(d) === rep.id) && dealStage(d) !== 'lost');
+  // Quotations come after the client agrees to the proposal.
+  const dealsForPicker = deals.filter(d => (staff && me.id === rep.id ? true : dealOwnerId(d) === rep.id) && canQuote(d));
 
   return (
     <>
@@ -125,7 +126,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
 }
 
 // ---------- Choose the deal (or client) ----------
-function Chooser({ deals, clients, sources, personName, onPick, onCancel, title = 'Which deal is this quotation for?' }: {
+function Chooser({ deals, clients, sources, personName, onPick, onCancel, title = 'Which agreed deal is this quotation for?' }: {
   deals: any[]; clients: any[]; sources: QuoteSources; personName: (id?: string) => string;
   onPick: (p: { deal?: any; clientId?: string }) => void; onCancel: () => void; title?: string;
 }) {
@@ -154,7 +155,7 @@ function Chooser({ deals, clients, sources, personName, onPick, onCancel, title 
               <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, programme or rep" className={`${input} pl-9`} aria-label="Search deals" />
             </div>
             <ul className="mt-3 max-h-[50vh] divide-y divide-line overflow-y-auto rounded-xl border border-line">
-              {list.length === 0 && <li className="p-4 text-ink-soft">No deals found.</li>}
+              {list.length === 0 && <li className="p-4 text-ink-soft">No agreed deals found.</li>}
               {list.map(d => (
                 <li key={d.id}>
                   <button type="button" onClick={() => onPick({ deal: d })} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface">
@@ -167,7 +168,7 @@ function Chooser({ deals, clients, sources, personName, onPick, onCancel, title 
                 </li>
               ))}
             </ul>
-            <button type="button" className={`${linkBtn} mt-3`} onClick={() => setClientOnly(true)}>No deal yet? Make it for a client only</button>
+            <p className="mt-3 text-sm text-ink-soft">Only deals where the client has agreed to the proposal are listed. On the deal, click "Client agreed" first.</p>
           </>
         ) : (
           <div className="space-y-3">
@@ -354,8 +355,10 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
       setSaved(JSON.stringify(final));
       setNote(msg);
       window.setTimeout(() => setNote(''), 2500);
+      return true;
     } catch (e) {
       setError(friendlyError(e));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -364,7 +367,16 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const markSent = () => {
     if (r.issues.length && !window.confirm(`Some details are missing:\n\n• ${r.issues.join('\n• ')}\n\nMark as sent anyway?`)) return;
     // Lock a copy of exactly what prints now.
-    return persist({ ...shownQ, status: 'sent', sentAt: new Date().toISOString(), sentById: me.id, sentByName: me.name }, 'Marked as sent and locked');
+    return persist({ ...shownQ, status: 'sent', sentAt: new Date().toISOString(), sentById: me.id, sentByName: me.name }, 'Marked as sent and locked').then(async ok => {
+      // The deal moves to "Quotation sent" (if it was at "Client agreed").
+      if (!ok || !r.deal || dealStage(r.deal) !== 'agreed') return;
+      try {
+        await updateDoc(doc(db, 'pipelines', r.deal.id), {
+          stage: 'quoted', status: 'Pending', quotationSentDate: todayIso(),
+          history: [...(r.deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Quotation ${q.refNumber} sent` }].slice(-40),
+        });
+      } catch { /* the deal owner or Admin can move it on the deal */ }
+    });
   };
   const revise = () => {
     if (!window.confirm('Unlock this quotation to revise it? It will read the latest client, deal and programme details again.')) return;

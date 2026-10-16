@@ -6,7 +6,7 @@ import {
 import { db, friendlyError } from '../lib/firebase';
 import { CalendarEvent, Representative } from '../types';
 import {
-  OPEN_STAGES, STAGE_LABELS, DealStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
+  OPEN_STAGES, STAGE_LABELS, DealStage, journeyStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
 } from '../lib/deals';
 import { metricsFor, countAuto } from '../lib/kpi';
 import { checklistFlags, daysUntil, progress, Flag } from '../lib/checklist';
@@ -622,15 +622,16 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         const fu = ymd(p.followUpDate);
         if (fu && fu < c.today) return true;
         const sent = ymd(p.proposalSentDate);
+        if (dealStage(p) === 'quoted' && !fu && ymd(p.quotationSentDate) && (daysUntil(ymd(p.quotationSentDate), c.today) ?? 0) <= -7) return true;
         return dealStage(p) === 'proposal' && !fu && sent && (daysUntil(sent, c.today) ?? 0) <= -7;
       });
       return {
         items: stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${apptOverdue(p, c.today) ? `appointment on ${formatDate(apptOf(p)!.date)} not logged` : ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` })),
         empty: 'No stuck deals.',
         footer: (
-          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3">
-            {(['lead', 'appointment', 'proposal'] as DealStage[]).map(st => {
-              const list = open.filter(p => dealStage(p) === st);
+          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-3 sm:grid-cols-4">
+            {(['lead', 'proposal', 'agreed', 'quoted'] as DealStage[]).map(st => {
+              const list = open.filter(p => journeyStage(dealStage(p)) === st);
               return <div key={st} className="rounded-xl bg-surface px-3 py-2"><p className="text-xs font-semibold text-ink-soft">{STAGE_LABELS[st]}</p><p className="font-bold">{list.length}</p><p className="text-xs text-ink-soft">{formatRM(list.reduce((t, p) => t + dealValue(p), 0))}</p></div>;
             })}
           </div>

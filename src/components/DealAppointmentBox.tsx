@@ -26,7 +26,7 @@ export default function DealAppointmentBox({ deal, viewer, editable, programmes,
 }) {
   const a = apptOf(deal);
   const st = dealStage(deal);
-  const open = st === 'lead' || st === 'appointment' || st === 'proposal';
+  const open = st === 'lead' || st === 'appointment' || st === 'proposal' || st === 'agreed' || st === 'quoted';   // any time before Won
   const [mode, setMode] = useState<null | 'book' | 'log'>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

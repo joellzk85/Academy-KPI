@@ -6,7 +6,7 @@ import {
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import {
-  DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES,
+  DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM,
 } from '../lib/deals';
 import { progress } from '../lib/checklist';
@@ -45,6 +45,8 @@ const STAGE_TONE: Record<DealStage, string> = {
   lead: 'bg-surface text-ink-soft',
   appointment: 'bg-[#E8EEF8] text-[#2B4A7E]',
   proposal: 'bg-attention-soft text-attention',
+  agreed: 'bg-[#E8EEF8] text-[#2B4A7E]',
+  quoted: 'bg-[#EFE8F8] text-[#5B3A8C]',
   won: 'bg-accent-soft text-accent',
   lost: 'bg-danger-soft text-danger',
 };
@@ -137,14 +139,14 @@ export default function DealsBoard({
   const stageSummary = useMemo(() => {
     const out: Record<DealStage, { count: number; value: number }> = {
       lead: { count: 0, value: 0 }, appointment: { count: 0, value: 0 }, proposal: { count: 0, value: 0 },
-      won: { count: 0, value: 0 }, lost: { count: 0, value: 0 },
+      agreed: { count: 0, value: 0 }, quoted: { count: 0, value: 0 }, won: { count: 0, value: 0 }, lost: { count: 0, value: 0 },
     };
-    myDeals.forEach(p => { const st = dealStage(p); out[st].count++; out[st].value += dealValue(p); });
+    myDeals.forEach(p => { const st = journeyStage(dealStage(p)); out[st].count++; out[st].value += dealValue(p); });
     return out;
   }, [myDeals]);
 
   const visible = useMemo(() => {
-    const base = filter === 'tagged' ? taggedDeals : myDeals.filter(p => (filter === 'open' ? OPEN_STAGES.includes(dealStage(p)) : dealStage(p) === filter));
+    const base = filter === 'tagged' ? taggedDeals : myDeals.filter(p => (filter === 'open' ? OPEN_STAGES.includes(dealStage(p)) : journeyStage(dealStage(p)) === filter));
     const q = search.trim().toLowerCase();
     const list = q ? base.filter(p => `${clientName(p)} ${courseOf(p)}`.toLowerCase().includes(q)) : base;
     return [...list].sort((a, b) => String(b.requestDate || b.id).localeCompare(String(a.requestDate || a.id)));
@@ -171,7 +173,9 @@ export default function DealsBoard({
       const age = p.requestDate ? (Date.now() - new Date(p.requestDate).getTime()) / 86400000 : 0;
       return { text: fu ? `Follow up ${formatDate(fu)}` : 'Book an appointment or send the proposal', urgent: age > 2 && !fu };
     }
-    if (st === 'appointment') return { text: 'Send the proposal', urgent: false };
+    if (st === 'appointment') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Send the proposal', urgent: false };
+    if (st === 'agreed') return { text: 'Client agreed: send the quotation', urgent: false };
+    if (st === 'quoted') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Waiting for the client to sign', urgent: false };
     return { text: fu ? `Follow up ${formatDate(fu)}` : 'Follow up on the proposal', urgent: false };
   };
 
@@ -291,7 +295,15 @@ export default function DealsBoard({
     return writeStage(p, { stage: 'proposal', proposalSentDate: sent }, 'Proposal sent');
   };
 
+  const toAgreed = (p: any) => writeStage(p, { stage: 'agreed', agreedDate: todayIso() }, 'Client agreed to the proposal');
+
+  const toQuoted = (p: any) => {
+    if (!quotes.some(q => q.pipelineId === p.id)) return setStageError('Create the quotation for this deal first.');
+    return writeStage(p, { stage: 'quoted', quotationSentDate: todayIso() }, 'Quotation sent');
+  };
+
   const confirmWon = async (p: any) => {
+    if (dealStage(p) !== 'quoted') return setStageError('A deal is won when the client signs the quotation. Send the quotation first.');
     if (!p.clientId || !clients.some(c => c.id === p.clientId)) return setStageError('Link this deal to a client from the client list first (Edit details).');
     if (dealValue(p) <= 0) return setStageError('Add the deal value first (Edit details).');
     if (!p.fundingType) return setStageError('Choose how this training will be paid for first (Edit details).');
@@ -314,7 +326,8 @@ export default function DealsBoard({
   };
 
   const reopen = (p: any) => {
-    const back: DealStage = /^\d{4}-\d{2}-\d{2}/.test(p.proposalSentDate || '') ? 'proposal' : p.appointmentDate || p.appointmentTicked ? 'appointment' : 'lead';
+    const has = (v: any) => /^\d{4}-\d{2}-\d{2}/.test(v || '');
+    const back: DealStage = has(p.quotationSentDate) ? 'quoted' : has(p.agreedDate) ? 'agreed' : has(p.proposalSentDate) ? 'proposal' : p.appointmentDate || p.appointmentTicked ? 'appointment' : 'lead';
     return writeStage(p, { stage: back, wonDate: '', lostReason: '', lostNote: '' }, dealStage(p) === 'won' ? 'Win undone' : 'Deal reopened');
   };
 
@@ -366,8 +379,8 @@ export default function DealsBoard({
       )}
 
       {/* The journey strip: counts and value per stage, click to filter */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="tablist" aria-label="Filter deals by stage">
-        {(['lead', 'appointment', 'proposal', 'won', 'lost'] as DealStage[]).map((st, i) => {
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6" role="tablist" aria-label="Filter deals by stage">
+        {(['lead', 'proposal', 'agreed', 'quoted', 'won', 'lost'] as DealStage[]).map((st, i) => {
           const active = filter === st;
           return (
             <button
@@ -380,7 +393,7 @@ export default function DealsBoard({
             >
               <span className="flex items-center gap-1 text-sm font-semibold text-ink-soft">
                 {STAGE_LABELS[st]}
-                {i < 2 && <ChevronRight className="hidden h-3.5 w-3.5 sm:inline" aria-hidden />}
+                {i < 4 && <ChevronRight className="hidden h-3.5 w-3.5 lg:inline" aria-hidden />}
               </span>
               <span className="mt-1 block text-2xl font-bold leading-none text-ink">{stageSummary[st].count}</span>
               <span className="mt-1 block text-sm text-ink-soft">{formatRM(stageSummary[st].value)}</span>
@@ -484,6 +497,8 @@ export default function DealsBoard({
               programmes={programmes}
               onApptDone={flash}
               onProposal={() => toProposal(openDeal)}
+              onAgreed={() => toAgreed(openDeal)}
+              onQuoted={() => toQuoted(openDeal)}
               onWon={() => confirmWon(openDeal)}
               onLost={() => confirmLost(openDeal)}
               onReopen={() => reopen(openDeal)}
@@ -634,15 +649,16 @@ function DealPanel(props: {
   stagePanel: null | 'won' | 'lost'; setStagePanel: (v: null | 'won' | 'lost') => void; stageError: string;
   wonDate: string; setWonDate: (v: string) => void; lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
-  onClose: () => void; onEdit: () => void; onProposal: () => void;
+  onClose: () => void; onEdit: () => void; onProposal: () => void; onAgreed: () => void; onQuoted: () => void;
   programmes: Programme[]; onApptDone: (msg: string) => void;
   onWon: () => void; onLost: () => void; onReopen: () => void;
   onCreateQuotation: () => void; onCreateOutline: () => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
 }) {
   const p = props.deal;
   const st = dealStage(p);
-  const journey: DealStage[] = ['lead', 'appointment', 'proposal', 'won'];
-  const reached = st === 'lost' ? -1 : journey.indexOf(st);
+  const journey: DealStage[] = JOURNEY;
+  const reached = st === 'lost' ? -1 : journey.indexOf(journeyStage(st));
+  const hasQuote = props.quotes.length > 0;
   const canUndoWin = props.viewer.role !== 'rep';
   const isHrdcDeal = p.fundingType === 'hrdc' || p.fundingType === 'hrdc_topup';
   const grantBlock = grantBlockReason(p, props.programme);
@@ -677,12 +693,11 @@ function DealPanel(props: {
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
             {(st === 'lead' || st === 'appointment') && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onProposal}>Proposal sent</button>}
-            {OPEN_STAGES.includes(st) && (
-              <>
-                <button type="button" className={st === 'proposal' ? 'inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]' : btnSecondary} onClick={() => props.setStagePanel('won')}><Trophy className="h-4 w-4" /> Mark won</button>
-                <button type="button" className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-4 w-4" /> Mark lost</button>
-              </>
-            )}
+            {st === 'proposal' && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onAgreed}>Client agreed</button>}
+            {st === 'agreed' && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onCreateQuotation}>Create quotation</button>}
+            {st === 'agreed' && hasQuote && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onQuoted}>Quotation sent</button>}
+            {st === 'quoted' && <button type="button" className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={() => props.setStagePanel('won')}><Trophy className="h-4 w-4" /> Mark won (client signed)</button>}
+            {OPEN_STAGES.includes(st) && <button type="button" className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-4 w-4" /> Mark lost</button>}
             {st === 'lost' && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onReopen}><Undo2 className="h-4 w-4" /> Reopen deal</button>}
             {st === 'won' && canUndoWin && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onReopen}><Undo2 className="h-4 w-4" /> Undo win</button>}
             <button type="button" className={btnSecondary} onClick={props.onEdit}>Edit details</button>
@@ -690,7 +705,7 @@ function DealPanel(props: {
 
           {props.stagePanel === 'won' && (
             <div className="rounded-xl border border-accent/30 bg-accent-soft p-4">
-              <label htmlFor="won-date" className="mb-1.5 block text-sm font-semibold text-accent">Date the client confirmed</label>
+              <label htmlFor="won-date" className="mb-1.5 block text-sm font-semibold text-accent">Date the client signed the quotation</label>
               <input id="won-date" type="date" value={props.wonDate} onChange={e => props.setWonDate(e.target.value)} className={input} />
               <p className="mt-2 text-sm text-accent">The sale counts toward KPI in this month.</p>
               <div className="mt-3 flex gap-2">
@@ -763,7 +778,8 @@ function DealPanel(props: {
       <section>
         <h4 className="mb-2 font-bold">Documents</h4>
         <div className="space-y-2">
-          <DocRow icon={<FileText className="h-4 w-4" />} name="Quotations" items={props.quotes.map(q => q.refNumber || q.id)} onOpen={props.onOpenQuotations} onCreate={props.editable ? props.onCreateQuotation : undefined} createLabel="Create quotation" />
+          <DocRow icon={<FileText className="h-4 w-4" />} name="Quotations" items={props.quotes.map(q => q.refNumber || q.id)} onOpen={props.onOpenQuotations} onCreate={props.editable && canQuote(p) ? props.onCreateQuotation : undefined} createLabel="Create quotation" />
+          {!canQuote(p) && st !== 'lost' && <p className="text-sm text-ink-soft">A quotation can be made once the client agrees to the proposal.</p>}
           <DocRow icon={<ClipboardList className="h-4 w-4" />} name="Course outlines" items={props.outlines.map(o => o.refNumber || o.courseTitle || o.id)} onOpen={props.onOpenOutlines} onCreate={props.editable ? props.onCreateOutline : undefined} createLabel="Create outline" />
         </div>
       </section>
