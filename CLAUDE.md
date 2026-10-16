@@ -57,7 +57,7 @@ Every piece of information is typed once, in one home; everything else points to
 
 ## 3. Technical setup
 
-- **Code:** React 19 + Vite + Tailwind v4 front end in `src/`; Express server in `server.ts` with login routes in `serverAuth.tsx` (it should be `.ts`; it works as is, so leave it unless asked).
+- **Code:** React 19 + Vite + Tailwind v4 front end in `src/`; Express server in `server.ts` with login routes in `serverAuth.ts` (renamed from `.tsx` in Phase 2A).
 - **Database:** Firebase Firestore, project `gen-lang-client-0779528352`, default database.
 - **Hosting:** Firebase App Hosting, backend `nextacademy2`. It **builds and deploys automatically from GitHub `main`**. Live site: https://nextacademy2--gen-lang-client-0779528352.asia-southeast1.hosted.app
 - **GitHub is the master copy:** https://github.com/joellzk85/Academy-KPI. Google AI Studio is no longer used and must never be used to edit again (it can't pull, and saving from it would overwrite newer work).
@@ -116,13 +116,23 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 ### Joel's open to-dos (check with him)
 1. Set each person's KPI template and targets in Management → Team.
 2. Link old records in Data tools (ask for a screenshot of the matches before he clicks Link).
-3. Test a deal from new to won and check it shows in that month's KPIs.
+3. ~~Test a deal from new to won and check it shows in that month's KPIs.~~ Done 2026-10-16: works.
 4. Clear old data: only after the open question above is settled.
 5. As a precaution, both Management people change their passwords once, because the database ran on old open rules until Phase 2A's rules were published.
 
 ## 6. Next: Phase 2B, the handover to admin
 
 **Start by asking Joel** to describe, in his own words, the steps his admin goes through from the moment a client confirms to the moment the job is closed. Design 2B around his answer, propose the plan, and wait for his yes before coding.
+
+Joel's answer (2026-10-16), the admin's steps after a client confirms:
+1. Apply grant
+2. Quotation
+3. Follow up attendance list
+4. Check venue + payment
+5. Prepare materials
+6. Confirm trainer
+
+He wants room to **add more tasks later**, so the checklist must be easy to extend (not a fixed set of hardcoded steps).
 
 Planned scope (adjust to his answer):
 - Marking a deal **Won** auto-creates its admin checklist from the deal, with no retyping of client, programme, trainer or dates. Use the existing `admin_records` collection, rebuilt in the new style, or a new structure if cleaner; explain the choice.
