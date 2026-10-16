@@ -269,9 +269,9 @@ interface AdminRecordManagerProps {
 }
 
 export default function AdminRecordManager({ rep, reps, requestManagerPermission }: AdminRecordManagerProps) {
-  // Only Ying and Atiqa are allowed to create, edit, or delete Admin Records.
+  // Admins can create, edit, or delete Admin Records in their workspace.
   // Everyone else can view the checklist (useful for visibility) but cannot change it.
-  const isAdminEditor = rep.id === 'xin-ying' || rep.id === 'atiqa';
+  const isAdminEditor = rep.role === 'admin';
 
   // Read-only live sync of Won pipeline deals and Quotations, used to power
   // "Create from Pipeline" so client/programme/quotation ref carry over automatically.

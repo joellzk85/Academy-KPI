@@ -26,112 +26,8 @@ interface HomeDashboardProps {
   monthKpisSync?: any[];
 }
 
-const getSharedPipelines = (repsList: any[], pipelinesSync?: any[]): any[] => {
-  if (pipelinesSync && pipelinesSync.length > 0) {
-    return pipelinesSync;
-  }
-  const saved = localStorage.getItem('next_pipelines_shared');
-  if (saved) {
-    try {
-      return JSON.parse(saved);
-    } catch {
-      return [];
-    }
-  }
-
-  const combined: any[] = [];
-  const repIds = ['xin-ying', 'chee-cai', 'alif', 'atiqa', 'new-guy'];
-  if (repsList && repsList.length > 0) {
-    repsList.forEach(r => {
-      if (!repIds.includes(r.id)) {
-        repIds.push(r.id);
-      }
-    });
-  }
-
-  repIds.forEach(repId => {
-    let repPipes: any[] = [];
-    const localSaved = localStorage.getItem(`next_pipelines_${repId}`);
-    if (localSaved) {
-      try {
-        repPipes = JSON.parse(localSaved);
-      } catch {
-        repPipes = [];
-      }
-    } else {
-      if (repId === 'chee-cai') {
-        repPipes = [
-          {
-            id: 'pipe_1',
-            requestDate: '2026-07-01',
-            type: 'Training',
-            proposalSentDate: '2026-07-03',
-            proposalValue: 45000,
-            followUpDate: '2026-07-10',
-            status: 'Won',
-            client: 'Petronas Digital',
-            courseName: 'React & TypeScript Enterprise Workshop'
-          },
-          {
-            id: 'pipe_2',
-            requestDate: '2026-07-05',
-            type: 'Teambuilding',
-            proposalSentDate: '2026-07-07',
-            proposalValue: 18500,
-            followUpDate: '2026-07-12',
-            status: 'Pending',
-            client: 'CIMB Bank',
-            courseName: 'Strategic Leadership Offsite'
-          }
-        ];
-      } else if (repId === 'alif') {
-        repPipes = [
-          {
-            id: 'pipe_3',
-            requestDate: '2026-07-02',
-            type: 'Training',
-            proposalSentDate: '2026-07-04',
-            proposalValue: 22000,
-            followUpDate: '2026-07-09',
-            status: 'Pending',
-            client: 'Grab Malaysia',
-            courseName: 'Modern Frontend Scaling'
-          }
-        ];
-      } else if (repId === 'xin-ying') {
-        repPipes = [
-          {
-            id: 'pipe_4',
-            requestDate: '2026-06-28',
-            type: 'Training',
-            proposalSentDate: '2026-06-30',
-            proposalValue: 65000,
-            followUpDate: '2026-07-08',
-            status: 'Won',
-            client: 'Maybank HQ',
-            courseName: 'Full-Stack Engineering Boot Camp'
-          }
-        ];
-      }
-    }
-
-    const repObj = repsList.find(r => r.id === repId);
-    const repName = repObj ? repObj.name : (repId.charAt(0).toUpperCase() + repId.slice(1).replace('-', ' '));
-
-    repPipes.forEach(p => {
-      combined.push({
-        ...p,
-        creatorId: p.creatorId || repId,
-        creatorName: p.creatorName || repName,
-        ownerId: p.ownerId || repId,
-        ownerName: p.ownerName || repName,
-      });
-    });
-  });
-
-  localStorage.setItem('next_pipelines_shared', JSON.stringify(combined));
-  return combined;
-};
+// Deals come only from the live database (no sample data).
+const getSharedPipelines = (_repsList: any[], pipelinesSync?: any[]): any[] => pipelinesSync || [];
 
 const getRepAlertStatus = (
   repId: string,
@@ -590,8 +486,7 @@ export default function HomeDashboard({
   };
 
   const allDeals: any[] = (() => {
-    if (pipelinesSync && pipelinesSync.length > 0) return pipelinesSync;
-    try { return JSON.parse(localStorage.getItem('next_pipelines_shared') || '[]'); } catch { return []; }
+    return pipelinesSync || [];
   })();
 
   // Sales count in the month a deal was WON, for the deal's owner only.

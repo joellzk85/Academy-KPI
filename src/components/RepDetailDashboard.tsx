@@ -10,7 +10,6 @@ import ClientManager from './ClientManager';
 import TrainerManager from './TrainerManager';
 import VenueManager from './VenueManager';
 import AppointmentManager from './AppointmentManager';
-import ClientPaymentManager from './ClientPaymentManager';
 import DealsBoard from './DealsBoard';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -29,64 +28,6 @@ interface RepDetailDashboardProps {
 
 type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments' | 'client_payments';
 
-
-export function getInitialPipelinesForRep(repId: string) {
-  if (repId === 'chee-cai') {
-    return [
-      {
-        id: 'pipe_1',
-        requestDate: '2026-07-01',
-        type: 'Training',
-        proposalSentDate: '2026-07-03',
-        proposalValue: 45000,
-        followUpDate: '2026-07-10',
-        status: 'Won',
-        client: 'Petronas Digital',
-        courseName: 'React & TypeScript Enterprise Workshop'
-      },
-      {
-        id: 'pipe_2',
-        requestDate: '2026-07-05',
-        type: 'Teambuilding',
-        proposalSentDate: '2026-07-07',
-        proposalValue: 18500,
-        followUpDate: '2026-07-12',
-        status: 'Pending',
-        client: 'CIMB Bank',
-        courseName: 'Strategic Leadership Offsite'
-      }
-    ];
-  } else if (repId === 'alif') {
-    return [
-      {
-        id: 'pipe_3',
-        requestDate: '2026-07-02',
-        type: 'Training',
-        proposalSentDate: '2026-07-04',
-        proposalValue: 22000,
-        followUpDate: '2026-07-09',
-        status: 'Pending',
-        client: 'Grab Malaysia',
-        courseName: 'Modern Frontend Scaling'
-      }
-    ];
-  } else if (repId === 'xin-ying') {
-    return [
-      {
-        id: 'pipe_4',
-        requestDate: '2026-06-28',
-        type: 'Training',
-        proposalSentDate: '2026-06-30',
-        proposalValue: 65000,
-        followUpDate: '2026-07-08',
-        status: 'Won',
-        client: 'Maybank HQ',
-        courseName: 'Full-Stack Engineering Boot Camp'
-      }
-    ];
-  }
-  return [];
-}
 
 // Tombstone list of pipeline IDs the user has deleted, so other views
 // (e.g. HomeDashboard's own shared-pipeline loader) can filter them out
@@ -514,105 +455,6 @@ export default function RepDetailDashboard({
     setEditKpi(updatedKpi);
     setShowCommissionModal(false);
     setCommissionValues({});
-  };
-
-  // Payment states for Raise Payment Form (Ying) with backwards compatibility and unified shared key
-  const [payments, setPayments] = useState<any[]>(() => {
-    const sharedSaved = localStorage.getItem('next_payments_shared');
-    if (sharedSaved) {
-      try {
-        return JSON.parse(sharedSaved);
-      } catch {
-        return [];
-      }
-    }
-    // Backward compatibility: try to load from individual reps and merge
-    const repsList = reps.map(r => r.id);
-    let merged: any[] = [];
-    repsList.forEach(id => {
-      const saved = localStorage.getItem(`next_payments_${id}`);
-      if (saved) {
-        try {
-          const itemsList = JSON.parse(saved);
-          const mapped = itemsList.map((p: any) => ({
-            ...p,
-            repId: p.repId || id,
-            repName: p.repName || reps.find(r => r.id === id)?.name || id,
-            status: p.status || 'Approved'
-          }));
-          merged = [...merged, ...mapped];
-        } catch (e) {
-          // ignore
-        }
-      }
-    });
-    localStorage.setItem('next_payments_shared', JSON.stringify(merged));
-    return merged;
-  });
-
-  const [payDateRequest, setPayDateRequest] = useState(new Date().toISOString().substring(0, 10));
-  const [payTrainingDate, setPayTrainingDate] = useState('');
-  const [payTrainingClient, setPayTrainingClient] = useState('');
-  const [payVenue, setPayVenue] = useState('');
-  const [payItems, setPayItems] = useState<{ id: string; itemQty: string; amount: string }[]>([
-    { id: '1', itemQty: '', amount: '' }
-  ]);
-
-  // Sync payments list when rep changes
-  useEffect(() => {
-    const sharedSaved = localStorage.getItem('next_payments_shared');
-    if (sharedSaved) {
-      try {
-        setPayments(JSON.parse(sharedSaved));
-      } catch {
-        // ignore
-      }
-    }
-  }, [rep]);
-
-  const handleRaisePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const parsedItems = payItems.map(item => ({
-      id: item.id || `item_${Date.now()}_${Math.random()}`,
-      itemQty: item.itemQty.trim(),
-      amount: parseFloat(item.amount) || 0
-    })).filter(item => item.itemQty !== '');
-
-    if (parsedItems.length === 0) {
-      alert("Please add at least one item to the payment voucher.");
-      return;
-    }
-
-    const totalAmount = parsedItems.reduce((sum, item) => sum + item.amount, 0);
-
-    const newPayment = {
-      id: `pay_${Date.now()}`,
-      dateRequest: payDateRequest,
-      trainingDate: payTrainingDate,
-      trainingClient: payTrainingClient,
-      venue: payVenue,
-      itemQty: parsedItems.map(item => item.itemQty).join(', '),
-      amount: totalAmount,
-      items: parsedItems,
-      repId: rep.id,
-      repName: rep.name,
-      status: rep.id === 'xin-ying' ? 'Approved' : 'Pending Approval'
-    };
-    const updated = [newPayment, ...payments];
-    setPayments(updated);
-    localStorage.setItem('next_payments_shared', JSON.stringify(updated));
-    try {
-      if (db) {
-        await setDoc(doc(db, 'payments', newPayment.id), newPayment);
-      }
-    } catch (err) {
-      console.error("Firestore save payment failed:", err);
-    }
-    
-    setPayTrainingDate('');
-    setPayTrainingClient('');
-    setPayVenue('');
-    setPayItems([{ id: '1', itemQty: '', amount: '' }]);
   };
 
   // Manager Permission Authorization Modal States
@@ -1273,7 +1115,7 @@ export default function RepDetailDashboard({
       if (localSaved) {
         try { repPipes = JSON.parse(localSaved); } catch { repPipes = []; }
       } else {
-        repPipes = getInitialPipelinesForRep(id);
+        repPipes = []; // no sample data: only real deals from the database
       }
       
       const repObj = reps?.find(r => r.id === id);
@@ -1467,35 +1309,6 @@ export default function RepDetailDashboard({
 
     return () => unsubscribe();
   }, [rep.id]);
-
-  // Real-time Firestore sync for Payments
-  useEffect(() => {
-    if (!db) return;
-
-    const q = query(collection(db, 'payments'));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const firestorePayments: any[] = [];
-      snapshot.forEach((docSnap) => {
-        firestorePayments.push({ ...docSnap.data(), id: docSnap.id });
-      });
-
-      if (firestorePayments.length > 0) {
-        firestorePayments.sort((a, b) => b.id.localeCompare(a.id));
-        setPayments(firestorePayments);
-        localStorage.setItem('next_payments_shared', JSON.stringify(firestorePayments));
-      } else {
-        // Firestore genuinely has no payments (either none created yet, or all deleted).
-        // Reflect that truthfully instead of re-uploading stale localStorage data,
-        // which would silently resurrect deleted payment vouchers.
-        setPayments([]);
-        localStorage.setItem('next_payments_shared', JSON.stringify([]));
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-
 
   // Sync pipelines and reset pipeline forms when representative changes
   useEffect(() => {
@@ -2203,7 +2016,6 @@ export default function RepDetailDashboard({
     if (activeSubTab === 'venue') return 'VENUE';
     if (activeSubTab === 'tasks') return 'PENDING TASKS';
     if (activeSubTab === 'pl') return 'P&L';
-    if (activeSubTab === 'payment') return 'RAISE PAYMENT';
     if (activeSubTab === 'pipeline') return 'PIPELINE';
     if (activeSubTab === 'course_outline') return 'COURSE OUTLINE';
     if (activeSubTab === 'admin_record') return 'ADMINISTRATIVE RECORDS';
@@ -2649,8 +2461,6 @@ export default function RepDetailDashboard({
             <VenueManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'appointments' ? (
             <AppointmentManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
-          ) : activeSubTab === 'client_payments' ? (
-            <ClientPaymentManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'kpi' ? (
             /* KPI SCREEN (WEEKLY BREAKDOWN TABLE) */
             <div className="space-y-6">
@@ -3407,325 +3217,6 @@ export default function RepDetailDashboard({
                     </div>
                   );
                 })}
-              </div>
-
-            </div>
-          ) : activeSubTab === 'payment' ? (
-            /* RAISE PAYMENT SCREEN */
-            <div className="space-y-6">
-              
-              {/* Main card wrapper */}
-              <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                
-                {/* Table Header Section */}
-                <div className="p-4 bg-[#EA580C] text-white flex items-center justify-between">
-                  <h4 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
-                    <DollarSign className="w-4 h-4 text-white" />
-                    RAISE PAYMENT VOUCHER - {rep.name.toUpperCase()}
-                  </h4>
-                  
-                  <span className="text-[10px] bg-[#C2410C] font-bold px-3 py-1.5 rounded border border-[#9A3412] flex items-center gap-1 font-mono">
-                    <Clock className="w-3.5 h-3.5" />
-                    STATUS: ACTIVE ENGINE
-                  </span>
-                </div>
-
-                <div className="p-6">
-                  <form onSubmit={handleRaisePaymentSubmit} className="space-y-6">
-                    
-                    {/* Section 1: Info */}
-                    <div>
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 pb-1 border-b border-slate-100">
-                        Section 1: Assignment Info
-                      </h5>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                            Date Request
-                          </label>
-                          <input
-                            type="date"
-                            required
-                            value={payDateRequest}
-                            onChange={(e) => setPayDateRequest(e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-[#EA580C] bg-white font-mono"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                            Training Date
-                          </label>
-                          <input
-                            type="date"
-                            required
-                            value={payTrainingDate}
-                            onChange={(e) => setPayTrainingDate(e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-[#EA580C] bg-white font-mono"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                            Training Client
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            placeholder="e.g. Shopee Malaysia"
-                            value={payTrainingClient}
-                            onChange={(e) => setPayTrainingClient(e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-[#EA580C] bg-white"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                            Venue
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            placeholder="e.g. Kuala Lumpur Headquarters"
-                            value={payVenue}
-                            onChange={(e) => setPayVenue(e.target.value)}
-                            className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-[#EA580C] bg-white"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Section 2: Multiple Items & Financial Details */}
-                    <div>
-                      <div className="flex items-center justify-between mb-3 pb-1 border-b border-slate-100">
-                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                          Section 2: Items & Financial Details
-                        </h5>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPayItems([
-                              ...payItems,
-                              { id: `item_${Date.now()}_${Math.random()}`, itemQty: '', amount: '' }
-                            ]);
-                          }}
-                          className="text-[10px] bg-orange-50 hover:bg-orange-100 text-[#EA580C] font-black px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer border border-orange-200"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          Add Item Row
-                        </button>
-                      </div>
-
-                      <div className="space-y-3">
-                        {payItems.map((item, index) => (
-                          <div key={item.id} className="flex flex-col md:flex-row gap-4 items-end bg-slate-50 p-3.5 rounded-lg border border-slate-100 relative group">
-                            <div className="flex-1 min-w-0 w-full">
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Item Name & Qty (Item #{index + 1})
-                              </label>
-                              <input
-                                type="text"
-                                required
-                                placeholder="e.g. Lead Trainer Allowance x 2 Days"
-                                value={item.itemQty}
-                                onChange={(e) => {
-                                  const updated = [...payItems];
-                                  updated[index].itemQty = e.target.value;
-                                  setPayItems(updated);
-                                }}
-                                className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-[#EA580C] bg-white"
-                              />
-                            </div>
-
-                            <div className="w-full md:w-48">
-                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
-                                Amount (RM)
-                              </label>
-                              <div className="relative">
-                                <span className="absolute left-3 top-2.5 text-slate-400 text-xs font-black font-mono">RM</span>
-                                <input
-                                  type="number"
-                                  required
-                                  placeholder="e.g. 1500"
-                                  value={item.amount}
-                                  onChange={(e) => {
-                                    const updated = [...payItems];
-                                    updated[index].amount = e.target.value;
-                                    setPayItems(updated);
-                                  }}
-                                  className="w-full text-xs border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-slate-800 focus:outline-none focus:border-[#EA580C] bg-white font-mono"
-                                />
-                              </div>
-                            </div>
-
-                            {payItems.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPayItems(payItems.filter(p => p.id !== item.id));
-                                }}
-                                className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-2 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-rose-200 mb-0.5"
-                                title="Remove item"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Display Total Summary inside section */}
-                      <div className="mt-3 flex justify-end text-xs font-black text-slate-700 uppercase tracking-wide px-1.5">
-                        <span>Total Voucher Amount: <span className="text-sm text-slate-900 font-mono font-black ml-1">RM {payItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></span>
-                      </div>
-                    </div>
-
-                    {/* Submission Action Button */}
-                    <div className="pt-3 border-t border-slate-100 flex justify-end">
-                      <button
-                        type="submit"
-                        className="bg-[#EA580C] hover:bg-[#C2410C] text-white font-black text-xs uppercase tracking-wider px-6 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Raise Payment Voucher
-                      </button>
-                    </div>
-
-                  </form>
-                </div>
-
-              </div>
-
-              {/* Raised Payment Logs History Panel */}
-              <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                <div className="p-4 bg-slate-800 text-white flex items-center justify-between">
-                  <h4 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
-                    <FileText className="w-4 h-4 text-slate-300" />
-                    PAST RAISED PAYMENT VOUCHERS ({payments.filter(p => rep.id === 'xin-ying' ? true : p.repId === rep.id).length})
-                  </h4>
-                  <span className="text-[10px] bg-slate-700 text-slate-300 font-bold px-2.5 py-1 rounded font-mono">
-                    Realtime Log
-                  </span>
-                </div>
-
-                {payments.filter(p => rep.id === 'xin-ying' ? true : p.repId === rep.id).length === 0 ? (
-                  <div className="p-8 text-center text-slate-400 text-xs italic bg-slate-50/50">
-                    No payment vouchers raised yet for {rep.name}. Fill in the form above to log assignments.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                          <th className="p-4">Date Request</th>
-                          <th className="p-4">Training Details</th>
-                          <th className="p-4">Client & Venue</th>
-                          <th className="p-4">Items Breakdown</th>
-                          <th className="p-4 text-right">Total Amount</th>
-                          <th className="p-4 text-center">Status</th>
-                          <th className="p-4 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700 font-sans text-xs">
-                        {payments.filter(p => rep.id === 'xin-ying' ? true : p.repId === rep.id).map((p) => (
-                          <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="p-4 font-mono font-bold text-slate-500">{p.dateRequest}</td>
-                            <td className="p-4">
-                              <span className="font-extrabold text-slate-800 block">Training Course</span>
-                              <span className="text-[10px] text-slate-400 block font-mono">Date: {p.trainingDate}</span>
-                            </td>
-                            <td className="p-4">
-                              <span className="font-bold text-slate-700 block">{p.trainingClient}</span>
-                              <span className="text-[10px] text-slate-400 block">{p.venue}</span>
-                            </td>
-                            <td className="p-4">
-                              {p.items && p.items.length > 0 ? (
-                                <div className="space-y-1">
-                                  {p.items.map((item: any, idx: number) => (
-                                    <div key={item.id || idx} className="text-slate-600 font-semibold flex flex-col xl:flex-row xl:items-center xl:gap-2">
-                                      <span>• {item.itemQty}</span>
-                                      <span className="text-[10px] text-slate-400 font-mono font-medium">(RM {(parseFloat(item.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })})</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="font-semibold text-slate-600">{p.itemQty}</span>
-                              )}
-                            </td>
-                            <td className="p-4 text-right font-mono font-black text-slate-800">
-                              RM {parseFloat(p.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-4 text-center">
-                              <div className="flex flex-col items-center gap-1">
-                                {p.status === 'Pending Approval' ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700">
-                                    Pending Approval
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-700">
-                                    Approved
-                                  </span>
-                                )}
-                                
-                                <span className="text-[9px] text-slate-400 font-medium">
-                                  by: {p.repName || p.repId || 'Unknown'}
-                                </span>
-
-                                {rep.id === 'xin-ying' && p.status === 'Pending Approval' && (
-                                  <button
-                                    onClick={async () => {
-                                      const updated = payments.map(item => {
-                                        if (item.id === p.id) {
-                                          return { ...item, status: 'Approved' };
-                                        }
-                                        return item;
-                                      });
-                                      setPayments(updated);
-                                      localStorage.setItem('next_payments_shared', JSON.stringify(updated));
-                                      try {
-                                        if (db) {
-                                          await setDoc(doc(db, 'payments', p.id), { ...p, status: 'Approved' });
-                                        }
-                                      } catch (err) {
-                                        console.error("Firestore approve payment failed:", err);
-                                      }
-                                    }}
-                                    className="mt-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded transition-all cursor-pointer flex items-center gap-0.5"
-                                  >
-                                    <Check className="w-3 h-3" /> Approve
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                            <td className="p-4 text-right">
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (window.confirm("Are you sure you want to delete this payment voucher?")) {
-                                    const updated = payments.filter(item => item.id !== p.id);
-                                    setPayments(updated);
-                                    localStorage.setItem('next_payments_shared', JSON.stringify(updated));
-                                    try {
-                                      if (db) {
-                                        await deleteDoc(doc(db, 'payments', p.id));
-                                      }
-                                    } catch (err) {
-                                      console.error("Firestore delete payment failed:", err);
-                                    }
-                                  }
-                                }}
-                                className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-                                title="Delete Voucher Log"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
               </div>
 
             </div>

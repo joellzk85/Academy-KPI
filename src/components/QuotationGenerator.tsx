@@ -1319,12 +1319,7 @@ export default function QuotationGenerator({ rep, reps, requestManagerPermission
                                   Select Team Members (Select Multiple):
                                 </label>
                                 <div className="grid grid-cols-2 gap-2">
-                                  {(reps || [
-                                    { id: 'xin-ying', name: 'Ng Xin Ying' },
-                                    { id: 'chee-cai', name: 'Chee Cai' },
-                                    { id: 'alif', name: 'Alif' },
-                                    { id: 'atiqa', name: 'Atiqa' }
-                                  ]).filter(m => m.id !== rep.id).map(m => {
+                                  {(reps || []).filter(m => m.id !== rep.id).map(m => {
                                     const isChecked = tagTargetRepIds.includes(m.id);
                                     return (
                                       <label key={m.id} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer hover:text-blue-600 transition-colors">

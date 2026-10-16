@@ -31,7 +31,7 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 // Core components & initial datasets
 import Logo from './components/Logo';
 import HomeDashboard from './components/HomeDashboard';
-import RepDetailDashboard, { getInitialPipelinesForRep } from './components/RepDetailDashboard';
+import RepDetailDashboard from './components/RepDetailDashboard';
 import ManagementDashboard from './components/ManagementDashboard';
 import TeamManager from './components/TeamManager';
 import DataTools from './components/DataTools';
@@ -583,22 +583,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const getOverduePipelineNotices = (): string[] => {
     const alerts: string[] = [];
     representatives.forEach(rep => {
-
-      const saved = localStorage.getItem(`next_pipelines_${rep.id}`);
-      let pipes: any[] = [];
-      if (saved) {
-        try {
-          pipes = JSON.parse(saved);
-        } catch {
-          // ignore
-        }
-      } else {
-        try {
-          pipes = getInitialPipelinesForRep(rep.id);
-        } catch {
-          // ignore
-        }
-      }
+      // Real deals only, owned by this person (never sample data).
+      const pipes = pipelinesSync.filter(p => (p.ownerId || p.creatorId) === rep.id);
 
       pipes.forEach(p => {
         if (p.status === 'Pending') {
