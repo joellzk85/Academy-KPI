@@ -166,6 +166,7 @@ export interface Quotation {
   clientId?: string;
   venueId?: string;
   pipelineId?: string;
+  sharedWithIds?: string[];   // teammates who can open and edit this same quotation
 }
 
 export interface CourseOutlineItem {

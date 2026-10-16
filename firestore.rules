@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 3 + My home)
+// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -129,7 +129,7 @@ service cloud.firestore {
         && (resource.data.requestedById == request.auth.uid || isManagement());
     }
 
-    // Quotations: reps change their own (or ones they're asked to help on);
+    // Quotations: reps change their own, ones shared with them, or ones they're asked to help on;
     // Admin and Management can change any. Old shared templates with no owner stay open.
     match /quotations/{quoteId} {
       function quotePeople(d) {
@@ -141,6 +141,7 @@ service cloud.firestore {
       allow update: if isStaff()
         || (isMember() && (request.auth.uid in quotePeople(resource.data)
                            || resource.data.get('taggedRepId', '') == request.auth.uid
+                           || request.auth.uid in resource.data.get('sharedWithIds', [])
                            || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == '')));
       allow delete: if isStaff()
         || (isMember() && request.auth.uid in quotePeople(resource.data));

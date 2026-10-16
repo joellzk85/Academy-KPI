@@ -3,7 +3,7 @@ import { Representative, GoogleLinks, Client } from '../types';
 import { getRepMetrics } from '../initialData';
 import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
 import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3, CheckSquare, Square, FolderCheck, Search, Layers, CheckCheck } from 'lucide-react';
-import QuotationGenerator from './QuotationGenerator';
+import QuotationsPage from './QuotationsPage';
 import CourseOutlineGenerator from './CourseOutlineGenerator';
 import AdminRecordManager from './AdminRecordManager';
 import ClientManager from './ClientManager';
@@ -2262,7 +2262,7 @@ export default function RepDetailDashboard({
           )}
 
           {activeSubTab === 'quotation' ? (
-            <QuotationGenerator key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} viewer={viewer} />
+            <QuotationsPage key={rep.id} rep={rep} reps={reps} viewer={viewer} />
           ) : activeSubTab === 'course_outline' ? (
             <CourseOutlineGenerator key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'admin_record' ? (
