@@ -3,7 +3,7 @@ import { collection, onSnapshot, query } from 'firebase/firestore';
 import { Check, HandHelping, Loader2, Pencil, UserCheck } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { Representative } from '../types';
-import { countAuto, metricsFor, monthPrefix, weekIndexOf } from '../lib/kpi';
+import { metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, weekIndexOf } from '../lib/kpi';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 
 // The KPI page (redesigned 2026-10-16).
@@ -16,7 +16,6 @@ import { formatDate, formatRM, todayIso } from '../lib/deals';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 const WEEKS = [0, 1, 2, 3, 4];
-const MONTHS = ['JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26', 'JUL-26', 'AUG-26', 'SEP-26', 'OCT-26', 'NOV-26', 'DEC-26', 'JAN-27', 'FEB-27', 'MAR-27', 'APR-27', 'MAY-27', 'JUN-27'];
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -65,14 +64,8 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
   const kpi: any = rep.kpi || {};
   const thisMonth = monthPrefix(selectedMonth) === todayIso().slice(0, 7);
 
-  const weekValue = (m: typeof metrics[number], w: number) => (m.auto ? countAuto(m.auto, deals, rep.id, selectedMonth, w) : Number(kpi[m.key]?.[w]) || 0);
-  const rows = metrics.map(m => {
-    const weeks = WEEKS.map(w => weekValue(m, w));
-    const total = weeks.reduce((a, b) => a + b, 0);
-    const pct = m.targetVal > 0 ? Math.min(100, Math.round((total / m.targetVal) * 100)) : 0;
-    return { m, weeks, total, pct };
-  });
-  const score = Math.round(rows.reduce((t, r) => t + r.pct * r.m.weight, 0));
+  // Shared with Management's Team performance (lib/kpi.ts), so both show the same numbers.
+  const { rows, score } = monthKpi(rep, deals, selectedMonth);
   const typed = metrics.filter(m => !m.auto);
 
   const save = (changes: Record<string, any>) => onUpdateRepKpi(rep.id, { ...JSON.parse(JSON.stringify(rep.kpi || {})), ...changes });
@@ -88,7 +81,7 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
         <label className="flex items-center gap-2 text-sm font-semibold text-ink-soft">
           Month
           <select value={selectedMonth} onChange={e => onMonthChange(e.target.value)} className={`${input} w-auto`}>
-            {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+            {monthChoices(todayIso(), selectedMonth).map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
           </select>
         </label>
       </div>

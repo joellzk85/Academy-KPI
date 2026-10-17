@@ -1,1382 +1,216 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { collection, onSnapshot, query } from 'firebase/firestore';
+import { ChevronRight, Trophy, Users, XCircle } from 'lucide-react';
+import { db } from '../lib/firebase';
 import { Representative } from '../types';
-import { getRepMetrics } from '../initialData';
-import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
-import { getDeletedPipelineIds } from './RepDetailDashboard';
-import { 
-  TrendingUp, 
-  Users, 
-  Target, 
-  Sparkles, 
-  DollarSign, 
-  CheckCircle, 
-  BarChart3, 
-  Settings, 
-  Plus, 
-  Trophy, 
-  ArrowUpRight, 
-  ArrowRight,
-  Sliders,
-  Calendar,
-  Lock,
-  RefreshCw,
-  Edit2,
-  Database,
-  FileSpreadsheet,
-  Link,
-  XCircle,
-  AlertCircle,
-  Briefcase,
-  Eye,
-  EyeOff,
-  UserPlus,
-  UserMinus,
-  Trash2,
-  Shield,
-  Key
-} from 'lucide-react';
+import {
+  DealStage, STAGE_LABELS, dealAppointmentDate, dealNeedsAttention, dealOwnerId, dealProposalDate, dealStage, dealValue,
+  dealWonDate, formatDate, formatRM, journeyStage, todayIso,
+} from '../lib/deals';
+import { metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
 
-interface ManagementDashboardProps {
-  reps: Representative[];
+// Management → Dashboard: Team performance (rebuilt 2026-10-17).
+// Everything is counted from deals by the same rules as the KPI page and My home rings
+// (lib/kpi.ts monthKpi), so the numbers always agree. Typed KPIs show as each person keyed them in.
+// KPI sets and targets are set in Management → Team.
+
+interface Props {
+  reps: Representative[];               // people with a workspace, with this month's typed KPIs
+  pipelinesSync?: any[];                // all deals
+  selectedMonth: string;                // 'OCT-26'
+  onMonthChange: (m: string) => void;
   onSelectRep: (rep: Representative) => void;
-  onUpdateRepKpi: (repId: string, updatedKpi: Representative['kpi']) => void;
-  onUpdateRepTargets: (repId: string, updatedTargets: Representative['targets']) => void;
-  onAskCopilot: (prompt: string) => void;
-  selectedMonth: string;
-  onMonthChange: (month: string) => void;
   onOpenTeam?: () => void;
-  pipelinesSync?: any[];
 }
 
-export default function ManagementDashboard({
-  reps,
-  onSelectRep,
-  onUpdateRepKpi,
-  onUpdateRepTargets,
-  onAskCopilot,
-  selectedMonth,
-  onMonthChange,
-  onOpenTeam = () => {},
-  pipelinesSync
-}: ManagementDashboardProps) {
-  // Navigation Tabs for Management Console
-  const [activeTab, setActiveTab] = useState<'overview' | 'targets' | 'quick-log' | 'pipelines'>('overview');
+const card = 'rounded-2xl border border-line bg-white p-5';
+const OPEN_JOURNEY: DealStage[] = ['lead', 'proposal', 'agreed', 'quoted'];
 
-  // Loaded pipelines across all representatives for managerial overview
-  const [allPipelines, setAllPipelines] = useState<any[]>([]);
+export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam }: Props) {
+  const deals = pipelinesSync || [];
+  const [clients, setClients] = useState<any[]>([]);
+  useEffect(() => onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))), []);
 
-  useEffect(() => {
-    const deleted = getDeletedPipelineIds();
-    if (pipelinesSync) {
-      setAllPipelines(pipelinesSync.filter((p: any) => !deleted.includes(p.id)));
-      return;
-    }
-    // Deals come only from the live database (no sample data).
-    setAllPipelines([]);
-  }, [reps, activeTab, pipelinesSync]);
+  const today = todayIso();
+  const prefix = monthPrefix(selectedMonth) || today.slice(0, 7);
+  const year = prefix.slice(0, 4);
+  const monthsSoFar = Number(prefix.slice(5, 7));
+  const inMonth = (d: string) => !!d && d.startsWith(prefix);
+  const inYearToMonth = (d: string) => !!d && d.slice(0, 4) === year && d.slice(0, 7) <= prefix;
+  const clientName = (p: any) => clients.find(c => c.id === p.clientId)?.companyName || p.client || 'No client';
+  const personName = (id: string) => reps.find(r => r.id === id)?.name || 'Former team member';
 
-  // Selected rep for targets edit
-  const [editingTargetsId, setEditingTargetsId] = useState<string | null>(null);
-  const [targetSales, setTargetSales] = useState('30000');
-  const [targetProposals, setTargetProposals] = useState('2');
-  const [targetPreview, setTargetPreview] = useState('1');
-
-  // Quick Log Form state
-  const [selectedRepId, setSelectedRepId] = useState(reps[0]?.id || '');
-  const [selectedWeek, setSelectedWeek] = useState(0); // 0 to 4 (Week 1 to 5)
-  const [logSales, setLogSales] = useState('');
-  const [logProposals, setLogProposals] = useState('');
-  const [logPreviews, setLogPreviews] = useState('');
-
-  // Team-wide bulk target setup
-  const [bulkSales, setBulkSales] = useState('30000');
-  const [bulkProposals, setBulkProposals] = useState('2');
-  const [bulkPreviews, setBulkPreviews] = useState('1');
-  const [showBulkModal, setShowBulkModal] = useState(false);
-
-  // Representative Management States
-
-  // Date Range and Google Sheets Backup states
-  const [startMonth, setStartMonth] = useState('JUN-26');
-  const [endMonth, setEndMonth] = useState('DEC-26');
-  const [lastBackupRun, setLastBackupRun] = useState(() => {
-    return localStorage.getItem('next_last_backup') || 'Never';
-  });
-  const [isBackingUp, setIsBackingUp] = useState(false);
-  const [backupError, setBackupError] = useState<string | null>(null);
-
-  const BACKUP_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwBGK-BzpvWvZ0pWmuXMi_lmZiJ01vOuJFsdJQ9q6zaQ-RAKx6877h91TbuS8OK3wZT/exec';
-  const BACKUP_SHEET_URL = 'https://docs.google.com/spreadsheets/d/185A2We-gBfPM-YBLiO9V3hOUTTOsPPeXALG04cY6Zq4/edit';
-
-  const ALL_AVAILABLE_MONTHS = [
-    'JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26',
-    'JUL-26', 'AUG-26', 'SEP-26', 'OCT-26', 'NOV-26', 'DEC-26',
-    'JAN-27', 'FEB-27', 'MAR-27', 'APR-27', 'MAY-27', 'JUN-27'
-  ];
-
-  const getResultingMonthList = () => {
-    const startIdx = ALL_AVAILABLE_MONTHS.indexOf(startMonth);
-    const endIdx = ALL_AVAILABLE_MONTHS.indexOf(endMonth);
-    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
-      return [startMonth];
-    }
-    return ALL_AVAILABLE_MONTHS.slice(startIdx, endIdx + 1);
-  };
-
-  const handleRunBackupNow = () => {
-    setIsBackingUp(true);
-    setBackupError(null);
-    fetch(BACKUP_WEBAPP_URL)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.status === 'ok') {
-          const nowStr = new Date().toLocaleString('en-US', {
-            weekday: 'short',
-            month: 'short',
-            day: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true
-          });
-          setLastBackupRun(nowStr);
-          localStorage.setItem('next_last_backup', nowStr);
-          alert(`🎉 Backup Completed Successfully!\nAll data has been exported to your Google Sheet.`);
-        } else {
-          throw new Error(data.message || 'Unknown error from backup script');
-        }
-      })
-      .catch((err) => {
-        console.error('Backup failed:', err);
-        setBackupError(err.message || String(err));
-        alert(`❌ Backup failed: ${err.message || err}`);
-      })
-      .finally(() => {
-        setIsBackingUp(false);
-      });
-  };
-
-  // Helpers for chronological YTD and pipeline sales calculations
-  const getYTDMonths = (selMonth: string): string[] => {
-    const allMonths = [
-      'JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26',
-      'JUL-26', 'AUG-26', 'SEP-26', 'OCT-26', 'NOV-26', 'DEC-26',
-      'JAN-27', 'FEB-27', 'MAR-27', 'APR-27', 'MAY-27', 'JUN-27'
-    ];
-    const selIndex = allMonths.indexOf(selMonth);
-    if (selIndex === -1) return [selMonth];
-    const parts = selMonth.split('-');
-    const yearSuffix = parts[1]; // e.g. '26'
-    return allMonths.slice(0, selIndex + 1).filter(m => m.endsWith(`-${yearSuffix}`));
-  };
-
-  const allDeals: any[] = pipelinesSync && pipelinesSync.length > 0 ? pipelinesSync : allPipelines;
-
-  // Labels and targets for one KPI slot, taken from the person's KPI template.
-  const metricOf = (rep: Representative, key: string) => getRepMetrics(rep).find(m => m.key === key);
-  const metricValueText = (rep: Representative, key: string, value: number) => {
-    const m = metricOf(rep, key);
-    if (!m) return '—';
-    return m.isRM ? `RM ${Math.round(value).toLocaleString()}` : `${value} ${m.label}`;
-  };
-  const metricTargetText = (rep: Representative, key: string) => {
-    const m = metricOf(rep, key);
-    if (!m) return '';
-    return `Target: ${m.isRM ? 'RM ' + m.targetVal.toLocaleString() : m.targetVal} (${m.targetLabel})`;
-  };
-
-  // Sales count in the month a deal was WON, for the deal's owner only.
-  const getRepPipelineSalesForMonth = (repId: string, targetMonth: string): number => {
-    return countAuto('won', allDeals, repId, targetMonth);
-  };
-
-  // Tracks Proposal-Sent activity and Appointment-ticked activity from the shared
-  // pipeline log for a given rep/month, so KPI scores on the management side stay
-  // in sync with what each rep's own KPI page already counts.
-  const getRepPipelineActivityForMonth = (repId: string, targetMonth: string, type: 'proposals' | 'appointments'): number => {
-    return countAuto(type, allDeals, repId, targetMonth);
-  };
-
-  // Math metrics
-  const activeMonthSales = reps.reduce((sum, r) => {
-    if (!salesIsFromDeals(r)) return sum;
-    const manualSales = (r.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0);
-    return sum + manualSales + getRepPipelineSalesForMonth(r.id, selectedMonth);
-  }, 0);
-
-  const totalSalesToDateYTD = (() => {
-    const storedKpis = localStorage.getItem('next_month_kpis_dict');
-    const kpisDict = storedKpis ? JSON.parse(storedKpis) : {};
-    const ytdMonthsList = getYTDMonths(selectedMonth);
-
-    return reps.reduce((sum, r) => {
-      if (!salesIsFromDeals(r)) return sum;
-      let repYTDSum = 0;
-      ytdMonthsList.forEach(m => {
-        let monthKpi = kpisDict[`${r.id}_${m}`];
-        if (!monthKpi && m === selectedMonth) {
-          monthKpi = r.kpi;
-        }
-        const manualSales = monthKpi?.salesFigure ? monthKpi.salesFigure.reduce((a: number, b: number) => a + b, 0) : 0;
-        const pipeSales = getRepPipelineSalesForMonth(r.id, m);
-        repYTDSum += manualSales + pipeSales;
-      });
-      return sum + repYTDSum;
-    }, 0);
-  })();
-
-  const numReps = reps.length;
-  const totalProposalsTeam = reps.reduce((sum, r) => sum + (r.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + autoValueFor(r, 'proposals', allDeals, selectedMonth), 0);
-  const totalPreviewsTeam = reps.reduce((sum, r) => sum + (r.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + autoValueFor(r, 'preview', allDeals, selectedMonth), 0);
-
-  // Targets totals
-  const totalSalesTargetTeam = reps.reduce((sum, r) => {
-    if (!salesIsFromDeals(r)) return sum;
-    return sum + (r.targets?.salesFigure ?? 30000);
-  }, 0);
-  const totalProposalsTargetTeam = reps.length * 10; // 2 per week * 5 weeks = 10 per rep
-  const totalPreviewsTargetTeam = reps.reduce((sum, r) => sum + (r.targets?.preview ?? 1), 0);
-
-  // Calculated overall score per rep helper
-  const getRepScores = (rep: Representative) => {
-    const pipelineSales = (salesIsFromDeals(rep) ? getRepPipelineSalesForMonth(rep.id, selectedMonth) : 0);
-    const totalSales = (rep.kpi?.salesFigure ?? []).reduce((a, b) => a + b, 0) + pipelineSales;
-    const pipelineProposals = autoValueFor(rep, 'proposals', allDeals, selectedMonth);
-    const totalProposals = (rep.kpi?.proposals ?? []).reduce((a, b) => a + b, 0) + pipelineProposals;
-    const pipelinePreviews = autoValueFor(rep, 'preview', allDeals, selectedMonth);
-    const totalPreview = (rep.kpi?.preview ?? []).reduce((a, b) => a + b, 0) + pipelinePreviews;
-
-    const metricsList = getRepMetrics(rep);
-
-    const getMetricScore = (key: string) => {
-      const config = metricsList.find(m => m.key === key);
-      if (!config) return 0;
-      let totalAchieved = 0;
-      if (config.isRM) {
-        totalAchieved = totalSales;
-      } else if (key === 'proposals') {
-        totalAchieved = totalProposals;
-      } else if (key === 'preview') {
-        totalAchieved = totalPreview;
-      } else if (key === 'extraMetric') {
-        totalAchieved = (rep.kpi.extraMetric || []).reduce((a, b) => a + b, 0);
-      }
-      return Math.min(100, Math.round((totalAchieved / config.targetVal) * 100)) || 0;
-    };
-
-    const salesScore = getMetricScore('salesFigure');
-    const proposalsScore = getMetricScore('proposals');
-    const previewScore = getMetricScore('preview');
-
-    const overallScore = Math.round(metricsList.reduce((sum, m) => {
-      const score = getMetricScore(m.key);
-      return sum + (score * m.weight);
-    }, 0));
-
+  // ---------- Tiles ----------
+  const sellers = reps.filter(r => metricsFor(r).some(m => m.key === 'salesFigure' && m.auto === 'won'));
+  const monthTarget = sellers.reduce((t, r) => t + (metricsFor(r).find(m => m.key === 'salesFigure')?.targetVal || 0), 0);
+  const tiles = useMemo(() => {
+    const sum = (pick: (p: any) => string, test: (d: string) => boolean, value = false) =>
+      deals.reduce((t, p) => (test(pick(p)) ? t + (value ? dealValue(p) : 1) : t), 0);
     return {
-      totalSales,
-      totalProposals,
-      totalPreview,
-      salesScore,
-      proposalsScore,
-      previewScore,
-      overallScore
+      wonRM: sum(dealWonDate, inMonth, true), wonRMYear: sum(dealWonDate, inYearToMonth, true),
+      wonCount: sum(dealWonDate, inMonth), wonCountYear: sum(dealWonDate, inYearToMonth),
+      appts: sum(dealAppointmentDate, inMonth), apptsYear: sum(dealAppointmentDate, inYearToMonth),
+      proposals: sum(dealProposalDate, inMonth), proposalsYear: sum(dealProposalDate, inYearToMonth),
     };
-  };
+  }, [deals, prefix]);
 
-  // Find Top Performers
-  const repPerformanceList = reps.map(rep => ({
-    rep,
-    metrics: getRepScores(rep)
-  }));
+  // ---------- Team table ----------
+  const team = useMemo(() => reps
+    .map(r => ({ rep: r, ...monthKpi(r, deals, selectedMonth) }))
+    .sort((a, b) => b.score - a.score || a.rep.name.localeCompare(b.rep.name)), [reps, deals, selectedMonth]);
 
-  // Sort by sales closed to find best closer
-  const sortedBySales = [...repPerformanceList].sort((a, b) => b.metrics.totalSales - a.metrics.totalSales);
-  const topCloser = sortedBySales[0];
+  // ---------- Pipeline ----------
+  const open = deals.filter(p => OPEN_JOURNEY.includes(journeyStage(dealStage(p))));
+  const byStage = OPEN_JOURNEY.map(st => {
+    const list = open.filter(p => journeyStage(dealStage(p)) === st);
+    return { st, count: list.length, value: list.reduce((t, p) => t + dealValue(p), 0) };
+  });
+  const stuck = open.filter(p => dealNeedsAttention(p, today));
+  const wonList = deals.filter(p => inMonth(dealWonDate(p))).sort((a, b) => dealWonDate(b).localeCompare(dealWonDate(a)));
+  const lostList = deals.filter(p => dealStage(p) === 'lost' && inMonth(String(p.lostDate || '').slice(0, 10)));
+  const lostReasons = Object.entries<number>(lostList.reduce((m: Record<string, number>, p) => { const r = p.lostReason || 'No reason given'; m[r] = (m[r] || 0) + 1; return m; }, {}))
+    .sort((a, b) => b[1] - a[1]);
 
-  // Sort by overall performance score
-  const sortedByScore = [...repPerformanceList].sort((a, b) => b.metrics.overallScore - a.metrics.overallScore);
-  const topPerformer = sortedByScore[0];
-
-  // Team average score calculation
-  const avgTeamScore = numReps === 0 ? 0 : Math.round(
-    repPerformanceList.reduce((acc, r) => acc + r.metrics.overallScore, 0) / numReps
-  );
-
-  // Targets Edit handler
-  // KPI templates and targets are now set per person in Management → Team.
-  const handleStartEditingTargets = (_rep: Representative) => {
-    onOpenTeam();
-  };
-  const handleSaveTargets = (e: React.FormEvent) => {
-    e.preventDefault();
-    setEditingTargetsId(null);
-  };
-
-  // Team Bulk update targets
-  const handleBulkTargetsSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    reps.forEach(rep => {
-      onUpdateRepTargets(rep.id, {
-        salesFigure: parseFloat(bulkSales) || 30000,
-        proposals: parseInt(bulkProposals) || 2,
-        preview: parseInt(bulkPreviews) || 1
-      });
-    });
-    setShowBulkModal(false);
-  };
-
-  // Quick Log Handler
-  const handleQuickLogSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const rep = reps.find(r => r.id === selectedRepId);
-    if (!rep) return;
-
-    const updatedKpi = {
-      salesFigure: [...(rep.kpi?.salesFigure ?? [0, 0, 0, 0, 0])],
-      proposals: [...(rep.kpi?.proposals ?? [0, 0, 0, 0, 0])],
-      preview: [...(rep.kpi?.preview ?? [0, 0, 0, 0, 0])]
-    };
-
-    const addSales = parseFloat(logSales) || 0;
-    const addProps = parseInt(logProposals) || 0;
-    const addPreviews = parseInt(logPreviews) || 0;
-
-    updatedKpi.salesFigure[selectedWeek] += addSales;
-    updatedKpi.proposals[selectedWeek] += addProps;
-    updatedKpi.preview[selectedWeek] += addPreviews;
-
-    onUpdateRepKpi(selectedRepId, updatedKpi);
-
-    // Reset log inputs
-    setLogSales('');
-    setLogProposals('');
-    setLogPreviews('');
-
-    // Trigger small animation or notification
-    alert(`Successfully logged data for ${rep.name} on Week ${selectedWeek + 1}!`);
-  };
-
-  // Score badge color logic
-  const getScoreStyle = (score: number) => {
-    if (score >= 80) return 'bg-emerald-50 text-emerald-700 border-emerald-100';
-    if (score >= 50) return 'bg-amber-50 text-amber-700 border-amber-100';
-    return 'bg-rose-50 text-rose-700 border-rose-100';
-  };
+  const pct = (v: number, t: number) => (t > 0 ? Math.round((v / t) * 100) : 0);
+  const fmtVal = (isRM: boolean, v: number) => (isRM ? formatRM(v) : String(Math.round(v * 10) / 10));
 
   return (
-    <div className="space-y-6" id="management-dashboard-view">
-
-      {/* Upper Management Header Banner */}
-      <div className="bg-slate-900 text-white rounded-2xl p-6 md:p-8 border border-slate-800 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
-
-        <div className="space-y-2 relative z-10">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] bg-blue-600/80 text-blue-100 font-extrabold px-2.5 py-1 rounded-full uppercase tracking-widest font-mono">
-              EXECUTIVE PORTAL
-            </span>
-            <span className="text-[10px] bg-emerald-600/80 text-emerald-100 font-extrabold px-2.5 py-1 rounded-full uppercase tracking-widest font-mono">
-              {selectedMonth} ACTIVE
-            </span>
-          </div>
-          <h2 className="text-2xl md:text-3xl font-black tracking-tight font-sans text-white">
-            NEXT ACADEMY MANAGEMENT CONSOLE
-          </h2>
-          <p className="text-slate-400 text-xs md:text-sm max-w-2xl font-medium leading-relaxed">
-            Configure benchmarks, track team-wide ratios, update individual performance targets.
-          </p>
+    <div className="space-y-5 font-sans text-ink">
+      {/* Header */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Team performance</h2>
+          <p className="text-[15px] text-ink-soft">Counted from deals, the same way as each person's KPI page.{onOpenTeam && <> KPI sets and targets are set in <button type="button" onClick={onOpenTeam} className="font-semibold text-accent hover:underline">Team</button>.</>}</p>
         </div>
-
-      </div>
-
-      {/* Primary Sub-Navigation inside the Console */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-2 rounded-xl border border-slate-200">
-        <div className="flex flex-wrap gap-1">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-              activeTab === 'overview'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            Overview & Leaderboard
-          </button>
-
-          <button
-            onClick={() => setActiveTab('targets')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-              activeTab === 'targets'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-            }`}
-          >
-            <Target className="w-4 h-4" />
-            Configure Targets
-          </button>
-
-          <button
-            onClick={() => setActiveTab('quick-log')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-              activeTab === 'quick-log'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-            }`}
-          >
-            <Plus className="w-4 h-4" />
-            Quick KPI Log
-          </button>
-
-          <button
-            onClick={() => setActiveTab('pipelines')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-              activeTab === 'pipelines'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" />
-            Global Pipelines
-          </button>
-
-          <button
-            onClick={onOpenTeam}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-          >
-            <Users className="w-4 h-4" />
-            Team
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg">
-          <Calendar className="w-3.5 h-3.5 text-blue-500" />
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider font-mono">Selected Month:</span>
-          <select
-            value={selectedMonth}
-            onChange={(e) => onMonthChange(e.target.value)}
-            className="text-[11px] font-bold font-mono border-0 bg-transparent text-slate-700 focus:ring-0 focus:outline-none cursor-pointer p-0 pr-6"
-          >
-            {['JAN-26', 'FEB-26', 'MAR-26', 'APR-26', 'MAY-26', 'JUN-26', 'JUL-26', 'AUG-26', 'SEP-26', 'OCT-26', 'NOV-26', 'DEC-26', 'JAN-27', 'FEB-27', 'MAR-27', 'APR-27', 'MAY-27', 'JUN-27'].map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
+        <label className="flex items-center gap-2 text-sm font-semibold text-ink-soft">
+          Month
+          <select value={selectedMonth} onChange={e => onMonthChange(e.target.value)} className="rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink focus:border-accent focus:outline-none">
+            {monthChoices(today, selectedMonth).map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
           </select>
-        </div>
+        </label>
       </div>
 
-      {/* Main Tab views */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
+      {/* Tiles */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Tile label="Sales won" value={formatRM(tiles.wonRM)} sub={monthTarget ? `of ${formatRM(monthTarget)} · ${pct(tiles.wonRM, monthTarget)}%` : 'No sales targets set'}
+          year={`${year} so far: ${formatRM(tiles.wonRMYear)}${monthTarget ? ` of ${formatRM(monthTarget * monthsSoFar)}` : ''}`} bar={monthTarget ? pct(tiles.wonRM, monthTarget) : undefined} />
+        <Tile label="Deals won" value={String(tiles.wonCount)} year={`${year} so far: ${tiles.wonCountYear}`} />
+        <Tile label="Appointments held" value={String(tiles.appts)} year={`${year} so far: ${tiles.apptsYear}`} />
+        <Tile label="Proposals sent" value={String(tiles.proposals)} year={`${year} so far: ${tiles.proposalsYear}`} />
+      </div>
 
-          {/* Executive Summary Stats Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5" id="management-stats-grid">
-
-            {/* Team Sales Card */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
-                    TEAM ACTIVE SALES
-                  </span>
-                  <div className="p-1.5 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-lg">
-                    <DollarSign className="w-4 h-4" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-black font-mono tracking-tight text-slate-800 mt-2">
-                  RM {activeMonthSales.toLocaleString()}
-                </h3>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-150 flex items-center justify-between text-xs font-bold text-slate-500">
-                <span>Monthly Target:</span>
-                <span className="font-mono text-slate-700">RM {totalSalesTargetTeam.toLocaleString()}</span>
-              </div>
-            </div>
-
-            {/* Team Proposals */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
-                    TEAM PROPOSALS SENT
-                  </span>
-                  <div className="p-1.5 bg-blue-50 border border-blue-100 text-blue-600 rounded-lg">
-                    <CheckCircle className="w-4 h-4" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-black font-mono tracking-tight text-slate-800 mt-2">
-                  {totalProposalsTeam} / {totalProposalsTargetTeam}
-                </h3>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-150 flex items-center justify-between text-xs font-bold text-slate-500">
-                <span>Avg Per Rep:</span>
-                <span className="font-mono text-slate-700">
-                  {numReps > 0 ? (totalProposalsTeam / numReps).toFixed(1) : 0} props
-                </span>
-              </div>
-            </div>
-
-            {/* Team Previews */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
-                    TEAM PREVIEWS ACHIEVED
-                  </span>
-                  <div className="p-1.5 bg-cyan-50 border border-cyan-100 text-cyan-600 rounded-lg">
-                    <Users className="w-4 h-4" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-black font-mono tracking-tight text-slate-800 mt-2">
-                  {totalPreviewsTeam} / {totalPreviewsTargetTeam}
-                </h3>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-150 flex items-center justify-between text-xs font-bold text-slate-500">
-                <span>Global Score contribution:</span>
-                <span className="text-cyan-600 font-mono">20% weight</span>
-              </div>
-            </div>
-
-            {/* Team Average Score */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
-                    TEAM AVERAGE SCORE
-                  </span>
-                  <div className="p-1.5 bg-purple-50 border border-purple-100 text-purple-600 rounded-lg">
-                    <Trophy className="w-4 h-4" />
-                  </div>
-                </div>
-                <h3 className="text-2xl font-black font-mono tracking-tight text-slate-800 mt-2">
-                  {avgTeamScore}%
-                </h3>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-150">
-                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-purple-500 transition-all duration-500"
-                    style={{ width: `${avgTeamScore}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          {/* Spotlight Row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5" id="spotlight-row">
-
-            {/* Spotlight 1: Leader by Score */}
-            {topPerformer && (
-              <div className="bg-gradient-to-tr from-blue-500/5 to-cyan-500/5 border border-blue-100 rounded-2xl p-5 flex items-center justify-between">
-                <div className="space-y-1.5">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-blue-500 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded font-mono">
-                    🥇 TEAM OVERALL LEADER
-                  </span>
-                  <h4 className="text-base font-black text-slate-800">{topPerformer.rep.name}</h4>
-                  <p className="text-xs text-slate-500 font-medium font-sans">
-                    With an overall pipeline efficiency Index of <span className="font-black font-mono text-blue-600">{topPerformer.metrics.overallScore}%</span>.
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase font-mono">Actual Sales</p>
-                  <p className="text-lg font-black font-mono text-slate-800">RM {topPerformer.metrics.totalSales.toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Spotlight 2: Best Closer by Revenue */}
-            {topCloser && (
-              <div className="bg-gradient-to-tr from-emerald-500/5 to-green-500/5 border border-emerald-100 rounded-2xl p-5 flex items-center justify-between">
-                <div className="space-y-1.5">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded font-mono">
-                    💵 REVENUE TOP CLOSER
-                  </span>
-                  <h4 className="text-base font-black text-slate-800">{topCloser.rep.name}</h4>
-                  <p className="text-xs text-slate-500 font-medium font-sans">
-                    Generating a record <span className="font-black font-mono text-emerald-600">RM {topCloser.metrics.totalSales.toLocaleString()}</span> this period.
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[9px] font-bold text-slate-400 uppercase font-mono">Target</p>
-                  <p className="text-sm font-bold font-mono text-slate-500">RM {(topCloser.rep.targets?.salesFigure ?? 30000).toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-
-          </div>
-
-          {/* Interactive Custom SVG Comparison Chart */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-            <div className="flex justify-between items-center">
-              <div className="space-y-0.5">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-mono">
-                  Visual Analytics
-                </span>
-                <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
-                  SALES PERFORMANCE VS ASSIGNED TARGETS
-                </h4>
-              </div>
-              <div className="flex items-center gap-3 text-xs font-bold">
-                <div className="flex items-center gap-1.5 text-slate-600">
-                  <div className="w-3 h-3 bg-blue-500 rounded-xs" />
-                  <span>Actual Closed</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-slate-600">
-                  <div className="w-3 h-3 bg-slate-200 rounded-xs border border-slate-300" />
-                  <span>Target Benchmark</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Custom Responsive SVG Horizontal Bar Chart */}
-            <div className="space-y-4 pt-2">
-              {reps.map((rep) => {
-                const metrics = getRepScores(rep);
-                const salesTarget = rep.targets?.salesFigure ?? 30000;
-
-                // Calculate percentages relative to the highest sales target or value to prevent overflow
-                const maxVal = Math.max(...reps.map(r => Math.max(r.targets?.salesFigure ?? 30000, (r.kpi?.salesFigure ?? []).reduce((a,b)=>a+b,0))), 40000);
-                const actualPct = Math.min(100, (metrics.totalSales / maxVal) * 100);
-                const targetPct = Math.min(100, (salesTarget / maxVal) * 100);
-
-                return (
-                  <div key={rep.id} className="grid grid-cols-12 gap-4 items-center">
-
-                    {/* Name */}
-                    <div className="col-span-3">
-                      <p className="text-xs font-extrabold text-slate-800 truncate">{rep.name}</p>
-                      <p className="text-[9px] text-slate-400 font-mono mt-0.5 uppercase tracking-wider">
-                        Score: {metrics.overallScore}%
-                      </p>
+      {/* Team table */}
+      <section className={card}>
+        <h3 className="mb-3 flex items-center gap-2 font-bold"><Users className="h-4 w-4 text-accent" /> Each person, {monthLabel(selectedMonth)}</h3>
+        {team.length === 0 ? <p className="text-ink-soft">No one with a workspace yet.</p> : (
+          <ul className="divide-y divide-line">
+            {team.map(({ rep, rows, score }) => (
+              <li key={rep.id} className="flex flex-col gap-3 py-3 lg:flex-row lg:items-center">
+                <div className="w-full shrink-0 lg:w-56">
+                  <p className="font-semibold">{rep.name}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={score} aria-valuemin={0} aria-valuemax={100} aria-label={`${rep.name} KPI score`}>
+                      <div className={`h-full rounded-full ${score >= 100 ? 'bg-accent' : score >= 50 ? 'bg-accent/70' : 'bg-attention'}`} style={{ width: `${Math.min(100, score)}%` }} />
                     </div>
-
-                    {/* Bar visualizer */}
-                    <div className="col-span-7 relative h-6 bg-slate-50 border border-slate-100 rounded-md overflow-hidden flex items-center">
-
-                      {/* Target bar (light overlay border/background) */}
-                      <div
-                        className="absolute h-full bg-slate-100 border-r border-slate-300/80 transition-all duration-500"
-                        style={{ width: `${targetPct}%` }}
-                      />
-
-                      {/* Actual value bar */}
-                      <div
-                        className="absolute h-full bg-blue-500/90 hover:bg-blue-600 transition-all duration-500 rounded-r-xs flex items-center pl-2"
-                        style={{ width: `${actualPct}%` }}
-                      >
-                        {actualPct > 12 && (
-                          <span className="text-[8px] font-black text-white font-mono drop-shadow-xs">
-                            RM {metrics.totalSales.toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-
+                    <span className="w-16 text-right text-sm font-bold tabular-nums">{score}%</span>
+                  </div>
+                </div>
+                <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  {rows.map(({ m, total, pct: p }) => (
+                    <div key={m.key} className="rounded-lg bg-surface px-3 py-2">
+                      <p className="flex items-center justify-between gap-2 text-xs text-ink-soft"><span className="truncate">{m.label}{m.auto ? '' : ' (typed)'}</span><span className="tabular-nums">{p}%</span></p>
+                      <p className="text-sm"><strong className="tabular-nums">{fmtVal(m.isRM, total)}</strong> <span className="text-ink-soft">/ {fmtVal(m.isRM, m.targetVal)}</span></p>
                     </div>
-
-                    {/* Numeric breakdown */}
-                    <div className="col-span-2 text-right">
-                      <span className="text-xs font-black font-mono text-slate-700">
-                        {Math.round((metrics.totalSales / salesTarget) * 100)}%
-                      </span>
-                      <span className="text-[9px] text-slate-400 block font-sans">
-                        of RM {salesTarget.toLocaleString()}
-                      </span>
-                    </div>
-
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Main Comparison Leaderboard Table */}
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
-            <div className="p-4 bg-slate-800 text-white flex items-center justify-between">
-              <span className="text-xs font-black uppercase tracking-wider font-display">
-                🏆 REPRESENTATIVE PIPELINE LEADERBOARD
-              </span>
-              <span className="text-[10px] bg-slate-700 text-slate-300 font-bold px-2.5 py-1 rounded font-mono">
-                {numReps} Sales reps active
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-150 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                    <th className="p-4">Representative</th>
-                    <th className="p-4 text-center">Efficiency Score</th>
-                    <th className="p-4">Sales closed (RM)</th>
-                    <th className="p-4 text-center">Proposals</th>
-                    <th className="p-4 text-center font-mono">Previews</th>
-                    <th className="p-4 text-right">Operational Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700 font-sans text-xs">
-                  {repPerformanceList.map(({ rep, metrics }) => {
-                    return (
-                      <tr key={rep.id} className="hover:bg-slate-50/50 transition-colors">
-
-                        {/* Name column */}
-                        <td className="p-4">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-black text-slate-600">
-                              {rep.name.substring(0, 2).toUpperCase()}
-                            </div>
-                            <div>
-                              <p className="font-extrabold text-slate-800">{rep.name}</p>
-                              <p className="text-[9px] text-slate-400 font-mono uppercase mt-0.5">ID: {rep.id}</p>
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Overall efficiency score */}
-                        <td className="p-4 text-center">
-                          <span className={`inline-block px-2.5 py-1 rounded-full border text-[10px] font-black font-mono ${getScoreStyle(metrics.overallScore)}`}>
-                            {metrics.overallScore}%
-                          </span>
-                        </td>
-
-                        {/* Sales Volume */}
-                        <td className="p-4">
-                          <div className="space-y-1">
-                            <p className="font-extrabold font-mono text-slate-800">
-                              {metricValueText(rep, 'salesFigure', metrics.totalSales)}
-                            </p>
-                            <div className="w-24 bg-slate-100 h-1 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-emerald-500"
-                                style={{ width: `${metrics.salesScore}%` }}
-                              />
-                            </div>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase font-mono">
-                              {metricTargetText(rep, 'salesFigure')}
-                            </p>
-                          </div>
-                        </td>
-
-                        {/* Proposals Sent */}
-                        <td className="p-4 text-center">
-                          <p className="font-black font-mono text-slate-800">
-                            {metricValueText(rep, 'proposals', metrics.totalProposals)}
-                          </p>
-                          <span className="text-[9px] text-slate-400 block font-mono">
-                            {`${metrics.proposalsScore}% of target`}
-                          </span>
-                        </td>
-
-                        {/* Previews Achieved */}
-                        <td className="p-4 text-center">
-                          <p className="font-black font-mono text-slate-800">
-                            {metricValueText(rep, 'preview', metrics.totalPreview)}
-                          </p>
-                          <span className="text-[9px] text-slate-400 block font-mono">
-                            {`${metrics.previewScore}% of target`}
-                          </span>
-                        </td>
-
-                        {/* Actions */}
-                        <td className="p-4 text-right">
-                          <div className="flex justify-end gap-1.5">
-                            <button
-                              onClick={() => onSelectRep(rep)}
-                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] rounded uppercase tracking-wider transition-all cursor-pointer"
-                            >
-                              Console
-                            </button>
-                            <button
-                              onClick={() => handleStartEditingTargets(rep)}
-                              className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-100 font-bold text-[10px] rounded uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1"
-                            >
-                              <Sliders className="w-3 h-3" />
-                              Targets
-                            </button>
-                          </div>
-                        </td>
-
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* New Section: KPI Date Range and Backup Management */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-
-            {/* Card 1: KPI Active Date Range Configuration */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col justify-between space-y-4">
-              <div className="space-y-4">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-blue-50 border border-blue-100 text-blue-600 rounded-xl">
-                    <Calendar className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
-                      KPI ACTIVE DATE RANGE CONFIGURATION
-                    </h4>
-                    <p className="text-slate-400 text-[10px] uppercase font-bold mt-1 leading-relaxed">
-                      Configure the active month list range (Format: MMM-YY, e.g. Jun-26 to May-27). This defines the tracking year and allowable KPI months.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1.5">
-                      Start Month
-                    </label>
-                    <select
-                      value={startMonth}
-                      onChange={(e) => setStartMonth(e.target.value)}
-                      className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white font-mono"
-                    >
-                      {ALL_AVAILABLE_MONTHS.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1.5">
-                      End Month
-                    </label>
-                    <select
-                      value={endMonth}
-                      onChange={(e) => setEndMonth(e.target.value)}
-                      className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white font-mono"
-                    >
-                      {ALL_AVAILABLE_MONTHS.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <span className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">
-                    Resulting KPI Month List ({getResultingMonthList().length} Months)
-                  </span>
-                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
-                    {getResultingMonthList().map((month) => (
-                      <span
-                        key={month}
-                        className="text-[10px] font-bold px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-600 rounded-md font-mono hover:bg-slate-100 transition-colors cursor-default"
-                      >
-                        {month}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-                <span>Active Year Setup:</span>
-                <span className="font-extrabold text-blue-600">2026 Operational Term</span>
-              </div>
-            </div>
-
-            {/* Card 2: Google Sheets Backup & Log */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col justify-between space-y-4">
-              <div className="space-y-4">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-xl">
-                    <Database className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
-                      GOOGLE SHEETS BACKUP & LOG
-                    </h4>
-                    <p className="text-slate-400 text-[10px] uppercase font-bold mt-1 leading-relaxed">
-                      A secure backup of all data is automatically performed daily at 9:00 PM using Google Sheets, in addition to on-demand backups.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="border border-slate-150 rounded-xl overflow-hidden text-xs divide-y divide-slate-100">
-                  <div className="flex justify-between items-center p-3 hover:bg-slate-50/50 transition-colors">
-                    <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider">Spreadsheet ID:</span>
-                    <span className="font-mono text-slate-800 bg-slate-50 px-2 py-0.5 border border-slate-200 rounded max-w-[200px] truncate" title="185A2We-gBfPM-YBLiO9V3hOUTTOsPPeXALG04cY6Zq4">
-                      185A2We-gBfPM-YBLiO9V3hOU...
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 hover:bg-slate-50/50 transition-colors">
-                    <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider">Backup Tabs:</span>
-                    <span className="font-black text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded font-mono">
-                      One tab per data type
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 hover:bg-slate-50/50 transition-colors">
-                    <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider">Auto Backup Schedule:</span>
-                    <span className="flex items-center gap-1 font-bold text-slate-700 font-mono">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Daily @ 9:00 PM
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 hover:bg-slate-50/50 transition-colors">
-                    <span className="font-bold text-slate-500 uppercase text-[10px] tracking-wider">Last Backup Run:</span>
-                    <span className="font-semibold text-slate-600 font-mono text-[11px]">
-                      {lastBackupRun}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
-                <a
-                  href={BACKUP_SHEET_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 border border-emerald-600 hover:bg-emerald-50 text-emerald-700 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-xs"
-                >
-                  <Link className="w-3.5 h-3.5" />
-                  OPEN SHEET (BACKUP)
-                </a>
-
-                <button
-                  onClick={handleRunBackupNow}
-                  disabled={isBackingUp}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50"
-                >
-                  {isBackingUp ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      RUNNING...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      BACKUP NOW
-                    </>
-                  )}
-                </button>
-              </div>
-              {backupError && (
-                <p className="text-[10px] text-rose-600 font-bold mt-1">
-                  Last attempt failed: {backupError}
-                </p>
-              )}
-            </div>
-
-          </div>
-
-        </div>
-      )}
-
-      {/* Targets Management Panel */}
-      {activeTab === 'targets' && (
-        <div className="space-y-6">
-
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-              <div className="space-y-0.5">
-                <h4 className="text-sm font-black uppercase text-slate-800 tracking-wider">
-                  TEAM TARGET CONFIGURATION MANAGER
-                </h4>
-                <p className="text-slate-400 text-xs">
-                  Set operational quotas and conversion targets for individual representatives.
-                </p>
-              </div>
-
-              <button
-                onClick={onOpenTeam}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                Set KPIs and targets in Team
-              </button>
-            </div>
-
-            {/* Editing Active Targets inline row */}
-            {editingTargetsId && (
-              <form onSubmit={handleSaveTargets} className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-4 animate-fadeIn">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-blue-600 animate-ping" />
-                  <span className="text-[10px] font-black uppercase text-blue-800 tracking-widest font-mono">
-                    Modifying Targets for {reps.find(r => r.id === editingTargetsId)?.name}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Sales Figure target (RM)</label>
-                    <input
-                      type="number"
-                      required
-                      value={targetSales}
-                      onChange={(e) => setTargetSales(e.target.value)}
-                      className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Proposals Target (weekly)</label>
-                    <input
-                      type="number"
-                      required
-                      value={targetProposals}
-                      onChange={(e) => setTargetProposals(e.target.value)}
-                      className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Preview Target (monthly)</label>
-                    <input
-                      type="number"
-                      required
-                      value={targetPreview}
-                      onChange={(e) => setTargetPreview(e.target.value)}
-                      className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingTargetsId(null)}
-                    className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-4 py-2 rounded-lg"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg"
-                  >
-                    Save Target Benchmarks
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* List of current targets with editing trigger */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {reps.map((rep) => {
-                return (
-                  <div key={rep.id} className="border border-slate-200/80 rounded-xl p-4 flex flex-col justify-between hover:border-slate-300 hover:shadow-xs transition-all bg-white">
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-start">
-                        <h5 className="font-extrabold text-slate-800">{rep.name}</h5>
-                        <button
-                          onClick={() => handleStartEditingTargets(rep)}
-                          className="p-1 hover:bg-slate-50 text-slate-400 hover:text-blue-600 rounded transition-colors"
-                          title="Edit rep targets"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      <div className="space-y-2 text-xs">
-                        {getRepMetrics(rep).map(m => (
-                          <div key={m.key} className="flex justify-between items-center gap-3 text-slate-500">
-                            <span>{m.label}{m.auto ? ' (from deals)' : ''}</span>
-                            <span className="font-mono font-black text-slate-800 text-right">
-                              {m.isRM ? `RM ${m.targetVal.toLocaleString()}` : m.targetVal} <span className="font-normal text-slate-400">{m.targetLabel}</span>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="border-t border-slate-100 mt-4 pt-3 flex justify-between items-center text-[10px] text-slate-400 uppercase font-mono">
-                      <span>Status:</span>
-                      <span className="text-emerald-500 font-bold">● Tracking Active</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-          </div>
-
-        </div>
-      )}
-
-      {/* Quick KPI Logging screen */}
-      {activeTab === 'quick-log' && (
-        <div className="max-w-xl mx-auto">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
-            <div className="pb-3 border-b border-slate-100">
-              <h4 className="text-sm font-black uppercase text-slate-800 tracking-wider">
-                ⚡ QUICK LOG CONSOLE
-              </h4>
-              <p className="text-slate-400 text-xs">
-                Log weekly data for any representative instantly from a single centralized form.
-              </p>
-            </div>
-
-            <form onSubmit={handleQuickLogSubmit} className="space-y-4">
-
-              {/* Select rep */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Select Representative</label>
-                <select
-                  value={selectedRepId}
-                  onChange={(e) => setSelectedRepId(e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
-                >
-                  {reps.map(r => (
-                    <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
-                </select>
-              </div>
-
-              {/* Select Week */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Select Active Week</label>
-                <select
-                  value={selectedWeek}
-                  onChange={(e) => setSelectedWeek(parseInt(e.target.value))}
-                  className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500"
-                >
-                  <option value={0}>Week 1</option>
-                  <option value={1}>Week 2</option>
-                  <option value={2}>Week 3</option>
-                  <option value={3}>Week 4</option>
-                  <option value={4}>Week 5</option>
-                </select>
-              </div>
-
-              {/* Sales Closed */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Add Sales Closed (RM)</label>
-                <input
-                  type="number"
-                  placeholder="e.g. 5000 (leaves blank for no change)"
-                  value={logSales}
-                  onChange={(e) => setLogSales(e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              {/* Proposals and Previews side by side */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Add Proposals</label>
-                  <input
-                    type="number"
-                    placeholder="e.g. 1"
-                    value={logProposals}
-                    onChange={(e) => setLogProposals(e.target.value)}
-                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                  />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Add Previews</label>
-                  <input
-                    type="number"
-                    placeholder="e.g. 1"
-                    value={logPreviews}
-                    onChange={(e) => setLogPreviews(e.target.value)}
-                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3">
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors"
-                >
-                  Centralized Quota Update
+                <button type="button" onClick={() => onSelectRep(rep)} className="inline-flex shrink-0 items-center gap-1 self-start rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold hover:bg-surface lg:self-center">
+                  Open workspace <ChevronRight className="h-4 w-4" />
                 </button>
-              </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
-            </form>
-          </div>
-        </div>
+      {/* Pipeline snapshot */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <section className={card}>
+          <h3 className="mb-3 font-bold">Open pipeline now</h3>
+          <ul className="space-y-2">
+            {byStage.map(s => (
+              <li key={s.st} className="flex items-center justify-between gap-2 text-[15px]">
+                <span>{STAGE_LABELS[s.st]}</span>
+                <span className="text-right"><strong className="tabular-nums">{s.count}</strong> <span className="text-ink-soft">· {formatRM(s.value)}</span></span>
+              </li>
+            ))}
+            <li className="flex items-center justify-between gap-2 border-t border-line pt-2 text-[15px]">
+              <span className={stuck.length ? 'font-semibold text-danger' : ''}>Need attention</span>
+              <strong className={`tabular-nums ${stuck.length ? 'text-danger' : ''}`}>{stuck.length}</strong>
+            </li>
+          </ul>
+          {stuck.length > 0 && (
+            <p className="mt-2 text-sm text-ink-soft">
+              {stuck.slice(0, 4).map(p => `${clientName(p)} (${personName(dealOwnerId(p))})`).join(', ')}{stuck.length > 4 ? ` and ${stuck.length - 4} more` : ''}
+            </p>
+          )}
+        </section>
+
+        <section className={card}>
+          <h3 className="mb-3 flex items-center gap-2 font-bold"><Trophy className="h-4 w-4 text-accent" /> Won in {monthLabel(selectedMonth)} ({wonList.length})</h3>
+          {wonList.length === 0 ? <p className="text-ink-soft">No deals won this month yet.</p> : (
+            <ul className="max-h-72 divide-y divide-line overflow-y-auto">
+              {wonList.map(p => (
+                <li key={p.id} className="flex items-center justify-between gap-2 py-2 text-[15px]">
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{clientName(p)}</span>
+                    <span className="block truncate text-sm text-ink-soft">{personName(dealOwnerId(p))} · {formatDate(dealWonDate(p))}</span>
+                  </span>
+                  <strong className="shrink-0 tabular-nums">{formatRM(dealValue(p))}</strong>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className={card}>
+          <h3 className="mb-3 flex items-center gap-2 font-bold"><XCircle className="h-4 w-4 text-danger" /> Lost in {monthLabel(selectedMonth)} ({lostList.length})</h3>
+          {lostList.length === 0 ? <p className="text-ink-soft">No deals lost this month.</p> : (
+            <>
+              <ul className="mb-3 space-y-1.5">
+                {lostReasons.map(([reason, n]) => (
+                  <li key={reason} className="flex items-center gap-2 text-[15px]">
+                    <span className="min-w-0 flex-1 truncate">{reason}</span>
+                    <span className="h-2 w-24 overflow-hidden rounded-full bg-line"><span className="block h-full rounded-full bg-danger/70" style={{ width: `${pct(n, lostList.length)}%` }} /></span>
+                    <strong className="w-6 text-right tabular-nums">{n}</strong>
+                  </li>
+                ))}
+              </ul>
+              <ul className="max-h-40 divide-y divide-line overflow-y-auto border-t border-line text-sm">
+                {lostList.map(p => (
+                  <li key={p.id} className="flex justify-between gap-2 py-1.5">
+                    <span className="min-w-0 truncate">{clientName(p)} <span className="text-ink-soft">({personName(dealOwnerId(p))})</span></span>
+                    <span className="shrink-0 text-ink-soft">{formatRM(dealValue(p))}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function Tile({ label, value, sub, year, bar }: { label: string; value: string; sub?: string; year: string; bar?: number }) {
+  return (
+    <div className="rounded-2xl border border-line bg-white p-4">
+      <p className="text-sm font-semibold text-ink-soft">{label}</p>
+      <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
+      {sub && <p className="text-sm text-ink-soft">{sub}</p>}
+      {bar !== undefined && (
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, bar)}%` }} /></div>
       )}
-
-      {activeTab === 'pipelines' && (
-        <div className="space-y-6">
-          {/* Executive Header Banner */}
-          <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-md border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6" id="executive-pipeline-banner">
-            <div className="space-y-1 text-left">
-              <span className="text-[10px] bg-blue-500/20 text-blue-300 font-bold px-3 py-1 rounded border border-blue-500/30 font-mono uppercase tracking-widest">
-                Team-wide Pipeline Board
-              </span>
-              <h2 className="text-xl font-bold tracking-tight text-white font-sans mt-2">
-                Executive Sales Pipeline Overview
-              </h2>
-              <p className="text-slate-300 text-xs">
-                Real-time tracking of deal value, status, and conversion trajectories for all sales representatives.
-              </p>
-            </div>
-
-            <div className="flex gap-4">
-              <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-4 text-center min-w-[140px]">
-                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest block font-mono">
-                  Gross Pipeline
-                </span>
-                <span className="text-lg font-mono font-black text-blue-400 block mt-1">
-                  RM {allPipelines.reduce((sum, item) => sum + item.proposalValue, 0).toLocaleString()}
-                </span>
-              </div>
-              <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-4 text-center min-w-[140px]">
-                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest block font-mono">
-                  Closed Won
-                </span>
-                <span className="text-lg font-mono font-black text-emerald-400 block mt-1">
-                  RM {allPipelines.filter(i => i.status === 'Won').reduce((sum, item) => sum + item.proposalValue, 0).toLocaleString()}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Table representing all combined pipelines */}
-          <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden" id="management-pipeline-table-card">
-            <div className="p-4 bg-slate-800 text-white flex items-center justify-between">
-              <h4 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
-                <Briefcase className="w-4 h-4 text-blue-400" />
-                ACTIVE OPPORTUNITIES LIST ({allPipelines.length})
-              </h4>
-              <span className="text-[10px] bg-slate-700 text-slate-300 font-bold px-2.5 py-1 rounded font-mono">
-                Management Oversight
-              </span>
-            </div>
-
-            {allPipelines.length === 0 ? (
-              <div className="p-12 text-center text-slate-400 text-xs italic bg-slate-50/50">
-                No pipeline opportunities logged across representatives yet.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                      <th className="p-4">Owner</th>
-                      <th className="p-4">Request date</th>
-                      <th className="p-4">Training or Teambuilding Details</th>
-                      <th className="p-4">Proposal Sent date</th>
-                      <th className="p-4 text-right">Value</th>
-                      <th className="p-4">Follow up date</th>
-                      <th className="p-4 text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700 font-sans text-xs">
-                    {allPipelines.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="p-4">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-50 border border-blue-100 text-blue-700 font-black text-[9px] uppercase tracking-wider">
-                            {p.repName}
-                          </span>
-                        </td>
-                        <td className="p-4 font-mono font-bold text-slate-500">{p.requestDate}</td>
-                        <td className="p-4">
-                          <span className="font-extrabold text-slate-800 block">{p.client}</span>
-                          <span className="text-[10px] text-slate-400 block font-mono">{p.courseName}</span>
-                          <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 font-mono">
-                            {p.type}
-                          </span>
-                        </td>
-                        <td className="p-4 font-mono font-bold text-slate-500">{p.proposalSentDate}</td>
-                        <td className="p-4 text-right font-mono font-black text-slate-800">
-                          RM {parseFloat(p.proposalValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="p-4 font-mono text-slate-500 font-semibold">{p.followUpDate || 'TBD'}</td>
-                        <td className="p-4 text-center">
-                          {p.status === 'Won' ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-black text-[9px] uppercase tracking-wider">
-                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                              Won
-                            </span>
-                          ) : p.status === 'Lost' ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-50 border border-rose-200 text-rose-700 font-black text-[9px] uppercase tracking-wider">
-                              <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                              Lost
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-50 border border-amber-200 text-amber-700 font-black text-[9px] uppercase tracking-wider">
-                              <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                              Pending
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-
-      {/* Team Bulk Targets setup Modal */}
-      {showBulkModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-150 space-y-4">
-            <div className="space-y-1">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">
-                ⚙️ Team Bulk Targets Setup
-              </h3>
-              <p className="text-slate-400 text-xs">
-                Apply a uniform benchmark to every representative on the active roster.
-              </p>
-            </div>
-
-            <form onSubmit={handleBulkTargetsSubmit} className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulk Sales Target (RM)</label>
-                <input
-                  type="number"
-                  required
-                  placeholder="e.g. 30000"
-                  value={bulkSales}
-                  onChange={(e) => setBulkSales(e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulk Weekly Proposals Target</label>
-                <input
-                  type="number"
-                  required
-                  placeholder="e.g. 2"
-                  value={bulkProposals}
-                  onChange={(e) => setBulkProposals(e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bulk Monthly Previews Target</label>
-                <input
-                  type="number"
-                  required
-                  placeholder="e.g. 1"
-                  value={bulkPreviews}
-                  onChange={(e) => setBulkPreviews(e.target.value)}
-                  className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowBulkModal(false)}
-                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-4 py-2 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg transition-colors"
-                >
-                  Apply Global Quotas
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
+      <p className="mt-2 text-xs text-ink-soft">{year}</p>
     </div>
   );
 }

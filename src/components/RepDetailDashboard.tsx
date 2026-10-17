@@ -24,7 +24,6 @@ interface RepDetailDashboardProps {
   reps: Representative[];
   onBack: () => void;
   onUpdateRepKpi: (repId: string, updatedKpi: Representative['kpi']) => void;
-  onAskCopilot: (prompt: string) => void;
   selectedMonth: string;
   onMonthChange: (month: string) => void;
   viewer?: { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -300,7 +299,6 @@ export default function RepDetailDashboard({
   reps,
   onBack,
   onUpdateRepKpi,
-  onAskCopilot,
   selectedMonth,
   onMonthChange,
   viewer

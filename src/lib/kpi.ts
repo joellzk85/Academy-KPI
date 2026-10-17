@@ -152,3 +152,37 @@ export function salesIsFromDeals(rep: RepLike): boolean {
   const m = metricsFor(rep).find(x => x.key === 'salesFigure');
   return !!m && m.auto === 'won';
 }
+
+// One person's KPIs for a month: each KPI's weekly values, total and % of target, and the weighted score.
+// Used by the KPI page and Management's Team performance, so both always show the same numbers.
+export interface KpiRow { m: ResolvedMetric; weeks: number[]; total: number; pct: number }
+export function monthKpi(rep: RepLike & { kpi?: any }, deals: any[], month: string): { rows: KpiRow[]; score: number } {
+  const kpi: any = rep.kpi || {};
+  const rows = metricsFor(rep).map(m => {
+    const weeks = [0, 1, 2, 3, 4].map(w => (m.auto ? countAuto(m.auto, deals, rep.id, month, w) : Number(kpi[m.key]?.[w]) || 0));
+    const total = weeks.reduce((a, b) => a + b, 0);
+    const pct = m.targetVal > 0 ? Math.min(100, Math.round((total / m.targetVal) * 100)) : 0;
+    return { m, weeks, total, pct };
+  });
+  return { rows, score: Math.round(rows.reduce((t, r) => t + r.pct * r.m.weight, 0)) };
+}
+
+// Months to choose from ('OCT-26' style): the last 12 months up to 3 months ahead, always current.
+const MONTH_CODES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+export function monthChoices(todayIso: string, selected?: string): string[] {
+  const y = Number(todayIso.slice(0, 4)), m = Number(todayIso.slice(5, 7)) - 1;
+  const out: string[] = [];
+  for (let i = -12; i <= 3; i++) {
+    const d = new Date(y, m + i, 1);
+    out.push(`${MONTH_CODES[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`);
+  }
+  if (selected && !out.includes(selected)) out.unshift(selected);
+  return out;
+}
+
+// 'OCT-26' -> 'October 2026'
+export function monthLabel(month: string): string {
+  const p = monthPrefix(month);
+  if (!p) return month;
+  return new Date(Number(p.slice(0, 4)), Number(p.slice(5, 7)) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}

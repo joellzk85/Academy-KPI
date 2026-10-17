@@ -41,7 +41,7 @@ const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
 const MyHome = React.lazy(() => import('./components/MyHome'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
-import { Representative, CalendarEvent, ChatMessage, TeamMember, ROLE_LABELS } from './types';
+import { Representative, CalendarEvent, TeamMember, ROLE_LABELS } from './types';
 import { metricsFor } from './lib/kpi';
 import { appointmentEvents } from './lib/appointments';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
@@ -264,19 +264,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   // Time & Quote Dynamic States
   const [currentTime, setCurrentTime] = useState(new Date());
   const [quoteIndex, setQuoteIndex] = useState(0);
-
-  // Co-Pilot Chat integration
-  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'model',
-      text: "👋 Hello! I'm the NEXT Academy Sales & Operations Advisor. I can analyze representative conversion ratios, summarize pipeline logs, generate outreach scripts, or draft announcement schedules based on live metrics. How can I help you today?",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }
-  ]);
-  const [chatInput, setChatInput] = useState('');
-  const [isChatSending, setIsChatSending] = useState(false);
 
   // Real-time Firestore synchronizer helper states to trigger re-renders
   const [pipelinesSync, setPipelinesSync] = useState<any[]>([]);
@@ -680,71 +667,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     }
   };
 
-  // API Client Call to backend Gemini Co-Pilot
-  const handleSendChatMessage = async (customPrompt?: string) => {
-    const promptToSend = customPrompt || chatInput;
-    if (!promptToSend.trim() || isChatSending) return;
-
-    const userMsg: ChatMessage = {
-      id: `msg_${Date.now()}`,
-      role: 'user',
-      text: promptToSend,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setChatMessages(prev => [...prev, userMsg]);
-    if (!customPrompt) setChatInput('');
-    setIsChatSending(true);
-    setIsCopilotOpen(true);
-
-    try {
-      const response = await fetch('/api/copilot', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messages: [...chatMessages, userMsg].map(m => ({ role: m.role, text: m.text })),
-          datasetContext: {
-            representatives,
-            notices,
-            eventsCount: calendarEvents.length
-          }
-        })
-      });
-
-      const data = await response.json();
-      if (response.ok && data.response) {
-        const assistantMsg: ChatMessage = {
-          id: `msg_${Date.now() + 1}`,
-          role: 'model',
-          text: data.response,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setChatMessages(prev => [...prev, assistantMsg]);
-      } else {
-        throw new Error(data.error || 'Failed to fetch model response');
-      }
-    } catch (err: any) {
-      console.error(err);
-      const errorMsg: ChatMessage = {
-        id: `msg_err_${Date.now()}`,
-        role: 'model',
-        text: `⚠️ I ran into a connection glitch while processing that request: ${err.message || 'Unknown server error'}. Please check that your API keys are correctly defined or try again in a moment.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setChatMessages(prev => [...prev, errorMsg]);
-    } finally {
-      setIsChatSending(false);
-    }
-  };
-
-  // Predefined prompts for rapid query analysis
-  const PRESET_PROMPTS = [
-    { label: "Analyze Conversion", query: "Can you analyze the Call-to-Appointment and Appointment-to-Closing ratios for all representatives, and identify our top performing pipeline strategy?" },
-    { label: "Weekly Update Email", query: "Draft a high-energy weekly recap email for the Next Academy Sales Team to summarize our performance, congratulate top closures, and remind them of the upcoming team building at Happi Village." }
-  ];
-
   const selectedRep = representatives.find(r => r.id === selectedRepId);
 
   // Team calendar = typed events + appointments booked on deals (read from the deals, never copied).
@@ -978,9 +900,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   setSelectedRepId(rep.id);
                   setCurrentTab('operations');
                 }}
-                onUpdateRepKpi={handleUpdateRepKpi}
-                onUpdateRepTargets={handleUpdateRepTargets}
-                onAskCopilot={(prompt) => handleSendChatMessage(prompt)}
                 selectedMonth={selectedMonth}
                 onMonthChange={handleMonthChange}
                 onOpenTeam={() => setManagementView('team')}
@@ -1032,7 +951,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                     setSelectedRepId(null);
                   }}
                   onUpdateRepKpi={handleUpdateRepKpi}
-                  onAskCopilot={(prompt) => handleSendChatMessage(prompt)}
                   selectedMonth={selectedMonth}
                   onMonthChange={handleMonthChange}
                   viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
