@@ -64,6 +64,19 @@ function cut(s: string): string {
   return s.length > MAX_CELL ? `${s.slice(0, MAX_CELL)} …(cut: too long for one cell)` : s;
 }
 
+// Google Sheets (and Excel) treat "Venues" and "venues" as the same tab name. When two lists would clash
+// (e.g. an older "venues" list next to the Venues directory), the later one is renamed so both are kept.
+export function uniqueTabs(tables: Table[]): Table[] {
+  const used = new Set<string>([INFO_TAB.toLowerCase()]);
+  return tables.map(t => {
+    let tab = t.tab;
+    if (used.has(tab.toLowerCase())) tab = `${t.tab} (older list)`;
+    for (let i = 2; used.has(tab.toLowerCase()); i++) tab = `${t.tab} (${i})`;
+    used.add(tab.toLowerCase());
+    return tab === t.tab ? t : { ...t, tab };
+  });
+}
+
 export type Table = { collectionId: string; tab: string; rows: (string | number | boolean)[][]; count: number };
 
 // Records → a table with a header row. "id" comes first, then the fields A to Z.

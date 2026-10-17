@@ -14,7 +14,7 @@ import type { Express, Request, Response } from 'express';
 import ExcelJS from 'exceljs';
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import {
-  INFO_TAB, SKIP_CONFIG_DOCS, Table, infoTable, malaysiaDay, orderCollections, sheetIdFrom, toTable,
+  INFO_TAB, SKIP_CONFIG_DOCS, Table, infoTable, malaysiaDay, orderCollections, sheetIdFrom, toTable, uniqueTabs,
 } from './src/lib/backup';
 
 const API = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -86,7 +86,7 @@ async function sheets(path: string, body?: any): Promise<any> {
       "The CRM can't open that Google Sheet. Check the link, and that the sheet is shared with the CRM's address as Editor (setup step 2).");
   }
   // Show Google's own reason, so a problem can be fixed from a screenshot.
-  const reason = String(data?.error?.message || '').slice(0, 300);
+  const reason = String(data?.error?.message || '').trim().replace(/\.+$/, '').slice(0, 300);
   throw new UserError(502, 'sheets-error', `Google Sheets didn't accept the backup (${res.status})${reason ? `: ${reason}` : ''}. Try again in a minute, or send a screenshot of this message.`);
 }
 
@@ -110,13 +110,13 @@ async function saveSettings(patch: BackupSettings) {
 async function readAllTables(): Promise<Table[]> {
   const { db } = admin();
   const ids = orderCollections((await db.listCollections()).map(c => c.id));
-  return Promise.all(ids.map(async id => {
+  return uniqueTabs(await Promise.all(ids.map(async id => {
     const snap = await db.collection(id).get();
     const docs = snap.docs
       .filter(d => !(id === 'config' && SKIP_CONFIG_DOCS.includes(d.id)))
       .map(d => ({ id: d.id, data: d.data() }));
     return toTable(id, docs);
-  }));
+  })));
 }
 
 // ---------- Write to the Google Sheet ----------
@@ -124,31 +124,33 @@ const a1 = (tab: string) => `'${tab.replace(/'/g, "''")}'`;
 
 export async function writeToSheet(sheetId: string, tables: Table[], info: (string | number)[][], oldTabs: string[]) {
   const meta = await sheets(`${sheetId}?fields=sheets.properties(sheetId,title)`);
+  // Tab names are matched ignoring upper and lower case, as Google does.
   const existing = new Map<string, number>();
-  (meta?.sheets || []).forEach((s: any) => existing.set(s.properties.title, s.properties.sheetId));
+  (meta?.sheets || []).forEach((s: any) => existing.set(String(s.properties.title).toLowerCase(), s.properties.sheetId));
+  const idOf = (tab: string) => existing.get(tab.toLowerCase());
 
   // What each tab should hold. Tabs from an earlier backup whose list is now empty say so (so old data doesn't linger).
   const wanted: { tab: string; rows: any[][] }[] = [{ tab: INFO_TAB, rows: info }, ...tables.map(t => ({ tab: t.tab, rows: t.rows }))];
-  oldTabs.filter(t => !wanted.some(w => w.tab === t)).forEach(tab => wanted.push({ tab, rows: [['No records at this backup.']] }));
+  oldTabs.filter(t => !wanted.some(w => w.tab.toLowerCase() === t.toLowerCase())).forEach(tab => wanted.push({ tab, rows: [['No records at this backup.']] }));
 
   // 1) Add missing tabs.
-  const add = wanted.filter(w => !existing.has(w.tab)).map(w => ({ addSheet: { properties: { title: w.tab } } }));
+  const add = wanted.filter(w => idOf(w.tab) === undefined).map(w => ({ addSheet: { properties: { title: w.tab } } }));
   if (add.length) {
     const r = await sheets(`${sheetId}:batchUpdate`, { requests: add });
-    (r?.replies || []).forEach((rep: any) => existing.set(rep.addSheet.properties.title, rep.addSheet.properties.sheetId));
+    (r?.replies || []).forEach((rep: any) => existing.set(String(rep.addSheet.properties.title).toLowerCase(), rep.addSheet.properties.sheetId));
   }
   // 2) Size every tab to its data (this also removes leftover rows), freeze the header row, put "Backup info" first.
   const requests: any[] = wanted.map((w, i) => ({
     updateSheetProperties: {
       properties: {
-        sheetId: existing.get(w.tab), index: i,
+        sheetId: idOf(w.tab), title: w.tab, index: i,
         gridProperties: {
           rowCount: Math.max(w.rows.length, 2),
           columnCount: Math.max(1, ...w.rows.map(r => r.length)),
           frozenRowCount: w.tab === INFO_TAB ? 0 : 1,
         },
       },
-      fields: 'index,gridProperties.rowCount,gridProperties.columnCount,gridProperties.frozenRowCount',
+      fields: 'title,index,gridProperties.rowCount,gridProperties.columnCount,gridProperties.frozenRowCount',
     },
   }));
   await sheets(`${sheetId}:batchUpdate`, { requests });
