@@ -85,7 +85,9 @@ async function sheets(path: string, body?: any): Promise<any> {
     throw new UserError(503, 'sheet-not-shared',
       "The CRM can't open that Google Sheet. Check the link, and that the sheet is shared with the CRM's address as Editor (setup step 2).");
   }
-  throw new UserError(502, 'sheets-error', `Google Sheets didn't accept the backup (${res.status}). Try again in a minute.`);
+  // Show Google's own reason, so a problem can be fixed from a screenshot.
+  const reason = String(data?.error?.message || '').slice(0, 300);
+  throw new UserError(502, 'sheets-error', `Google Sheets didn't accept the backup (${res.status})${reason ? `: ${reason}` : ''}. Try again in a minute, or send a screenshot of this message.`);
 }
 
 // ---------- Settings ----------
@@ -146,7 +148,7 @@ export async function writeToSheet(sheetId: string, tables: Table[], info: (stri
           frozenRowCount: w.tab === INFO_TAB ? 0 : 1,
         },
       },
-      fields: 'index,gridProperties(rowCount,columnCount,frozenRowCount)',
+      fields: 'index,gridProperties.rowCount,gridProperties.columnCount,gridProperties.frozenRowCount',
     },
   }));
   await sheets(`${sheetId}:batchUpdate`, { requests });
