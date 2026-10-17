@@ -224,6 +224,13 @@ What was built:
   - **Performance layout, again (Joel, 2026-10-17: keep the 2 rings, fix size and position):** the main rings (Company and/or Me, 148px) sit on the left, filling their block with the figures beside them. Each person gets medium rings (96px) on the right in a wrapping grid. It stacks on phones. Inside each ring the year % is big, with the month % small underneath. Empty (0%) arcs are no longer drawn as stray dots.
   - Joel asked: everyone has their own My home (yes). Content depends on role, and each person's Customise choice affects only their own page.
   - Admin work can be opened on a chosen tab (`initialView`) from the cards.
+  - **Customisable shortcuts (Joel, 2026-10-17: "follow the limit of their portal capabilities only"):** in **Customise**, each person adds, removes (×) and reorders (arrows) the shortcut buttons at the top, saved in `user_prefs/{id}.homeShortcuts`. The library is `SHORTCUTS` in `MyHome.tsx`, each with a `need`:
+    - `workspace`: My workspace, My KPI, My deals, Quotations, Course outlines, Clients, Trainers, Venues, To-do. Their own workspace only; anyone with a workspace (reps, admins, Management with a KPI set).
+    - `all`: Full calendar.
+    - `staff`: Admin work, Work queue, Money, Programmes, Checklist tasks, Backup.
+    - `management`: Management, Team performance, Project P&L, Team, Data tools.
+    - Saved shortcuts the person's role no longer allows are never shown, and `goShortcut` checks again. The screens keep their own role checks (`openAdminWork`/`openManagement` in `App.tsx` refuse the wrong role). Defaults are My workspace, Admin work, Management (as allowed). "Reset cards and shortcuts" restores them. `openManagement(view)` and `openAdminWork('backup')` open a chosen tab.
+    - Management with a KPI set can also add the "My KPI this month" and "My won deals" cards.
   - **Company sales target and period (Joel, 2026-10-17):** Management → Dashboard → **Company sales target** (`CompanyTarget` in `ManagementDashboard.tsx`; logic `src/lib/salesTarget.ts`, live via `useSalesTarget`). Management types the **total for the period**, a **monthly target** (both typed, they needn't match) and the **first and last month** (e.g. Jul 2026 to Jun 2027). Saved in `config/sales_target`; the rule is Management only. **Rules need publishing.**
     - Company ring: the outer ring is sales won from the period's start to today against the total; the inner ring is this month against the monthly target. **Each person's ring follows the same period** (their monthly Closing RM target × the months in it). The tiles on Team performance say "<period> so far".
     - Not set = the old rule: January to December, and the company target is the sum of each person's targets.

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import {
   AlertTriangle, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardCheck, GripVertical, LayoutGrid, Loader2, Plus, RotateCcw, ShieldCheck, Users, X,
+  BarChart3, TrendingUp, FileText, BookOpen, Building2, GraduationCap, MapPin, ListTodo, ListChecks, Wallet, Layers, ListOrdered, DatabaseBackup, LineChart, PieChart, UserCog, Wrench,
 } from 'lucide-react';
 import GridLayout, { WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
@@ -53,14 +54,49 @@ const DEFAULT_CARDS: Record<Role, CardId[]> = {
   management: ['approvals', 'money_position', 'pipeline', 'team_appointments', 'next14'],
 };
 
+// ---------- Shortcut library (Joel, 2026-10-17) ----------
+// Each person picks and orders their own shortcut buttons (user_prefs/{id}.homeShortcuts). What is offered
+// follows their role: own-workspace pages for anyone with a workspace (reps, admins, Management with a KPI set),
+// Admin work pages for Admin and Management, Management pages for Management. A saved shortcut the person
+// is no longer allowed is never shown, and every screen still checks the role itself when opened.
+type ShortcutId =
+  | 'workspace' | 'ws_kpi' | 'ws_deals' | 'ws_quotes' | 'ws_outlines' | 'ws_clients' | 'ws_trainers' | 'ws_venues' | 'ws_todo'
+  | 'calendar' | 'admin_work' | 'aw_queue' | 'aw_money' | 'aw_programmes' | 'aw_tasks' | 'aw_backup'
+  | 'management' | 'mg_dashboard' | 'mg_pl' | 'mg_team' | 'mg_data';
+type Need = 'workspace' | 'all' | 'staff' | 'management';
+const SHORTCUTS: { id: ShortcutId; label: string; icon: React.ComponentType<{ className?: string }>; need: Need; tab?: string; view?: string }[] = [
+  { id: 'workspace', label: 'My workspace', icon: Briefcase, need: 'workspace' },
+  { id: 'ws_kpi', label: 'My KPI', icon: BarChart3, need: 'workspace', tab: 'kpi' },
+  { id: 'ws_deals', label: 'My deals', icon: TrendingUp, need: 'workspace', tab: 'pipeline' },
+  { id: 'ws_quotes', label: 'Quotations', icon: FileText, need: 'workspace', tab: 'quotation' },
+  { id: 'ws_outlines', label: 'Course outlines', icon: BookOpen, need: 'workspace', tab: 'course_outline' },
+  { id: 'ws_clients', label: 'Clients', icon: Building2, need: 'workspace', tab: 'client' },
+  { id: 'ws_trainers', label: 'Trainers', icon: GraduationCap, need: 'workspace', tab: 'trainerList' },
+  { id: 'ws_venues', label: 'Venues', icon: MapPin, need: 'workspace', tab: 'venue' },
+  { id: 'ws_todo', label: 'To-do', icon: ListTodo, need: 'workspace', tab: 'tasks' },
+  { id: 'calendar', label: 'Full calendar', icon: CalendarDays, need: 'all' },
+  { id: 'admin_work', label: 'Admin work', icon: ClipboardCheck, need: 'staff' },
+  { id: 'aw_queue', label: 'Work queue', icon: ListChecks, need: 'staff', view: 'queue' },
+  { id: 'aw_money', label: 'Money', icon: Wallet, need: 'staff', view: 'money' },
+  { id: 'aw_programmes', label: 'Programmes', icon: Layers, need: 'staff', view: 'programmes' },
+  { id: 'aw_tasks', label: 'Checklist tasks', icon: ListOrdered, need: 'staff', view: 'tasks' },
+  { id: 'aw_backup', label: 'Backup', icon: DatabaseBackup, need: 'staff', view: 'backup' },
+  { id: 'management', label: 'Management', icon: ShieldCheck, need: 'management' },
+  { id: 'mg_dashboard', label: 'Team performance', icon: LineChart, need: 'management', view: 'dashboard' },
+  { id: 'mg_pl', label: 'Project P&L', icon: PieChart, need: 'management', view: 'pl' },
+  { id: 'mg_team', label: 'Team', icon: UserCog, need: 'management', view: 'team' },
+  { id: 'mg_data', label: 'Data tools', icon: Wrench, need: 'management', view: 'data' },
+];
+const DEFAULT_SHORTCUTS: ShortcutId[] = ['workspace', 'admin_work', 'management'];
+
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink disabled:opacity-30';
 
 export interface MyHomeNav {
   openWorkspace: (repId: string, subTab?: string) => void;
-  openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks') => void;
-  openManagement: () => void;
+  openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup') => void;
+  openManagement: (view?: 'dashboard' | 'pl' | 'team' | 'data') => void;
 }
 
 export default function MyHome({ viewer, people, representatives, deals, events, calendar, notices, nav }: {
@@ -86,6 +122,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const [programmes, setProgrammes] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<CardId[] | null>(null);
+  const [savedShortcuts, setSavedShortcuts] = useState<ShortcutId[] | null>(null);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [customising, setCustomising] = useState(false);
   const [prefsError, setPrefsError] = useState('');
@@ -101,8 +138,9 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(doc(db, 'user_prefs', viewer.id), s => {
-        const c = s.data()?.homeCards, l = s.data()?.homeLayout;
+        const c = s.data()?.homeCards, l = s.data()?.homeLayout, sc = s.data()?.homeShortcuts;
         setSavedCards(Array.isArray(c) ? c : null);
+        setSavedShortcuts(Array.isArray(sc) ? sc : null);
         setSavedLayout(Array.isArray(l) ? l : null);
         setPrefsLoaded(true);
       }, () => setPrefsLoaded(true)),
@@ -115,7 +153,38 @@ export default function MyHome({ viewer, people, representatives, deals, events,
     return () => subs.forEach(u => u());
   }, [viewer.id, staff]);
 
-  const allowed = CARDS.filter(c => c.roles.includes(viewer.role));
+  const hasWorkspace = (id: string) => representatives.some(r => r.id === id);
+  // Management with a KPI set (e.g. Ying) can also have the personal KPI cards.
+  const allowed = CARDS.filter(c => c.roles.includes(viewer.role)
+    || (viewer.role === 'management' && hasWorkspace(viewer.id) && (c.id === 'my_kpi' || c.id === 'my_won')));
+
+  // Shortcuts: only the ones this person's role allows, whatever was saved.
+  const mayUse = (need: Need) => need === 'all' || (need === 'workspace' ? hasWorkspace(viewer.id) : need === 'staff' ? staff : viewer.role === 'management');
+  const allowedShortcuts = SHORTCUTS.filter(s => mayUse(s.need));
+  const shortcuts: ShortcutId[] = (savedShortcuts || DEFAULT_SHORTCUTS).filter(id => allowedShortcuts.some(s => s.id === id));
+  const saveShortcuts = async (next: ShortcutId[]) => {
+    setSavedShortcuts(next);
+    setPrefsError('');
+    try {
+      await setDoc(doc(db, 'user_prefs', viewer.id), { homeShortcuts: next, updatedAt: Date.now() }, { merge: true });
+    } catch (err) {
+      setPrefsError(friendlyError(err));
+    }
+  };
+  const moveShortcut = (id: ShortcutId, by: number) => {
+    const i = shortcuts.indexOf(id), j = i + by;
+    if (i < 0 || j < 0 || j >= shortcuts.length) return;
+    const next = [...shortcuts];
+    [next[i], next[j]] = [next[j], next[i]];
+    saveShortcuts(next);
+  };
+  const goShortcut = (s: typeof SHORTCUTS[number]) => {
+    if (!mayUse(s.need)) return;
+    if (s.need === 'workspace') return nav.openWorkspace(viewer.id, s.tab);
+    if (s.id === 'calendar') return setShowFullCalendar(true);
+    if (s.need === 'staff') return nav.openAdminWork(s.view as any);
+    if (s.need === 'management') return nav.openManagement(s.view as any);
+  };
   const cards: CardId[] = (savedCards || DEFAULT_CARDS[viewer.role]).filter(id => allowed.some(c => c.id === id));
 
   // Card choice and layout are saved together on the person's own prefs (only they can read or write them).
@@ -139,7 +208,6 @@ export default function MyHome({ viewer, people, representatives, deals, events,
 
   const nameOf = (id: string) => people.find(p => p.id === id)?.name || 'Former team member';
   const clientName = (p: any) => clients.find(c => c.id === p.clientId)?.companyName || p.client || 'No client';
-  const hasWorkspace = (id: string) => representatives.some(r => r.id === id);
   // Management can open anyone's workspace; everyone else only their own (Admin goes to the work queue).
   const openDeal = (p: any) => {
     const owner = dealOwnerId(p);
@@ -156,13 +224,23 @@ export default function MyHome({ viewer, people, representatives, deals, events,
 
   return (
     <div className="space-y-6 font-sans text-ink">
-      {/* Shortcuts */}
+      {/* Shortcuts: each person's own choice, limited to what their role can open */}
       <div className="flex flex-wrap items-center gap-2">
-        {hasWorkspace(viewer.id) && (
-          <button type="button" className={btnSecondary} onClick={() => nav.openWorkspace(viewer.id)}><Briefcase className="h-4 w-4 text-accent" /> My workspace</button>
-        )}
-        {staff && <button type="button" className={btnSecondary} onClick={() => nav.openAdminWork()}><ClipboardCheck className="h-4 w-4 text-accent" /> Admin work</button>}
-        {viewer.role === 'management' && <button type="button" className={btnSecondary} onClick={nav.openManagement}><ShieldCheck className="h-4 w-4 text-accent" /> Management</button>}
+        {shortcuts.map((id, i) => {
+          const s = SHORTCUTS.find(x => x.id === id)!;
+          const Icon = s.icon;
+          return customising ? (
+            <span key={id} className="inline-flex items-center gap-0.5 rounded-lg border border-accent/40 bg-white py-1 pl-1 pr-1 text-sm font-semibold">
+              <button type="button" className={iconBtn} disabled={i === 0} onClick={() => moveShortcut(id, -1)} aria-label={`Move ${s.label} left`}><ChevronLeft className="h-4 w-4" /></button>
+              <Icon className="h-4 w-4 text-accent" /><span className="px-1">{s.label}</span>
+              <button type="button" className={iconBtn} disabled={i === shortcuts.length - 1} onClick={() => moveShortcut(id, 1)} aria-label={`Move ${s.label} right`}><ChevronRight className="h-4 w-4" /></button>
+              <button type="button" className={iconBtn} onClick={() => saveShortcuts(shortcuts.filter(x => x !== id))} aria-label={`Remove ${s.label}`}><X className="h-4 w-4" /></button>
+            </span>
+          ) : (
+            <button key={id} type="button" className={btnSecondary} onClick={() => goShortcut(s)}><Icon className="h-4 w-4 text-accent" /> {s.label}</button>
+          );
+        })}
+        {shortcuts.length === 0 && !customising && <span className="text-sm text-ink-soft">No shortcuts. Click Customise to add some.</span>}
         {viewer.role === 'management' && (
           <label className="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold">
             <Users className="h-4 w-4 text-accent" />
@@ -193,7 +271,8 @@ export default function MyHome({ viewer, people, representatives, deals, events,
           </button>
         </div>
         {prefsError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{prefsError}</p>}
-        {customising && <EditBar hidden={allowed.filter(c => !cards.includes(c.id))} wide={wide} onAdd={addCard} onReset={resetLayout} />}
+        {customising && <EditBar hidden={allowed.filter(c => !cards.includes(c.id))} wide={wide} onAdd={addCard} onReset={() => { resetLayout(); saveShortcuts(DEFAULT_SHORTCUTS); }}
+          hiddenShortcuts={allowedShortcuts.filter(s => !shortcuts.includes(s.id))} onAddShortcut={id => saveShortcuts([...shortcuts, id])} />}
         {!prefsLoaded ? (
           <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading your cards…</p>
         ) : cards.length === 0 ? (
@@ -272,9 +351,22 @@ function useWide(): boolean {
   return wide;
 }
 
-function EditBar({ hidden, wide, onAdd, onReset }: { hidden: typeof CARDS; wide: boolean; onAdd: (id: CardId) => void; onReset: () => void }) {
+function EditBar({ hidden, wide, onAdd, onReset, hiddenShortcuts, onAddShortcut }: {
+  hidden: typeof CARDS; wide: boolean; onAdd: (id: CardId) => void; onReset: () => void;
+  hiddenShortcuts: typeof SHORTCUTS; onAddShortcut: (id: ShortcutId) => void;
+}) {
   return (
     <div className="space-y-3 rounded-2xl border border-accent/30 bg-accent-soft/40 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold">Shortcuts at the top:</span>
+        <span className="text-sm text-ink-soft">use the arrows to reorder, × to remove.</span>
+        {hiddenShortcuts.length > 0 && <span className="text-sm font-semibold">Add a shortcut:</span>}
+        {hiddenShortcuts.map(s => (
+          <button key={s.id} type="button" onClick={() => onAddShortcut(s.id)} className="inline-flex items-center gap-1 rounded-full border border-line bg-white px-3 py-1 text-sm font-medium hover:bg-surface">
+            <Plus className="h-3.5 w-3.5" />{s.label}
+          </button>
+        ))}
+      </div>
       <p className="text-sm text-ink">
         {wide
           ? <>Drag a card by its <strong>title</strong> to move it. Pull its <strong>right or bottom edge</strong> (or the corner) to resize it. <strong>×</strong> removes it.</>
@@ -288,8 +380,8 @@ function EditBar({ hidden, wide, onAdd, onReset }: { hidden: typeof CARDS; wide:
             <Plus className="h-3.5 w-3.5" />{c.title}
           </button>
         ))}
-        <button type="button" onClick={() => { if (window.confirm('Go back to the standard cards and layout for your role?')) onReset(); }} className="ml-auto inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline">
-          <RotateCcw className="h-3.5 w-3.5" /> Reset layout
+        <button type="button" onClick={() => { if (window.confirm('Go back to the standard cards, layout and shortcuts for your role?')) onReset(); }} className="ml-auto inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline">
+          <RotateCcw className="h-3.5 w-3.5" /> Reset cards and shortcuts
         </button>
       </div>
     </div>

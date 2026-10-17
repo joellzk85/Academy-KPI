@@ -217,7 +217,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [managementView, setManagementView] = useState<'dashboard' | 'pl' | 'team' | 'data'>('dashboard');
-  const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks'>('queue');
+  const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks' | 'backup'>('queue');
 
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
     const saved = localStorage.getItem('next_events');
@@ -721,13 +721,17 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setSelectedRepId(repId);
       setCurrentTab('operations');
     },
-    openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks') => {
+    openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup') => {
       if (!isStaff) return;
       setAdminView(view || 'queue');
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
-    openManagement: () => handleSwitchTab('management'),
+    openManagement: (view?: 'dashboard' | 'pl' | 'team' | 'data') => {
+      if (!isManagement) return;
+      if (view) setManagementView(view);
+      handleSwitchTab('management');
+    },
   };
 
   // Formatted date string
