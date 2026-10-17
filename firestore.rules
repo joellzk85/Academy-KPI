@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion + course outlines + trainer and venue deletion + to-do tasks)
+// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion + course outlines + trainer and venue deletion + to-do tasks + Google Calendar)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -46,12 +46,13 @@ service cloud.firestore {
     }
 
     // Settings. The admin checklist's master task list and money settings: Admin and Management only.
+    // google_calendar (the shared Google Calendar's ID and sync status) is written only by the CRM server.
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar']))
                             || (docId in ['checklist_tasks', 'money_settings'] && isStaff());
       allow delete: if (docId == 'passwords' && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings']));
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -148,6 +149,11 @@ service cloud.firestore {
                            || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == '')));
       allow delete: if isStaff()
         || (isMember() && request.auth.uid in quotePeople(resource.data));
+    }
+
+    // What the CRM has sent to the shared Google Calendar: only the CRM server uses this.
+    match /calendar_sync/{id} {
+      allow read, write: if false;
     }
 
     // Trainers: every team member can add and edit; only Management can delete.

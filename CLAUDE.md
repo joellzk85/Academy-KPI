@@ -282,6 +282,25 @@ What was built:
   - **"Booked" was removed** (Joel). Status is Available or On leave only; old "Booked" records show as Available, and bookings come from the deals.
   - **Only Management can delete a trainer**, and only if no quotation or admin checklist uses them. `trainers_directory` has its own rule and left the catch-all list. **Rules need publishing.**
   - Removed: the stat boxes, dark control panel, status and sort filters, undo banner and the 8-column table.
+- **Google Calendar (built 2026-10-17; Joel chose one shared company calendar, synced both ways):**
+  - **How it connects:** the CRM **server** uses its own Google identity: the App Hosting service account, via the Cloud Run metadata server with the calendar scope. Nobody signs in to Google, which fits the no-emails login.
+    - Management shares the company calendar with that address ("Make changes to events") and saves the Calendar ID in the CRM. The ID is in `config/google_calendar`, which only the server writes.
+    - The old pop-up Google sign-in (Firebase Google provider, hardcoded nextacademy24/lzk.joel emails, attendee email invites) was removed.
+  - **Server:** `serverCalendar.ts`, registered in `server.ts`, with these routes (all need a logged-in member; settings is Management only):
+    - `/api/calendar/status`: shows the address to share the calendar with, for Management.
+    - `/api/calendar/settings`: tests the calendar, then saves it.
+    - `/api/calendar/events`: Google events for a date range. The CRM's own synced items are left out.
+    - `/api/calendar/sync`: CRM to Google, at most once a minute unless forced.
+    - Errors come in plain language: API not switched on, calendar not shared, not the live site.
+  - **What goes to Google** (`src/lib/calendarSync.ts`, pure and tested):
+    - CRM calendar events, with tagged teammates' names in the description.
+    - Deal appointments, booked or held, at their time.
+    - Won deals' training dates as all-day events, with programme, venue, trainer (the same rules as the deal panel), participants and owner.
+    - Each has a fixed Google event id (`googleIdFor`), so there are never duplicates. What was sent is kept in `calendar_sync/{googleId}` (server-only) with a fingerprint, so unchanged items are skipped and removed ones are deleted from Google. Malaysia time.
+  - **When:** the app syncs on load and every 5 minutes, and forces a sync right after adding or deleting a CRM calendar event (`refreshGoogleCalendar` in `App.tsx`). So deal changes reach Google within about 5 minutes, or straight away with "Sync now".
+  - **Google to CRM:** Google events show on both calendars with a "Google" tag. They are read-only in the CRM ("Open in Google"; deleting is refused).
+  - **UI:** `src/components/GoogleCalendarBar.tsx` on the full calendar shows status, last sync and Sync now. For Management it also shows the 3 setup steps, the address to share with (with Copy), and the Calendar ID box (Save and test; blank = disconnect).
+  - **Joel's one-time setup:** 1) enable the Google Calendar API in project gen-lang-client-0779528352; 2) share the calendar with the service account address shown in the bar; 3) paste the Calendar ID. **Rules need publishing** (`calendar_sync` server-only; `google_calendar` added to the protected config docs).
 - **To-do (redesigned 2026-10-17, was "Pending tasks"):** `src/components/TasksPage.tsx`, logic in `src/lib/tasks.ts`.
   - **One shared task per job.** The old screen made a copy for the person it was assigned to, so ticks drifted apart. Old copies (`isDuplicate`) are now skipped. Field names are kept (`detail`, `dateline`, `status` Not done/Done, `assignedById`, `assignedToId`), plus `doneAt`, `doneByName` and `pipelineId` (the deal it is about). Very old tasks fall back to `ownerRepId`.
   - The screen has a quick add bar (what, due, assign to: me by default or any teammate, optional deal), then the views **My to-do / I asked others / Everyone's** (Management). Tasks are grouped Overdue, Today, Next 7 days, Later, No date, with Done collapsed.

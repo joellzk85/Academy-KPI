@@ -399,7 +399,7 @@ function CompactCalendar({ events, today, full }: { events: CalendarEvent[]; tod
         {hover ? (
           <>
             <p className="font-semibold">{formatDate(hover)}</p>
-            {hoverEvents.length === 0 ? <p className="text-ink-soft">No events</p> : hoverEvents.map(e => <p key={e.id} className="truncate text-ink-soft">{e.time ? `${e.time} · ` : ''}{e.title}</p>)}
+            {hoverEvents.length === 0 ? <p className="text-ink-soft">No events</p> : hoverEvents.map(e => <p key={e.id} className="truncate text-ink-soft">{e.time ? `${e.time} · ` : ''}{e.title}{e.source === 'google' && <span className="ml-1 rounded bg-sky-50 px-1 text-[10px] font-semibold text-sky-700">Google</span>}</p>)}
           </>
         ) : <p className="text-ink-soft">Point at a date to see its events.</p>}
       </div>

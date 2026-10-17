@@ -23,7 +23,7 @@ const EMPTY_KPI = { salesFigure: [0, 0, 0, 0, 0], proposals: [0, 0, 0, 0, 0], pr
 
 // ---------- Firebase (admin) connection, started on first use ----------
 let adminApp: App | null = null;
-function admin() {
+export function admin() {
   if (!adminApp) {
     adminApp = getApps()[0] || initializeApp({ projectId: (firebaseConfig as any).projectId });
   }
@@ -33,7 +33,7 @@ function admin() {
 }
 
 // ---------- Errors shown to people in plain language ----------
-class UserError extends Error {
+export class UserError extends Error {
   status: number;
   code: string;
   constructor(status: number, code: string, message: string) {
@@ -122,7 +122,7 @@ function recordFail(memberId: string) {
 }
 
 // ---------- Who is calling? ----------
-async function callerFrom(req: Request) {
+export async function callerFrom(req: Request) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token) throw new UserError(401, 'not-logged-in', 'You are logged out. Log in again.');
@@ -139,7 +139,7 @@ async function callerFrom(req: Request) {
   return { memberId: uid, role: data.role as Role };
 }
 
-async function managementFrom(req: Request) {
+export async function managementFrom(req: Request) {
   const caller = await callerFrom(req);
   if (caller.role !== 'management') throw new UserError(403, 'management-only', 'Only Management can do this.');
   return caller;
@@ -167,7 +167,7 @@ async function getMember(db: Firestore, memberId: unknown) {
 }
 
 // Wraps each route so every error becomes a clear message.
-function route(handler: (req: Request, res: Response) => Promise<any>) {
+export function route(handler: (req: Request, res: Response) => Promise<any>) {
   return async (req: Request, res: Response) => {
     try {
       const result = await handler(req, res);

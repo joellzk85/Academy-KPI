@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { registerAuthRoutes } from "./serverAuth";
+import { registerCalendarRoutes } from "./serverCalendar";
 
 // Load environment variables
 dotenv.config();
@@ -42,6 +43,9 @@ async function startServer() {
 
   // Login and team management (passwords are checked here, on the server)
   registerAuthRoutes(app);
+
+  // The shared Google Calendar (the server connects; nobody signs in to Google)
+  registerCalendarRoutes(app);
 
   // API Routes
   app.get("/api/health", (req, res) => {

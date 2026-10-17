@@ -122,6 +122,8 @@ export interface CalendarEvent {
   attendees?: string[]; // IDs of representatives tagged/invited
   syncWithGoogle?: boolean;
   gmailCalendarSync?: string;
+  source?: 'google';       // shown from the shared Google Calendar (read-only in the CRM)
+  link?: string;           // opens it in Google Calendar
 }
 
 export interface QuotationItem {

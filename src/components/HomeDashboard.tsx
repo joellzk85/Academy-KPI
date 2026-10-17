@@ -3,7 +3,7 @@ import { Representative, CalendarEvent } from '../types';
 import { getRepMetrics } from '../initialData';
 import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
 import { Plus, Calendar, ChevronLeft, ChevronRight, Edit3, Trash2, Megaphone, HelpCircle, Check, Users, RefreshCw } from 'lucide-react';
-import { initAuth, googleSignIn, googleSignOut, syncEventToGoogleCalendar } from '../lib/googleCalendar';
+import GoogleCalendarBar from './GoogleCalendarBar';
 
 interface HomeDashboardProps {
   reps: Representative[];
@@ -26,6 +26,9 @@ interface HomeDashboardProps {
   monthKpisSync?: any[];
   // Show only one part (used by My home). Leave out for the full page.
   section?: 'calendar' | 'notices';
+  // The shared Google Calendar bar (2026-10-17)
+  canManageCalendar?: boolean;
+  onCalendarChanged?: () => void;
 }
 
 // Deals come only from the live database (no sample data).
@@ -187,7 +190,9 @@ export default function HomeDashboard({
   quotationsSync,
   outlinesSync,
   monthKpisSync,
-  section
+  section,
+  canManageCalendar,
+  onCalendarChanged
 }: HomeDashboardProps) {
   // Calendar state — defaults to today's actual month/year, not a hardcoded one
   const today = new Date();
@@ -212,40 +217,8 @@ export default function HomeDashboard({
   const [newNoticeText, setNewNoticeText] = useState('');
   const [showNoticeInput, setShowNoticeInput] = useState(false);
 
-  // Google Calendar Integration State
-  const [googleUser, setGoogleUser] = useState<any>(null);
-  const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+  // Teammates tagged on a new event (their names go on the Google Calendar event).
   const [selectedRepIdsForEvent, setSelectedRepIdsForEvent] = useState<string[]>([]);
-  const [syncToGoogleCheckbox, setSyncToGoogleCheckbox] = useState(true);
-
-  // Setup Firebase Auth Listener for Google Workspace API Sync
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (user, token) => {
-        if (user.email === 'lzk.joel@gmail.com') {
-          googleSignOut();
-          setGoogleUser(null);
-          setGoogleToken(null);
-          setSyncStatusMsg("lzk.joel@gmail.com calendar is disconnected. Only nextacademy24@gmail.com calendar is supported.");
-          setTimeout(() => setSyncStatusMsg(null), 6000);
-        } else {
-          setGoogleUser(user);
-          setGoogleToken(token);
-        }
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
-      }
-    );
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, []);
 
   // Month navigation helpers
   const monthNames = [
@@ -324,138 +297,18 @@ export default function HomeDashboard({
     e.preventDefault();
     if (!newEventTitle.trim()) return;
 
-    // Fetch attendee emails
-    const attendeeEmails = selectedRepIdsForEvent.map(repId => {
-      const foundRep = reps.find(r => r.id === repId);
-      return foundRep?.email || `${repId}@nextenergy24.com`;
-    });
-
-    let googleSyncSucceeded = false;
-    let syncErrorMsg = null;
-
-    if (syncToGoogleCheckbox && googleToken) {
-      setIsSyncing(true);
-      setSyncStatusMsg("Syncing event with Google Calendar...");
-      try {
-        await syncEventToGoogleCalendar(
-          newEventTitle,
-          selectedDayStr,
-          newEventTime,
-          attendeeEmails
-        );
-        googleSyncSucceeded = true;
-      } catch (err: any) {
-        console.error("Google Calendar Sync failed:", err);
-        syncErrorMsg = err.message || String(err);
-      } finally {
-        setIsSyncing(false);
-      }
-    }
-
+    // The CRM saves it; the server then puts it on the shared Google Calendar.
     onAddEvent({
       time: newEventTime,
       title: newEventTitle,
       date: selectedDayStr,
       color: newEventColor,
       attendees: selectedRepIdsForEvent,
-      syncWithGoogle: googleSyncSucceeded,
-      gmailCalendarSync: googleUser?.email || 'nextacademy24@gmail.com'
     });
-
-    if (googleSyncSucceeded) {
-      setSyncStatusMsg("Successfully added event and synced with Google Calendar!");
-      setTimeout(() => setSyncStatusMsg(null), 4000);
-    } else if (syncErrorMsg) {
-      setSyncStatusMsg(`Event added locally, but Google Calendar sync failed: ${syncErrorMsg}`);
-      setTimeout(() => setSyncStatusMsg(null), 6000);
-    } else {
-      setSyncStatusMsg("Event added locally!");
-      setTimeout(() => setSyncStatusMsg(null), 3000);
-    }
 
     setNewEventTitle('');
     setSelectedRepIdsForEvent([]);
     setShowAddEventModal(false);
-  };
-
-  const handleGoogleLogin = async () => {
-    try {
-      setSyncStatusMsg("Opening Google Sign-In...");
-      const res = await googleSignIn();
-      if (res) {
-        if (res.user.email === 'lzk.joel@gmail.com') {
-          await googleSignOut();
-          setGoogleUser(null);
-          setGoogleToken(null);
-          setSyncStatusMsg("lzk.joel@gmail.com calendar is disconnected. Only nextacademy24@gmail.com calendar is supported.");
-          setTimeout(() => setSyncStatusMsg(null), 6000);
-        } else {
-          setGoogleUser(res.user);
-          setGoogleToken(res.accessToken);
-          setSyncStatusMsg("Connected to Google Calendar successfully!");
-          setTimeout(() => setSyncStatusMsg(null), 3000);
-        }
-      }
-    } catch (err: any) {
-      console.error("Login failed:", err);
-      setSyncStatusMsg(`Failed to connect Google Calendar: ${err.message || String(err)}`);
-      setTimeout(() => setSyncStatusMsg(null), 5000);
-    }
-  };
-
-  const handleGoogleLogout = async () => {
-    await googleSignOut();
-    setGoogleUser(null);
-    setGoogleToken(null);
-    setSyncStatusMsg("Google Calendar disconnected.");
-    setTimeout(() => setSyncStatusMsg(null), 3000);
-  };
-
-  const handleResyncCalendar = async () => {
-    if (!googleToken) {
-      setSyncStatusMsg("Cannot resync: Google Calendar is not connected.");
-      setTimeout(() => setSyncStatusMsg(null), 3000);
-      return;
-    }
-
-    setIsSyncing(true);
-    setSyncStatusMsg("Checking Google Calendar connection & syncing events...");
-    try {
-      const unsyncedEvents = events.filter(ev => !ev.syncWithGoogle);
-      
-      if (unsyncedEvents.length > 0) {
-        setSyncStatusMsg(`Found ${unsyncedEvents.length} unsynced local event(s). Syncing...`);
-        let count = 0;
-        for (const ev of unsyncedEvents) {
-          const attendeeEmails = (ev.attendees || []).map(repId => {
-            const foundRep = reps.find(r => r.id === repId);
-            return foundRep?.email || `${repId}@nextenergy24.com`;
-          });
-          try {
-            await syncEventToGoogleCalendar(ev.title, ev.date, ev.time, attendeeEmails);
-            ev.syncWithGoogle = true;
-            count++;
-          } catch (err) {
-            console.warn(`Failed to sync event "${ev.title}":`, err);
-          }
-        }
-        if (count > 0) {
-          setSyncStatusMsg(`Successfully synced ${count} event(s) with Google Calendar!`);
-        } else {
-          setSyncStatusMsg("Verification complete. No events were synced due to connection limits.");
-        }
-      } else {
-        await new Promise(resolve => setTimeout(resolve, 800));
-        setSyncStatusMsg("Google Calendar is fully in-sync! No unsynced local events found.");
-      }
-      setTimeout(() => setSyncStatusMsg(null), 4000);
-    } catch (err: any) {
-      console.error("Resync failed:", err);
-      setSyncStatusMsg(`Resync failed: ${err.message || String(err)}`);
-      setTimeout(() => setSyncStatusMsg(null), 5000);
-    } finally {
-      setIsSyncing(false);
-    }
   };
 
   const handleAddRepSubmit = (e: React.FormEvent) => {
@@ -808,51 +661,8 @@ export default function HomeDashboard({
             </div>
           </div>
 
-          {/* Google Calendar Connection Status Bar */}
-          <div className="bg-slate-50 border border-slate-100/80 rounded-lg p-2.5 my-2 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${googleToken ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-              <div className="text-left">
-                <span className="font-bold text-slate-700 block text-[11px]">Google Calendar Integration</span>
-                <span className="text-[9px] text-slate-400 font-medium block">
-                  {googleToken ? `Synced to: nextacademy24@gmail.com (${googleUser?.email})` : 'Target calendar: nextacademy24@gmail.com'}
-                </span>
-              </div>
-            </div>
-            {googleToken ? (
-              <div className="flex items-center gap-1.5">
-                <button 
-                  onClick={handleResyncCalendar}
-                  disabled={isSyncing}
-                  className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-150 px-2 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                  title="Resync events with Google Calendar"
-                >
-                  <RefreshCw className={`w-2.5 h-2.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  Resync
-                </button>
-                <button 
-                  onClick={handleGoogleLogout} 
-                  className="text-[9px] font-bold text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-150 border border-rose-100 px-2 py-1 rounded transition-colors cursor-pointer"
-                >
-                  Disconnect
-                </button>
-              </div>
-            ) : (
-              <button 
-                onClick={handleGoogleLogin} 
-                className="text-[9px] font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-100 px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <RefreshCw className="w-2.5 h-2.5" />
-                Connect Account
-              </button>
-            )}
-          </div>
-
-          {syncStatusMsg && (
-            <div className="bg-amber-50 text-amber-800 border border-amber-200 rounded p-2 text-[10px] font-medium text-center mb-2">
-              {syncStatusMsg}
-            </div>
-          )}
+          {/* The shared Google Calendar (status, Sync now; Management: setup) */}
+          <GoogleCalendarBar canManage={!!canManageCalendar} onChanged={onCalendarChanged} />
 
           {/* Days Grid Headers */}
           <div className="grid grid-cols-7 text-center py-2 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50">
@@ -935,8 +745,8 @@ export default function HomeDashboard({
                       <div>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="text-xs font-bold text-slate-800">{ev.title}</p>
-                          {ev.syncWithGoogle && (
-                            <span className="text-[8px] bg-blue-50 text-blue-600 font-extrabold px-1 rounded border border-blue-100 flex items-center gap-0.5" title="Synced to Google Calendar">
+                          {ev.source === 'google' && (
+                            <span className="text-[8px] bg-blue-50 text-blue-600 font-extrabold px-1 rounded border border-blue-100 flex items-center gap-0.5" title="From Google Calendar">
                               <Check className="w-2 h-2" /> Google
                             </span>
                           )}
@@ -959,12 +769,16 @@ export default function HomeDashboard({
                         )}
                       </div>
                     </div>
+                    {ev.source === 'google' ? (
+                      ev.link ? <a href={ev.link} target="_blank" rel="noreferrer" className="text-[10px] font-semibold text-blue-600 hover:underline">Open in Google</a> : null
+                    ) : (
                     <button 
                       onClick={() => onDeleteEvent(ev.id)}
                       className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
+                    )}
                   </div>
                 ))
               )}
@@ -1159,7 +973,7 @@ export default function HomeDashboard({
               {/* Invite/Tag Other Representatives */}
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Invite Representatives (Link to their Calendars)
+                  Tag teammates (their names go on the Google Calendar event)
                 </label>
                 <div className="grid grid-cols-2 gap-1.5 max-h-24 overflow-y-auto border border-slate-200 rounded p-2">
                   {reps.map(rep => (
@@ -1180,24 +994,6 @@ export default function HomeDashboard({
                     </label>
                   ))}
                 </div>
-              </div>
-
-              {/* Sync with Google Calendar Sync Check */}
-              <div className="pt-1">
-                <label className="flex items-start gap-2 cursor-pointer bg-slate-50 p-2 rounded border border-slate-100">
-                  <input 
-                    type="checkbox"
-                    checked={syncToGoogleCheckbox}
-                    onChange={(e) => setSyncToGoogleCheckbox(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 border-slate-300 cursor-pointer mt-0.5"
-                  />
-                  <div className="text-left">
-                    <span className="text-[11px] font-bold text-slate-700 block leading-tight">Sync with nextacademy24@gmail.com</span>
-                    <span className="text-[9px] text-slate-400 block mt-0.5">
-                      {googleToken ? 'Authenticated. Google Calendar will receive this event.' : 'Requires connection. Click "Connect Account" above first.'}
-                    </span>
-                  </div>
-                </label>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

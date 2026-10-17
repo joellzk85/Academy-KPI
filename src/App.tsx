@@ -44,6 +44,7 @@ import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from '.
 import { Representative, CalendarEvent, ChatMessage, TeamMember, ROLE_LABELS } from './types';
 import { metricsFor } from './lib/kpi';
 import { appointmentEvents } from './lib/appointments';
+import { googleEvents, syncCalendar } from './lib/googleCalendar';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -362,6 +363,25 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     return () => unsubscribe();
   }, []);
 
+  // The shared Google Calendar (2026-10-17): show its events on the CRM calendar, and keep it up to date
+  // with the CRM (events, deal appointments, training dates). The server does the work; if the calendar
+  // isn't set up yet, or this isn't the live site, this quietly shows nothing.
+  const [googleCalEvents, setGoogleCalEvents] = useState<CalendarEvent[]>([]);
+  const refreshGoogleCalendar = async (force = false) => {
+    try { await syncCalendar(force); } catch (err) { console.warn('Google Calendar sync:', err); }
+    try {
+      const day = (n: number) => { const d = new Date(Date.now() + n * 86400000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+      setGoogleCalEvents(await googleEvents(day(-62), day(365)));
+    } catch {
+      setGoogleCalEvents([]);
+    }
+  };
+  useEffect(() => {
+    refreshGoogleCalendar();
+    const timer = window.setInterval(() => refreshGoogleCalendar(), 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   // Real-time Firestore synchronizer for Notices
   useEffect(() => {
     if (!db) return;
@@ -565,12 +585,17 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     setCalendarEvents(prev => [...prev, newEvent]);
     try {
       await setDoc(doc(db, 'events', newEvent.id), newEvent);
+      refreshGoogleCalendar(true);
     } catch (err) {
       console.error("Firestore add event failed:", err);
     }
   };
 
   const handleDeleteEvent = async (id: string) => {
+    if (id.startsWith('g_')) {
+      showToast('This event is on the Google Calendar. Change or delete it in Google Calendar.');
+      return;
+    }
     // Appointments come from deals; change or cancel them on the deal.
     if (id.startsWith('appt_')) {
       showToast('This is a deal appointment. Change or cancel it on the deal.');
@@ -579,6 +604,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     setCalendarEvents(prev => prev.filter(e => e.id !== id));
     try {
       await deleteDoc(doc(db, 'events', id));
+      refreshGoogleCalendar(true);
     } catch (err) {
       console.error("Firestore delete event failed:", err);
     }
@@ -722,7 +748,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const selectedRep = representatives.find(r => r.id === selectedRepId);
 
   // Team calendar = typed events + appointments booked on deals (read from the deals, never copied).
-  const allCalendarEvents = [...calendarEvents, ...appointmentEvents(pipelinesSync, id => teamMembers.find(m => m.id === id)?.name || '')];
+  const allCalendarEvents = [...calendarEvents, ...googleCalEvents, ...appointmentEvents(pipelinesSync, id => teamMembers.find(m => m.id === id)?.name || '')];
 
   // The calendar and notices on My home reuse the old home page's parts.
   const homeDashboardProps = {
@@ -733,6 +759,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     onAddRep: () => {},
     onAddEvent: handleAddEvent,
     onDeleteEvent: handleDeleteEvent,
+    canManageCalendar: currentMember.role === 'management',
+    onCalendarChanged: () => refreshGoogleCalendar(),
     onAddNotice: handleAddNotice,
     onDeleteNotice: handleDeleteNotice,
     isManagementUnlocked: false,
