@@ -16,6 +16,8 @@ import { admin, UserError, callerFrom, route } from './serverAuth';
 import {
   INFO_TAB, SKIP_CONFIG_DOCS, Table, infoTable, malaysiaDay, orderCollections, sheetIdFrom, toTable, uniqueTabs,
 } from './src/lib/backup';
+import { readMoneySettings } from './src/lib/money';
+import { projectPLBackupRows, projectRows } from './src/lib/projectPL';
 
 const API = 'https://sheets.googleapis.com/v4/spreadsheets';
 const METADATA = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default';
@@ -110,13 +112,35 @@ async function saveSettings(patch: BackupSettings) {
 async function readAllTables(): Promise<Table[]> {
   const { db } = admin();
   const ids = orderCollections((await db.listCollections()).map(c => c.id));
-  return uniqueTabs(await Promise.all(ids.map(async id => {
+  const raw: Record<string, { id: string; data: Record<string, any> }[]> = {};
+  const tables = await Promise.all(ids.map(async id => {
     const snap = await db.collection(id).get();
     const docs = snap.docs
       .filter(d => !(id === 'config' && SKIP_CONFIG_DOCS.includes(d.id)))
       .map(d => ({ id: d.id, data: d.data() }));
+    raw[id] = docs;
     return toTable(id, docs);
-  })));
+  }));
+  // The ready-made Project P&L goes straight after Deals.
+  const at = tables.findIndex(t => t.collectionId === 'pipelines') + 1;
+  tables.splice(at, 0, projectPLTable(raw));
+  return uniqueTabs(tables);
+}
+
+// "Project P&L" tab: one line per won deal, worked out from the lists just read, the same way as
+// Management → Project P&L (src/lib/projectPL.ts), so the backup is readable without the CRM.
+function projectPLTable(raw: Record<string, { id: string; data: Record<string, any> }[]>): Table {
+  const list = (id: string): any[] => (raw[id] || []).map(d => ({ ...d.data, id: d.id }));
+  const settings = readMoneySettings((raw.config || []).find(d => d.id === 'money_settings')?.data);
+  const plDocs = Object.fromEntries((raw.project_pl || []).map(d => [d.id, d.data]));
+  const rows = projectRows(list('pipelines'), list('money_in'), list('money_out'), settings, malaysiaDay(Date.now()),
+    { quotes: list('quotations'), plDocs });
+  const clients = list('clients');
+  const team = list('team');
+  const table = projectPLBackupRows(rows,
+    p => clients.find(c => c.id === p.clientId)?.companyName || p.client || '',
+    id => team.find(m => m.id === id)?.name || '');
+  return { collectionId: 'project_pl_report', tab: 'Project P&L', rows: table, count: rows.length };
 }
 
 // ---------- Write to the Google Sheet ----------

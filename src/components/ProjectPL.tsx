@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { db } from '../lib/firebase';
+import { db, friendlyError } from '../lib/firebase';
 import { FUNDING_LABELS, FundingType, dealOwnerId, formatDate, formatRM, todayIso } from '../lib/deals';
 import { IN_SOURCE_LABELS, MoneyIn, MoneyOut, OUT_STATUS_LABELS, isPaid } from '../lib/money';
 import {
@@ -10,29 +10,35 @@ import {
 import { useMoneySettings } from './Money';
 
 // Management → Project P&L (2026-10-17). One row per won deal (training session), worked out
-// live from the deal's money in and money out (lib/projectPL.ts). Nothing is typed here:
-// invoices, claims and costs are recorded in each deal's Money section.
+// live from the deal's money in and money out (lib/projectPL.ts). Invoices, claims and costs are
+// recorded in each deal's Money section. The only thing typed here is SST, when it differs from
+// the automatic amount (project_pl/{dealId}.sstAmount, Management only).
 
 interface Props {
   pipelinesSync?: any[];
   people: { id: string; name: string }[];
+  viewer: { id: string; name: string };
 }
 
 const card = 'rounded-2xl border border-line bg-white p-5';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 type Show = 'all' | 'done' | 'upcoming' | 'open';
 
-export default function ProjectPL({ pipelinesSync, people }: Props) {
+export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
   const deals = pipelinesSync || [];
   const settings = useMoneySettings();
   const [clients, setClients] = useState<any[]>([]);
   const [ins, setIns] = useState<MoneyIn[]>([]);
   const [outs, setOuts] = useState<MoneyOut[]>([]);
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const [plDocs, setPlDocs] = useState<Record<string, any>>({});
   useEffect(() => {
     const subs = [
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'money_in')), s => setIns(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
       onSnapshot(query(collection(db, 'money_out')), s => setOuts(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))),
+      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'project_pl')), s => setPlDocs(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -45,7 +51,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
   const [show, setShow] = useState<Show>('all');
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const rows = useMemo(() => projectRows(deals, ins, outs, settings, today), [deals, ins, outs, settings, today]);
+  const rows = useMemo(() => projectRows(deals, ins, outs, settings, today, { quotes, plDocs }), [deals, ins, outs, settings, today, quotes, plDocs]);
   const years = useMemo(() => {
     const ys = new Set<string>([today.slice(0, 4)]);
     rows.forEach(r => r.trainingDate && ys.add(r.trainingDate.slice(0, 4)));
@@ -111,8 +117,8 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
         <Tile label="Trainings" value={String(totals.count)} sub={`${totals.done} done · ${totals.upcoming} upcoming`} />
         <Tile label="Income" value={formatRM(totals.income)}
           sub={totals.estimated ? `incl. ${formatRM(totals.estimated)} estimated (not invoiced yet)` : 'All invoiced or claimed'} />
-        <Tile label="HRDC % and costs" value={formatRM(totals.hrdcFee + totals.costs)}
-          sub={`HRDC ${formatRM(totals.hrdcFee)} · costs ${formatRM(totals.costs)}`} />
+        <Tile label="SST, HRDC % and costs" value={formatRM(totals.sst + totals.hrdcFee + totals.costs)}
+          sub={`SST ${formatRM(totals.sst)} · HRDC ${formatRM(totals.hrdcFee)} · costs ${formatRM(totals.costs)}`} />
         <Tile label="Profit" value={formatRM(totals.profit)} sub={`${Math.round(totals.margin)}% margin`} tone={totals.profit < 0 ? 'danger' : 'accent'} />
       </div>
       <p className="-mt-2 text-sm text-ink-soft">
@@ -126,12 +132,13 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
           <h3 className="mb-1 font-bold">Month by month, {periodLabel}</h3>
           <p className="mb-3 text-sm text-ink-soft">Click a month to see only its trainings.</p>
           <div className="-mx-5 overflow-x-auto px-5">
-            <table className="w-full min-w-[40rem] text-[15px]">
+            <table className="w-full min-w-[46rem] text-[15px]">
               <thead>
                 <tr className="border-b border-line text-left text-sm text-ink-soft">
                   <th className="py-2 pr-3 font-semibold">Month</th>
                   <th className="py-2 pr-3 text-right font-semibold">Trainings</th>
                   <th className="py-2 pr-3 text-right font-semibold">Income</th>
+                  <th className="py-2 pr-3 text-right font-semibold">SST</th>
                   <th className="py-2 pr-3 text-right font-semibold">HRDC %</th>
                   <th className="py-2 pr-3 text-right font-semibold">Costs</th>
                   <th className="py-2 pr-3 text-right font-semibold">Profit</th>
@@ -144,6 +151,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
                     <td className="py-2 pr-3 font-medium">{mName(m)} {year}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{t.count || '—'}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{t.count ? formatRM(t.income) : '—'}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.sst ? `− ${formatRM(t.sst)}` : '—'}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.hrdcFee ? `− ${formatRM(t.hrdcFee)}` : '—'}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.costs ? `− ${formatRM(t.costs)}` : '—'}</td>
                     <td className={`whitespace-nowrap py-2 pr-3 text-right font-bold tabular-nums ${t.profit < 0 ? 'text-danger' : ''}`}>{t.count ? formatRM(t.profit) : '—'}</td>
@@ -156,6 +164,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
                   <td className="py-2 pr-3">Total</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{totals.count}</td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{formatRM(totals.income)}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.sst ? `− ${formatRM(totals.sst)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.hrdcFee ? `− ${formatRM(totals.hrdcFee)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.costs ? `− ${formatRM(totals.costs)}` : '—'}</td>
                   <td className={`whitespace-nowrap py-2 pr-3 text-right tabular-nums ${totals.profit < 0 ? 'text-danger' : ''}`}>{formatRM(totals.profit)}</td>
@@ -172,7 +181,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
         <h3 className="mb-3 font-bold">Trainings in {periodLabel} ({shown.length})</h3>
         {shown.length === 0 ? <p className="text-ink-soft">No won deals with a training date in {periodLabel}{show !== 'all' ? ' for this filter' : ''}.</p> : (
           <div className="-mx-5 overflow-x-auto px-5">
-            <table className="w-full min-w-[56rem] text-[15px]">
+            <table className="w-full min-w-[62rem] text-[15px]">
               <thead>
                 <tr className="border-b border-line text-left text-sm text-ink-soft">
                   <th className="w-8 py-2 pr-2">
@@ -181,6 +190,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
                   <th className="py-2 pr-3 font-semibold">Training</th>
                   <th className="py-2 pr-3 font-semibold">Client and programme</th>
                   <th className="py-2 pr-3 text-right font-semibold">Income</th>
+                  <th className="py-2 pr-3 text-right font-semibold">SST</th>
                   <th className="py-2 pr-3 text-right font-semibold">HRDC %</th>
                   <th className="py-2 pr-3 text-right font-semibold">Costs</th>
                   <th className="py-2 pr-3 text-right font-semibold">Profit</th>
@@ -210,6 +220,9 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
                       <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">
                         {formatRM(r.income)}{r.estimate && <span className="block text-xs text-attention">estimate</span>}
                       </td>
+                      <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-ink-soft">
+                        {r.sst ? `− ${formatRM(r.sst)}` : '—'}{r.sstTyped && <span className="block text-xs">typed</span>}
+                      </td>
                       <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-ink-soft">{r.hrdcFee ? `− ${formatRM(r.hrdcFee)}` : '—'}</td>
                       <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-ink-soft">{r.costs ? `− ${formatRM(r.costs)}` : '—'}</td>
                       <td className={`whitespace-nowrap py-2.5 pr-3 text-right font-bold tabular-nums ${r.profit < 0 ? 'text-danger' : ''}`}>{formatRM(r.profit)}</td>
@@ -220,7 +233,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
                       </td>
                     </tr>
                     {openId === r.deal.id && (
-                      <tr><td colSpan={9}className="bg-surface px-4 py-4"><Breakdown r={r} /></td></tr>
+                      <tr><td colSpan={10} className="bg-surface px-4 py-4"><Breakdown r={r} viewer={viewer} /></td></tr>
                     )}
                   </React.Fragment>
                 ))}
@@ -229,6 +242,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
                 <tr className="border-t-2 border-line font-bold">
                   <td className="py-2.5 pr-3" colSpan={3}>Total, {shown.length} training{shown.length === 1 ? '' : 's'}</td>
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{formatRM(totals.income)}</td>
+                  <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.sst ? `− ${formatRM(totals.sst)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.hrdcFee ? `− ${formatRM(totals.hrdcFee)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.costs ? `− ${formatRM(totals.costs)}` : '—'}</td>
                   <td className={`whitespace-nowrap py-2.5 pr-3 text-right tabular-nums ${totals.profit < 0 ? 'text-danger' : ''}`}>{formatRM(totals.profit)}</td>
@@ -240,7 +254,8 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
           </div>
         )}
         <p className="mt-3 text-sm text-ink-soft">
-          Profit = income − HRDC's {settings.hrdcDeductionPct}% (and anything else HRDC didn't pay) − approved and paid costs.
+          Profit = income − SST − HRDC's {settings.hrdcDeductionPct}% (and anything else HRDC didn't pay) − approved and paid costs.
+          SST is worked out automatically when the deal's quotation adds SST (normally 8%), or you can type the amount in a line's details.
           "Estimate" means no invoice or claim is recorded yet, so the deal value is used. Click a line to see the details, or tick lines to add them up.
           Invoices, claims and costs are added in the deal's Money section (Admin work).
         </p>
@@ -264,6 +279,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
         <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-accent bg-white px-4 py-3 text-[15px] shadow-lg">
           <strong>{tickedRows.length} ticked training{tickedRows.length === 1 ? '' : 's'}</strong>
           <span>Income <strong className="tabular-nums">{formatRM(tickedTotals.income)}</strong></span>
+          <span className="text-ink-soft">SST <span className="tabular-nums">− {formatRM(tickedTotals.sst)}</span></span>
           <span className="text-ink-soft">HRDC <span className="tabular-nums">− {formatRM(tickedTotals.hrdcFee)}</span></span>
           <span className="text-ink-soft">Costs <span className="tabular-nums">− {formatRM(tickedTotals.costs)}</span></span>
           <span>Profit <strong className={`tabular-nums ${tickedTotals.profit < 0 ? 'text-danger' : 'text-accent'}`}>{formatRM(tickedTotals.profit)}</strong> <span className="text-ink-soft">({Math.round(tickedTotals.margin)}%)</span></span>
@@ -276,7 +292,7 @@ export default function ProjectPL({ pipelinesSync, people }: Props) {
   );
 }
 
-function Breakdown({ r }: { r: ProjectRow }) {
+function Breakdown({ r, viewer }: { r: ProjectRow; viewer: { id: string; name: string } }) {
   const cats = costsByCategory(r.outs);
   const pending = r.outs.filter(o => o.status === 'pending');
   return (
@@ -299,6 +315,7 @@ function Breakdown({ r }: { r: ProjectRow }) {
           </ul>
         )}
         <p className="mt-2 text-ink-soft">Received {formatRM(r.received)} · still to come in {formatRM(r.toComeIn)}</p>
+        <SstBox r={r} viewer={viewer} />
       </div>
       <div>
         <p className="mb-1 font-semibold">Costs (approved and paid)</p>
@@ -319,6 +336,49 @@ function Breakdown({ r }: { r: ProjectRow }) {
           <p className="mt-1 text-ink-soft">{r.outs.filter(o => o.status === 'rejected').length} rejected request(s) not counted ({OUT_STATUS_LABELS.rejected.toLowerCase()}).</p>
         )}
       </div>
+    </div>
+  );
+}
+
+// SST for one training: automatic from the quotation, or a typed amount.
+function SstBox({ r, viewer }: { r: ProjectRow; viewer: { id: string; name: string } }) {
+  const [text, setText] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const auto = r.sstRate ? `automatic: ${r.sstRate}% from the quotation` : 'automatic: the quotation adds no SST';
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true); setError('');
+    try { await fn(); setEditing(false); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  const save = () => {
+    const n = Number(text.replace(/[^0-9.]/g, ''));
+    if (text.trim() === '' || !Number.isFinite(n)) { setError('Type the SST amount in RM.'); return; }
+    run(() => setDoc(doc(db, 'project_pl', r.deal.id), {
+      sstAmount: n, updatedById: viewer.id, updatedByName: viewer.name, updatedAt: new Date().toISOString(),
+    }));
+  };
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-white p-3">
+      <p className="flex flex-wrap items-center justify-between gap-2">
+        <span><span className="font-semibold">SST</span> {formatRM(r.sst)} <span className="text-ink-soft">({r.sstTyped ? 'typed' : auto})</span></span>
+        {!editing && (
+          <span className="flex gap-3">
+            <button type="button" onClick={() => { setText(r.sst ? String(Math.round(r.sst * 100) / 100) : ''); setEditing(true); }} className="font-semibold text-accent hover:underline">Type amount</button>
+            {r.sstTyped && <button type="button" disabled={busy} onClick={() => run(() => deleteDoc(doc(db, 'project_pl', r.deal.id)))} className="font-semibold text-accent hover:underline">Use automatic</button>}
+          </span>
+        )}
+      </p>
+      {editing && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span>RM</span>
+          <input autoFocus inputMode="decimal" value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') save(); }}
+            aria-label="SST amount in RM" className="w-32 rounded-md border border-line px-2 py-1 tabular-nums focus:border-accent focus:outline-none" />
+          <button type="button" disabled={busy} onClick={save} className="rounded-lg bg-accent px-3 py-1 font-semibold text-white disabled:opacity-60">Save</button>
+          <button type="button" onClick={() => { setEditing(false); setError(''); }} className="rounded-lg border border-line px-3 py-1 font-semibold">Cancel</button>
+        </div>
+      )}
+      {error && <p className="mt-1 text-danger">{error}</p>}
     </div>
   );
 }

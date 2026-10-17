@@ -902,7 +902,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               ) : managementView === 'data' ? (
                 <DataTools teamMembers={teamMembers} />
               ) : managementView === 'pl' ? (
-                <ProjectPL pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
+                <ProjectPL pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : (
               <ManagementDashboard
                 reps={representatives}

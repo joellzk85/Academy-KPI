@@ -15,6 +15,7 @@ export const LIST_NAMES: [string, string][] = [
   ['course_outlines', 'Course outlines'],
   ['money_in', 'Money in'],
   ['money_out', 'Money out'],
+  ['project_pl', 'Project P&L SST typed'],
   ['deal_checklists', 'Admin checklists'],
   ['hrdc_queries', 'HRDC queries'],
   ['programmes', 'Programmes'],

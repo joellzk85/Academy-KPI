@@ -228,6 +228,11 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
+    // Project P&L (2026-10-17): the SST amount Management types for a training. Management only.
+    match /project_pl/{dealId} {
+      allow read, write: if isManagement();
+    }
+
     // All other CRM work data: team members only
     match /{coll}/{docId=**} {
       allow read, write: if isMember() && coll in [
