@@ -211,6 +211,7 @@ What was built:
     - **Newsfeed (Notices) removed** from everyone's default cards. The card still exists in Customise if someone wants it back.
   - **Only Management can open other people's workspaces** (Joel, 2026-10-16). Admin and reps only open their own (`canOpenWorkspace` in `App.tsx`). The "Open a teammate's workspace" picker is for Management only. Admin's deal links go to the work queue, and Admin's quotation links open their own Quotations (which lists everyone's). Admin can set a won deal's **training date in the work queue panel** (`TrainingDate` in `WorkQueue.tsx`).
   - Performance layout (redone after Joel found it odd): large ring(s) for Company and/or Me with the figures beside them, in a card the same height as the calendar; Management also gets a row of small per-person rings.
+  - **Performance layout, again (Joel, 2026-10-17: keep the 2 rings, fix size and position):** the main rings (Company and/or Me, 148px) sit on the left, filling their block with the figures beside them. Each person gets medium rings (96px) on the right in a wrapping grid. It stacks on phones. Inside each ring the year % is big, with the month % small underneath. Empty (0%) arcs are no longer drawn as stray dots.
   - Joel asked: everyone has their own My home (yes). Content depends on role, and each person's Customise choice affects only their own page.
   - Admin work can be opened on a chosen tab (`initialView`) from the cards.
   - **Rules:** `user_prefs` was added to `firestore.rules`. Published by Joel on 2026-10-17.

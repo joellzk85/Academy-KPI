@@ -278,21 +278,23 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
       {main.length === 0 && team.length === 0 ? (
         <p className="mt-2 text-ink-soft">No sales target is set for you yet.</p>
       ) : (
-        <div className="flex flex-1 flex-col justify-center gap-4 pt-3">
+        // Layout (Joel, 2026-10-17): the main rings (Company and/or Me) on the left with their figures beside
+        // them, each person's rings at medium size on the right, wrapping onto more rows. Stacks on phones.
+        <div className={`grid flex-1 items-stretch gap-4 pt-3 ${main.length > 0 && team.length > 0 ? 'lg:grid-cols-2' : ''}`}>
           {main.length > 0 && (
-            <div className={`grid gap-4 ${main.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+            <div className={`grid gap-3 ${main.length > 1 && team.length === 0 ? 'sm:grid-cols-2' : ''}`}>
               {main.map(({ key, label, ring }) => (
-                <div key={key} className="flex items-center gap-4 rounded-xl bg-surface p-3" title={tip(label, ring)}>
-                  <Rings ring={ring} size={124} />
-                  <div className="min-w-0 space-y-1.5">
-                    <p className="font-bold">{label}</p>
+                <div key={key} className="flex items-center justify-center gap-5 rounded-xl bg-surface p-4" title={tip(label, ring)}>
+                  <Rings ring={ring} size={main.length > 1 && team.length > 0 ? 120 : 148} monthLabel={monthLabel} />
+                  <div className="min-w-0 space-y-2">
+                    <p className="text-lg font-bold">{label}</p>
                     <div>
-                      <p className="text-xs text-ink-soft">Year {year}</p>
-                      <p className="text-sm"><strong className="tabular-nums">{formatRM(ring.yearValue)}</strong> <span className="text-ink-soft">of {formatRM(ring.yearTarget)}</span></p>
+                      <p className="flex items-center gap-1.5 text-xs text-ink-soft"><span className="h-2 w-2 rounded-sm bg-[#0E6E62]" />Year {year}</p>
+                      <p className="text-[15px]"><strong className="tabular-nums">{formatRM(ring.yearValue)}</strong> <span className="text-ink-soft">of {formatRM(ring.yearTarget)} · {pct(ring.yearValue, ring.yearTarget)}%</span></p>
                     </div>
                     <div>
-                      <p className="text-xs text-ink-soft">{monthLabel}</p>
-                      <p className="text-sm"><strong className="tabular-nums">{formatRM(ring.monthValue)}</strong> <span className="text-ink-soft">of {formatRM(ring.monthTarget)} · {pct(ring.monthValue, ring.monthTarget)}%</span></p>
+                      <p className="flex items-center gap-1.5 text-xs text-ink-soft"><span className="h-2 w-2 rounded-sm bg-[#5DB3A6]" />{monthLabel}</p>
+                      <p className="text-[15px]"><strong className="tabular-nums">{formatRM(ring.monthValue)}</strong> <span className="text-ink-soft">of {formatRM(ring.monthTarget)} · {pct(ring.monthValue, ring.monthTarget)}%</span></p>
                     </div>
                   </div>
                 </div>
@@ -300,14 +302,14 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
             </div>
           )}
           {team.length > 0 && (
-            <div>
+            <div className="flex flex-col justify-center">
               <p className="mb-2 text-xs font-semibold text-ink-soft">Each person</p>
-              <div className="flex gap-3 overflow-x-auto pb-1">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-3">
                 {team.map(({ key, label, ring }) => (
-                  <div key={key} className="flex w-20 shrink-0 flex-col items-center text-center" title={tip(label, ring)}>
-                    <Rings ring={ring} size={64} />
-                    <span className="mt-1 w-full truncate text-xs font-semibold">{label}</span>
-                    <span className="text-xs text-ink-soft">{pct(ring.monthValue, ring.monthTarget)}% {monthLabel.slice(0, 3)}</span>
+                  <div key={key} className="flex flex-col items-center text-center" title={tip(label, ring)}>
+                    <Rings ring={ring} size={96} monthLabel={monthLabel} />
+                    <span className="mt-1 w-full truncate text-sm font-semibold">{label}</span>
+                    <span className="text-xs text-ink-soft">{monthLabel.slice(0, 3)} {pct(ring.monthValue, ring.monthTarget)}% · Year {pct(ring.yearValue, ring.yearTarget)}%</span>
                   </div>
                 ))}
               </div>
@@ -322,7 +324,7 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
 type Ring = { yearValue: number; yearTarget: number; monthValue: number; monthTarget: number };
 const pct = (v: number, t: number) => (t > 0 ? Math.round((v / t) * 100) : 0);
 
-function Rings({ ring, size }: { ring: Ring; size: number }) {
+function Rings({ ring, size, monthLabel = '' }: { ring: Ring; size: number; monthLabel?: string }) {
   const c = size / 2;
   const outerR = size * 0.41, outerW = size * 0.093, innerR = size * 0.27, innerW = size * 0.067;
   const arc = (r: number, frac: number) => {
@@ -333,10 +335,14 @@ function Rings({ ring, size }: { ring: Ring; size: number }) {
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`Year ${yp}% of target, this month ${pct(ring.monthValue, ring.monthTarget)}% of target`}>
       <circle cx={c} cy={c} r={outerR} fill="none" stroke="#E2E5DE" strokeWidth={outerW} />
-      <circle cx={c} cy={c} r={outerR} fill="none" stroke="#0E6E62" strokeWidth={outerW} strokeLinecap="round" strokeDasharray={arc(outerR, ring.yearTarget ? ring.yearValue / ring.yearTarget : 0)} transform={`rotate(-90 ${c} ${c})`} />
+      {ring.yearValue > 0 && <circle cx={c} cy={c} r={outerR} fill="none" stroke="#0E6E62" strokeWidth={outerW} strokeLinecap="round" strokeDasharray={arc(outerR, ring.yearTarget ? ring.yearValue / ring.yearTarget : 0)} transform={`rotate(-90 ${c} ${c})`} />}
       <circle cx={c} cy={c} r={innerR} fill="none" stroke="#E2E5DE" strokeWidth={innerW} />
-      <circle cx={c} cy={c} r={innerR} fill="none" stroke="#5DB3A6" strokeWidth={innerW} strokeLinecap="round" strokeDasharray={arc(innerR, ring.monthTarget ? ring.monthValue / ring.monthTarget : 0)} transform={`rotate(-90 ${c} ${c})`} />
-      <text x={c} y={c + size * 0.05} textAnchor="middle" fill="#1C2B45" style={{ fontSize: size * 0.14, fontWeight: 700 }}>{yp}%</text>
+      {ring.monthValue > 0 && <circle cx={c} cy={c} r={innerR} fill="none" stroke="#5DB3A6" strokeWidth={innerW} strokeLinecap="round" strokeDasharray={arc(innerR, ring.monthTarget ? ring.monthValue / ring.monthTarget : 0)} transform={`rotate(-90 ${c} ${c})`} />}
+      {/* Year % big in the middle; the month % small under it (Joel, 2026-10-17) */}
+      <text x={c} y={c + size * (monthLabel ? 0.01 : 0.05)} textAnchor="middle" fill="#1C2B45" style={{ fontSize: size * 0.14, fontWeight: 700 }}>{yp}%</text>
+      {monthLabel && (
+        <text x={c} y={c + size * 0.13} textAnchor="middle" fill="#3E8F83" style={{ fontSize: Math.max(8, size * 0.07), fontWeight: 600 }}>{monthLabel.slice(0, 3)} {pct(ring.monthValue, ring.monthTarget)}%</text>
+      )}
     </svg>
   );
 }
