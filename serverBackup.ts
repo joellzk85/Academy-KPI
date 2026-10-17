@@ -10,7 +10,7 @@
 // - Excel download: the same tables as an .xlsx file, built here and sent straight to the browser.
 // - Settings and the last result are in config/backup_settings, which only the server writes.
 
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, Response as ExpressResponse } from 'express';
 import ExcelJS from 'exceljs';
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import {
@@ -246,7 +246,7 @@ export function registerBackupRoutes(app: Express) {
   }));
 
   // Download everything as an Excel file.
-  app.post('/api/backup/download', async (req: Request, res: Response) => {
+  app.post('/api/backup/download', async (req: Request, res: ExpressResponse) => {
     try {
       const caller = await staffFrom(req);
       const tables = await readAllTables();
