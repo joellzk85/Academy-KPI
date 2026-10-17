@@ -9,6 +9,9 @@ import { STAGE_LABELS, dealOwnerId, dealStage, formatDate, todayIso } from '../l
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
 import CourseOutlineDocument from './CourseOutlineDocument';
 import { linkedOnly } from '../lib/linked';
+import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
+import { OutlineSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
+import { trainerOptions } from './PickOrType';
 
 // Course outlines (redesigned 2026-10-17, like quotations).
 // An outline is made for a deal (or as a general outline with no client), starting blank or from a copy
@@ -46,6 +49,8 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
   const [clients, setClients] = useState<any[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
+  const [trainers, setTrainers] = useState<any[]>([]);
+  const links = useTrainerLinks();
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<{ o: CourseOutline; isNew: boolean } | null>(null);
   const [choosing, setChoosing] = useState<null | { step: 'deal' } | { step: 'start'; deal: any | null }>(null);
@@ -55,6 +60,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       onSnapshot(query(collection(db, 'course_outlines')), s => { setOutlines(linkedOnly(s.docs.map(d => ({ ...(d.data() as CourseOutline), id: d.id })))); setLoaded(true); }, () => setLoaded(true)),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'trainers_directory')), s => setTrainers(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
     ];
     return () => subs.forEach(u => u());
@@ -109,9 +115,9 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
     <>
       {draft ? (
         <Editor key={draft.o.id} initial={draft.o} isNew={draft.isNew} me={me} staff={staff} reps={reps} sources={sources}
-          dealsForPicker={dealsForPicker} onOpenTab={onOpenTab} onClose={() => setDraft(null)} />
+          dealsForPicker={dealsForPicker} onOpenTab={onOpenTab} onClose={() => setDraft(null)} trainers={trainers} links={links} />
       ) : (
-        <OutlineList rep={rep} me={me} staff={staff} outlines={outlines} loaded={loaded} sources={sources} personName={personName}
+        <OutlineList rep={rep} me={me} staff={staff} outlines={outlines} loaded={loaded} sources={sources} personName={personName} links={links}
           onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} />
       )}
       {choosing?.step === 'deal' && (
@@ -228,8 +234,9 @@ function Modal({ title, onCancel, children }: { title: string; onCancel: () => v
 // ---------- List ----------
 type Scope = 'mine' | 'shared' | 'everyone';
 
-function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, onNew, onOpen, onDuplicate }: {
+function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, links, onNew, onOpen, onDuplicate }: {
   rep: Representative; me: Viewer; staff: boolean; outlines: CourseOutline[]; loaded: boolean; sources: OutlineSources; personName: (id?: string) => string;
+  links: TrainerLink[];
   onNew: () => void; onOpen: (o: CourseOutline) => void; onDuplicate: (o: CourseOutline) => Promise<void>;
 }) {
   const canSeeEveryone = staff && me.id === rep.id;
@@ -301,6 +308,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, on
                       {o.refNumber}
                       {outlineSent(o) ? <span className="rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Sent</span> : <span className="rounded bg-surface px-1.5 text-xs font-semibold">Draft</span>}
                       {o.isHidden && <span className="text-xs">hidden</span>}
+                      {links.some(l => l.outlineId === o.id && l.status === 'submitted' && isLive(l)) && <span className="rounded bg-attention-soft px-1.5 text-xs font-semibold text-attention">Trainer submitted: review</span>}
                     </span>
                   </span>
                   <span className="min-w-0 text-[15px] text-ink-soft">
@@ -345,9 +353,9 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 }
 
 // ---------- Editor ----------
-function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose }: {
+function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, trainers, links }: {
   initial: CourseOutline; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: OutlineSources; dealsForPicker: any[];
-  onOpenTab?: (tab: Tab) => void; onClose: () => void; key?: string;
+  onOpenTab?: (tab: Tab) => void; onClose: () => void; key?: string; trainers: any[]; links: TrainerLink[];
 }) {
   const [o, setO] = useState<CourseOutline>(initial);
   const [saved, setSaved] = useState<string>(isNew ? '' : JSON.stringify(initial));
@@ -481,6 +489,21 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
             </div>
           )}
         </div>
+      )}
+
+      {!locked && (
+        <TrainerCard o={o} r={r} me={me} trainers={trainers} links={links} saved={!!saved}
+          onTrainer={id => set({ trainerId: id })}
+          onAccept={s => {
+            const hasContent = !!(o.overview || '').trim() || (o.items || []).some(m => (m.moduleTitle || m.topics || '').trim());
+            if (hasContent && !window.confirm("Replace this outline's overview, outcomes and modules with what the trainer submitted?")) return false;
+            set({
+              durationDays: s.durationDays, totalHours: s.totalHours, level: s.level, audience: s.audience, prerequisites: s.prerequisites,
+              overview: s.overview, outcomes: s.outcomes, items: s.items.map(m => ({ ...newModule(), ...m })),
+            });
+            setNote("Filled in from the trainer's submission. Check it, then click Save.");
+            return true;
+          }} />
       )}
 
       <fieldset disabled={locked} className="space-y-4">
@@ -631,6 +654,60 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
         <DealChooser deals={dealsForPicker} sources={sources} personName={nameOf} onPick={relink} onCancel={() => setRelinking(false)} allowGeneral title="Link this outline to a deal" />
       )}
     </div>
+  );
+}
+
+// ---------- The trainer's part: who wrote it, and the private link to fill it in (Joel, 2026-10-17) ----------
+function TrainerCard({ o, r, me, trainers, links, saved, onTrainer, onAccept }: {
+  o: CourseOutline; r: ReturnType<typeof resolveOutline>; me: Viewer; trainers: any[]; links: TrainerLink[]; saved: boolean;
+  onTrainer: (id: string) => void; onAccept: (s: OutlineSubmission) => boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const trainer = trainers.find(t => t.id === o.trainerId);
+  const link = links.filter(l => l.kind === 'outline' && l.outlineId === o.id && isLive(l)).sort((a, b) => b.createdAt - a.createdAt)[0];
+  const title = r.programmeName || r.o.courseTitle || 'this training';
+  const run = async (fn: () => Promise<any>) => {
+    setBusy(true); setError('');
+    try { await fn(); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  const send = () => run(() => createTrainerLink({ kind: 'outline', outlineId: o.id, trainerId: trainer?.id || '', trainerName: trainer?.name || '', title }, me));
+  const sub = link?.status === 'submitted' ? (link.submission as OutlineSubmission) : null;
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-bold">Trainer</h3>
+        <span className="text-sm text-ink-soft">The trainer can fill in this outline from a private link, no login needed.</span>
+      </div>
+      <select value={o.trainerId || ''} onChange={e => onTrainer(e.target.value)} className={input} aria-label="Trainer for this outline">
+        <option value="">No trainer chosen</option>
+        {trainerOptions(trainers, r.programmeId).map(t => <option key={t.id} value={t.id}>{t.name}{t.hint ? ` (${t.hint.toLowerCase()})` : ''}</option>)}
+      </select>
+      {!link ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className={btnSecondary} disabled={busy || !saved} onClick={send}>Send to trainer</button>
+          {!saved && <span className="text-sm text-ink-soft">Save the outline first.</span>}
+        </div>
+      ) : (
+        <>
+          {sub && (
+            <div className="rounded-xl border border-attention/40 bg-attention-soft/40 p-3">
+              <p className="font-semibold">{link.trainerName || 'The trainer'} submitted the outline{link.submittedAt ? ` on ${formatDate(new Date(link.submittedAt).toISOString().slice(0, 10))}` : ''}.</p>
+              <p className="text-sm text-ink-soft">{sub.durationDays} day{sub.durationDays === 1 ? '' : 's'} · {sub.totalHours} hours · {sub.items.length} module{sub.items.length === 1 ? '' : 's'}: {sub.items.map(m => m.moduleTitle).join(', ')}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className={btnPrimary} disabled={busy} onClick={() => { if (onAccept(sub)) run(() => closeTrainerLink(link, 'accepted', me)); }}>Accept into this outline</button>
+                <button type="button" className={btnSecondary} disabled={busy} onClick={() => { if (window.confirm("Discard what the trainer submitted? The link will be closed.")) run(() => closeTrainerLink(link, 'cancelled', me)); }}>Discard</button>
+              </div>
+            </div>
+          )}
+          <LinkShareBox link={link} phone={trainer?.contact}
+            message={`Hi${link.trainerName ? ` ${link.trainerName}` : ''}, please fill in your course outline for "${link.title || title}" for NEXT Academy here:`}
+            onCancel={() => { if (window.confirm('Cancel this link? The trainer will no longer be able to open it.')) run(() => closeTrainerLink(link, 'cancelled', me)); }} />
+        </>
+      )}
+      {error && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+    </section>
   );
 }
 

@@ -7,6 +7,8 @@ import { STAGE_LABELS, dealStage, formatDate, formatRM, todayIso } from '../lib/
 import { ChecklistTask } from '../lib/checklist';
 import { Booking, trainerBookings } from '../lib/trainers';
 import { linkedOnly } from '../lib/linked';
+import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
+import { ProfileSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -29,7 +31,8 @@ const btnPrimary =
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
-const emptyForm = () => ({ name: '', specialization: '', programmeIds: [] as string[], contact: '', email: '', rate: '', onLeave: false, notes: '' });
+const emptyForm = () => ({ name: '', specialization: '', programmeIds: [] as string[], contact: '', email: '', rate: '', onLeave: false, notes: '',
+  bio: '', experienceYears: '', qualifications: '', pastClients: '', suggestedTopics: '' });
 type Form = ReturnType<typeof emptyForm>;
 
 const norm = (s?: string) => (s || '').trim().toLowerCase();
@@ -53,6 +56,11 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const [programmes, setProgrammes] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [progSearch, setProgSearch] = useState('');
+  // Trainer links (Joel, 2026-10-17): invite a new trainer or ask one to update their profile.
+  const links = useTrainerLinks();
+  const [shareLink, setShareLink] = useState<TrainerLink | null>(null);
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const waiting = links.filter(l => l.kind === 'profile' && l.status === 'submitted' && isLive(l)).sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
 
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
@@ -78,6 +86,50 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
 
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
   const today = todayIso();
+
+  const inviteNew = async () => {
+    try { setShareLink(await createTrainerLink({ kind: 'profile', title: 'Trainer profile' }, viewer)); }
+    catch (err) { setFormError(friendlyError(err)); flash(friendlyError(err)); }
+  };
+  const sendProfileLink = async (t: Trainer) => {
+    try { setShareLink(await createTrainerLink({ kind: 'profile', trainerId: t.id, trainerName: t.name, title: 'Trainer profile' }, viewer)); }
+    catch (err) { setPanelError(friendlyError(err)); }
+  };
+  const liveProfileLink = (t: Trainer) => links.filter(l => l.kind === 'profile' && l.trainerId === t.id && isLive(l)).sort((a, b) => b.createdAt - a.createdAt)[0];
+
+  // Accept a submitted profile: update that trainer, or add the invited one (or update a trainer with the same name).
+  const acceptProfile = async (l: TrainerLink) => {
+    const s = l.submission as ProfileSubmission;
+    const details = {
+      name: s.name, contact: s.contact, email: s.email, bio: s.bio, experienceYears: s.experienceYears, qualifications: s.qualifications,
+      pastClients: s.pastClients, programmeIds: s.programmeIds, suggestedTopics: s.suggestedTopics, rate: s.rate,
+    };
+    let targetId = l.trainerId || '';
+    if (!targetId) {
+      const same = trainers.find(t => norm(t.name) === norm(s.name));
+      if (same && window.confirm(`"${same.name}" is already in the trainer list. Update that trainer with these details? (Cancel to add a separate trainer.)`)) targetId = same.id;
+    }
+    setBusy(true);
+    try {
+      if (targetId) await setDoc(doc(db, 'trainers_directory', targetId), details, { merge: true });
+      else {
+        targetId = `trainer_${Date.now()}`;
+        await setDoc(doc(db, 'trainers_directory', targetId), { id: targetId, ...details, specialization: '', status: 'Available', notes: '', createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+      }
+      await closeTrainerLink(l, 'accepted', viewer);
+      setReviewId(null);
+      setOpenId(targetId);
+      flash('Profile accepted');
+    } catch (err) {
+      flash(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const discardProfile = async (l: TrainerLink) => {
+    if (!window.confirm('Discard what the trainer submitted? The link will be closed.')) return;
+    try { await closeTrainerLink(l, 'cancelled', viewer); setReviewId(null); } catch (err) { flash(friendlyError(err)); }
+  };
 
   const bookingsOf = (t: Trainer) => trainerBookings(t, deals, checklists, quotes, trainers);
   const nextTraining = useMemo(() => {
@@ -105,7 +157,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   // ---------- Add / edit ----------
   const startNew = () => { setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
   const startEdit = (t: Trainer) => {
-    setForm({ name: t.name || '', specialization: t.specialization || '', programmeIds: (t.programmeIds || []).filter(id => programmes.some(p => p.id === id)), contact: t.contact || '', email: t.email || '', rate: t.rate ? String(t.rate) : '', onLeave: t.status === 'On Leave', notes: t.notes || '' });
+    setForm({ name: t.name || '', specialization: t.specialization || '', programmeIds: (t.programmeIds || []).filter(id => programmes.some(p => p.id === id)), contact: t.contact || '', email: t.email || '', rate: t.rate ? String(t.rate) : '', onLeave: t.status === 'On Leave', notes: t.notes || '',
+      bio: t.bio || '', experienceYears: t.experienceYears ? String(t.experienceYears) : '', qualifications: t.qualifications || '', pastClients: t.pastClients || '', suggestedTopics: t.suggestedTopics || '' });
     setProgSearch('');
     setFormError(''); setDupId(null); setEditing(t.id);
   };
@@ -126,6 +179,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       rate: parseFloat(form.rate.replace(/[^0-9.]/g, '')) || 0,
       status: (form.onLeave ? 'On Leave' : 'Available') as Trainer['status'],
       notes: form.notes.trim(),
+      bio: form.bio.trim(), experienceYears: parseFloat(form.experienceYears.replace(/[^0-9.]/g, '')) || 0,
+      qualifications: form.qualifications.trim(), pastClients: form.pastClients.trim(), suggestedTopics: form.suggestedTopics.trim(),
     };
     setBusy(true);
     try {
@@ -183,8 +238,28 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
           <h2 className="text-xl font-bold">Trainers</h2>
           <p className="text-[15px] text-ink-soft">{trainers.length} trainer{trainers.length === 1 ? '' : 's'}, shared by the whole team</p>
         </div>
-        <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add trainer</button>
+        <span className="flex flex-wrap gap-2">
+          <button type="button" onClick={inviteNew} className={btnSecondary}>Invite a new trainer</button>
+          <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add trainer</button>
+        </span>
       </div>
+
+      {waiting.length > 0 && (
+        <section className="rounded-2xl border border-attention/40 bg-attention-soft/30 p-4">
+          <h3 className="font-bold">Profiles waiting for review ({waiting.length})</h3>
+          <ul className="mt-2 divide-y divide-line">
+            {waiting.map(l => {
+              const s = l.submission as ProfileSubmission;
+              return (
+                <li key={l.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[15px]">
+                  <span><strong>{s?.name || 'Trainer'}</strong> <span className="text-ink-soft">· {l.trainerId ? 'update to their profile' : 'new trainer'}</span></span>
+                  <button type="button" onClick={() => setReviewId(l.id)} className={btnSecondary}>Review</button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
@@ -244,9 +319,74 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
               onEdit={() => startEdit(openTrainer)}
               onDelete={() => remove(openTrainer)}
             />
+            <section className="mt-6 space-y-2 rounded-xl border border-line p-4">
+              <h4 className="text-sm font-semibold text-ink-soft">Profile link</h4>
+              <p className="text-sm text-ink-soft">Send {openTrainer.name} a private link to fill in or update their own profile. You review it before anything changes.</p>
+              {liveProfileLink(openTrainer) ? (
+                <LinkShareBox link={liveProfileLink(openTrainer)!} phone={openTrainer.contact}
+                  message={`Hi ${openTrainer.name}, please fill in your trainer profile for NEXT Academy here:`}
+                  onCancel={() => { const l = liveProfileLink(openTrainer); if (l && window.confirm('Cancel this link?')) closeTrainerLink(l, 'cancelled', viewer); }} />
+              ) : (
+                <button type="button" className={btnSecondary} onClick={() => sendProfileLink(openTrainer)}>Send profile link</button>
+              )}
+            </section>
           </div>
         </div>
       )}
+
+      {/* A new link to share */}
+      {shareLink && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" role="dialog" aria-modal="true" onClick={() => setShareLink(null)}>
+          <div className="w-full max-w-lg space-y-3 rounded-2xl bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold">{shareLink.trainerId ? `Profile link for ${shareLink.trainerName}` : 'Invite a new trainer'}</h3>
+            <p className="text-[15px] text-ink-soft">Send this link by WhatsApp. They fill in their profile without logging in; it appears here for review.</p>
+            <LinkShareBox link={shareLink} phone={trainers.find(t => t.id === shareLink.trainerId)?.contact}
+              message={shareLink.trainerName ? `Hi ${shareLink.trainerName}, please fill in your trainer profile for NEXT Academy here:` : 'Hi, please fill in your trainer profile for NEXT Academy here:'} />
+            <div className="flex justify-end"><button type="button" className={btnPrimary} onClick={() => setShareLink(null)}>Done</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* Review a submitted profile */}
+      {reviewId && (() => {
+        const l = links.find(x => x.id === reviewId);
+        if (!l || !l.submission) return null;
+        const s = l.submission as ProfileSubmission;
+        const cur = l.trainerId ? trainers.find(t => t.id === l.trainerId) : null;
+        const row = (label_: string, now: string, before?: string) => (
+          <div className="grid gap-1 border-b border-line py-2 sm:grid-cols-[10rem_minmax(0,1fr)]">
+            <dt className="text-sm text-ink-soft">{label_}</dt>
+            <dd className="whitespace-pre-line text-[15px]">{now || <span className="text-ink-soft">—</span>}
+              {cur && (before || '') !== (now || '') && <span className="block text-xs text-ink-soft">Was: {before || '—'}</span>}</dd>
+          </div>
+        );
+        return (
+          <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setReviewId(null)}>
+            <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-1/2 md:min-w-[40rem]" onClick={e => e.stopPropagation()}>
+              <div className="mb-3 flex items-start justify-between gap-4">
+                <h3 className="text-lg font-bold">{cur ? `Profile update from ${cur.name}` : 'New trainer profile'}</h3>
+                <button type="button" onClick={() => setReviewId(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
+              </div>
+              <dl>
+                {row('Name', s.name, cur?.name)}
+                {row('Phone', s.contact, cur?.contact)}
+                {row('Email', s.email, cur?.email)}
+                {row('Programmes', s.programmeIds.map(progName).filter(Boolean).join(', '), (cur?.programmeIds || []).map(progName).filter(Boolean).join(', '))}
+                {row('Other topics', s.suggestedTopics, cur?.suggestedTopics)}
+                {row('Years of experience', s.experienceYears ? String(s.experienceYears) : '', cur?.experienceYears ? String(cur.experienceYears) : '')}
+                {row('Daily rate', s.rate ? formatRM(s.rate) : '', cur?.rate ? formatRM(cur.rate) : '')}
+                {row('Bio', s.bio, cur?.bio)}
+                {row('Qualifications', s.qualifications, cur?.qualifications)}
+                {row('Past clients', s.pastClients, cur?.pastClients)}
+              </dl>
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button type="button" className={btnSecondary} onClick={() => discardProfile(l)}>Discard</button>
+                <button type="button" className={btnPrimary} disabled={busy} onClick={() => acceptProfile(l)}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{cur ? 'Accept changes' : 'Add this trainer'}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Add / edit form */}
       {editing && (
@@ -315,6 +455,30 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                   <input type="checkbox" checked={form.onLeave} onChange={e => set({ onLeave: e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
                   On leave (not taking trainings for now)
                 </label>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={label} htmlFor="t-years">Years of experience</label>
+                  <input id="t-years" inputMode="numeric" value={form.experienceYears} onChange={e => set({ experienceYears: e.target.value })} className={input} />
+                </div>
+                <div>
+                  <label className={label} htmlFor="t-other">Other topics <span className="font-normal text-ink-soft">(not in the list yet)</span></label>
+                  <input id="t-other" value={form.suggestedTopics} onChange={e => set({ suggestedTopics: e.target.value })} className={input} />
+                </div>
+              </div>
+              <div>
+                <label className={label} htmlFor="t-bio">Short bio</label>
+                <textarea id="t-bio" value={form.bio} onChange={e => set({ bio: e.target.value })} rows={3} className={`${input} resize-y`} />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={label} htmlFor="t-qual">Qualifications</label>
+                  <textarea id="t-qual" value={form.qualifications} onChange={e => set({ qualifications: e.target.value })} rows={3} className={`${input} resize-y`} />
+                </div>
+                <div>
+                  <label className={label} htmlFor="t-past">Past clients</label>
+                  <textarea id="t-past" value={form.pastClients} onChange={e => set({ pastClients: e.target.value })} rows={3} className={`${input} resize-y`} />
+                </div>
               </div>
               <div>
                 <label className={label} htmlFor="t-notes">Notes <span className="font-normal text-ink-soft">(optional)</span></label>
@@ -400,6 +564,11 @@ function TrainerPanel(props: {
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
         <div><dt className="text-sm text-ink-soft">Daily rate</dt><dd className="font-semibold">{t.rate ? formatRM(t.rate) : 'Not set'}</dd></div>
         <div><dt className="text-sm text-ink-soft">Status</dt><dd className="font-semibold">{t.status === 'On Leave' ? 'On leave' : 'Available'}</dd></div>
+        {!!t.experienceYears && <div><dt className="text-sm text-ink-soft">Experience</dt><dd className="font-semibold">{t.experienceYears} year{t.experienceYears === 1 ? '' : 's'}</dd></div>}
+        {t.suggestedTopics && <div className="col-span-2"><dt className="text-sm text-ink-soft">Other topics (not in the Programme list yet)</dt><dd className="whitespace-pre-line">{t.suggestedTopics}</dd></div>}
+        {t.bio && <div className="col-span-2"><dt className="text-sm text-ink-soft">Bio</dt><dd className="whitespace-pre-line">{t.bio}</dd></div>}
+        {t.qualifications && <div className="col-span-2"><dt className="text-sm text-ink-soft">Qualifications</dt><dd className="whitespace-pre-line">{t.qualifications}</dd></div>}
+        {t.pastClients && <div className="col-span-2"><dt className="text-sm text-ink-soft">Past clients</dt><dd className="whitespace-pre-line">{t.pastClients}</dd></div>}
         {t.notes && <div className="col-span-2"><dt className="text-sm text-ink-soft">Notes</dt><dd className="whitespace-pre-line">{t.notes}</dd></div>}
       </dl>
 

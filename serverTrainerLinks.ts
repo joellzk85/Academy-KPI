@@ -1,0 +1,94 @@
+// Trainer links, the public part (Joel, 2026-10-17). A trainer opens /t/<token> without logging in.
+// These two routes are the only way in: they read the link with the server's own access and
+// return just what the form needs (the programme title, who is asking, the trainer's current
+// details), and store what the trainer submits. The trainer never touches the database directly.
+// The team reviews and accepts the submission inside the CRM (src/lib/trainerLinks.ts).
+
+import type { Express, Request } from 'express';
+import { admin, UserError, route } from './serverAuth';
+import {
+  cleanOutline, cleanProfile, isExpired, outlineProblem, profileProblem,
+} from './src/lib/trainerLinks';
+
+// Light protection against someone hammering the links: 40 requests a minute per address.
+const hits = new Map<string, { n: number; since: number }>();
+function slowDown(req: Request) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const now = Date.now();
+  const h = hits.get(ip);
+  if (!h || now - h.since > 60_000) { hits.set(ip, { n: 1, since: now }); return; }
+  if (++h.n > 40) throw new UserError(429, 'too-many', 'Too many tries. Wait a minute and try again.');
+}
+
+async function openLink(token: any) {
+  const t = String(token || '');
+  if (!/^[a-f0-9]{32}$/.test(t)) throw new UserError(404, 'link-not-found', 'This link is not valid. Ask NEXT Academy for a new one.');
+  const { db } = admin();
+  const ref = db.collection('trainer_links').doc(t);
+  const snap = await ref.get();
+  if (!snap.exists) throw new UserError(404, 'link-not-found', 'This link is not valid. Ask NEXT Academy for a new one.');
+  const link: any = snap.data();
+  if (link.status === 'cancelled') throw new UserError(410, 'link-closed', 'This link has been cancelled. Ask NEXT Academy for a new one if needed.');
+  if (link.status === 'accepted') throw new UserError(410, 'link-done', 'Thank you, NEXT Academy has already received and accepted this. The link is now closed.');
+  if (isExpired(link)) throw new UserError(410, 'link-expired', 'This link has expired. Ask NEXT Academy for a new one.');
+  return { db, ref, link };
+}
+
+const firstName = (n: string) => String(n || '').trim().split(/\s+/)[0] || 'NEXT Academy';
+
+export function registerTrainerLinkRoutes(app: Express) {
+  // What the form shows.
+  app.post('/api/trainer-link/get', route(async req => {
+    slowDown(req);
+    const { db, link } = await openLink(req.body?.token);
+    const out: any = {
+      kind: link.kind, title: link.title || '', askedBy: firstName(link.requestedByName),
+      trainerName: link.trainerName || '', status: link.status, expiresAt: link.expiresAt,
+    };
+    if (link.kind === 'profile') {
+      const progs = await db.collection('programmes').get();
+      out.programmes = progs.docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name));
+      if (link.submission) out.prefill = link.submission;
+      else if (link.trainerId) {
+        const t = (await db.collection('trainers_directory').doc(link.trainerId).get()).data() || {};
+        out.prefill = {
+          name: t.name || '', contact: t.contact || '', email: t.email || '', bio: t.bio || '', experienceYears: t.experienceYears || 0,
+          qualifications: t.qualifications || '', pastClients: t.pastClients || '', programmeIds: t.programmeIds || [],
+          suggestedTopics: t.suggestedTopics || '', rate: t.rate || 0,
+        };
+      }
+    } else {
+      if (link.submission) out.prefill = link.submission;
+      else if (link.outlineId) {
+        const o = (await db.collection('course_outlines').doc(link.outlineId).get()).data();
+        if (o && (o.items || []).some((m: any) => m.moduleTitle || m.topics)) {
+          out.prefill = {
+            durationDays: o.durationDays || 0, totalHours: o.totalHours || 0, level: o.level || 'Beginner', audience: o.audience || '',
+            prerequisites: o.prerequisites || '', overview: o.overview || '', outcomes: o.outcomes || [],
+            items: (o.items || []).map((m: any) => ({ moduleTitle: m.moduleTitle || '', duration: m.duration || '', methodology: m.methodology || '', topics: m.topics || '' })),
+          };
+        }
+      }
+    }
+    return out;
+  }));
+
+  // The trainer submits (again, if they want to correct it, until the team accepts it).
+  app.post('/api/trainer-link/submit', route(async req => {
+    slowDown(req);
+    const { db, ref, link } = await openLink(req.body?.token);
+    let submission: any;
+    if (link.kind === 'profile') {
+      const ids = (await db.collection('programmes').get()).docs.map(d => d.id);
+      submission = cleanProfile(req.body?.data, ids);
+      const problem = profileProblem(submission);
+      if (problem) throw new UserError(400, 'invalid', problem);
+    } else {
+      submission = cleanOutline(req.body?.data);
+      const problem = outlineProblem(submission);
+      if (problem) throw new UserError(400, 'invalid', problem);
+    }
+    await ref.update({ submission, submittedAt: Date.now(), status: 'submitted' });
+    return {};
+  }));
+}

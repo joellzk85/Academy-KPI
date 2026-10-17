@@ -235,6 +235,14 @@ service cloud.firestore {
       allow read, write: if isManagement();
     }
 
+    // Trainer links (2026-10-17): private links for a trainer to fill in a course outline or their profile.
+    // Team members make, cancel and accept them. Trainers never use the database: the CRM server reads the
+    // link and stores what they submit (serverTrainerLinks.ts).
+    match /trainer_links/{token} {
+      allow read, create, update: if isMember();
+      allow delete: if isStaff();
+    }
+
     // All other CRM work data: team members only
     match /{coll}/{docId=**} {
       allow read, write: if isMember() && coll in [

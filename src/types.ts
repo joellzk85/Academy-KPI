@@ -219,6 +219,7 @@ export interface CourseOutline {
   // Redesign (2026-10-17): read live from the deal while a draft, locked copy once sent.
   useProgrammeName?: boolean;   // course title = the programme's name (else courseTitle as typed)
   programmeId?: string;         // the programme this outline is for (optional; else the linked deal's programme)
+  trainerId?: string;           // the trainer who wrote / will deliver it (trainers_directory)
   status?: 'draft' | 'sent';
   sentAt?: string;
   sentById?: string;
@@ -247,6 +248,12 @@ export interface Trainer {
   name: string;
   specialization: string;       // old free-text topics, kept as a note (programmeIds replaced it, 2026-10-17)
   programmeIds?: string[];      // programmes from the Programme list this trainer can teach
+  // Filled in by the trainer from a profile link, or by the team (2026-10-17)
+  bio?: string;
+  experienceYears?: number;
+  qualifications?: string;
+  pastClients?: string;
+  suggestedTopics?: string;     // topics they teach that aren't in the Programme list yet
   contact?: string;
   email?: string;
   rate: number;

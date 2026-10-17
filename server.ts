@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { registerAuthRoutes } from "./serverAuth";
 import { registerCalendarRoutes } from "./serverCalendar";
 import { registerBackupRoutes } from "./serverBackup";
+import { registerTrainerLinkRoutes } from "./serverTrainerLinks";
 
 // Load environment variables
 dotenv.config();
@@ -28,6 +29,9 @@ async function startServer() {
 
   // Data backup: daily copy to a Google Sheet and Excel download (Admin and Management)
   registerBackupRoutes(app);
+
+  // Trainer links: a trainer fills in a course outline or their profile without logging in
+  registerTrainerLinkRoutes(app);
 
   // API Routes
   app.get("/api/health", (req, res) => {
