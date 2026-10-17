@@ -45,6 +45,7 @@ import { Representative, CalendarEvent, TeamMember, ROLE_LABELS } from './types'
 import { metricsFor } from './lib/kpi';
 import { appointmentEvents } from './lib/appointments';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
+import { runBackup } from './lib/backupApi';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -363,6 +364,13 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setGoogleCalEvents([]);
     }
   };
+  // Daily backup to the Google Sheet: the server runs it only once a Malaysian day, the first time
+  // Admin or Management opens the CRM (serverBackup.ts). Quiet if it isn't set up.
+  useEffect(() => {
+    if (!isStaff) return;
+    runBackup(false).catch(err => console.warn('Daily backup:', err));
+  }, [isStaff]);
+
   useEffect(() => {
     refreshGoogleCalendar();
     const timer = window.setInterval(() => refreshGoogleCalendar(), 5 * 60 * 1000);

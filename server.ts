@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { registerAuthRoutes } from "./serverAuth";
 import { registerCalendarRoutes } from "./serverCalendar";
+import { registerBackupRoutes } from "./serverBackup";
 
 // Load environment variables
 dotenv.config();
@@ -24,6 +25,9 @@ async function startServer() {
 
   // The shared Google Calendar (the server connects; nobody signs in to Google)
   registerCalendarRoutes(app);
+
+  // Data backup: daily copy to a Google Sheet and Excel download (Admin and Management)
+  registerBackupRoutes(app);
 
   // API Routes
   app.get("/api/health", (req, res) => {

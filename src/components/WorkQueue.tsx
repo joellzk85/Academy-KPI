@@ -13,6 +13,7 @@ import HrdcQueries from './HrdcQueries';
 import MoneyPanel, { MoneyOverview, useMoneySettings } from './Money';
 import { MoneyIn, MoneyOut, moneyFlags, moneySettled } from '../lib/money';
 import ProgrammesManager, { StatusChip } from './Programmes';
+import BackupPanel from './BackupPanel';
 import { Flag } from '../lib/checklist';
 import { HrdcQuery, Programme, grantBlockReason, isQueryOpen, isQueryOverdue } from '../lib/programmes';
 
@@ -32,9 +33,9 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
   viewer: Viewer;
   people: { id: string; name: string }[];
   onOpenQuotations: (repId: string) => void;   // opens that person's quotation library
-  initialView?: 'queue' | 'money' | 'programmes' | 'tasks';   // which tab to open (from My home)
+  initialView?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup';   // which tab to open (from My home)
 }) {
-  const [view, setView] = useState<'queue' | 'money' | 'programmes' | 'tasks'>(initialView);
+  const [view, setView] = useState<'queue' | 'money' | 'programmes' | 'tasks' | 'backup'>(initialView);
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -42,8 +43,8 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
           <h2 className="text-xl font-bold">Admin work</h2>
           <p className="mt-0.5 text-[15px] text-ink-soft">Every won deal and what still needs doing, soonest training first.</p>
         </div>
-        <div className="inline-flex rounded-lg border border-line bg-white p-0.5" role="tablist">
-          {([['queue', 'Work queue'], ['money', 'Money'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks']] as const).map(([k, t]) => (
+        <div className="inline-flex flex-wrap rounded-lg border border-line bg-white p-0.5" role="tablist">
+          {([['queue', 'Work queue'], ['money', 'Money'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ['backup', 'Backup']] as const).map(([k, t]) => (
             <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
               className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === k ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>
               {t}
@@ -51,7 +52,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
           ))}
         </div>
       </div>
-      {view === 'queue' ? <Queue viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} /> : view === 'money' ? <MoneyOverview viewer={viewer} /> : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : <TaskSettings viewer={viewer} />}
+      {view === 'queue' ? <Queue viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} /> : view === 'money' ? <MoneyOverview viewer={viewer} /> : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : view === 'tasks' ? <TaskSettings viewer={viewer} /> : <BackupPanel />}
     </div>
   );
 }
