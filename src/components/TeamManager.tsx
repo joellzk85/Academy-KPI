@@ -113,14 +113,17 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
   const [kpiTemplate, setKpiTemplate] = useState('');
   const [kpiTargets, setKpiTargets] = useState<Record<string, string>>({});
 
+  // Management have no KPIs unless a KPI set is chosen for them (Joel, 2026-10-17).
+  const NO_KPIS = 'none';
   const kpiSummary = (m: TeamMember) => {
     const chosen = templateById(kpiDocs[m.id]?.kpiTemplate);
-    return chosen ? chosen.name : `${templateById(defaultTemplateIdFor(m.role))!.name} (default)`;
+    if (chosen) return chosen.name;
+    return m.role === 'management' ? 'None' : `${templateById(defaultTemplateIdFor(m.role))!.name} (default)`;
   };
 
   const openKpi = (m: TeamMember) => {
     const saved = kpiDocs[m.id] || {};
-    const tplId = templateById(saved.kpiTemplate) ? saved.kpiTemplate : defaultTemplateIdFor(m.role);
+    const tplId = templateById(saved.kpiTemplate) ? saved.kpiTemplate : m.role === 'management' ? NO_KPIS : defaultTemplateIdFor(m.role);
     const resolved = metricsFor({ id: m.id, role: m.role, kpiTemplate: saved.kpiTemplate, targets: saved.targets });
     const t: Record<string, string> = {};
     resolved.forEach(x => { t[x.key] = String(x.targetVal); });
@@ -139,6 +142,18 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
 
   const saveKpi = async () => {
     if (!dialog || dialog.kind !== 'kpi') return;
+    if (kpiTemplate === NO_KPIS) {
+      setDialogBusy(true);
+      try {
+        await setDoc(doc(db, 'reps', dialog.member.id), { kpiTemplate: '' }, { merge: true });
+        flash('ok', `${dialog.member.name} has no KPIs.`);
+        closeDialog();
+      } catch (err) {
+        setDialogError(friendlyError(err));
+        setDialogBusy(false);
+      }
+      return;
+    }
     const tpl = templateById(kpiTemplate);
     if (!tpl) return setDialogError('Choose a KPI set.');
     const targets: Record<string, number> = {};
@@ -344,7 +359,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                     </p>
                     <p className="mt-0.5 text-sm text-ink-soft">
                       {m.mustChangePassword ? 'Has not set their own password yet' : 'Active'}
-                      {m.role !== 'management' && <span className="block">KPIs: {kpiSummary(m)}</span>}
+                      <span className="block">KPIs: {kpiSummary(m)}</span>
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -361,11 +376,9 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                       <option value="admin">{ROLE_LABELS.admin}</option>
                       <option value="management">{ROLE_LABELS.management}</option>
                     </select>
-                    {m.role !== 'management' && (
-                      <button type="button" className={secondaryBtn} onClick={() => openKpi(m)}>
-                        <Gauge className="h-3.5 w-3.5" /> KPIs
-                      </button>
-                    )}
+                    <button type="button" className={secondaryBtn} onClick={() => openKpi(m)}>
+                      <Gauge className="h-3.5 w-3.5" /> KPIs
+                    </button>
                     {!isMe && (
                       <>
                         <button type="button" className={secondaryBtn} onClick={() => setDialog({ kind: 'reset', member: m })}>
@@ -456,6 +469,15 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
         <Dialog title={`KPIs for ${dialog.member.name}`} onClose={closeDialog}>
           <p className="mb-3 text-[15px] leading-relaxed text-ink-soft">Choose the KPI set, then adjust the monthly targets. KPIs marked "from deals" are counted automatically.</p>
           <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+            {dialog.member.role === 'management' && (
+              <label className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 ${kpiTemplate === NO_KPIS ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface'}`}>
+                <input type="radio" name="kpi-tpl" checked={kpiTemplate === NO_KPIS} onChange={() => { setKpiTemplate(NO_KPIS); setKpiTargets({}); }} className="mt-1 accent-[#0E6E62]" />
+                <span>
+                  <span className="block text-[15px] font-semibold">No KPIs</span>
+                  <span className="block text-sm text-ink-soft">Management only. Choose a KPI set below to give them a KPI page and a performance ring.</span>
+                </span>
+              </label>
+            )}
             {KPI_TEMPLATES.map(t => (
               <label key={t.id} className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 ${kpiTemplate === t.id ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface'}`}>
                 <input type="radio" name="kpi-tpl" checked={kpiTemplate === t.id} onChange={() => chooseTemplate(t.id)} className="mt-1 accent-[#0E6E62]" />

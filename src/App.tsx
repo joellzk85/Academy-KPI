@@ -43,7 +43,7 @@ const MyHome = React.lazy(() => import('./components/MyHome'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, TeamMember, ROLE_LABELS } from './types';
-import { metricsFor } from './lib/kpi';
+import { metricsFor, templateById } from './lib/kpi';
 import { appointmentEvents } from './lib/appointments';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
 import { runBackup } from './lib/backupApi';
@@ -292,12 +292,14 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     return 'JUL-26';
   });
 
-  // People with a sales workspace: active reps and admins. Names come from Team,
-  // KPI settings from their rep document, typed-in numbers from this month's KPI document.
+  // People with a workspace and KPIs: active reps and admins, plus Management members who were
+  // given a KPI set in Team (Joel, 2026-10-17). Names come from Team, KPI settings from their rep
+  // document, typed-in numbers from this month's KPI document.
+  const ROLE_ORDER: Record<string, number> = { rep: 0, admin: 1, management: 2 };
   const representatives: Representative[] = React.useMemo(() => {
     return teamMembers
-      .filter(m => m.active && (m.role === 'rep' || m.role === 'admin'))
-      .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'rep' ? -1 : 1))
+      .filter(m => m.active && (m.role === 'rep' || m.role === 'admin' || (m.role === 'management' && !!templateById(repDocs[m.id]?.kpiTemplate))))
+      .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : ROLE_ORDER[a.role] - ROLE_ORDER[b.role]))
       .map(m => {
         const settings = repDocs[m.id] || {};
         const person = { id: m.id, role: m.role, kpiTemplate: settings.kpiTemplate, targets: settings.targets || DEFAULT_TARGETS };

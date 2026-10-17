@@ -29,6 +29,11 @@ const CLEAR_COLLECTIONS: { name: string; label: string }[] = [
 
 type Doc = { coll: string; id: string; data: any };
 
+// KPI history is stored per person per month as month_kpis/<memberId>_<MMM-YY>; KPI settings as reps/<memberId>.
+// Linking moves an old person's months to their new Team profile (Joel, 2026-10-17).
+const kpiOwner = (d: Doc) => String(d.data?.repId || d.id.slice(0, d.id.lastIndexOf('_')) || '');
+const kpiMonth = (d: Doc) => String(d.data?.month || d.id.slice(d.id.lastIndexOf('_') + 1));
+
 const btnPrimary = 'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50] disabled:opacity-60';
 const btnSecondary = 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-surface disabled:opacity-60';
 
@@ -49,6 +54,8 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
 
   const [clearCounts, setClearCounts] = useState<Record<string, number> | null>(null);
   const [oldWorkspaces, setOldWorkspaces] = useState<string[]>([]);
+  const [kpiDocs, setKpiDocs] = useState<Doc[]>([]);
+  const [repDocs, setRepDocs] = useState<Doc[]>([]);
   const [confirmClear, setConfirmClear] = useState(false);
   const [understood, setUnderstood] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -72,7 +79,13 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
       }
       setClearCounts(counts);
       const reps = await getDocs(collection(db, 'reps'));
-      setOldWorkspaces(reps.docs.map(d => d.id).filter(id => !teamIds.has(id)));
+      const months = await getDocs(collection(db, 'month_kpis'));
+      const kd: Doc[] = months.docs.map(d => ({ coll: 'month_kpis', id: d.id, data: d.data() }));
+      setKpiDocs(kd);
+      setRepDocs(reps.docs.map(d => ({ coll: 'reps', id: d.id, data: d.data() })));
+      // Old KPI settings are kept while that person still has KPI history waiting to be linked.
+      const waiting = new Set(kd.map(kpiOwner).filter(id => id && !teamIds.has(id)));
+      setOldWorkspaces(reps.docs.map(d => d.id).filter(id => !teamIds.has(id) && !waiting.has(id)));
     } catch (err) {
       setLoadError(friendlyError(err));
     }
@@ -97,10 +110,17 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
       (data.taggedRepIds || []).forEach((id: string) => { note(id, ''); if (id && !teamIds.has(id)) ids.add(id); });
       ids.forEach(id => { found[id].count++; });
     });
+    const months: Record<string, number> = {};
+    kpiDocs.forEach(d => {
+      const id = kpiOwner(d);
+      if (!id || teamIds.has(id)) return;
+      note(id, repDocs.find(r => r.id === id)?.data?.name);
+      months[id] = (months[id] || 0) + 1;
+    });
     return Object.entries(found)
-      .map(([id, v]) => ({ id, name: v.name || id, count: v.count }))
-      .sort((a, b) => b.count - a.count);
-  }, [records, teamIds]);
+      .map(([id, v]) => ({ id, name: v.name || id, count: v.count, kpiMonths: months[id] || 0 }))
+      .sort((a, b) => b.count + b.kpiMonths - (a.count + a.kpiMonths));
+  }, [records, teamIds, kpiDocs, repDocs]);
 
   // Suggest a match when an old name equals a new team member's name.
   useEffect(() => {
@@ -141,10 +161,39 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
         ops.push(b => b.update(doc(db, coll, id), upd));
       }
     });
+    // KPI history: move each old month to the new person, unless they already have numbers for that month.
+    const taken = new Set(kpiDocs.map(d => d.id));
+    let movedMonths = 0;
+    const kept: string[] = [];
+    kpiDocs.forEach(d => {
+      const to = map[kpiOwner(d)];
+      if (!to) return;
+      const month = kpiMonth(d);
+      const newId = `${to}_${month}`;
+      if (taken.has(newId)) { kept.push(`${nameOf(to)} ${month}`); return; }
+      taken.add(newId);
+      movedMonths++;
+      ops.push(b => b.set(doc(db, 'month_kpis', newId), { ...d.data, repId: to, month }));
+      ops.push(b => b.delete(doc(db, 'month_kpis', d.id)));
+    });
+    // KPI settings (KPI set and targets): copied only if the new person has none yet.
+    repDocs.forEach(r => {
+      const to = map[r.id];
+      if (!to) return;
+      const current = repDocs.find(x => x.id === to)?.data || {};
+      const upd: any = {};
+      if (!current.kpiTemplate && r.data?.kpiTemplate) upd.kpiTemplate = r.data.kpiTemplate;
+      if (!current.targets && r.data?.targets) upd.targets = r.data.targets;
+      if (Object.keys(upd).length) ops.push(b => b.set(doc(db, 'reps', to), upd, { merge: true }));
+    });
     setLinking(true);
     try {
       await commitInChunks(ops);
-      setLinkMsg({ ok: true, text: `${touched} record${touched === 1 ? '' : 's'} moved to their new Team profiles.` });
+      const parts = [`${touched} record${touched === 1 ? '' : 's'} moved to their new Team profiles`];
+      if (movedMonths) parts.push(`${movedMonths} month${movedMonths === 1 ? '' : 's'} of KPI history moved`);
+      let text = parts.join(', and ') + '.';
+      if (kept.length) text += ` These months already had numbers on the new profile, so the old ones were left as they were: ${kept.join(', ')}.`;
+      setLinkMsg({ ok: true, text });
       setMapping({});
       await load();
     } catch (err) {
@@ -195,7 +244,7 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
       <section className="rounded-2xl border border-line bg-white p-5">
         <h3 className="flex items-center gap-2 font-bold"><Link2 className="h-4 w-4 text-accent" /> Link old records to the new team</h3>
         <p className="mt-1 text-[15px] leading-relaxed text-ink-soft">
-          Old deals, quotations and course outlines are tagged with the old logins. Match each old name to the right person so their work appears in their workspace and counts toward their KPIs.
+          Old deals, quotations, course outlines and KPI history are tagged with the old logins. Until they are linked they are hidden everywhere in the CRM. Match each old name to the right person so their work and past KPIs appear in their workspace. Choose only the people you want to link now; "Leave unlinked for now" keeps the rest hidden.
         </p>
         {records === null ? (
           <p className="mt-4 flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Checking records…</p>
@@ -213,7 +262,9 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
                     <li key={op.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center">
                       <span className="min-w-0 flex-1">
                         <span className="block font-semibold">{op.name}</span>
-                        <span className="block text-sm text-ink-soft">On {op.count} record{op.count === 1 ? '' : 's'}</span>
+                        <span className="block text-sm text-ink-soft">
+                          {[op.count ? `On ${op.count} record${op.count === 1 ? '' : 's'}` : '', op.kpiMonths ? `${op.kpiMonths} month${op.kpiMonths === 1 ? '' : 's'} of KPI history` : ''].filter(Boolean).join(' · ')}
+                        </span>
                       </span>
                       <label className="sr-only" htmlFor={`map-${op.id}`}>New team member for {op.name}</label>
                       <select

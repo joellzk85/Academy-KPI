@@ -1959,7 +1959,7 @@ export default function RepDetailDashboard({
     { key: 'client', label: MENU_LABELS.client },
     { key: 'trainerList', label: MENU_LABELS.trainerList },
     { key: 'venue', label: MENU_LABELS.venue },
-    ...(rep.role === 'admin' && onOpenAdminWork ? [{ key: 'admin_work' as const, label: MENU_LABELS.admin_work }] : []),
+    ...((rep.role === 'admin' || rep.role === 'management') && onOpenAdminWork ? [{ key: 'admin_work' as const, label: MENU_LABELS.admin_work }] : []),
     { key: 'tasks', label: MENU_LABELS.tasks, alert: tasks.some(t => needsDoingNow(t, rep.id, todayIso())) ? 'Task due' : undefined },
   ];
 
@@ -1988,7 +1988,7 @@ export default function RepDetailDashboard({
         </button>
         <div className="min-w-0">
           <p className="truncate text-lg font-bold">{rep.name}</p>
-          <p className="text-sm text-ink-soft">{rep.role === 'admin' ? 'Admin' : 'Sales rep'} · {MENU_LABELS[activeSubTab as keyof typeof MENU_LABELS] || 'Workspace'}</p>
+          <p className="text-sm text-ink-soft">{rep.role === 'management' ? 'Management' : rep.role === 'admin' ? 'Admin' : 'Sales rep'} · {MENU_LABELS[activeSubTab as keyof typeof MENU_LABELS] || 'Workspace'}</p>
         </div>
       </div>
 
