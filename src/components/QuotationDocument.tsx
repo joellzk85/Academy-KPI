@@ -154,7 +154,8 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
               <th className="p-3.5 w-32 border-r border-slate-300">Programme Code</th>
               <th className="p-3.5 w-40 border-r border-slate-300">Training Date</th>
               <th className="p-3.5 border-r border-slate-300">Trainer</th>
-              <th className="p-3.5 w-32 text-right border-r border-slate-300">Rate / Day</th>
+              <th className="p-3.5 w-20 text-center border-r border-slate-300">Days / Qty</th>
+              <th className="p-3.5 w-32 text-right border-r border-slate-300">Rate</th>
               <th className="p-3.5 w-32 text-right">Total Fee</th>
             </tr>
           </thead>
@@ -166,6 +167,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
                 <td className="p-3.5 font-mono font-semibold text-slate-600 border-r border-slate-200 text-xs">{item.code}</td>
                 <td className="p-3.5 text-slate-600 font-medium border-r border-slate-200 leading-normal">{item.date}</td>
                 <td className="p-3.5 font-semibold text-slate-700 border-r border-slate-200 leading-normal">{item.trainer}</td>
+                <td className="p-3.5 text-center font-mono font-semibold text-slate-600 border-r border-slate-200">{item.days}</td>
                 <td className="p-3.5 text-right font-mono font-bold text-slate-600 border-r border-slate-200">
                   RM {item.feePerDay.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </td>
@@ -184,6 +186,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
                 <td className="p-3.5 border-r border-slate-200"></td>
                 <td className="p-3.5 border-r border-slate-200"></td>
                 <td className="p-3.5 border-r border-slate-200"></td>
+                <td className="p-3.5 border-r border-slate-200"></td>
                 <td className="p-3.5"></td>
               </tr>
             ))}
@@ -192,7 +195,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
             {applySST && (
               <>
                 <tr className="bg-slate-50/40 border-t border-slate-200 font-bold text-slate-600">
-                  <td colSpan={5} className="p-3.5 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
+                  <td colSpan={6} className="p-3.5 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
                     SUB-TOTAL COURSE FEES
                   </td>
                   <td colSpan={2} className="p-3.5 text-right text-sm font-mono font-bold text-slate-700 bg-slate-50/20">
@@ -200,7 +203,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
                   </td>
                 </tr>
                 <tr className="bg-slate-50/40 border-t border-slate-200 font-bold text-slate-600">
-                  <td colSpan={5} className="p-3.5 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
+                  <td colSpan={6} className="p-3.5 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
                     ADD SST ({sstRate}%)
                   </td>
                   <td colSpan={2} className="p-3.5 text-right text-sm font-mono font-bold text-slate-700 bg-slate-50/20">
@@ -212,7 +215,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
 
             {/* Grand Total Row */}
             <tr className="bg-slate-55/60 border-t border-slate-300 font-black">
-              <td colSpan={5} className="p-4 border-r border-slate-200 text-right uppercase tracking-wider text-xs text-slate-500 font-mono">
+              <td colSpan={6} className="p-4 border-r border-slate-200 text-right uppercase tracking-wider text-xs text-slate-500 font-mono">
                 GRAND TOTAL COURSE FEES CLAIMABLE
               </td>
               <td colSpan={2} className="p-4 text-right text-base font-mono font-black text-blue-700 bg-slate-50">

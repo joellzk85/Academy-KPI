@@ -62,13 +62,18 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
   const issues: string[] = [];
   const out: Quotation = { ...q, clientId: clientId || q.clientId };
 
+  const attnOverride = (q.attnOverride || '').trim();
   if (client) {
     out.company = client.companyName || '';
-    out.attn = client.contactName && client.contactName !== 'N/A' ? client.contactName : '';
+    // The client's contact person, unless a different PIC was typed for this quotation.
+    out.attn = attnOverride || (client.contactName && client.contactName !== 'N/A' ? client.contactName : '');
     out.address = client.address || '';
     if (!out.address) issues.push(`${out.company || 'This client'} has no address in the client list.`);
     if (!out.attn) issues.push(`${out.company || 'This client'} has no contact person in the client list.`);
-  } else if (!q.company) {
+  } else if (attnOverride) {
+    out.attn = attnOverride;
+  }
+  if (!client && !q.company) {
     issues.push('Choose the deal or client this quotation is for.');
   }
 
@@ -83,6 +88,13 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
 
   out.items = (q.items || []).map((it): QuotationItem => {
     const line = { ...it };
+    // Other items (bus, T-shirts): only description, quantity and price.
+    if (it.kind === 'item') {
+      line.code = ''; line.trainer = ''; line.date = '';
+      line.totalFee = (Number(line.feePerDay) || 0) * (Number(line.days) || 0);
+      return line;
+    }
+    // Picked from a list = read live; typed in = kept as typed.
     const prog = it.programmeId ? s.programmes.find(p => p.id === it.programmeId) : null;
     if (prog) { line.program = prog.name || ''; line.code = prog.hrdcCode || ''; }
     else if (it.programmeId) issues.push('A programme on this quotation is no longer in the programme list.');

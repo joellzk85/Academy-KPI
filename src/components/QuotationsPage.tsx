@@ -407,7 +407,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     items[i] = it;
     return { ...x, items };
   });
-  const addItem = () => setQ(x => ({ ...x, items: [...(x.items || []), { id: `item_${Date.now()}`, no: (x.items || []).length + 1, program: '', code: '', date: '', trainer: '', programmeId: '', trainerId: '', useDealDate: !!x.pipelineId, feePerDay: 0, days: 1, totalFee: 0 }] }));
+  const addItem = (kind: 'programme' | 'item') => setQ(x => ({ ...x, items: [...(x.items || []), { id: `item_${Date.now()}`, no: (x.items || []).length + 1, kind, program: '', code: '', date: '', trainer: '', programmeId: '', trainerId: '', useDealDate: kind === 'programme' && !!x.pipelineId, feePerDay: 0, days: 1, totalFee: 0 }] }));
   const removeItem = (i: number) => setQ(x => ({ ...x, items: (x.items || []).filter((_, k) => k !== i) }));
 
   if (preview) {
@@ -426,7 +426,10 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     );
   }
 
-  const sortedBy = (list: any[], key: string) => [...list].sort((a, b) => String(a[key] || '').localeCompare(String(b[key] || '')));
+  // List choices for the "pick or type" boxes, A–Z.
+  const opts = (list: any[]) => list.filter(x => String(x.name || '').trim())
+    .map(x => ({ id: x.id, name: String(x.name).trim() }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const goto = (tab: Tab, what: string) => onOpenTab ? (
     <button type="button" className={linkBtn} onClick={() => { if (!dirty || window.confirm('Leave this quotation without saving?')) onOpenTab(tab); }}>{what}</button>
   ) : null;
@@ -488,7 +491,13 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
           {r.client ? (
             <dl className="grid gap-3 sm:grid-cols-3">
               <Fact term="Company" value={shownQ.company} />
-              <Fact term="Attention to" value={shownQ.attn} />
+              <AttentionBox
+                value={shownQ.attn}
+                override={q.attnOverride || ''}
+                clientContact={r.client.contactName && r.client.contactName !== 'N/A' ? r.client.contactName : ''}
+                locked={locked}
+                onChange={v => set({ attnOverride: v })}
+              />
               <Fact term="Address" value={shownQ.address} />
               <div className="sm:col-span-3">{goto('client', 'Edit these in the client list')}</div>
             </dl>
@@ -508,11 +517,9 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className={label} htmlFor="q-venue">Venue</label>
-              <select id="q-venue" value={q.venueId || ''} onChange={e => set({ venueId: e.target.value })} className={input}>
-                <option value="">{q.venue && !q.venueId ? `Old typed venue: ${q.venue}` : 'Choose from the venue list…'}</option>
-                {sortedBy(sources.venues, 'name').map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </select>
-              <div className="mt-1">{goto('venue', 'Venue not listed? Add it in Venues')}</div>
+              <PickOrType id="q-venue" options={opts(sources.venues)} linkedId={q.venueId || ''} text={q.venue || ''}
+                onChange={v => set({ venueId: v.id, venue: v.text })} placeholder="Pick from the venue list or type one" className={input} />
+              {!q.venueId && q.venue?.trim() && <div className="mt-1">{goto('venue', 'Using it often? Add it in Venues')}</div>}
             </div>
             <div><label className={label} htmlFor="q-time">Time</label><input id="q-time" value={q.time} onChange={e => set({ time: e.target.value })} className={input} placeholder="9:00 AM – 5:00 PM" /></div>
             <div><label className={label} htmlFor="q-pax">Participants{r.deal?.participants ? ' (from the deal)' : ''}</label><input id="q-pax" value={r.deal?.participants ? shownQ.participants : q.participants} disabled={!!r.deal?.participants} onChange={e => set({ participants: e.target.value })} className={input} placeholder="Up to 25 pax" /></div>
@@ -521,17 +528,17 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
         </Card>
 
         {/* 3. Programmes */}
-        <Card title="3. Programmes">
+        <Card title="3. Programmes and other items">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[800px] text-[15px]">
               <thead>
                 <tr className="text-left text-sm text-ink-soft">
-                  <th className="min-w-[220px] pb-2 font-semibold">Programme</th>
+                  <th className="min-w-[220px] pb-2 font-semibold">Programme or item</th>
                   <th className="w-28 pb-2 font-semibold">HRDC code</th>
                   <th className="w-44 pb-2 font-semibold">Dates</th>
                   <th className="w-44 pb-2 font-semibold">Trainer</th>
-                  <th className="w-24 pb-2 font-semibold">Fee / day</th>
-                  <th className="w-16 pb-2 font-semibold">Days</th>
+                  <th className="w-24 pb-2 font-semibold">Rate</th>
+                  <th className="w-16 pb-2 font-semibold">Days / Qty</th>
                   <th className="w-28 pb-2 text-right font-semibold">Total</th>
                   <th className="w-8" />
                 </tr>
@@ -539,15 +546,39 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
               <tbody>
                 {(q.items || []).map((it, i) => {
                   const shown = shownQ.items[i] || it;
+                  const money = (
+                    <>
+                      <td className="py-1 pr-2"><input inputMode="decimal" value={it.feePerDay ? String(it.feePerDay) : ''} onChange={e => setItem(i, { feePerDay: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className={cell} aria-label={`${it.kind === 'item' ? 'Price each' : 'Rate per day'}, line ${i + 1}`} /></td>
+                      <td className="py-1 pr-2"><input inputMode="numeric" value={it.days ? String(it.days) : ''} onChange={e => setItem(i, { days: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className={cell} aria-label={`${it.kind === 'item' ? 'Quantity' : 'Days'}, line ${i + 1}`} /></td>
+                      <td className="py-2.5 text-right font-semibold tabular-nums">{formatRM(shown.totalFee || 0)}</td>
+                      <td className="py-1 pl-1">{!locked && <button type="button" onClick={() => removeItem(i)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove line ${i + 1}`}><X className="h-4 w-4" /></button>}</td>
+                    </>
+                  );
+                  if (it.kind === 'item') {
+                    return (
+                      <tr key={it.id} className="align-top">
+                        <td className="py-1 pr-2">
+                          <input value={it.program} onChange={e => setItem(i, { program: e.target.value })} className={cell} placeholder="e.g. Bus, T-shirts, lunch" aria-label={`Item, line ${i + 1}`} />
+                        </td>
+                        <td colSpan={3} className="py-2.5 pr-2 text-sm text-ink-soft">Other item: price each × quantity</td>
+                        {money}
+                      </tr>
+                    );
+                  }
                   return (
                     <tr key={it.id} className="align-top">
                       <td className="py-1 pr-2">
-                        <select value={it.programmeId || ''} onChange={e => setItem(i, { programmeId: e.target.value })} className={cell} aria-label={`Programme, line ${i + 1}`}>
-                          <option value="">{it.program && !it.programmeId ? `Old: ${it.program}` : 'Choose a programme…'}</option>
-                          {sortedBy(sources.programmes, 'name').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <PickOrType id={`q-prog-${it.id}`} options={opts(sources.programmes)} linkedId={it.programmeId || ''} text={it.program || ''}
+                          onChange={v => setItem(i, { programmeId: v.id, program: v.text, ...(v.id ? {} : { code: it.programmeId ? '' : it.code }) })}
+                          placeholder="Pick or type a programme" className={cell} ariaLabel={`Programme, line ${i + 1}`} />
                       </td>
-                      <td className="py-2.5 pr-2 text-ink-soft">{shown.code || '—'}</td>
+                      <td className="py-1 pr-2">
+                        {it.programmeId ? (
+                          <p className="py-1.5 text-ink-soft">{shown.code || '—'}</p>
+                        ) : (
+                          <input value={it.code || ''} onChange={e => setItem(i, { code: e.target.value })} className={cell} placeholder="If any" aria-label={`HRDC code, line ${i + 1}`} />
+                        )}
+                      </td>
                       <td className="py-1 pr-2">
                         {it.useDealDate && r.deal ? (
                           <div className="py-1.5">
@@ -562,15 +593,11 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
                         )}
                       </td>
                       <td className="py-1 pr-2">
-                        <select value={it.trainerId || ''} onChange={e => setItem(i, { trainerId: e.target.value })} className={cell} aria-label={`Trainer, line ${i + 1}`}>
-                          <option value="">{it.trainer && !it.trainerId ? `Old: ${it.trainer}` : 'Choose…'}</option>
-                          {sortedBy(sources.trainers, 'name').map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        </select>
+                        <PickOrType id={`q-trainer-${it.id}`} options={opts(sources.trainers)} linkedId={it.trainerId || ''} text={it.trainer || ''}
+                          onChange={v => setItem(i, { trainerId: v.id, trainer: v.text })}
+                          placeholder="Pick or type" className={cell} ariaLabel={`Trainer, line ${i + 1}`} />
                       </td>
-                      <td className="py-1 pr-2"><input inputMode="decimal" value={it.feePerDay ? String(it.feePerDay) : ''} onChange={e => setItem(i, { feePerDay: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className={cell} aria-label={`Fee per day, line ${i + 1}`} /></td>
-                      <td className="py-1 pr-2"><input inputMode="numeric" value={it.days ? String(it.days) : ''} onChange={e => setItem(i, { days: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className={cell} aria-label={`Days, line ${i + 1}`} /></td>
-                      <td className="py-2.5 text-right font-semibold tabular-nums">{formatRM(shown.totalFee || 0)}</td>
-                      <td className="py-1 pl-1">{!locked && <button type="button" onClick={() => removeItem(i)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove line ${i + 1}`}><X className="h-4 w-4" /></button>}</td>
+                      {money}
                     </tr>
                   );
                 })}
@@ -579,8 +606,9 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
           </div>
           {!locked && (
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              <button type="button" className={btnSecondary} onClick={addItem}><Plus className="h-4 w-4" /> Add programme</button>
-              <span className="text-sm text-ink-soft">Programme names and HRDC codes come from Admin work → Programmes; trainers from the trainer list.</span>
+              <button type="button" className={btnSecondary} onClick={() => addItem('programme')}><Plus className="h-4 w-4" /> Add programme</button>
+              <button type="button" className={btnSecondary} onClick={() => addItem('item')}><Plus className="h-4 w-4" /> Add other item</button>
+              <span className="text-sm text-ink-soft">Pick a programme or trainer from the list, or type one. Picked ones stay up to date with the list.</span>
             </div>
           )}
           <div className="mt-4 flex flex-wrap items-center justify-end gap-x-6 gap-y-2 border-t border-line pt-3 text-[15px]">
@@ -654,6 +682,62 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
 
       {relinking && (
         <Chooser deals={dealsForPicker} clients={sources.clients} sources={sources} personName={nameOf} onPick={relink} onCancel={() => setRelinking(false)} title="Link this quotation to a deal" />
+      )}
+    </div>
+  );
+}
+
+// "Attention to": the client's contact person, or a different PIC typed for this quotation only.
+function AttentionBox({ value, override, clientContact, locked, onChange }: {
+  value: string; override: string; clientContact: string; locked: boolean; onChange: (v: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const typed = !!override.trim();
+  if (editing && !locked) {
+    return (
+      <div className="rounded-xl bg-surface px-3.5 py-2.5">
+        <label className="text-sm text-ink-soft" htmlFor="q-attn">Attention to (this quotation only)</label>
+        <input id="q-attn" autoFocus value={override} onChange={e => onChange(e.target.value)} placeholder={clientContact || 'Name of the PIC'} className={`${cell} mt-1`} />
+        <div className="mt-1 flex flex-wrap gap-3">
+          <button type="button" className="text-xs font-semibold text-accent hover:underline" onClick={() => setEditing(false)}>Done</button>
+          {clientContact && <button type="button" className="text-xs font-semibold text-accent hover:underline" onClick={() => { onChange(''); setEditing(false); }}>Use the client's contact ({clientContact})</button>}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl bg-surface px-3.5 py-2.5">
+      <dt className="text-sm text-ink-soft">Attention to</dt>
+      <dd className={value ? 'font-semibold' : 'text-ink-soft/70'}>{value || 'Missing'}</dd>
+      {!locked && (
+        <button type="button" className="text-xs font-semibold text-accent hover:underline" onClick={() => setEditing(true)}>
+          {typed ? 'Changed for this quotation · Edit' : 'Change'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// One box for "pick from the list or type your own" (venue, programme, trainer).
+// Typing a name that's in the list links it (read live afterwards); anything else is kept as typed.
+function PickOrType({ id, options, linkedId, text, onChange, placeholder, className, ariaLabel }: {
+  id: string; options: { id: string; name: string }[]; linkedId: string; text: string;
+  onChange: (v: { id: string; text: string }) => void; placeholder?: string; className: string; ariaLabel?: string;
+}) {
+  const linked = linkedId ? options.find(o => o.id === linkedId) : undefined;
+  const value = linked ? linked.name : text;
+  const pick = (v: string) => {
+    const hit = options.find(o => o.name.trim().toLowerCase() === v.trim().toLowerCase() && v.trim());
+    onChange(hit ? { id: hit.id, text: hit.name } : { id: '', text: v });
+  };
+  return (
+    <div>
+      <input id={id} list={`${id}-list`} value={value} onChange={e => pick(e.target.value)} placeholder={placeholder} className={className} aria-label={ariaLabel} autoComplete="off" />
+      <datalist id={`${id}-list`}>
+        {options.map(o => <option key={o.id} value={o.name} />)}
+      </datalist>
+      {(linked || value.trim()) && (
+        <span className={`mt-0.5 block text-xs ${linked ? 'text-accent' : 'text-ink-soft'}`}>{linked ? 'From list' : 'Typed'}</span>
       )}
     </div>
   );

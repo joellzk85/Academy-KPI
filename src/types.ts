@@ -134,8 +134,9 @@ export interface QuotationItem {
   trainerId?: string;      // from the trainer list (live name while the quotation is a draft)
   programmeId?: string;    // from the programme list (live name and HRDC code while a draft)
   useDealDate?: boolean;   // show the linked deal's training date
-  feePerDay: number;
-  days: number;
+  kind?: 'programme' | 'item';  // 'item' = other items (bus, T-shirts): description, quantity and price only
+  feePerDay: number;       // rate per day, or price each for an item
+  days: number;            // days, or quantity for an item
   totalFee: number;
 }
 
@@ -144,6 +145,7 @@ export interface Quotation {
   refNumber: string;
   date: string;
   attn: string;
+  attnOverride?: string;   // a different PIC for this quotation only (else the client's contact person)
   company: string;
   address: string;
   venue: string;

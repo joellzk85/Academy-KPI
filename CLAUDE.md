@@ -245,7 +245,12 @@ What was built:
     - Only quotation-specific things are typed: fee per day (first line starts at the deal value), days, time, participants, extra lines, remarks/terms, SST.
     - **New quotation** first asks "Which deal is this for?" (or "client only"). `buildQuotationForDeal` (Deals and work queue) now links instead of copying.
     - **Mark as sent** writes the resolved text into the quotation and sets `status: 'sent'` (locked, read-only, banner). **Revise** sets it back to draft so it reads live again. The list shows Draft or Sent.
-    - Older quotations without links keep and print their typed text until someone links a deal or client ("Old: ..." shown in the pickers).
+    - Older quotations without links keep and print their typed text until someone links a deal or client.
+  - **Pick or type (Joel, 2026-10-17):**
+    - **Attention to** fills from the client's contact person; "Change" types a different PIC for this quotation only (`attnOverride`). The client list isn't changed.
+    - **Venue, programme and trainer** are one box each (`PickOrType` in `QuotationsPage.tsx`): pick from the list (stays linked, read live, "From list") or type anything else (kept as typed, "Typed"). A typed programme gets a typeable HRDC code.
+    - **Other items** (bus, T-shirts…): "Add other item" adds a line with `kind: 'item'`, holding only a description, price each (`feePerDay`) and quantity (`days`).
+    - The printed quotation gained a **"Days / Qty"** column, and "Rate / Day" is now "Rate" (Joel agreed). The total rows still say "course fees".
     - Missing source details (e.g. a client with no address) show as a "Fix these at the source" list, with links to the right tab.
 - **Tidy-up (done and pushed 2026-10-16):**
   - Removed every fallback to made-up sample deals ("Petronas Digital", "Maybank HQ", ...). They were in Home, Management, the rep workspace and the "URGENT" notices in `App.tsx`. Deals now come only from the live database (`pipelinesSync`).
