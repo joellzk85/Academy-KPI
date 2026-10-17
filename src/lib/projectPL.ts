@@ -77,10 +77,11 @@ export function projectRows(deals: any[], ins: MoneyIn[], outs: MoneyOut[], s: M
     .sort((a, b) => (b.trainingDate || '0').localeCompare(a.trainingDate || '0'));
 }
 
-// year = 'YYYY'; month = 'MM' or '' for the whole year.
-export function inPeriod(r: ProjectRow, year: string, month: string): boolean {
+// year = 'YYYY'; from and to = 'MM' (inclusive), e.g. '07' to '09'.
+export function inPeriod(r: ProjectRow, year: string, from: string, to: string): boolean {
   if (!r.trainingDate) return false;
-  return r.trainingDate.slice(0, 4) === year && (!month || r.trainingDate.slice(5, 7) === month);
+  const m = r.trainingDate.slice(5, 7);
+  return r.trainingDate.slice(0, 4) === year && m >= from && m <= to;
 }
 
 export interface ProjectTotals {
