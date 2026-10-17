@@ -2003,7 +2003,7 @@ export default function RepDetailDashboard({
           ) : activeSubTab === 'trainerList' ? (
             <TrainerManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
           ) : activeSubTab === 'venue' ? (
-            <VenueManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
+            <VenueManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
           ) : activeSubTab === 'kpi' ? (
             <KpiPage rep={rep} reps={reps} viewer={viewer} selectedMonth={selectedMonth} onMonthChange={onMonthChange} onUpdateRepKpi={onUpdateRepKpi} />
           ) : activeSubTab === 'pipeline' ? (

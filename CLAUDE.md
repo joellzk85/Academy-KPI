@@ -280,6 +280,12 @@ What was built:
   - **"Booked" was removed** (Joel). Status is Available or On leave only; old "Booked" records show as Available, and bookings come from the deals.
   - **Only Management can delete a trainer**, and only if no quotation or admin checklist uses them. `trainers_directory` has its own rule and left the catch-all list. **Rules need publishing.**
   - Removed: the stat boxes, dark control panel, status and sort filters, undo banner and the 8-column table.
+- **Venues redesign (2026-10-17, like Trainers):** `src/components/VenueManager.tsx` rewritten in the new style.
+  - The screen has a title with a count, one search box, **Add venue**, then an A–Z list (small photo if `pictures` is a link, name, Under renovation tag, distance · contact, meeting package, next training).
+  - The side panel shows the photo, the contact (Call / WhatsApp when the contact text has a phone number: `phoneIn` in `src/lib/venues.ts`), packages, facilities and remarks, then **upcoming and past trainings there, read live**. These are deals (not lost) whose venue is this one (`venueBookings`, using the same rule as the deal panel's Venue line: the checklist's venue, else the quotation's).
+  - The form keeps the same fields, grouped: Venue (name, distance, picture link, under renovation), Packages and prices (meeting, room, dinner), then facilities, contact and remarks. Only the name is required, and a duplicate name is refused.
+  - **"Booked" removed** (Joel): status is Available or Under renovation only; old "Booked" records show as Available.
+  - **Only Management can delete a venue**, and only if no quotation or checklist uses it. `venues_directory` has its own rule and left the catch-all list. **Rules need publishing.**
 - **Course outlines redesign (2026-10-17, Joel: "similar to quotation"):** `src/components/CourseOutlinesPage.tsx` replaced `CourseOutlineGenerator.tsx` (deleted). It works the same way as quotations.
   - **List**: search, Mine / Shared with me (plus Everyone's for Admin and Management), Show hidden, and a ⋯ menu (Open, Duplicate, Hide, Delete). Each row shows title, ref, Draft/Sent, client, "N days · M modules", date and owner.
   - **New outline**: 1) "Which deal is this for?": any open or won deal, since outlines often go with the proposal, or "general outline, not for a client". 2) "Start from": blank, or a copy of an earlier outline, with the same programme listed first. So a programme's modules are typed once and reused.

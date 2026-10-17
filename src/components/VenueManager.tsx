@@ -1,664 +1,418 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { Building, Loader2, MapPin, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Venue } from '../types';
-import { db } from '../lib/firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
-import {
-  Plus, Trash2, Edit3, Search, X, MapPin, Phone,
-  DollarSign, CheckCircle, RotateCcw, Building, Save, Image as ImageIcon
-} from 'lucide-react';
+import { db, friendlyError } from '../lib/firebase';
+import { STAGE_LABELS, dealStage, formatDate, todayIso } from '../lib/deals';
+import { VenueBooking, phoneIn, venueBookings } from '../lib/venues';
+
+// Venues (redesigned 2026-10-17, like Clients and Trainers): one shared list, the same details as before.
+// Status is only Available / Under renovation: bookings show by themselves from the deals (Joel removed "Booked").
+// Anyone can add and edit; only Management can delete, and only a venue no quotation or checklist uses.
+
+type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
 interface VenueManagerProps {
   rep: Representative;
   reps: Representative[];
-  requestManagerPermission: (actionToExecute: () => void) => void;
+  viewer: Viewer;
 }
 
-const LOCAL_STORAGE_KEY = 'next_venues_shared';
+const input =
+  'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
+const label = 'mb-1.5 block text-sm font-semibold text-ink';
+const btnPrimary =
+  'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0B5A50] disabled:opacity-60';
+const btnSecondary =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
+const optional = <span className="font-normal text-ink-soft">(optional)</span>;
 
-export default function VenueManager({ rep, reps, requestManagerPermission }: VenueManagerProps) {
-  const [venues, setVenues] = useState<Venue[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // fallback to empty
-      }
-    }
-    return [];
-  });
+const emptyForm = () => ({
+  name: '', distance: '', pictures: '', meetingPackagePrice: '', roomPackagePrice: '', dinnerPackage: '',
+  facilities: '', contact: '', remarks: '', renovation: false,
+});
+type Form = ReturnType<typeof emptyForm>;
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'Available' | 'Booked' | 'Under Renovation'>('all');
-  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'az'>('newest');
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [undoMessage, setUndoMessage] = useState<string | null>(null);
-  const [previousVenues, setPreviousVenues] = useState<Venue[] | null>(null);
+const norm = (s?: string) => (s || '').trim().toLowerCase();
+const isLink = (s?: string) => /^https?:\/\/\S+$/i.test((s || '').trim());
 
-  const [showModal, setShowModal] = useState(false);
-  const [editingVenueId, setEditingVenueId] = useState<string | null>(null);
+// Malaysian numbers: 012-345 6789 -> 60123456789 for WhatsApp.
+function whatsappLink(phone: string): string {
+  let d = phone.replace(/\D/g, '');
+  if (d.startsWith('0')) d = '6' + d;
+  return d.length >= 9 ? `https://wa.me/${d}` : '';
+}
 
-  // Form fields
-  const [formName, setFormName] = useState('');
-  const [formDistance, setFormDistance] = useState('');
-  const [formMeetingPackagePrice, setFormMeetingPackagePrice] = useState('');
-  const [formRoomPackagePrice, setFormRoomPackagePrice] = useState('');
-  const [formDinnerPackage, setFormDinnerPackage] = useState('');
-  const [formFacilities, setFormFacilities] = useState('');
-  const [formContact, setFormContact] = useState('');
-  const [formRemarks, setFormRemarks] = useState('');
-  const [formPictures, setFormPictures] = useState('');
-  const [formStatus, setFormStatus] = useState<'Available' | 'Booked' | 'Under Renovation'>('Available');
+export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [deals, setDeals] = useState<any[]>([]);
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const [checklists, setChecklists] = useState<Record<string, any>>({});
+  const [clients, setClients] = useState<any[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+  const [search, setSearch] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<'new' | string | null>(null);
+  const [form, setForm] = useState<Form>(emptyForm());
+  const [formError, setFormError] = useState('');
+  const [dupId, setDupId] = useState<string | null>(null);
+  const [panelError, setPanelError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState('');
 
-  // Real-time Firestore sync for Venues (shared collection, not per-rep)
   useEffect(() => {
-    if (!db) return;
-
-    const q = query(collection(db, 'venues_directory'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const firestoreVenues: Venue[] = [];
-      snapshot.forEach((docSnap) => {
-        firestoreVenues.push({ ...(docSnap.data() as Venue), id: docSnap.id });
-      });
-
-      firestoreVenues.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setVenues(firestoreVenues);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(firestoreVenues));
-    });
-
-    return () => unsubscribe();
+    const subs = [
+      onSnapshot(query(collection(db, 'venues_directory')), s => { setVenues(s.docs.map(d => ({ ...(d.data() as Venue), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
+      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
+      onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+    ];
+    return () => subs.forEach(u => u());
   }, []);
 
-  const resetForm = () => {
-    setFormName('');
-    setFormDistance('');
-    setFormMeetingPackagePrice('');
-    setFormRoomPackagePrice('');
-    setFormDinnerPackage('');
-    setFormFacilities('');
-    setFormContact('');
-    setFormRemarks('');
-    setFormPictures('');
-    setFormStatus('Available');
-    setEditingVenueId(null);
-  };
+  const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
+  const today = todayIso();
 
-  const handleOpenAddModal = () => {
-    resetForm();
-    setShowModal(true);
-  };
+  const bookingsOf = (v: Venue) => venueBookings(v, deals, checklists, quotes, venues);
+  const nextTraining = useMemo(() => {
+    const out: Record<string, string> = {};
+    venues.forEach(v => {
+      const next = bookingsOf(v).map(b => b.date).filter(d => d && d >= today).sort()[0];
+      if (next) out[v.id] = next;
+    });
+    return out;
+  }, [venues, deals, checklists, quotes]);
 
-  const handleOpenEditModal = (venue: Venue) => {
-    setEditingVenueId(venue.id);
-    setFormName(venue.name || '');
-    setFormDistance(venue.distance || '');
-    setFormMeetingPackagePrice(venue.meetingPackagePrice || '');
-    setFormRoomPackagePrice(venue.roomPackagePrice || '');
-    setFormDinnerPackage(venue.dinnerPackage || '');
-    setFormFacilities(venue.facilities || '');
-    setFormContact(venue.contact || '');
-    setFormRemarks(venue.remarks || '');
-    setFormPictures(venue.pictures || '');
-    setFormStatus(venue.status || 'Available');
-    setShowModal(true);
-  };
+  const visible = useMemo(() => {
+    const q = norm(search);
+    const list = q ? venues.filter(v => [v.name, v.facilities, v.contact, v.distance, v.remarks].some(x => norm(x).includes(q))) : venues;
+    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }));
+  }, [venues, search]);
 
-  const handleSaveVenue = async (e: React.FormEvent) => {
+  const openVenue = venues.find(v => v.id === openId) || null;
+
+  // ---------- Add / edit ----------
+  const startNew = () => { setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
+  const startEdit = (v: Venue) => {
+    setForm({
+      name: v.name || '', distance: v.distance || '', pictures: v.pictures || '', meetingPackagePrice: v.meetingPackagePrice || '',
+      roomPackagePrice: v.roomPackagePrice || '', dinnerPackage: v.dinnerPackage || '', facilities: v.facilities || '',
+      contact: v.contact || '', remarks: v.remarks || '', renovation: v.status === 'Under Renovation',
+    });
+    setFormError(''); setDupId(null); setEditing(v.id);
+  };
+  const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
+
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(''); setDupId(null);
+    const name = form.name.trim();
+    if (!name) return setFormError('Enter the venue name.');
+    const dup = venues.find(v => v.id !== editing && norm(v.name) === norm(name));
+    if (dup) { setDupId(dup.id); return setFormError(`"${dup.name}" is already in the venue list.`); }
 
-    if (!formName.trim()) {
-      showToast('Venue name is required.', 'error');
-      return;
-    }
-
-    let newVenue: Venue;
-
-    if (editingVenueId) {
-      const existing = venues.find(v => v.id === editingVenueId);
-      newVenue = {
-        ...existing,
-        id: editingVenueId,
-        name: formName.trim(),
-        distance: formDistance.trim(),
-        meetingPackagePrice: formMeetingPackagePrice.trim(),
-        roomPackagePrice: formRoomPackagePrice.trim(),
-        dinnerPackage: formDinnerPackage.trim(),
-        facilities: formFacilities.trim(),
-        contact: formContact.trim(),
-        remarks: formRemarks.trim(),
-        pictures: formPictures.trim(),
-        status: formStatus,
-      } as Venue;
-
-      const updated = venues.map(v => v.id === editingVenueId ? newVenue : v);
-      setVenues(updated);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      showToast('Venue updated.', 'success');
-    } else {
-      newVenue = {
-        id: `venue_${Date.now()}`,
-        name: formName.trim(),
-        distance: formDistance.trim(),
-        meetingPackagePrice: formMeetingPackagePrice.trim(),
-        roomPackagePrice: formRoomPackagePrice.trim(),
-        dinnerPackage: formDinnerPackage.trim(),
-        facilities: formFacilities.trim(),
-        contact: formContact.trim(),
-        remarks: formRemarks.trim(),
-        pictures: formPictures.trim(),
-        status: formStatus,
-        createdAt: Date.now(),
-        createdBy: rep.id,
-        createdByName: rep.name,
-      };
-
-      const updated = [newVenue, ...venues];
-      setVenues(updated);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      showToast('Venue added.', 'success');
-    }
-
+    const details = {
+      name, distance: form.distance.trim(), pictures: form.pictures.trim(),
+      meetingPackagePrice: form.meetingPackagePrice.trim(), roomPackagePrice: form.roomPackagePrice.trim(), dinnerPackage: form.dinnerPackage.trim(),
+      facilities: form.facilities.trim(), contact: form.contact.trim(), remarks: form.remarks.trim(),
+      status: (form.renovation ? 'Under Renovation' : 'Available') as Venue['status'],
+    };
+    setBusy(true);
     try {
-      if (db) {
-        await setDoc(doc(db, 'venues_directory', newVenue.id), newVenue);
+      if (editing === 'new') {
+        const id = `venue_${Date.now()}`;
+        await setDoc(doc(db, 'venues_directory', id), { id, ...details, createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+        setOpenId(id);
+        flash('Venue added');
+      } else if (editing) {
+        await setDoc(doc(db, 'venues_directory', editing), details, { merge: true });
+        flash('Venue saved');
       }
+      setEditing(null);
     } catch (err) {
-      console.error('Firestore save venue failed:', err);
-    }
-
-    setShowModal(false);
-    resetForm();
-  };
-
-  const handleDeleteVenue = (id: string) => {
-    requestManagerPermission(async () => {
-      setPreviousVenues(JSON.parse(JSON.stringify(venues)));
-      setUndoMessage('Venue record deleted.');
-      const remaining = venues.filter(v => v.id !== id);
-      setVenues(remaining);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(remaining));
-      showToast('Venue deleted.', 'success');
-
-      try {
-        if (db) {
-          await deleteDoc(doc(db, 'venues_directory', id));
-        }
-      } catch (err) {
-        console.error('Firestore delete venue failed:', err);
-      }
-    });
-  };
-
-  const handleUndoChange = async () => {
-    if (previousVenues) {
-      setVenues(previousVenues);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(previousVenues));
-      showToast('Action reverted.', 'success');
-      try {
-        if (db) {
-          for (const v of previousVenues) {
-            await setDoc(doc(db, 'venues_directory', v.id), v);
-          }
-        }
-      } catch (err) {
-        console.error('Firestore undo failed:', err);
-      }
-      setPreviousVenues(null);
-      setUndoMessage(null);
+      setFormError(friendlyError(err));
+    } finally {
+      setBusy(false);
     }
   };
 
-  const filteredVenues = venues
-    .filter(v => {
-      const q = searchQuery.toLowerCase();
-      const matchesSearch =
-        (v.name || '').toLowerCase().includes(q) ||
-        (v.facilities || '').toLowerCase().includes(q) ||
-        (v.contact || '').toLowerCase().includes(q);
-      const matchesStatus = filterStatus === 'all' || v.status === filterStatus;
-      return matchesSearch && matchesStatus;
-    })
-    .sort((a, b) => {
-      if (sortOrder === 'az') return (a.name || '').localeCompare(b.name || '');
-      if (sortOrder === 'oldest') return (a.createdAt || 0) - (b.createdAt || 0);
-      return (b.createdAt || 0) - (a.createdAt || 0);
-    });
-
-  const totalVenues = venues.length;
-  const availableCount = venues.filter(v => v.status === 'Available').length;
-  const bookedCount = venues.filter(v => v.status === 'Booked').length;
-  const renovationCount = venues.filter(v => v.status === 'Under Renovation').length;
+  // ---------- Delete (Management only) ----------
+  const remove = async (v: Venue) => {
+    setPanelError('');
+    const inQuotes = quotes.filter(q => q.venueId === v.id).length;
+    const inChecklists = Object.values(checklists).filter((c: any) => (c.tasks || []).some((x: any) => x.kind === 'venue' && x.venueId === v.id)).length;
+    if (inQuotes || inChecklists) {
+      const parts = [inQuotes ? `${inQuotes} quotation${inQuotes === 1 ? '' : 's'}` : '', inChecklists ? `${inChecklists} admin checklist${inChecklists === 1 ? '' : 's'}` : ''].filter(Boolean);
+      return setPanelError(`This venue can't be deleted because ${parts.join(' and ')} use${inQuotes + inChecklists === 1 ? 's' : ''} it.`);
+    }
+    if (!window.confirm(`Delete ${v.name} from the venue list? This can't be undone.`)) return;
+    setBusy(true);
+    try {
+      await deleteDoc(doc(db, 'venues_directory', v.id));
+      setOpenId(null);
+      flash('Venue deleted');
+    } catch (err) {
+      setPanelError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="space-y-6">
-
-      {/* Toast Alert popup */}
+    <div className="space-y-5 font-sans text-ink">
       {toast && (
-        <div className={`fixed top-4 right-4 p-4 rounded-xl shadow-2xl flex items-center gap-2 z-50 text-xs font-black transition-all transform animate-slide-in ${
-          toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
-        }`}>
-          <CheckCircle className="w-4 h-4" />
-          <span>{toast.message}</span>
-        </div>
+        <div role="status" className="fixed right-4 top-4 z-[60] rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white shadow-lg">{toast}</div>
       )}
 
-      {/* Undo Banner */}
-      {undoMessage && (
-        <div className="bg-amber-500 text-white p-3 rounded-xl flex items-center justify-between shadow-md text-xs font-bold animate-pulse">
-          <div className="flex items-center gap-2">
-            <RotateCcw className="w-4 h-4" />
-            <span>{undoMessage}</span>
-          </div>
-          <button
-            onClick={handleUndoChange}
-            className="bg-white text-slate-800 hover:bg-slate-100 font-extrabold uppercase px-3 py-1 rounded-lg text-[10px] cursor-pointer"
-          >
-            Undo Action
-          </button>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Venues</h2>
+          <p className="text-[15px] text-ink-soft">{venues.length} venue{venues.length === 1 ? '' : 's'}, shared by the whole team</p>
         </div>
-      )}
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Total Venues
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-slate-900">{totalVenues}</span>
-            <div className="p-1.5 bg-teal-50 text-teal-600 rounded-lg">
-              <Building className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Shared record across all staff</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Available Now
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-emerald-600">{availableCount}</span>
-            <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
-              <CheckCircle className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Ready to be booked for a job</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Currently Booked
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-amber-600">{bookedCount}</span>
-            <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
-              <MapPin className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Reserved for an upcoming training</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Under Renovation
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-rose-600">{renovationCount}</span>
-            <div className="p-1.5 bg-rose-50 text-rose-600 rounded-lg">
-              <Building className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Temporarily unavailable</p>
-        </div>
+        <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add venue</button>
       </div>
 
-      {/* Control Panel */}
-      <div className="bg-slate-900 border border-slate-800 text-white rounded-xl p-4 space-y-4 shadow-lg">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-          <div>
-            <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5 font-display">
-              <Building className="w-4 h-4 text-teal-400" />
-              Venue Database (Shared Directory)
-            </h2>
-            <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-              One shared list, visible and editable by every rep
-            </p>
-          </div>
-
-          <button
-            onClick={handleOpenAddModal}
-            className="bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-[10px] uppercase tracking-wider px-4 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
-          >
-            <Plus className="w-4 h-4" />
-            Add New Venue
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-800">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search name, facilities, contact..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-teal-500 font-semibold"
-            />
-          </div>
-
-          <div>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
-              className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-teal-500 font-bold"
-            >
-              <option value="all">All Statuses</option>
-              <option value="Available">Available</option>
-              <option value="Booked">Booked</option>
-              <option value="Under Renovation">Under Renovation</option>
-            </select>
-          </div>
-
-          <div>
-            <select
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest' | 'az')}
-              className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-teal-500 font-bold"
-            >
-              <option value="newest">Sort: Newest First</option>
-              <option value="oldest">Sort: Oldest First</option>
-              <option value="az">Sort: Name A-Z</option>
-            </select>
-          </div>
-        </div>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, facilities, contact or distance" className={`${input} pl-9`} aria-label="Search venues" />
       </div>
 
-      {/* Venue Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {filteredVenues.length === 0 ? (
-          <div className="md:col-span-2 p-8 text-center text-slate-400 italic bg-white border border-slate-200 rounded-xl">
-            {venues.length === 0
-              ? 'No venues yet. Click "Add New Venue" to log the first record.'
-              : 'No venues found matching your search/filter.'}
+      <div className="overflow-hidden rounded-2xl border border-line bg-white">
+        {!loaded ? (
+          <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading venues…</p>
+        ) : visible.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="font-semibold">{venues.length === 0 ? 'No venues yet' : `No venue matches "${search.trim()}"`}</p>
+            <p className="mt-1 text-[15px] text-ink-soft">{venues.length === 0 ? 'Add your first venue.' : 'Check the spelling, or add it as a new venue.'}</p>
+            {venues.length > 0 && <button type="button" onClick={startNew} className={`${btnSecondary} mt-3`}><Plus className="h-4 w-4" /> Add "{search.trim()}"</button>}
           </div>
         ) : (
-          filteredVenues.map(v => (
-            <div key={v.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-              {v.pictures ? (
-                <div className="w-full h-36 bg-slate-100 overflow-hidden">
-                  <img src={v.pictures} alt={v.name} className="w-full h-full object-cover" />
-                </div>
-              ) : (
-                <div className="w-full h-36 bg-slate-100 flex items-center justify-center text-slate-300">
-                  <ImageIcon className="w-8 h-8" />
-                </div>
-              )}
-              <div className="p-4 space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h4 className="text-sm font-black text-slate-900">{v.name}</h4>
-                    {v.distance && (
-                      <p className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
-                        <MapPin className="w-3 h-3" />
-                        {v.distance}
-                      </p>
-                    )}
-                  </div>
-                  {v.status === 'Available' ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-black text-[9px] uppercase tracking-wider flex-shrink-0">
-                      Available
+          <ul className="divide-y divide-line">
+            {visible.map(v => {
+              const sub = [v.distance, v.contact].map(x => (x || '').trim()).filter(Boolean).join(' · ');
+              const next = nextTraining[v.id];
+              return (
+                <li key={v.id}>
+                  <button type="button" onClick={() => { setOpenId(v.id); setPanelError(''); }} className="flex w-full items-center gap-4 px-5 py-3 text-left hover:bg-surface">
+                    <Thumb src={v.pictures} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate font-semibold">{v.name}</span>
+                        {v.status === 'Under Renovation' && <span className="shrink-0 rounded-md bg-attention-soft px-2 py-0.5 text-xs font-semibold text-attention">Under renovation</span>}
+                      </span>
+                      <span className="block truncate text-sm text-ink-soft">{sub || 'No distance or contact yet'}</span>
                     </span>
-                  ) : v.status === 'Booked' ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 font-black text-[9px] uppercase tracking-wider flex-shrink-0">
-                      Booked
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 font-black text-[9px] uppercase tracking-wider flex-shrink-0">
-                      Renovation
-                    </span>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-[10px]">
-                  <div className="bg-slate-50 rounded-lg p-2">
-                    <div className="text-slate-400 font-black uppercase tracking-wider">Meeting</div>
-                    <div className="font-bold text-slate-700 mt-0.5">{v.meetingPackagePrice || '—'}</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg p-2">
-                    <div className="text-slate-400 font-black uppercase tracking-wider">Room</div>
-                    <div className="font-bold text-slate-700 mt-0.5">{v.roomPackagePrice || '—'}</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg p-2">
-                    <div className="text-slate-400 font-black uppercase tracking-wider">Dinner</div>
-                    <div className="font-bold text-slate-700 mt-0.5">{v.dinnerPackage || '—'}</div>
-                  </div>
-                </div>
-
-                {v.facilities && (
-                  <p className="text-[10px] text-slate-500">
-                    <span className="font-bold text-slate-600">Facilities: </span>
-                    {v.facilities}
-                  </p>
-                )}
-
-                {v.contact && (
-                  <p className="text-[10px] text-slate-500 flex items-center gap-1">
-                    <Phone className="w-3 h-3 text-slate-400" />
-                    {v.contact}
-                  </p>
-                )}
-
-                {v.remarks && (
-                  <p className="text-[10px] text-slate-400 italic">{v.remarks}</p>
-                )}
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    Added by {v.createdByName || '—'}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleOpenEditModal(v)}
-                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                      title="Edit venue"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteVenue(v.id)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                      title="Delete venue"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))
+                    <span className="hidden w-36 shrink-0 truncate text-right text-sm font-semibold sm:block">{v.meetingPackagePrice || ''}</span>
+                    <span className="w-32 shrink-0 text-right text-sm text-ink-soft">{next ? `Next ${formatDate(next)}` : 'No training booked'}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
 
-      {/* Add / Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-150 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                <Building className="w-4 h-4 text-teal-600" />
-                {editingVenueId ? 'Edit Venue' : 'Add New Venue'}
-              </h3>
-              <button
-                onClick={() => { setShowModal(false); resetForm(); }}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+      {/* Venue panel */}
+      {openVenue && !editing && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
+          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <VenuePanel
+              venue={openVenue}
+              bookings={bookingsOf(openVenue)}
+              clients={clients}
+              today={today}
+              canDelete={viewer.role === 'management'}
+              busy={busy}
+              error={panelError}
+              onClose={() => setOpenId(null)}
+              onEdit={() => startEdit(openVenue)}
+              onDelete={() => remove(openVenue)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Add / edit form */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true">
+          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <h3 className="text-lg font-bold">{editing === 'new' ? 'Add venue' : 'Edit venue'}</h3>
+              <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
-
-            <form onSubmit={handleSaveVenue} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Venue Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    placeholder="e.g. Happi Village, Janda Baik"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                    required
-                  />
-                </div>
-
+            <form onSubmit={save} className="space-y-6">
+              <fieldset className="space-y-4">
+                <legend className="mb-3 text-[15px] font-bold">Venue</legend>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Distance from HQ
-                  </label>
-                  <input
-                    type="text"
-                    value={formDistance}
-                    onChange={(e) => setFormDistance(e.target.value)}
-                    placeholder="e.g. 45 km from HQ"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                  />
+                  <label className={label} htmlFor="v-name">Name</label>
+                  <input id="v-name" value={form.name} onChange={e => set({ name: e.target.value })} placeholder="e.g. Happi Village, Janda Baik" className={input} autoFocus />
                 </div>
-
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className={label} htmlFor="v-dist">Distance {optional}</label>
+                    <input id="v-dist" value={form.distance} onChange={e => set({ distance: e.target.value })} placeholder="e.g. 45 km from office" className={input} />
+                  </div>
+                  <label className="flex cursor-pointer items-center gap-2.5 self-end pb-2 text-[15px]">
+                    <input type="checkbox" checked={form.renovation} onChange={e => set({ renovation: e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
+                    Under renovation (can't be used for now)
+                  </label>
+                </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as 'Available' | 'Booked' | 'Under Renovation')}
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                  >
-                    <option value="Available">Available</option>
-                    <option value="Booked">Booked</option>
-                    <option value="Under Renovation">Under Renovation</option>
-                  </select>
+                  <label className={label} htmlFor="v-pic">Picture link {optional}</label>
+                  <input id="v-pic" value={form.pictures} onChange={e => set({ pictures: e.target.value })} placeholder="https://…" className={input} />
                 </div>
+              </fieldset>
 
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Meeting Package Price
-                  </label>
-                  <input
-                    type="text"
-                    value={formMeetingPackagePrice}
-                    onChange={(e) => setFormMeetingPackagePrice(e.target.value)}
-                    placeholder="e.g. RM 150/pax/day"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                  />
+              <fieldset className="space-y-4">
+                <legend className="mb-3 text-[15px] font-bold">Packages and prices</legend>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className={label} htmlFor="v-meet">Meeting package</label>
+                    <input id="v-meet" value={form.meetingPackagePrice} onChange={e => set({ meetingPackagePrice: e.target.value })} placeholder="e.g. RM 150/pax/day" className={input} />
+                  </div>
+                  <div>
+                    <label className={label} htmlFor="v-room">Room package</label>
+                    <input id="v-room" value={form.roomPackagePrice} onChange={e => set({ roomPackagePrice: e.target.value })} placeholder="e.g. RM 280/pax" className={input} />
+                  </div>
+                  <div>
+                    <label className={label} htmlFor="v-dinner">Dinner package</label>
+                    <input id="v-dinner" value={form.dinnerPackage} onChange={e => set({ dinnerPackage: e.target.value })} placeholder="e.g. RM 120/pax (BBQ)" className={input} />
+                  </div>
                 </div>
+              </fieldset>
 
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Room Package Price
-                  </label>
-                  <input
-                    type="text"
-                    value={formRoomPackagePrice}
-                    onChange={(e) => setFormRoomPackagePrice(e.target.value)}
-                    placeholder="e.g. RM 280/pax"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Dinner Package
-                  </label>
-                  <input
-                    type="text"
-                    value={formDinnerPackage}
-                    onChange={(e) => setFormDinnerPackage(e.target.value)}
-                    placeholder="e.g. RM 120/pax (BBQ Buffet)"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Facilities
-                  </label>
-                  <input
-                    type="text"
-                    value={formFacilities}
-                    onChange={(e) => setFormFacilities(e.target.value)}
-                    placeholder="e.g. WiFi, Projector, Sound System"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Contact
-                  </label>
-                  <input
-                    type="text"
-                    value={formContact}
-                    onChange={(e) => setFormContact(e.target.value)}
-                    placeholder="e.g. Ms. Wong (+6019-2223344)"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Picture URL
-                  </label>
-                  <input
-                    type="text"
-                    value={formPictures}
-                    onChange={(e) => setFormPictures(e.target.value)}
-                    placeholder="https://..."
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Remarks
-                  </label>
-                  <textarea
-                    value={formRemarks}
-                    onChange={(e) => setFormRemarks(e.target.value)}
-                    placeholder="Any additional context about this venue..."
-                    rows={2}
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-teal-500 text-slate-800 resize-none"
-                  />
-                </div>
+              <div>
+                <label className={label} htmlFor="v-fac">Facilities {optional}</label>
+                <input id="v-fac" value={form.facilities} onChange={e => set({ facilities: e.target.value })} placeholder="e.g. WiFi, projector, sound system" className={input} />
+              </div>
+              <div>
+                <label className={label} htmlFor="v-contact">Contact person {optional}</label>
+                <input id="v-contact" value={form.contact} onChange={e => set({ contact: e.target.value })} placeholder="e.g. Ms Wong, 019-222 3344" className={input} />
+              </div>
+              <div>
+                <label className={label} htmlFor="v-rem">Remarks {optional}</label>
+                <textarea id="v-rem" value={form.remarks} onChange={e => set({ remarks: e.target.value })} rows={3} placeholder="Anything the team should know about this venue" className={`${input} resize-y`} />
               </div>
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => { setShowModal(false); resetForm(); }}
-                  className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs py-2 rounded-lg transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  {editingVenueId ? 'Save Changes' : 'Add Venue'}
-                </button>
+              {formError && (
+                <div role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">
+                  {formError}
+                  {dupId && <button type="button" onClick={() => { setEditing(null); setOpenId(dupId); }} className="ml-2 font-semibold underline">Open it</button>}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{editing === 'new' ? 'Add venue' : 'Save'}</button>
+                <button type="button" onClick={() => setEditing(null)} className={btnSecondary}>Cancel</button>
               </div>
             </form>
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
+// Small photo in the list, or a plain icon when there's no picture (or it doesn't load).
+function Thumb({ src }: { src?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!isLink(src) || failed) {
+    return <span className="flex h-11 w-14 shrink-0 items-center justify-center rounded-lg bg-surface text-ink-soft"><Building className="h-5 w-5" /></span>;
+  }
+  return <img src={src} alt="" onError={() => setFailed(true)} className="h-11 w-14 shrink-0 rounded-lg object-cover" />;
+}
+
+function VenuePanel(props: {
+  venue: Venue; bookings: VenueBooking[]; clients: any[]; today: string;
+  canDelete: boolean; busy: boolean; error: string; onClose: () => void; onEdit: () => void; onDelete: () => void;
+}) {
+  const { venue: v, bookings, today } = props;
+  const [picFailed, setPicFailed] = useState(false);
+  const phone = phoneIn(v.contact);
+  const wa = phone ? whatsappLink(phone) : '';
+  const clientName = (d: any) => props.clients.find(c => c.id === d.clientId)?.companyName || d.client || 'No client';
+  const upcoming = bookings.filter(b => !b.date || b.date >= today).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+  const past = bookings.filter(b => b.date && b.date < today).sort((a, b) => b.date.localeCompare(a.date));
+  const packages = [['Meeting package', v.meetingPackagePrice], ['Room package', v.roomPackagePrice], ['Dinner package', v.dinnerPackage]].filter(([, x]) => (x || '').trim());
+
+  const row = (b: VenueBooking) => (
+    <li key={b.deal.id} className="flex items-center gap-3 px-4 py-2.5 text-[15px]">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{clientName(b.deal)}</span>
+        <span className="block truncate text-sm text-ink-soft">{b.deal.courseName || 'No programme yet'}</span>
+      </span>
+      <span className="shrink-0 text-right text-sm">
+        <span className="block font-semibold">{b.date ? formatDate(b.date) : 'Date not set'}</span>
+        <span className="block text-ink-soft">{b.confirmed ? 'Confirmed' : dealStage(b.deal) === 'won' ? 'Won, not confirmed yet' : `On the quotation · ${STAGE_LABELS[dealStage(b.deal)]}`}</span>
+      </span>
+    </li>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-2 text-lg font-bold"><Building className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{v.name}</span></h3>
+          <p className="mt-0.5 text-[15px] text-ink-soft">{[v.distance, v.status === 'Under Renovation' ? 'Under renovation' : 'Available'].filter(Boolean).join(' · ')}</p>
+        </div>
+        <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
+      </div>
+
+      {isLink(v.pictures) && !picFailed && (
+        <img src={v.pictures} alt={v.name} onError={() => setPicFailed(true)} className="max-h-64 w-full rounded-xl object-cover" />
+      )}
+
+      <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>
+
+      <section className="rounded-xl border border-line p-4">
+        <h4 className="text-sm font-semibold text-ink-soft">Contact person</h4>
+        {v.contact ? (
+          <>
+            <p className="mt-1 font-semibold">{v.contact}</p>
+            {phone && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <a href={`tel:${phone.replace(/\s/g, '')}`} className={btnSecondary}><Phone className="h-4 w-4" /> Call</a>
+                {wa && <a href={wa} target="_blank" rel="noreferrer" className={btnSecondary}><MessageCircle className="h-4 w-4" /> WhatsApp</a>}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="mt-1 text-[15px] text-ink-soft">No contact yet. Click Edit details to add one.</p>
+        )}
+      </section>
+
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px] sm:grid-cols-3">
+        {packages.length === 0
+          ? <div className="col-span-full"><dt className="text-sm text-ink-soft">Packages</dt><dd className="text-ink-soft">No prices yet</dd></div>
+          : packages.map(([k, x]) => <div key={k}><dt className="text-sm text-ink-soft">{k}</dt><dd className="font-semibold">{x}</dd></div>)}
+        {v.facilities && <div className="col-span-full"><dt className="text-sm text-ink-soft">Facilities</dt><dd>{v.facilities}</dd></div>}
+        {v.remarks && <div className="col-span-full"><dt className="text-sm text-ink-soft">Remarks</dt><dd className="whitespace-pre-line">{v.remarks}</dd></div>}
+        {v.pictures && !isLink(v.pictures) && <div className="col-span-full"><dt className="text-sm text-ink-soft">Pictures</dt><dd className="flex items-start gap-1.5"><MapPin className="mt-1 h-4 w-4 shrink-0 text-ink-soft" />{v.pictures}</dd></div>}
+      </dl>
+
+      <section>
+        <h4 className="text-[15px] font-bold">Upcoming trainings here ({upcoming.length})</h4>
+        {upcoming.length === 0
+          ? <p className="mt-1 text-[15px] text-ink-soft">Nothing booked.</p>
+          : <ul className="mt-2 divide-y divide-line rounded-xl border border-line">{upcoming.map(row)}</ul>}
+        <p className="mt-1.5 text-sm text-ink-soft">From the deals: the venue on the admin checklist, or the venue on the quotation.</p>
+      </section>
+
+      {past.length > 0 && (
+        <section>
+          <h4 className="text-[15px] font-bold">Past trainings here ({past.length})</h4>
+          <ul className="mt-2 divide-y divide-line rounded-xl border border-line">{past.map(row)}</ul>
+        </section>
+      )}
+
+      {props.canDelete && (
+        <div className="border-t border-line pt-4">
+          {props.error && <p role="alert" className="mb-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{props.error}</p>}
+          <button type="button" disabled={props.busy} onClick={props.onDelete} className="inline-flex items-center gap-1.5 text-sm font-semibold text-danger hover:underline"><Trash2 className="h-4 w-4" /> Delete venue</button>
+        </div>
+      )}
     </div>
   );
 }

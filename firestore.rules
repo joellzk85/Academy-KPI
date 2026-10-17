@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion + course outlines + trainer deletion)
+// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion + course outlines + trainer and venue deletion)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -156,6 +156,12 @@ service cloud.firestore {
       allow delete: if isManagement();
     }
 
+    // Venues: every team member can add and edit; only Management can delete.
+    match /venues_directory/{venueId} {
+      allow read, create, update: if isMember();
+      allow delete: if isManagement();
+    }
+
     // Course outlines: same as quotations. Reps change their own, ones shared with them, or ones they're
     // asked to help on; Admin and Management can change any. Old outlines with no owner stay open.
     match /course_outlines/{outlineId} {
@@ -204,8 +210,7 @@ service cloud.firestore {
       allow read, write: if isMember() && coll in [
         'admin_records', 'appointments', 'client_payments',
         'events', 'links', 'payments',
-        'project_pls', 'tasks',
-        'venues_directory'
+        'project_pls', 'tasks'
       ];
     }
   }
