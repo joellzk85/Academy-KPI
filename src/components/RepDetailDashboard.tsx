@@ -27,6 +27,7 @@ interface RepDetailDashboardProps {
   selectedMonth: string;
   onMonthChange: (month: string) => void;
   viewer?: { id: string; name: string; role: 'rep' | 'admin' | 'management' };
+  onOpenAdminWork?: () => void;     // Admin's menu links to Admin work (it replaced the old Admin records screen)
 }
 
 type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments' | 'client_payments';
@@ -301,12 +302,13 @@ export default function RepDetailDashboard({
   onUpdateRepKpi,
   selectedMonth,
   onMonthChange,
-  viewer
+  viewer,
+  onOpenAdminWork
 }: RepDetailDashboardProps) {
   // The old payment, P&L and appointment screens were retired; anyone left on them lands on Deals.
   const savedSubTab = (): SubTab => {
     const saved = localStorage.getItem(`next_active_subtab_${rep.id}`) as SubTab | null;
-    return saved === 'payment' || saved === 'client_payments' || saved === 'pl' || saved === 'appointments' ? 'pipeline' : saved || 'kpi';
+    return saved === 'payment' || saved === 'client_payments' || saved === 'pl' || saved === 'appointments' || saved === 'admin_record' ? 'pipeline' : saved || 'kpi';
   };
   const [activeSubTab, setActiveSubTab] = useState<SubTab>(savedSubTab);
   const [subTabHistory, setSubTabHistory] = useState<SubTab[]>(() => [savedSubTab()]);
@@ -1953,7 +1955,7 @@ export default function RepDetailDashboard({
     { key: 'client', label: MENU_LABELS.client },
     { key: 'trainerList', label: MENU_LABELS.trainerList },
     { key: 'venue', label: MENU_LABELS.venue },
-    ...(rep.role === 'admin' ? [{ key: 'admin_record' as const, label: MENU_LABELS.admin_record }] : []),
+    ...(rep.role === 'admin' && onOpenAdminWork ? [{ key: 'admin_work' as const, label: MENU_LABELS.admin_work }] : []),
     { key: 'tasks', label: MENU_LABELS.tasks, alert: tasks.some(t => needsDoingNow(t, rep.id, todayIso())) ? 'Task due' : undefined },
   ];
 
@@ -1988,7 +1990,7 @@ export default function RepDetailDashboard({
 
       {/* Menu (collapsible) and the active page */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <WorkspaceMenu active={activeSubTab} onSelect={(k) => handleSubTabChange(k as SubTab)} items={workspaceMenuItems} />
+        <WorkspaceMenu active={activeSubTab} onSelect={(k) => (k === 'admin_work' ? onOpenAdminWork?.() : handleSubTabChange(k as SubTab))} items={workspaceMenuItems} />
 
         {/* Right Side: Active Workspace Section */}
         <div className="min-w-0 flex-1 space-y-5">

@@ -965,6 +965,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   selectedMonth={selectedMonth}
                   onMonthChange={handleMonthChange}
                   viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+                  onOpenAdminWork={isStaff ? () => homeNav.openAdminWork() : undefined}
                 />
               ) : (
                 <div className="text-center py-12 bg-white rounded-xl border border-slate-200">

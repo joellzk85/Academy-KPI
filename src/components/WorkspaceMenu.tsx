@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { BarChart3, BookOpen, Building2, ChevronsLeft, ChevronsRight, FileText, FolderOpen, GraduationCap, ListTodo, MapPin, TrendingUp } from 'lucide-react';
+import { BarChart3, BookOpen, Building2, ChevronsLeft, ChevronsRight, ClipboardCheck, FileText, GraduationCap, ListTodo, MapPin, TrendingUp } from 'lucide-react';
 
 // The workspace's left menu. It can be collapsed to a slim strip of icons (remembered per browser).
 // On small screens it becomes a row of buttons that scrolls sideways.
 
-export type MenuKey = 'kpi' | 'pipeline' | 'quotation' | 'course_outline' | 'client' | 'trainerList' | 'venue' | 'admin_record' | 'tasks';
+export type MenuKey = 'kpi' | 'pipeline' | 'quotation' | 'course_outline' | 'client' | 'trainerList' | 'venue' | 'admin_work' | 'tasks';
 
 export interface MenuItem { key: MenuKey; label: string; alert?: string }
 
@@ -16,7 +16,7 @@ const ICONS: Record<MenuKey, React.ComponentType<{ className?: string }>> = {
   client: Building2,
   trainerList: GraduationCap,
   venue: MapPin,
-  admin_record: FolderOpen,
+  admin_work: ClipboardCheck,
   tasks: ListTodo,
 };
 
@@ -74,5 +74,5 @@ export default function WorkspaceMenu({ items, active, onSelect }: { items: Menu
 // Plain names for each menu item (also used for the page header).
 export const MENU_LABELS: Record<MenuKey, string> = {
   kpi: 'KPI', pipeline: 'Deals', quotation: 'Quotations', course_outline: 'Course outlines', client: 'Clients',
-  trainerList: 'Trainers', venue: 'Venues', admin_record: 'Admin records', tasks: 'To-do',
+  trainerList: 'Trainers', venue: 'Venues', admin_work: 'Admin work', tasks: 'To-do',
 };
