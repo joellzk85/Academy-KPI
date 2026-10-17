@@ -1,932 +1,432 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { Building2, Loader2, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Client } from '../types';
-import { db } from '../lib/firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
-import {
-  Plus, Trash2, Edit3, Search, X, Building2, User,
-  Phone, Mail, MapPin, Briefcase, CheckCircle, RotateCcw,
-  Users, ShieldCheck, CalendarPlus, Save, Eye, TrendingUp,
-  FileText, BookOpen, ClipboardList, CalendarClock, Wallet
-} from 'lucide-react';
+import { db, friendlyError } from '../lib/firebase';
+import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, formatDate, formatRM } from '../lib/deals';
+import { MoneyIn } from '../lib/money';
+
+// Clients (redesigned 2026-10-17): one shared list, the same details as before.
+// Anyone can add and edit; only Management can delete, and only a client no deal or quotation uses.
+
+type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
 interface ClientManagerProps {
   rep: Representative;
   reps: Representative[];
-  requestManagerPermission: (actionToExecute: () => void) => void;
+  viewer: Viewer;
 }
 
-const LOCAL_STORAGE_KEY = 'next_clients_shared';
+const input =
+  'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
+const label = 'mb-1.5 block text-sm font-semibold text-ink';
+const btnPrimary =
+  'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0B5A50] disabled:opacity-60';
+const btnSecondary =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
-export default function ClientManager({ rep, reps, requestManagerPermission }: ClientManagerProps) {
-  const [clients, setClients] = useState<Client[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // fallback to empty
-      }
-    }
-    return [];
-  });
+const emptyForm = () => ({
+  companyName: '', industry: '', address: '', hrdcRegistered: true,
+  contactName: '', designation: '', phone: '', email: '', notes: '',
+});
+type Form = ReturnType<typeof emptyForm>;
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'az'>('newest');
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [undoMessage, setUndoMessage] = useState<string | null>(null);
-  const [previousClients, setPreviousClients] = useState<Client[] | null>(null);
+const norm = (s?: string) => (s || '').trim().toLowerCase();
+const shown = (s?: string) => (s && s.trim() && s.trim() !== 'N/A' ? s.trim() : '');
 
-  const [showModal, setShowModal] = useState(false);
-  const [editingClientId, setEditingClientId] = useState<string | null>(null);
+// Malaysian numbers: 012-345 6789 -> 60123456789 for WhatsApp.
+function whatsappLink(phone: string): string {
+  let d = phone.replace(/\D/g, '');
+  if (d.startsWith('0')) d = '6' + d;
+  return d.length >= 9 ? `https://wa.me/${d}` : '';
+}
 
-  // Form fields
-  const [formCompanyName, setFormCompanyName] = useState('');
-  const [formContactName, setFormContactName] = useState('');
-  const [formDesignation, setFormDesignation] = useState('');
-  const [formPhone, setFormPhone] = useState('');
-  const [formEmail, setFormEmail] = useState('');
-  const [formAddress, setFormAddress] = useState('');
-  const [formIndustry, setFormIndustry] = useState('');
-  const [formHrdc, setFormHrdc] = useState(false);
-  const [formNotes, setFormNotes] = useState('');
+export default function ClientManager({ rep, reps, viewer }: ClientManagerProps) {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [deals, setDeals] = useState<any[]>([]);
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const [moneyIn, setMoneyIn] = useState<MoneyIn[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  // Real-time Firestore sync for Clients (shared collection, not per-rep)
-  useEffect(() => {
-    if (!db) return;
-
-    const q = query(collection(db, 'clients'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const firestoreClients: Client[] = [];
-      snapshot.forEach((docSnap) => {
-        firestoreClients.push({ ...(docSnap.data() as Client), id: docSnap.id });
-      });
-
-      firestoreClients.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setClients(firestoreClients);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(firestoreClients));
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Read-only live sync of every other collection linked to clients, powering
-  // the Client 360 view below (pipeline deals, quotations, outlines, admin
-  // records, appointments, and payments tied to a given client).
-  const [pipelineDirectory, setPipelineDirectory] = useState<any[]>([]);
-  const [quotationDirectory, setQuotationDirectory] = useState<any[]>([]);
-  const [outlineDirectory, setOutlineDirectory] = useState<any[]>([]);
-  const [adminRecordDirectory, setAdminRecordDirectory] = useState<any[]>([]);
-  const [appointmentDirectory, setAppointmentDirectory] = useState<any[]>([]);
-  const [paymentDirectory, setPaymentDirectory] = useState<any[]>([]);
+  const [search, setSearch] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<'new' | string | null>(null);
+  const [form, setForm] = useState<Form>(emptyForm());
+  const [formError, setFormError] = useState('');
+  const [dupId, setDupId] = useState<string | null>(null);
+  const [panelError, setPanelError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState('');
 
   useEffect(() => {
-    if (!db) return;
-    const unsubs = [
-      onSnapshot(query(collection(db, 'pipelines')), (snap) => {
-        const list: any[] = [];
-        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
-        setPipelineDirectory(list);
-      }),
-      onSnapshot(query(collection(db, 'quotations')), (snap) => {
-        const list: any[] = [];
-        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
-        setQuotationDirectory(list);
-      }),
-      onSnapshot(query(collection(db, 'course_outlines')), (snap) => {
-        const list: any[] = [];
-        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
-        setOutlineDirectory(list);
-      }),
-      onSnapshot(query(collection(db, 'admin_records')), (snap) => {
-        const list: any[] = [];
-        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
-        setAdminRecordDirectory(list);
-      }),
-      onSnapshot(query(collection(db, 'appointments')), (snap) => {
-        const list: any[] = [];
-        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
-        setAppointmentDirectory(list);
-      }),
-      onSnapshot(query(collection(db, 'client_payments')), (snap) => {
-        const list: any[] = [];
-        snap.forEach(d => list.push({ ...d.data(), id: d.id }));
-        setPaymentDirectory(list);
-      }),
+    const subs = [
+      onSnapshot(query(collection(db, 'clients')), s => { setClients(s.docs.map(d => ({ ...(d.data() as Client), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
+      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
     ];
-    return () => unsubs.forEach(u => u());
+    return () => subs.forEach(u => u());
   }, []);
 
-  // Client 360 view state
-  const [view360ClientId, setView360ClientId] = useState<string | null>(null);
-  const view360Client = clients.find(c => c.id === view360ClientId);
+  const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
+  const personName = (id: string) => reps.find(r => r.id === id)?.name || (id === viewer.id ? viewer.name : 'Former team member');
 
-  // Every record type is matched to a client either by a direct clientId link,
-  // or (for records created before that client existed in the database) by
-  // company name text match, so nothing is missed just because it predates linking.
-  const getClientRecords = (c: Client) => {
-    const nameMatch = (val?: string) => (val || '').trim().toLowerCase() === c.companyName.trim().toLowerCase();
-    return {
-      deals: pipelineDirectory.filter(p => p.clientId === c.id || nameMatch(p.client)),
-      quotations: quotationDirectory.filter(q => q.clientId === c.id || nameMatch(q.company)),
-      outlines: outlineDirectory.filter(o => o.clientId === c.id || nameMatch(o.preparedForCompany)),
-      adminRecords: adminRecordDirectory.filter(r => r.clientId === c.id || nameMatch(r.client)),
-      appointments: appointmentDirectory.filter(a => a.clientId === c.id || nameMatch(a.clientName)),
-      payments: paymentDirectory.filter(p => p.clientId === c.id || nameMatch(p.clientName)),
-    };
+  // A client's deals: linked by clientId, or older deals typed with the same company name.
+  const dealsOf = (c: Client) => deals.filter(p => p.clientId === c.id || (!p.clientId && norm(p.client) === norm(c.companyName)));
+  const quotesOf = (c: Client) => {
+    const ids = new Set(dealsOf(c).map(p => p.id));
+    return quotes.filter(q => q.clientId === c.id || (q.pipelineId && ids.has(q.pipelineId)) || (!q.clientId && !q.pipelineId && norm(q.company) === norm(c.companyName)));
   };
 
-  const resetForm = () => {
-    setFormCompanyName('');
-    setFormContactName('');
-    setFormDesignation('');
-    setFormPhone('');
-    setFormEmail('');
-    setFormAddress('');
-    setFormIndustry('');
-    setFormHrdc(false);
-    setFormNotes('');
-    setEditingClientId(null);
-  };
+  const dealCount = useMemo(() => {
+    const out: Record<string, number> = {};
+    clients.forEach(c => { out[c.id] = dealsOf(c).length; });
+    return out;
+  }, [clients, deals]);
 
-  const handleOpenAddModal = () => {
-    resetForm();
-    setShowModal(true);
-  };
+  const visible = useMemo(() => {
+    const q = norm(search);
+    const list = q
+      ? clients.filter(c => [c.companyName, c.contactName, c.phone, c.email, c.industry].some(v => norm(v).includes(q)))
+      : clients;
+    return [...list].sort((a, b) => (a.companyName || '').localeCompare(b.companyName || '', 'en', { sensitivity: 'base' }));
+  }, [clients, search]);
 
-  const handleOpenEditModal = (client: Client) => {
-    setEditingClientId(client.id);
-    setFormCompanyName(client.companyName || '');
-    setFormContactName(client.contactName || '');
-    setFormDesignation(client.designation || '');
-    setFormPhone(client.phone || '');
-    setFormEmail(client.email || '');
-    setFormAddress(client.address || '');
-    setFormIndustry(client.industry || '');
-    setFormHrdc(!!client.hrdcRegistered);
-    setFormNotes(client.notes || '');
-    setShowModal(true);
-  };
+  const openClient = clients.find(c => c.id === openId) || null;
 
-  const handleSaveClient = async (e: React.FormEvent) => {
+  // ---------- Add / edit ----------
+  const startNew = () => {
+    setForm({ ...emptyForm(), companyName: search.trim() });
+    setFormError(''); setDupId(null); setEditing('new');
+  };
+  const startEdit = (c: Client) => {
+    setForm({
+      companyName: c.companyName || '', industry: c.industry || '', address: c.address || '', hrdcRegistered: !!c.hrdcRegistered,
+      contactName: shown(c.contactName), designation: c.designation || '', phone: c.phone || '', email: c.email || '', notes: c.notes || '',
+    });
+    setFormError(''); setDupId(null); setEditing(c.id);
+  };
+  const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
+
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(''); setDupId(null);
+    const name = form.companyName.trim();
+    if (!name) return setFormError('Enter the company name.');
+    const dup = clients.find(c => c.id !== editing && norm(c.companyName) === norm(name));
+    if (dup) { setDupId(dup.id); return setFormError(`"${dup.companyName}" is already in the client list.`); }
+    const email = form.email.trim();
+    if (email && !/^\S+@\S+\.\S+$/.test(email)) return setFormError('That email address doesn\'t look right.');
 
-    if (!formCompanyName.trim() || !formContactName.trim()) {
-      showToast('Company name and contact name are required.', 'error');
-      return;
-    }
-
-    let newClient: Client;
-
-    if (editingClientId) {
-      const existing = clients.find(c => c.id === editingClientId);
-      newClient = {
-        ...existing,
-        id: editingClientId,
-        companyName: formCompanyName.trim(),
-        contactName: formContactName.trim(),
-        designation: formDesignation.trim(),
-        phone: formPhone.trim(),
-        email: formEmail.trim(),
-        address: formAddress.trim(),
-        industry: formIndustry.trim(),
-        hrdcRegistered: formHrdc,
-        notes: formNotes.trim(),
-      } as Client;
-
-      const updated = clients.map(c => c.id === editingClientId ? newClient : c);
-      setClients(updated);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      showToast('Client updated.', 'success');
-    } else {
-      newClient = {
-        id: `client_${Date.now()}`,
-        companyName: formCompanyName.trim(),
-        contactName: formContactName.trim(),
-        designation: formDesignation.trim(),
-        phone: formPhone.trim(),
-        email: formEmail.trim(),
-        address: formAddress.trim(),
-        industry: formIndustry.trim(),
-        hrdcRegistered: formHrdc,
-        notes: formNotes.trim(),
-        createdAt: Date.now(),
-        createdBy: rep.id,
-        createdByName: rep.name,
-      };
-
-      const updated = [newClient, ...clients];
-      setClients(updated);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      showToast('Client added.', 'success');
-    }
-
+    const details = {
+      companyName: name, industry: form.industry.trim(), address: form.address.trim(), hrdcRegistered: form.hrdcRegistered,
+      contactName: form.contactName.trim(), designation: form.designation.trim(), phone: form.phone.trim(), email, notes: form.notes.trim(),
+    };
+    setBusy(true);
     try {
-      if (db) {
-        await setDoc(doc(db, 'clients', newClient.id), newClient);
+      if (editing === 'new') {
+        const id = `client_${Date.now()}`;
+        await setDoc(doc(db, 'clients', id), { id, ...details, createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+        setOpenId(id);
+        flash('Client added');
+      } else if (editing) {
+        await setDoc(doc(db, 'clients', editing), details, { merge: true });
+        flash('Client saved');
       }
+      setEditing(null);
     } catch (err) {
-      console.error('Firestore save client failed:', err);
-    }
-
-    setShowModal(false);
-    resetForm();
-  };
-
-  const handleDeleteClient = (id: string) => {
-    requestManagerPermission(async () => {
-      setPreviousClients(JSON.parse(JSON.stringify(clients)));
-      setUndoMessage('Client record deleted.');
-      const remaining = clients.filter(c => c.id !== id);
-      setClients(remaining);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(remaining));
-      showToast('Client deleted.', 'success');
-
-      try {
-        if (db) {
-          await deleteDoc(doc(db, 'clients', id));
-        }
-      } catch (err) {
-        console.error('Firestore delete client failed:', err);
-      }
-    });
-  };
-
-  const handleUndoChange = async () => {
-    if (previousClients) {
-      setClients(previousClients);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(previousClients));
-      showToast('Action reverted.', 'success');
-      try {
-        if (db) {
-          for (const c of previousClients) {
-            await setDoc(doc(db, 'clients', c.id), c);
-          }
-        }
-      } catch (err) {
-        console.error('Firestore undo failed:', err);
-      }
-      setPreviousClients(null);
-      setUndoMessage(null);
+      setFormError(friendlyError(err));
+    } finally {
+      setBusy(false);
     }
   };
 
-  const filteredClients = clients
-    .filter(c => {
-      const q = searchQuery.toLowerCase();
-      return (
-        (c.companyName || '').toLowerCase().includes(q) ||
-        (c.contactName || '').toLowerCase().includes(q) ||
-        (c.phone || '').toLowerCase().includes(q) ||
-        (c.email || '').toLowerCase().includes(q) ||
-        (c.industry || '').toLowerCase().includes(q)
-      );
-    })
-    .sort((a, b) => {
-      if (sortOrder === 'az') return (a.companyName || '').localeCompare(b.companyName || '');
-      if (sortOrder === 'oldest') return (a.createdAt || 0) - (b.createdAt || 0);
-      return (b.createdAt || 0) - (a.createdAt || 0);
-    });
-
-  const totalClients = clients.length;
-  const hrdcCount = clients.filter(c => c.hrdcRegistered).length;
-  const thisMonthCount = clients.filter(c => {
-    if (!c.createdAt) return false;
-    const now = new Date();
-    const created = new Date(c.createdAt);
-    return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
-  }).length;
-  const industryCount = new Set(clients.map(c => c.industry).filter(Boolean)).size;
+  // ---------- Delete (Management only) ----------
+  const remove = async (c: Client) => {
+    setPanelError('');
+    const nd = dealsOf(c).length, nq = quotesOf(c).length;
+    if (nd || nq) {
+      const parts = [nd ? `${nd} deal${nd === 1 ? '' : 's'}` : '', nq ? `${nq} quotation${nq === 1 ? '' : 's'}` : ''].filter(Boolean);
+      return setPanelError(`This client can't be deleted because ${parts.join(' and ')} use${nd + nq === 1 ? 's' : ''} it.`);
+    }
+    if (!window.confirm(`Delete ${c.companyName} from the client list? This can't be undone.`)) return;
+    setBusy(true);
+    try {
+      await deleteDoc(doc(db, 'clients', c.id));
+      setOpenId(null);
+      flash('Client deleted');
+    } catch (err) {
+      setPanelError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="space-y-6">
-
-      {/* Toast Alert popup */}
+    <div className="space-y-5 font-sans text-ink">
       {toast && (
-        <div className={`fixed top-4 right-4 p-4 rounded-xl shadow-2xl flex items-center gap-2 z-50 text-xs font-black transition-all transform animate-slide-in ${
-          toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
-        }`}>
-          <CheckCircle className="w-4 h-4" />
-          <span>{toast.message}</span>
-        </div>
+        <div role="status" className="fixed right-4 top-4 z-[60] rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white shadow-lg">{toast}</div>
       )}
 
-      {/* Undo Banner */}
-      {undoMessage && (
-        <div className="bg-amber-500 text-white p-3 rounded-xl flex items-center justify-between shadow-md text-xs font-bold animate-pulse">
-          <div className="flex items-center gap-2">
-            <RotateCcw className="w-4 h-4" />
-            <span>{undoMessage}</span>
-          </div>
-          <button
-            onClick={handleUndoChange}
-            className="bg-white text-slate-800 hover:bg-slate-100 font-extrabold uppercase px-3 py-1 rounded-lg text-[10px] cursor-pointer"
-          >
-            Undo Action
-          </button>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Clients</h2>
+          <p className="text-[15px] text-ink-soft">{clients.length} {clients.length === 1 ? 'company' : 'companies'}, shared by the whole team</p>
         </div>
-      )}
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Total Clients
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-slate-900">{totalClients}</span>
-            <div className="p-1.5 bg-violet-50 text-violet-600 rounded-lg">
-              <Users className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Shared record across all staff</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            HRDC Registered
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-emerald-600">{hrdcCount}</span>
-            <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
-              <ShieldCheck className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Eligible for HRDC claimable training</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Added This Month
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-blue-600">{thisMonthCount}</span>
-            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
-              <CalendarPlus className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">New client acquisitions this month</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Industries Covered
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-amber-600">{industryCount}</span>
-            <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
-              <Briefcase className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Distinct industry sectors served</p>
-        </div>
+        <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add client</button>
       </div>
 
-      {/* Control Panel */}
-      <div className="bg-slate-900 border border-slate-800 text-white rounded-xl p-4 space-y-4 shadow-lg">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-          <div>
-            <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5 font-display">
-              <Users className="w-4 h-4 text-violet-400" />
-              Client Database (Shared CRM)
-            </h2>
-            <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-              One shared list, visible and editable by every rep
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company, person, phone or email" className={`${input} pl-9`} aria-label="Search clients" />
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-line bg-white">
+        {!loaded ? (
+          <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading clients…</p>
+        ) : visible.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="font-semibold">{clients.length === 0 ? 'No clients yet' : `No client matches "${search.trim()}"`}</p>
+            <p className="mt-1 text-[15px] text-ink-soft">
+              {clients.length === 0 ? 'Add your first client, or add one from a deal.' : 'Check the spelling, or add them as a new client.'}
             </p>
+            {clients.length > 0 && <button type="button" onClick={startNew} className={`${btnSecondary} mt-3`}><Plus className="h-4 w-4" /> Add "{search.trim()}"</button>}
           </div>
+        ) : (
+          <ul className="divide-y divide-line">
+            {visible.map(c => {
+              const contact = [shown(c.contactName), shown(c.phone)].filter(Boolean).join(' · ');
+              const n = dealCount[c.id] || 0;
+              return (
+                <li key={c.id}>
+                  <button type="button" onClick={() => { setOpenId(c.id); setPanelError(''); }} className="flex w-full items-center gap-4 px-5 py-3.5 text-left hover:bg-surface">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">{c.companyName}</span>
+                      <span className="block truncate text-sm text-ink-soft">{contact || 'No contact person yet'}</span>
+                    </span>
+                    {c.hrdcRegistered && <span className="hidden rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent sm:inline">HRDC</span>}
+                    <span className="w-20 shrink-0 text-right text-sm text-ink-soft">{n ? `${n} deal${n === 1 ? '' : 's'}` : 'No deals'}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
-          <button
-            onClick={handleOpenAddModal}
-            className="bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-[10px] uppercase tracking-wider px-4 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
-          >
-            <Plus className="w-4 h-4" />
-            Add New Client
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-800">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search company, contact, phone, email, industry..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 font-semibold"
+      {/* Client panel */}
+      {openClient && !editing && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
+          <div className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <ClientPanel
+              client={openClient}
+              deals={dealsOf(openClient)}
+              quotes={quotesOf(openClient)}
+              moneyIn={moneyIn}
+              personName={personName}
+              canDelete={viewer.role === 'management'}
+              busy={busy}
+              error={panelError}
+              onClose={() => setOpenId(null)}
+              onEdit={() => startEdit(openClient)}
+              onDelete={() => remove(openClient)}
             />
           </div>
-
-          <div>
-            <select
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest' | 'az')}
-              className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-violet-500 font-bold"
-            >
-              <option value="newest">Sort: Newest First</option>
-              <option value="oldest">Sort: Oldest First</option>
-              <option value="az">Sort: Company A-Z</option>
-            </select>
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-slate-700 font-sans text-xs">
-            <thead className="bg-slate-800 text-slate-200 font-display text-[10px] font-black uppercase tracking-wider border-b border-slate-700">
-              <tr>
-                <th className="p-3 whitespace-nowrap min-w-[180px]">Company</th>
-                <th className="p-3 whitespace-nowrap">Contact Person</th>
-                <th className="p-3 whitespace-nowrap">Phone</th>
-                <th className="p-3 whitespace-nowrap">Email</th>
-                <th className="p-3 whitespace-nowrap">Industry</th>
-                <th className="p-3 text-center">HRDC</th>
-                <th className="p-3 whitespace-nowrap">Added By</th>
-                <th className="p-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-sans font-medium">
-              {filteredClients.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-400 italic bg-slate-50/50">
-                    {clients.length === 0
-                      ? 'No clients yet. Click "Add New Client" to log the first record.'
-                      : 'No clients found matching your search.'}
-                  </td>
-                </tr>
-              ) : (
-                filteredClients.map(c => (
-                  <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-3 font-bold text-slate-900">
-                      <div className="flex items-center gap-2">
-                        <Building2 className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
-                        {c.companyName}
-                      </div>
-                      {c.address && (
-                        <div className="flex items-start gap-1 mt-1 text-[10px] text-slate-400 font-normal">
-                          <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                          <span className="line-clamp-1">{c.address}</span>
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      <div className="flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-slate-400" />
-                        {c.contactName}
-                      </div>
-                      {c.designation && (
-                        <div className="text-[10px] text-slate-400 mt-0.5">{c.designation}</div>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      {c.phone ? (
-                        <div className="flex items-center gap-1.5 font-mono">
-                          <Phone className="w-3.5 h-3.5 text-slate-400" />
-                          {c.phone}
-                        </div>
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      {c.email ? (
-                        <div className="flex items-center gap-1.5 font-mono">
-                          <Mail className="w-3.5 h-3.5 text-slate-400" />
-                          {c.email}
-                        </div>
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      {c.industry || <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="p-3 text-center">
-                      {c.hrdcRegistered ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold px-2 py-0.5 rounded font-mono">
-                          <ShieldCheck className="w-3 h-3" />
-                          YES
-                        </span>
-                      ) : (
-                        <span className="text-[10px] bg-slate-50 text-slate-400 border border-slate-200 font-bold px-2 py-0.5 rounded font-mono">
-                          NO
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-3 text-[10px] text-slate-400 font-mono whitespace-nowrap">
-                      {c.createdByName || '—'}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => setView360ClientId(c.id)}
-                          className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors cursor-pointer"
-                          title="View 360: all activity for this client"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleOpenEditModal(c)}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          title="Edit client"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteClient(c.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Delete client"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Add / Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-150 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                <Users className="w-4 h-4 text-violet-600" />
-                {editingClientId ? 'Edit Client' : 'Add New Client'}
-              </h3>
-              <button
-                onClick={() => { setShowModal(false); resetForm(); }}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+      {/* Add / edit form */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true">
+          <div className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <h3 className="text-lg font-bold">{editing === 'new' ? 'Add client' : 'Edit client'}</h3>
+              <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
-
-            <form onSubmit={handleSaveClient} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Company Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={formCompanyName}
-                    onChange={(e) => setFormCompanyName(e.target.value)}
-                    placeholder="e.g. Petronas Digital Sdn Bhd"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-violet-500 text-slate-800"
-                    required
-                  />
-                </div>
-
+            <form onSubmit={save} className="space-y-6">
+              <fieldset className="space-y-4">
+                <legend className="mb-3 text-[15px] font-bold">Company</legend>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Contact Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={formContactName}
-                    onChange={(e) => setFormContactName(e.target.value)}
-                    placeholder="e.g. Ahmad Razak"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-violet-500 text-slate-800"
-                    required
-                  />
+                  <label className={label} htmlFor="c-name">Company name</label>
+                  <input id="c-name" value={form.companyName} onChange={e => set({ companyName: e.target.value })} placeholder="e.g. ABC Manufacturing Sdn Bhd" className={input} autoFocus />
                 </div>
-
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className={label} htmlFor="c-industry">Industry <span className="font-normal text-ink-soft">(optional)</span></label>
+                    <input id="c-industry" value={form.industry} onChange={e => set({ industry: e.target.value })} placeholder="e.g. Manufacturing" className={input} />
+                  </div>
+                  <label className="flex cursor-pointer items-center gap-2.5 self-end pb-2 text-[15px]">
+                    <input type="checkbox" checked={form.hrdcRegistered} onChange={e => set({ hrdcRegistered: e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
+                    HRDC registered
+                  </label>
+                </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Designation
-                  </label>
-                  <input
-                    type="text"
-                    value={formDesignation}
-                    onChange={(e) => setFormDesignation(e.target.value)}
-                    placeholder="e.g. Head of Learning"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-violet-500 text-slate-800"
-                  />
+                  <label className={label} htmlFor="c-address">Address <span className="font-normal text-ink-soft">(optional, printed on quotations)</span></label>
+                  <textarea id="c-address" value={form.address} onChange={e => set({ address: e.target.value })} rows={3} className={`${input} resize-y`} />
                 </div>
+              </fieldset>
 
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Phone
-                  </label>
-                  <input
-                    type="text"
-                    value={formPhone}
-                    onChange={(e) => setFormPhone(e.target.value)}
-                    placeholder="e.g. +6012-3456789"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-violet-500 text-slate-800"
-                  />
+              <fieldset className="space-y-4">
+                <legend className="mb-3 text-[15px] font-bold">Contact person</legend>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className={label} htmlFor="c-contact">Name</label>
+                    <input id="c-contact" value={form.contactName} onChange={e => set({ contactName: e.target.value })} className={input} />
+                  </div>
+                  <div>
+                    <label className={label} htmlFor="c-designation">Job title</label>
+                    <input id="c-designation" value={form.designation} onChange={e => set({ designation: e.target.value })} placeholder="e.g. HR Manager" className={input} />
+                  </div>
+                  <div>
+                    <label className={label} htmlFor="c-phone">Phone</label>
+                    <input id="c-phone" type="tel" value={form.phone} onChange={e => set({ phone: e.target.value })} placeholder="e.g. 012-345 6789" className={input} />
+                  </div>
+                  <div>
+                    <label className={label} htmlFor="c-email">Email</label>
+                    <input id="c-email" type="email" value={form.email} onChange={e => set({ email: e.target.value })} className={input} />
+                  </div>
                 </div>
+              </fieldset>
 
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={formEmail}
-                    onChange={(e) => setFormEmail(e.target.value)}
-                    placeholder="e.g. contact@company.com"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-violet-500 text-slate-800"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Address
-                  </label>
-                  <input
-                    type="text"
-                    value={formAddress}
-                    onChange={(e) => setFormAddress(e.target.value)}
-                    placeholder="Company address"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-violet-500 text-slate-800"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Industry
-                  </label>
-                  <input
-                    type="text"
-                    value={formIndustry}
-                    onChange={(e) => setFormIndustry(e.target.value)}
-                    placeholder="e.g. Oil & Gas"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-violet-500 text-slate-800"
-                  />
-                </div>
-
-                <div className="flex items-end pb-2">
-                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formHrdc}
-                      onChange={(e) => setFormHrdc(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
-                    />
-                    HRDC Registered
-                  </label>
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Notes
-                  </label>
-                  <textarea
-                    value={formNotes}
-                    onChange={(e) => setFormNotes(e.target.value)}
-                    placeholder="Any additional context about this client..."
-                    rows={2}
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-violet-500 text-slate-800 resize-none"
-                  />
-                </div>
+              <div>
+                <label className={label} htmlFor="c-notes">Notes <span className="font-normal text-ink-soft">(optional)</span></label>
+                <textarea id="c-notes" value={form.notes} onChange={e => set({ notes: e.target.value })} rows={3} placeholder="Anything the team should know about this client" className={`${input} resize-y`} />
               </div>
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => { setShowModal(false); resetForm(); }}
-                  className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs py-2 rounded-lg transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  {editingClientId ? 'Save Changes' : 'Add Client'}
-                </button>
+              {formError && (
+                <div role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">
+                  {formError}
+                  {dupId && (
+                    <button type="button" onClick={() => { setEditing(null); setOpenId(dupId); }} className="ml-2 font-semibold underline">Open it</button>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{editing === 'new' ? 'Add client' : 'Save'}</button>
+                <button type="button" onClick={() => setEditing(null)} className={btnSecondary}>Cancel</button>
               </div>
             </form>
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Client 360 View */}
-      {view360Client && (() => {
-        const records = getClientRecords(view360Client);
-        const wonDeals = records.deals.filter((d: any) => d.status === 'Won');
-        const totalWonValue = wonDeals.reduce((sum: number, d: any) => sum + (d.proposalValue || 0), 0);
-        const totalReceived = records.payments.reduce((sum: number, p: any) => sum + (p.amountReceived || 0), 0);
-        const totalOutstanding = records.payments.reduce((sum: number, p: any) => sum + ((p.invoiceAmount || 0) - (p.amountReceived || 0)), 0);
+function ClientPanel(props: {
+  client: Client; deals: any[]; quotes: any[]; moneyIn: MoneyIn[]; personName: (id: string) => string;
+  canDelete: boolean; busy: boolean; error: string; onClose: () => void; onEdit: () => void; onDelete: () => void;
+}) {
+  const { client: c, deals, quotes } = props;
+  const contact = shown(c.contactName);
+  const phone = shown(c.phone);
+  const wa = phone ? whatsappLink(phone) : '';
+  const dealIds = new Set(deals.map(d => d.id));
+  const money = props.moneyIn.filter(m => dealIds.has(m.dealId));
+  const invoiced = money.reduce((s, m) => s + (Number(m.amount) || 0), 0);
+  const received = money.reduce((s, m) => s + (Number(m.paidAmount) || 0), 0);
+  const won = deals.filter(d => dealStage(d) === 'won');
+  const sortedDeals = [...deals].sort((a, b) => String(b.requestDate || b.id).localeCompare(String(a.requestDate || a.id)));
 
-        return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl max-w-3xl w-full shadow-2xl border border-slate-150 max-h-[92vh] overflow-y-auto">
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-2 text-lg font-bold"><Building2 className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{c.companyName}</span></h3>
+          <p className="mt-0.5 text-[15px] text-ink-soft">{[shown(c.industry), c.hrdcRegistered ? 'HRDC registered' : 'Not HRDC registered'].filter(Boolean).join(' · ')}</p>
+        </div>
+        <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
+      </div>
 
-              {/* Header */}
-              <div className="sticky top-0 bg-white border-b border-slate-150 p-5 flex items-start justify-between z-10">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Building2 className="w-5 h-5 text-violet-600" />
-                    <h2 className="text-lg font-black text-slate-900">{view360Client.companyName}</h2>
-                    {view360Client.hrdcRegistered && (
-                      <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold px-2 py-0.5 rounded font-mono">
-                        <ShieldCheck className="w-3 h-3" />
-                        HRDC
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[11px] text-slate-500">
-                    {view360Client.contactName && view360Client.contactName !== 'N/A' && (
-                      <span className="flex items-center gap-1"><User className="w-3 h-3" />{view360Client.contactName}{view360Client.designation ? ` (${view360Client.designation})` : ''}</span>
-                    )}
-                    {view360Client.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{view360Client.phone}</span>}
-                    {view360Client.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{view360Client.email}</span>}
-                    {view360Client.industry && <span className="flex items-center gap-1"><Briefcase className="w-3 h-3" />{view360Client.industry}</span>}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setView360ClientId(null)}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer flex-shrink-0"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+      <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>
 
-              <div className="p-5 space-y-6">
-
-                {/* Summary stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3">
-                    <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider font-mono">Won Deals Value</div>
-                    <div className="text-lg font-black text-emerald-600 mt-1">RM {totalWonValue.toLocaleString()}</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3">
-                    <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider font-mono">Received</div>
-                    <div className="text-lg font-black text-green-600 mt-1">RM {totalReceived.toLocaleString()}</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3">
-                    <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider font-mono">Outstanding</div>
-                    <div className="text-lg font-black text-amber-600 mt-1">RM {totalOutstanding.toLocaleString()}</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3">
-                    <div className="text-[9px] text-slate-400 font-black uppercase tracking-wider font-mono">Total Deals</div>
-                    <div className="text-lg font-black text-slate-800 mt-1">{records.deals.length}</div>
-                  </div>
-                </div>
-
-                {/* Pipeline Deals */}
-                <div>
-                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                    <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
-                    Pipeline Deals ({records.deals.length})
-                  </h3>
-                  {records.deals.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 italic">No pipeline deals logged for this client yet.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {records.deals.map((d: any) => (
-                        <div key={d.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
-                          <span className="font-bold text-slate-700">{d.courseName || 'Untitled deal'}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-slate-500">RM {(d.proposalValue || 0).toLocaleString()}</span>
-                            <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
-                              d.status === 'Won' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                              d.status === 'Lost' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
-                              'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}>{d.status}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Quotations */}
-                <div>
-                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                    <FileText className="w-3.5 h-3.5 text-blue-500" />
-                    Quotations ({records.quotations.length})
-                  </h3>
-                  {records.quotations.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 italic">No quotations sent to this client yet.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {records.quotations.map((q: any) => {
-                        const itemsTotal = (q.items || []).reduce((sum: number, it: any) => sum + (it.totalFee || 0), 0);
-                        const sst = q.applySST ? (itemsTotal * (q.sstRate || 8) / 100) : 0;
-                        return (
-                          <div key={q.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
-                            <span className="font-mono font-bold text-slate-700">{q.refNumber}</span>
-                            <span className="font-mono text-slate-500">RM {(itemsTotal + sst).toLocaleString()}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Course Outlines */}
-                <div>
-                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                    <BookOpen className="w-3.5 h-3.5 text-emerald-500" />
-                    Course Outlines ({records.outlines.length})
-                  </h3>
-                  {records.outlines.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 italic">No course outlines prepared for this client yet.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {records.outlines.map((o: any) => (
-                        <div key={o.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
-                          <span className="font-bold text-slate-700">{o.courseTitle}</span>
-                          <span className="font-mono text-slate-400">{o.refNumber}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Admin Records (Jobs) */}
-                <div>
-                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                    <ClipboardList className="w-3.5 h-3.5 text-slate-500" />
-                    Confirmed Jobs / Admin Records ({records.adminRecords.length})
-                  </h3>
-                  {records.adminRecords.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 italic">No confirmed jobs logged for this client yet.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {records.adminRecords.map((r: any) => (
-                        <div key={r.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
-                          <span className="font-bold text-slate-700">{r.programmeName || 'Untitled programme'}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-slate-500">{r.trainingDate}</span>
-                            <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
-                              r.completed ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-500 border border-slate-200'
-                            }`}>{r.completed ? 'Done' : 'In Progress'}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Appointments */}
-                <div>
-                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                    <CalendarClock className="w-3.5 h-3.5 text-amber-500" />
-                    Appointments ({records.appointments.length})
-                  </h3>
-                  {records.appointments.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 italic">No appointments logged for this client yet.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {records.appointments.map((a: any) => (
-                        <div key={a.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
-                          <span className="font-bold text-slate-700">{a.type} — {a.date} {a.time || ''}</span>
-                          <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
-                            a.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                            a.status === 'No-Show' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
-                            'bg-amber-50 text-amber-700 border border-amber-200'
-                          }`}>{a.status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Payments */}
-                <div>
-                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                    <Wallet className="w-3.5 h-3.5 text-green-600" />
-                    Payments ({records.payments.length})
-                  </h3>
-                  {records.payments.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 italic">No payments logged for this client yet.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {records.payments.map((p: any) => (
-                        <div key={p.id} className="flex items-center justify-between bg-white border border-slate-150 rounded-lg px-3 py-2 text-[11px]">
-                          <span className="font-mono text-slate-500">Invoiced RM {(p.invoiceAmount || 0).toLocaleString()}</span>
-                          <span className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
-                            p.status === 'Paid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                            p.status === 'Overdue' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
-                            'bg-slate-50 text-slate-500 border border-slate-200'
-                          }`}>{p.status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-              </div>
+      {/* Contact */}
+      <section className="rounded-xl border border-line p-4">
+        <h4 className="text-sm font-semibold text-ink-soft">Contact person</h4>
+        {contact || phone || c.email ? (
+          <>
+            <p className="mt-1 font-semibold">{contact || 'No name'}{c.designation ? <span className="font-normal text-ink-soft">, {c.designation}</span> : null}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className={btnSecondary}><Phone className="h-4 w-4" /> {phone}</a>}
+              {wa && <a href={wa} target="_blank" rel="noreferrer" className={btnSecondary}><MessageCircle className="h-4 w-4" /> WhatsApp</a>}
+              {c.email && <a href={`mailto:${c.email}`} className={btnSecondary}><Mail className="h-4 w-4" /> {c.email}</a>}
             </div>
-          </div>
-        );
-      })()}
+          </>
+        ) : (
+          <p className="mt-1 text-[15px] text-ink-soft">No contact details yet. Click Edit details to add them.</p>
+        )}
+      </section>
 
+      {(c.address || c.notes) && (
+        <section className="space-y-3">
+          {c.address && (
+            <div>
+              <h4 className="text-sm font-semibold text-ink-soft">Address</h4>
+              <p className="mt-1 flex items-start gap-1.5 whitespace-pre-line text-[15px]"><MapPin className="mt-1 h-4 w-4 shrink-0 text-ink-soft" />{c.address}</p>
+            </div>
+          )}
+          {c.notes && (
+            <div>
+              <h4 className="text-sm font-semibold text-ink-soft">Notes</h4>
+              <p className="mt-1 whitespace-pre-line text-[15px]">{c.notes}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* History */}
+      <section>
+        <h4 className="text-[15px] font-bold">Deals ({deals.length})</h4>
+        {won.length > 0 && <p className="text-sm text-ink-soft">Won {won.length}, worth {formatRM(won.reduce((s, d) => s + dealValue(d), 0))}</p>}
+        {deals.length === 0 ? (
+          <p className="mt-1 text-[15px] text-ink-soft">No deals with this client yet.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-line rounded-xl border border-line">
+            {sortedDeals.map(d => (
+              <li key={d.id} className="flex items-center gap-3 px-4 py-2.5 text-[15px]">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{d.courseName || 'No programme yet'}</span>
+                  <span className="block truncate text-sm text-ink-soft">{props.personName(dealOwnerId(d))}{d.requestDate ? `, ${formatDate(d.requestDate)}` : ''}</span>
+                </span>
+                <span className="shrink-0 text-sm text-ink-soft">{STAGE_LABELS[dealStage(d)]}</span>
+                <span className="w-24 shrink-0 text-right font-semibold tabular-nums">{dealValue(d) ? formatRM(dealValue(d)) : '—'}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section>
+        <h4 className="text-[15px] font-bold">Quotations ({quotes.length})</h4>
+        {quotes.length === 0 ? (
+          <p className="mt-1 text-[15px] text-ink-soft">No quotations for this client yet.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-line rounded-xl border border-line">
+            {quotes.map(q => (
+              <li key={q.id} className="flex items-center gap-3 px-4 py-2.5 text-[15px]">
+                <span className="min-w-0 flex-1 truncate font-medium">{q.refNumber || 'No reference'}</span>
+                <span className="shrink-0 text-sm text-ink-soft">{q.date ? formatDate(q.date) : ''}</span>
+                <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${q.status === 'sent' ? 'bg-accent-soft text-accent' : 'bg-surface text-ink-soft'}`}>{q.status === 'sent' ? 'Sent' : 'Draft'}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {money.length > 0 && (
+        <section>
+          <h4 className="text-[15px] font-bold">Money</h4>
+          <p className="mt-1 text-[15px]">Invoiced or claimed {formatRM(invoiced)}, received {formatRM(received)}</p>
+        </section>
+      )}
+
+      {props.canDelete && (
+        <div className="border-t border-line pt-4">
+          {props.error && <p role="alert" className="mb-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{props.error}</p>}
+          <button type="button" disabled={props.busy} onClick={props.onDelete} className="inline-flex items-center gap-1.5 text-sm font-semibold text-danger hover:underline"><Trash2 className="h-4 w-4" /> Delete client</button>
+        </div>
+      )}
     </div>
   );
 }

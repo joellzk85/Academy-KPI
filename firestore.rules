@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion)
+// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -155,6 +155,12 @@ service cloud.firestore {
       allow read, write: if isMember() && request.auth.uid == memberId;
     }
 
+    // Clients: every team member can add and edit; only Management can delete.
+    match /clients/{clientId} {
+      allow read, create, update: if isMember();
+      allow delete: if isManagement();
+    }
+
     // KPI settings per person (template and targets): Management only.
     match /reps/{memberId} {
       allow read: if isMember();
@@ -172,7 +178,7 @@ service cloud.firestore {
     // All other CRM work data: team members only
     match /{coll}/{docId=**} {
       allow read, write: if isMember() && coll in [
-        'admin_records', 'appointments', 'client_payments', 'clients',
+        'admin_records', 'appointments', 'client_payments',
         'course_outlines', 'events', 'links', 'payments',
         'project_pls', 'tasks',
         'trainers_directory', 'venues_directory'

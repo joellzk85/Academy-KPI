@@ -2033,7 +2033,7 @@ export default function RepDetailDashboard({
           ) : activeSubTab === 'admin_record' ? (
             <AdminRecordManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'client' ? (
-            <ClientManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
+            <ClientManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
           ) : activeSubTab === 'trainerList' ? (
             <TrainerManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'venue' ? (
