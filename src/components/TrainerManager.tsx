@@ -1,615 +1,376 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { GraduationCap, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Trainer } from '../types';
-import { db } from '../lib/firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
-import {
-  Plus, Trash2, Edit3, Search, X, User, Phone, Mail,
-  DollarSign, CheckCircle, RotateCcw, Users, GraduationCap, Save
-} from 'lucide-react';
+import { db, friendlyError } from '../lib/firebase';
+import { STAGE_LABELS, dealStage, formatDate, formatRM, todayIso } from '../lib/deals';
+import { ChecklistTask } from '../lib/checklist';
+import { Booking, trainerBookings } from '../lib/trainers';
+
+// Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
+// Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
+// bookings show by themselves from the deals (Joel removed "Booked").
+// Anyone can add and edit; only Management can delete, and only a trainer no quotation or checklist uses.
+
+type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
 interface TrainerManagerProps {
   rep: Representative;
   reps: Representative[];
-  requestManagerPermission: (actionToExecute: () => void) => void;
+  viewer: Viewer;
 }
 
-const LOCAL_STORAGE_KEY = 'next_trainers_shared';
+const input =
+  'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
+const label = 'mb-1.5 block text-sm font-semibold text-ink';
+const btnPrimary =
+  'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0B5A50] disabled:opacity-60';
+const btnSecondary =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
-export default function TrainerManager({ rep, reps, requestManagerPermission }: TrainerManagerProps) {
-  const [trainers, setTrainers] = useState<Trainer[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // fallback to empty
-      }
-    }
-    return [];
-  });
+const emptyForm = () => ({ name: '', specialization: '', contact: '', email: '', rate: '', onLeave: false, notes: '' });
+type Form = ReturnType<typeof emptyForm>;
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'Available' | 'Booked' | 'On Leave'>('all');
-  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'az'>('newest');
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [undoMessage, setUndoMessage] = useState<string | null>(null);
-  const [previousTrainers, setPreviousTrainers] = useState<Trainer[] | null>(null);
+const norm = (s?: string) => (s || '').trim().toLowerCase();
 
-  const [showModal, setShowModal] = useState(false);
-  const [editingTrainerId, setEditingTrainerId] = useState<string | null>(null);
+// Malaysian numbers: 012-345 6789 -> 60123456789 for WhatsApp.
+function whatsappLink(phone: string): string {
+  let d = phone.replace(/\D/g, '');
+  if (d.startsWith('0')) d = '6' + d;
+  return d.length >= 9 ? `https://wa.me/${d}` : '';
+}
 
-  // Form fields
-  const [formName, setFormName] = useState('');
-  const [formSpecialization, setFormSpecialization] = useState('React & AI Integration');
-  const [formContact, setFormContact] = useState('');
-  const [formEmail, setFormEmail] = useState('');
-  const [formRate, setFormRate] = useState('');
-  const [formStatus, setFormStatus] = useState<'Available' | 'Booked' | 'On Leave'>('Available');
-  const [formNotes, setFormNotes] = useState('');
+export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProps) {
+  const [trainers, setTrainers] = useState<Trainer[]>([]);
+  const [deals, setDeals] = useState<any[]>([]);
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const [checklists, setChecklists] = useState<Record<string, any>>({});
+  const [clients, setClients] = useState<any[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+  const [search, setSearch] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<'new' | string | null>(null);
+  const [form, setForm] = useState<Form>(emptyForm());
+  const [formError, setFormError] = useState('');
+  const [dupId, setDupId] = useState<string | null>(null);
+  const [panelError, setPanelError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState('');
 
-  // Real-time Firestore sync for Trainers (shared collection, not per-rep)
   useEffect(() => {
-    if (!db) return;
-
-    const q = query(collection(db, 'trainers_directory'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const firestoreTrainers: Trainer[] = [];
-      snapshot.forEach((docSnap) => {
-        firestoreTrainers.push({ ...(docSnap.data() as Trainer), id: docSnap.id });
-      });
-
-      firestoreTrainers.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setTrainers(firestoreTrainers);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(firestoreTrainers));
-    });
-
-    return () => unsubscribe();
+    const subs = [
+      onSnapshot(query(collection(db, 'trainers_directory')), s => { setTrainers(s.docs.map(d => ({ ...(d.data() as Trainer), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
+      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
+      onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+    ];
+    return () => subs.forEach(u => u());
   }, []);
 
-  const resetForm = () => {
-    setFormName('');
-    setFormSpecialization('React & AI Integration');
-    setFormContact('');
-    setFormEmail('');
-    setFormRate('');
-    setFormStatus('Available');
-    setFormNotes('');
-    setEditingTrainerId(null);
-  };
+  const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
+  const today = todayIso();
 
-  const handleOpenAddModal = () => {
-    resetForm();
-    setShowModal(true);
-  };
+  const bookingsOf = (t: Trainer) => trainerBookings(t, deals, checklists, quotes, trainers);
+  const nextTraining = useMemo(() => {
+    const out: Record<string, string> = {};
+    trainers.forEach(t => {
+      const next = bookingsOf(t).map(b => b.date).filter(d => d && d >= today).sort()[0];
+      if (next) out[t.id] = next;
+    });
+    return out;
+  }, [trainers, deals, checklists, quotes]);
 
-  const handleOpenEditModal = (trainer: Trainer) => {
-    setEditingTrainerId(trainer.id);
-    setFormName(trainer.name || '');
-    setFormSpecialization(trainer.specialization || 'React & AI Integration');
-    setFormContact(trainer.contact || '');
-    setFormEmail(trainer.email || '');
-    setFormRate(trainer.rate ? String(trainer.rate) : '');
-    setFormStatus(trainer.status || 'Available');
-    setFormNotes(trainer.notes || '');
-    setShowModal(true);
-  };
+  // Topics already used, suggested as you type.
+  const topics = useMemo(() => Array.from(new Set(trainers.map(t => (t.specialization || '').trim()).filter(Boolean))).sort(), [trainers]);
 
-  const handleSaveTrainer = async (e: React.FormEvent) => {
+  const visible = useMemo(() => {
+    const q = norm(search);
+    const list = q ? trainers.filter(t => [t.name, t.specialization, t.contact, t.email].some(v => norm(v).includes(q))) : trainers;
+    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }));
+  }, [trainers, search]);
+
+  const openTrainer = trainers.find(t => t.id === openId) || null;
+
+  // ---------- Add / edit ----------
+  const startNew = () => { setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
+  const startEdit = (t: Trainer) => {
+    setForm({ name: t.name || '', specialization: t.specialization || '', contact: t.contact || '', email: t.email || '', rate: t.rate ? String(t.rate) : '', onLeave: t.status === 'On Leave', notes: t.notes || '' });
+    setFormError(''); setDupId(null); setEditing(t.id);
+  };
+  const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
+
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(''); setDupId(null);
+    const name = form.name.trim();
+    if (!name) return setFormError("Enter the trainer's name.");
+    const dup = trainers.find(t => t.id !== editing && norm(t.name) === norm(name));
+    if (dup) { setDupId(dup.id); return setFormError(`"${dup.name}" is already in the trainer list.`); }
+    const email = form.email.trim();
+    if (email && !/^\S+@\S+\.\S+$/.test(email)) return setFormError("That email address doesn't look right.");
 
-    if (!formName.trim()) {
-      showToast('Trainer name is required.', 'error');
-      return;
-    }
-
-    let newTrainer: Trainer;
-
-    if (editingTrainerId) {
-      const existing = trainers.find(t => t.id === editingTrainerId);
-      newTrainer = {
-        ...existing,
-        id: editingTrainerId,
-        name: formName.trim(),
-        specialization: formSpecialization,
-        contact: formContact.trim(),
-        email: formEmail.trim(),
-        rate: parseFloat(formRate) || 0,
-        status: formStatus,
-        notes: formNotes.trim(),
-      } as Trainer;
-
-      const updated = trainers.map(t => t.id === editingTrainerId ? newTrainer : t);
-      setTrainers(updated);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      showToast('Trainer updated.', 'success');
-    } else {
-      newTrainer = {
-        id: `trainer_${Date.now()}`,
-        name: formName.trim(),
-        specialization: formSpecialization,
-        contact: formContact.trim(),
-        email: formEmail.trim(),
-        rate: parseFloat(formRate) || 0,
-        status: formStatus,
-        notes: formNotes.trim(),
-        createdAt: Date.now(),
-        createdBy: rep.id,
-        createdByName: rep.name,
-      };
-
-      const updated = [newTrainer, ...trainers];
-      setTrainers(updated);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      showToast('Trainer added.', 'success');
-    }
-
+    const details = {
+      name, specialization: form.specialization.trim(), contact: form.contact.trim(), email,
+      rate: parseFloat(form.rate.replace(/[^0-9.]/g, '')) || 0,
+      status: (form.onLeave ? 'On Leave' : 'Available') as Trainer['status'],
+      notes: form.notes.trim(),
+    };
+    setBusy(true);
     try {
-      if (db) {
-        await setDoc(doc(db, 'trainers_directory', newTrainer.id), newTrainer);
+      if (editing === 'new') {
+        const id = `trainer_${Date.now()}`;
+        await setDoc(doc(db, 'trainers_directory', id), { id, ...details, createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+        setOpenId(id);
+        flash('Trainer added');
+      } else if (editing) {
+        await setDoc(doc(db, 'trainers_directory', editing), details, { merge: true });
+        flash('Trainer saved');
       }
+      setEditing(null);
     } catch (err) {
-      console.error('Firestore save trainer failed:', err);
-    }
-
-    setShowModal(false);
-    resetForm();
-  };
-
-  const handleDeleteTrainer = (id: string) => {
-    requestManagerPermission(async () => {
-      setPreviousTrainers(JSON.parse(JSON.stringify(trainers)));
-      setUndoMessage('Trainer record deleted.');
-      const remaining = trainers.filter(t => t.id !== id);
-      setTrainers(remaining);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(remaining));
-      showToast('Trainer deleted.', 'success');
-
-      try {
-        if (db) {
-          await deleteDoc(doc(db, 'trainers_directory', id));
-        }
-      } catch (err) {
-        console.error('Firestore delete trainer failed:', err);
-      }
-    });
-  };
-
-  const handleUndoChange = async () => {
-    if (previousTrainers) {
-      setTrainers(previousTrainers);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(previousTrainers));
-      showToast('Action reverted.', 'success');
-      try {
-        if (db) {
-          for (const t of previousTrainers) {
-            await setDoc(doc(db, 'trainers_directory', t.id), t);
-          }
-        }
-      } catch (err) {
-        console.error('Firestore undo failed:', err);
-      }
-      setPreviousTrainers(null);
-      setUndoMessage(null);
+      setFormError(friendlyError(err));
+    } finally {
+      setBusy(false);
     }
   };
 
-  const filteredTrainers = trainers
-    .filter(t => {
-      const q = searchQuery.toLowerCase();
-      const matchesSearch =
-        (t.name || '').toLowerCase().includes(q) ||
-        (t.specialization || '').toLowerCase().includes(q) ||
-        (t.contact || '').toLowerCase().includes(q) ||
-        (t.email || '').toLowerCase().includes(q);
-      const matchesStatus = filterStatus === 'all' || t.status === filterStatus;
-      return matchesSearch && matchesStatus;
-    })
-    .sort((a, b) => {
-      if (sortOrder === 'az') return (a.name || '').localeCompare(b.name || '');
-      if (sortOrder === 'oldest') return (a.createdAt || 0) - (b.createdAt || 0);
-      return (b.createdAt || 0) - (a.createdAt || 0);
-    });
-
-  const totalTrainers = trainers.length;
-  const availableCount = trainers.filter(t => t.status === 'Available').length;
-  const bookedCount = trainers.filter(t => t.status === 'Booked').length;
-  const avgRate = trainers.length > 0
-    ? Math.round(trainers.reduce((sum, t) => sum + (t.rate || 0), 0) / trainers.length)
-    : 0;
+  // ---------- Delete (Management only) ----------
+  const usedOn = (t: Trainer) => {
+    const inQuotes = quotes.filter(q => (q.items || []).some((it: any) => it.trainerId === t.id)).length;
+    const inChecklists = Object.values(checklists).filter((c: any) => (c.tasks || []).some((x: ChecklistTask) => x.kind === 'trainer' && x.trainerId === t.id)).length;
+    return { inQuotes, inChecklists };
+  };
+  const remove = async (t: Trainer) => {
+    setPanelError('');
+    const { inQuotes, inChecklists } = usedOn(t);
+    if (inQuotes || inChecklists) {
+      const parts = [inQuotes ? `${inQuotes} quotation${inQuotes === 1 ? '' : 's'}` : '', inChecklists ? `${inChecklists} admin checklist${inChecklists === 1 ? '' : 's'}` : ''].filter(Boolean);
+      return setPanelError(`This trainer can't be deleted because ${parts.join(' and ')} use${inQuotes + inChecklists === 1 ? 's' : ''} them.`);
+    }
+    if (!window.confirm(`Delete ${t.name} from the trainer list? This can't be undone.`)) return;
+    setBusy(true);
+    try {
+      await deleteDoc(doc(db, 'trainers_directory', t.id));
+      setOpenId(null);
+      flash('Trainer deleted');
+    } catch (err) {
+      setPanelError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="space-y-6">
-
-      {/* Toast Alert popup */}
+    <div className="space-y-5 font-sans text-ink">
       {toast && (
-        <div className={`fixed top-4 right-4 p-4 rounded-xl shadow-2xl flex items-center gap-2 z-50 text-xs font-black transition-all transform animate-slide-in ${
-          toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
-        }`}>
-          <CheckCircle className="w-4 h-4" />
-          <span>{toast.message}</span>
-        </div>
+        <div role="status" className="fixed right-4 top-4 z-[60] rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white shadow-lg">{toast}</div>
       )}
 
-      {/* Undo Banner */}
-      {undoMessage && (
-        <div className="bg-amber-500 text-white p-3 rounded-xl flex items-center justify-between shadow-md text-xs font-bold animate-pulse">
-          <div className="flex items-center gap-2">
-            <RotateCcw className="w-4 h-4" />
-            <span>{undoMessage}</span>
-          </div>
-          <button
-            onClick={handleUndoChange}
-            className="bg-white text-slate-800 hover:bg-slate-100 font-extrabold uppercase px-3 py-1 rounded-lg text-[10px] cursor-pointer"
-          >
-            Undo Action
-          </button>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Trainers</h2>
+          <p className="text-[15px] text-ink-soft">{trainers.length} trainer{trainers.length === 1 ? '' : 's'}, shared by the whole team</p>
         </div>
-      )}
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Total Trainers
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-slate-900">{totalTrainers}</span>
-            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
-              <GraduationCap className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Shared record across all staff</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Available Now
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-emerald-600">{availableCount}</span>
-            <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
-              <CheckCircle className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Ready to be assigned to a job</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Currently Booked
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-amber-600">{bookedCount}</span>
-            <div className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
-              <Users className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Engaged on an active training</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-2xs space-y-2">
-          <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block font-mono">
-            Average Daily Rate
-          </span>
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-indigo-600">RM {avgRate.toLocaleString()}</span>
-            <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500">Across all registered trainers</p>
-        </div>
+        <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add trainer</button>
       </div>
 
-      {/* Control Panel */}
-      <div className="bg-slate-900 border border-slate-800 text-white rounded-xl p-4 space-y-4 shadow-lg">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-          <div>
-            <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5 font-display">
-              <GraduationCap className="w-4 h-4 text-blue-400" />
-              Trainer Database (Shared Directory)
-            </h2>
-            <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-              One shared list, visible and editable by every rep
-            </p>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, topic, phone or email" className={`${input} pl-9`} aria-label="Search trainers" />
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-line bg-white">
+        {!loaded ? (
+          <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading trainers…</p>
+        ) : visible.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="font-semibold">{trainers.length === 0 ? 'No trainers yet' : `No trainer matches "${search.trim()}"`}</p>
+            <p className="mt-1 text-[15px] text-ink-soft">{trainers.length === 0 ? 'Add your first trainer.' : 'Check the spelling, or add them as a new trainer.'}</p>
+            {trainers.length > 0 && <button type="button" onClick={startNew} className={`${btnSecondary} mt-3`}><Plus className="h-4 w-4" /> Add "{search.trim()}"</button>}
           </div>
+        ) : (
+          <ul className="divide-y divide-line">
+            {visible.map(t => {
+              const sub = [t.specialization, t.contact].map(x => (x || '').trim()).filter(Boolean).join(' · ');
+              const next = nextTraining[t.id];
+              return (
+                <li key={t.id}>
+                  <button type="button" onClick={() => { setOpenId(t.id); setPanelError(''); }} className="flex w-full items-center gap-4 px-5 py-3.5 text-left hover:bg-surface">
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate font-semibold">{t.name}</span>
+                        {t.status === 'On Leave' && <span className="shrink-0 rounded-md bg-attention-soft px-2 py-0.5 text-xs font-semibold text-attention">On leave</span>}
+                      </span>
+                      <span className="block truncate text-sm text-ink-soft">{sub || 'No topic or phone yet'}</span>
+                    </span>
+                    <span className="hidden w-28 shrink-0 text-right text-sm font-semibold tabular-nums sm:block">{t.rate ? `${formatRM(t.rate)}/day` : ''}</span>
+                    <span className="w-32 shrink-0 text-right text-sm text-ink-soft">{next ? `Next ${formatDate(next)}` : 'No training booked'}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
-          <button
-            onClick={handleOpenAddModal}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-[10px] uppercase tracking-wider px-4 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
-          >
-            <Plus className="w-4 h-4" />
-            Register New Trainer
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-800">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search name, specialization, contact..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 font-semibold"
+      {/* Trainer panel */}
+      {openTrainer && !editing && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
+          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <TrainerPanel
+              trainer={openTrainer}
+              bookings={bookingsOf(openTrainer)}
+              clients={clients}
+              today={today}
+              canDelete={viewer.role === 'management'}
+              busy={busy}
+              error={panelError}
+              onClose={() => setOpenId(null)}
+              onEdit={() => startEdit(openTrainer)}
+              onDelete={() => remove(openTrainer)}
             />
           </div>
-
-          <div>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
-              className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-blue-500 font-bold"
-            >
-              <option value="all">All Statuses</option>
-              <option value="Available">Available</option>
-              <option value="Booked">Booked</option>
-              <option value="On Leave">On Leave</option>
-            </select>
-          </div>
-
-          <div>
-            <select
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest' | 'az')}
-              className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-blue-500 font-bold"
-            >
-              <option value="newest">Sort: Newest First</option>
-              <option value="oldest">Sort: Oldest First</option>
-              <option value="az">Sort: Name A-Z</option>
-            </select>
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-slate-700 font-sans text-xs">
-            <thead className="bg-slate-800 text-slate-200 font-display text-[10px] font-black uppercase tracking-wider border-b border-slate-700">
-              <tr>
-                <th className="p-3 whitespace-nowrap min-w-[160px]">Trainer Name</th>
-                <th className="p-3 whitespace-nowrap">Specialization</th>
-                <th className="p-3 whitespace-nowrap">Contact</th>
-                <th className="p-3 text-right whitespace-nowrap">Daily Rate</th>
-                <th className="p-3 text-center">Status</th>
-                <th className="p-3 whitespace-nowrap">Added By</th>
-                <th className="p-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-sans font-medium">
-              {filteredTrainers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400 italic bg-slate-50/50">
-                    {trainers.length === 0
-                      ? 'No trainers yet. Click "Register New Trainer" to log the first record.'
-                      : 'No trainers found matching your search/filter.'}
-                  </td>
-                </tr>
-              ) : (
-                filteredTrainers.map(t => (
-                  <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-3 font-bold text-slate-900">
-                      <div className="flex items-center gap-2">
-                        <User className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-                        {t.name}
-                      </div>
-                    </td>
-                    <td className="p-3 font-mono text-[10px] text-slate-500">
-                      {t.specialization}
-                    </td>
-                    <td className="p-3">
-                      <div className="space-y-0.5">
-                        {t.contact && (
-                          <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                            <Phone className="w-3 h-3 text-slate-400" />
-                            {t.contact}
-                          </div>
-                        )}
-                        {t.email && (
-                          <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                            <Mail className="w-3 h-3 text-slate-400" />
-                            {t.email}
-                          </div>
-                        )}
-                        {!t.contact && !t.email && <span className="text-slate-300">—</span>}
-                      </div>
-                    </td>
-                    <td className="p-3 text-right font-mono font-black text-slate-800">
-                      RM {(t.rate || 0).toLocaleString()}
-                    </td>
-                    <td className="p-3 text-center">
-                      {t.status === 'Available' ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-black text-[9px] uppercase tracking-wider">
-                          Available
-                        </span>
-                      ) : t.status === 'Booked' ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 font-black text-[9px] uppercase tracking-wider">
-                          Booked
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 font-black text-[9px] uppercase tracking-wider">
-                          On Leave
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-3 text-[10px] text-slate-400 font-mono whitespace-nowrap">
-                      {t.createdByName || '—'}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => handleOpenEditModal(t)}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          title="Edit trainer"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTrainer(t.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Delete trainer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Add / Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-150 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                <GraduationCap className="w-4 h-4 text-blue-600" />
-                {editingTrainerId ? 'Edit Trainer' : 'Register New Trainer'}
-              </h3>
-              <button
-                onClick={() => { setShowModal(false); resetForm(); }}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+      {/* Add / edit form */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true">
+          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <h3 className="text-lg font-bold">{editing === 'new' ? 'Add trainer' : 'Edit trainer'}</h3>
+              <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
-
-            <form onSubmit={handleSaveTrainer} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Trainer Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    placeholder="e.g. Dr. Jane Smith"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-800"
-                    required
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Specialization
-                  </label>
-                  <select
-                    value={formSpecialization}
-                    onChange={(e) => setFormSpecialization(e.target.value)}
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-800"
-                  >
-                    <option value="React & AI Integration">React & AI Integration</option>
-                    <option value="Design Thinking & Soft Skills">Design Thinking & Soft Skills</option>
-                    <option value="Full-Stack Web Development">Full-Stack Web Development</option>
-                    <option value="Leadership & Corporate">Leadership & Corporate</option>
-                    <option value="Sales Mastery">Sales Mastery</option>
-                    <option value="Technical QA">Technical QA</option>
-                  </select>
-                </div>
-
+            <form onSubmit={save} className="space-y-4">
+              <div>
+                <label className={label} htmlFor="t-name">Name</label>
+                <input id="t-name" value={form.name} onChange={e => set({ name: e.target.value })} className={input} autoFocus />
+              </div>
+              <div>
+                <label className={label} htmlFor="t-topic">Topics <span className="font-normal text-ink-soft">(what they train)</span></label>
+                <input id="t-topic" list="t-topic-list" value={form.specialization} onChange={e => set({ specialization: e.target.value })} placeholder="e.g. Leadership, Sales, Excel" className={input} autoComplete="off" />
+                <datalist id="t-topic-list">{topics.map(x => <option key={x} value={x} />)}</datalist>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Contact Number
-                  </label>
-                  <input
-                    type="text"
-                    value={formContact}
-                    onChange={(e) => setFormContact(e.target.value)}
-                    placeholder="e.g. +6011-1234567"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-800 font-mono"
-                  />
+                  <label className={label} htmlFor="t-phone">Phone</label>
+                  <input id="t-phone" type="tel" value={form.contact} onChange={e => set({ contact: e.target.value })} placeholder="e.g. 012-345 6789" className={input} />
                 </div>
-
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={formEmail}
-                    onChange={(e) => setFormEmail(e.target.value)}
-                    placeholder="e.g. trainer@email.com"
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-800"
-                  />
+                  <label className={label} htmlFor="t-email">Email</label>
+                  <input id="t-email" type="email" value={form.email} onChange={e => set({ email: e.target.value })} className={input} />
                 </div>
-
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Daily Rate (RM)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2 text-slate-400 text-xs font-black font-mono">RM</span>
-                    <input
-                      type="number"
-                      value={formRate}
-                      onChange={(e) => setFormRate(e.target.value)}
-                      placeholder="e.g. 2000"
-                      className="w-full text-xs pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-800 font-mono"
-                    />
-                  </div>
+                  <label className={label} htmlFor="t-rate">Daily rate (RM)</label>
+                  <input id="t-rate" inputMode="decimal" value={form.rate} onChange={e => set({ rate: e.target.value })} placeholder="e.g. 2000" className={input} />
                 </div>
-
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as 'Available' | 'Booked' | 'On Leave')}
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-800"
-                  >
-                    <option value="Available">Available</option>
-                    <option value="Booked">Booked</option>
-                    <option value="On Leave">On Leave</option>
-                  </select>
-                </div>
-
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Notes
-                  </label>
-                  <textarea
-                    value={formNotes}
-                    onChange={(e) => setFormNotes(e.target.value)}
-                    placeholder="Any additional context about this trainer..."
-                    rows={2}
-                    className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-slate-800 resize-none"
-                  />
-                </div>
+                <label className="flex cursor-pointer items-center gap-2.5 self-end pb-2 text-[15px]">
+                  <input type="checkbox" checked={form.onLeave} onChange={e => set({ onLeave: e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
+                  On leave (not taking trainings for now)
+                </label>
+              </div>
+              <div>
+                <label className={label} htmlFor="t-notes">Notes <span className="font-normal text-ink-soft">(optional)</span></label>
+                <textarea id="t-notes" value={form.notes} onChange={e => set({ notes: e.target.value })} rows={3} placeholder="Anything the team should know about this trainer" className={`${input} resize-y`} />
               </div>
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => { setShowModal(false); resetForm(); }}
-                  className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs py-2 rounded-lg transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  {editingTrainerId ? 'Save Changes' : 'Add Trainer'}
-                </button>
+              {formError && (
+                <div role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">
+                  {formError}
+                  {dupId && <button type="button" onClick={() => { setEditing(null); setOpenId(dupId); }} className="ml-2 font-semibold underline">Open it</button>}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{editing === 'new' ? 'Add trainer' : 'Save'}</button>
+                <button type="button" onClick={() => setEditing(null)} className={btnSecondary}>Cancel</button>
               </div>
             </form>
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
+function TrainerPanel(props: {
+  trainer: Trainer; bookings: Booking[]; clients: any[]; today: string;
+  canDelete: boolean; busy: boolean; error: string; onClose: () => void; onEdit: () => void; onDelete: () => void;
+}) {
+  const { trainer: t, bookings, today } = props;
+  const phone = (t.contact || '').trim();
+  const wa = phone ? whatsappLink(phone) : '';
+  const clientName = (d: any) => props.clients.find(c => c.id === d.clientId)?.companyName || d.client || 'No client';
+  const upcoming = bookings.filter(b => !b.date || b.date >= today).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+  const past = bookings.filter(b => b.date && b.date < today).sort((a, b) => b.date.localeCompare(a.date));
+
+  const row = (b: Booking) => (
+    <li key={b.deal.id} className="flex items-center gap-3 px-4 py-2.5 text-[15px]">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{clientName(b.deal)}</span>
+        <span className="block truncate text-sm text-ink-soft">{b.deal.courseName || 'No programme yet'}</span>
+      </span>
+      <span className="shrink-0 text-right text-sm">
+        <span className="block font-semibold">{b.date ? formatDate(b.date) : 'Date not set'}</span>
+        <span className="block text-ink-soft">{b.confirmed ? 'Confirmed' : dealStage(b.deal) === 'won' ? 'Won, not confirmed yet' : `On the quotation · ${STAGE_LABELS[dealStage(b.deal)]}`}</span>
+      </span>
+    </li>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-2 text-lg font-bold"><GraduationCap className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{t.name}</span></h3>
+          <p className="mt-0.5 text-[15px] text-ink-soft">{[t.specialization, t.status === 'On Leave' ? 'On leave' : 'Available'].filter(Boolean).join(' · ')}</p>
+        </div>
+        <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
+      </div>
+
+      <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>
+
+      <section className="rounded-xl border border-line p-4">
+        <h4 className="text-sm font-semibold text-ink-soft">Contact</h4>
+        {phone || t.email ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className={btnSecondary}><Phone className="h-4 w-4" /> {phone}</a>}
+            {wa && <a href={wa} target="_blank" rel="noreferrer" className={btnSecondary}><MessageCircle className="h-4 w-4" /> WhatsApp</a>}
+            {t.email && <a href={`mailto:${t.email}`} className={btnSecondary}><Mail className="h-4 w-4" /> {t.email}</a>}
+          </div>
+        ) : (
+          <p className="mt-1 text-[15px] text-ink-soft">No contact details yet. Click Edit details to add them.</p>
+        )}
+      </section>
+
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
+        <div><dt className="text-sm text-ink-soft">Daily rate</dt><dd className="font-semibold">{t.rate ? formatRM(t.rate) : 'Not set'}</dd></div>
+        <div><dt className="text-sm text-ink-soft">Status</dt><dd className="font-semibold">{t.status === 'On Leave' ? 'On leave' : 'Available'}</dd></div>
+        {t.notes && <div className="col-span-2"><dt className="text-sm text-ink-soft">Notes</dt><dd className="whitespace-pre-line">{t.notes}</dd></div>}
+      </dl>
+
+      <section>
+        <h4 className="text-[15px] font-bold">Upcoming trainings ({upcoming.length})</h4>
+        {upcoming.length === 0
+          ? <p className="mt-1 text-[15px] text-ink-soft">Nothing booked.</p>
+          : <ul className="mt-2 divide-y divide-line rounded-xl border border-line">{upcoming.map(row)}</ul>}
+        <p className="mt-1.5 text-sm text-ink-soft">From the deals: the confirmed trainer on the admin checklist, or the trainer on the quotation.</p>
+      </section>
+
+      {past.length > 0 && (
+        <section>
+          <h4 className="text-[15px] font-bold">Past trainings ({past.length})</h4>
+          <ul className="mt-2 divide-y divide-line rounded-xl border border-line">{past.map(row)}</ul>
+        </section>
+      )}
+
+      {props.canDelete && (
+        <div className="border-t border-line pt-4">
+          {props.error && <p role="alert" className="mb-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{props.error}</p>}
+          <button type="button" disabled={props.busy} onClick={props.onDelete} className="inline-flex items-center gap-1.5 text-sm font-semibold text-danger hover:underline"><Trash2 className="h-4 w-4" /> Delete trainer</button>
+        </div>
+      )}
     </div>
   );
 }

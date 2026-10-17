@@ -273,6 +273,13 @@ What was built:
   - Add/edit form: the same fields as before (company name, industry, HRDC registered, address; contact name, job title, phone, email; notes). Only the company name is required. A duplicate company name is refused, with an "Open it" link.
   - **Only Management can delete a client** (Joel), and only when no deal or quotation uses it. `clients` now has its own rule in `firestore.rules` (any member reads, adds, edits; delete Management only) and was taken out of the catch-all list. **Rules need publishing.**
   - Removed: the four stat boxes, the dark control panel, sort drop-down, undo banner and the old "View 360" pop-up (it read old appointments, admin records and payments).
+- **Trainers redesign (2026-10-17, like Clients):** `src/components/TrainerManager.tsx` rewritten in the new style.
+  - The screen has a title with a count, one search box, **Add trainer**, then an A–Z list (name, On leave tag, topics · phone, daily rate, next training date).
+  - The side panel shows Call / WhatsApp / Email, daily rate, status and notes, then **upcoming and past trainings, read live from the deals**. These are deals (not lost) where the checklist's trainer, or else the quotation's, is this trainer (`trainerBookings` in `src/lib/trainers.ts`). Each is marked Confirmed, Won not confirmed yet, or On the quotation.
+  - **Topics** (`specialization`) is free text with existing topics suggested; it was a fixed list of 6 made-up options.
+  - **"Booked" was removed** (Joel). Status is Available or On leave only; old "Booked" records show as Available, and bookings come from the deals.
+  - **Only Management can delete a trainer**, and only if no quotation or admin checklist uses them. `trainers_directory` has its own rule and left the catch-all list. **Rules need publishing.**
+  - Removed: the stat boxes, dark control panel, status and sort filters, undo banner and the 8-column table.
 - **Course outlines redesign (2026-10-17, Joel: "similar to quotation"):** `src/components/CourseOutlinesPage.tsx` replaced `CourseOutlineGenerator.tsx` (deleted). It works the same way as quotations.
   - **List**: search, Mine / Shared with me (plus Everyone's for Admin and Management), Show hidden, and a ⋯ menu (Open, Duplicate, Hide, Delete). Each row shows title, ref, Draft/Sent, client, "N days · M modules", date and owner.
   - **New outline**: 1) "Which deal is this for?": any open or won deal, since outlines often go with the proposal, or "general outline, not for a client". 2) "Start from": blank, or a copy of an earlier outline, with the same programme listed first. So a programme's modules are typed once and reused.
