@@ -13,6 +13,7 @@ import { Picked, dealVenue, progress } from '../lib/checklist';
 import DealChecklist, { startChecklist, useChecklistSettings } from './DealChecklist';
 import HrdcQueries from './HrdcQueries';
 import DealAppointmentBox from './DealAppointmentBox';
+import TrainingTimeBox from './TrainingTimeBox';
 import { apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import MoneyPanel, { RepMoneyStatus, useMoneySettings } from './Money';
 import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
@@ -793,6 +794,7 @@ function DealPanel(props: {
         <Detail term="Type" value={p.type || '—'} />
         <Detail term="Client asked on" value={formatDate(p.requestDate) || '—'} />
         <Detail term="Training date" value={formatDate(p.trainingDate) || 'Not set'} />
+        <div><dt className="text-sm text-ink-soft">Training time</dt><dd className="font-semibold"><TrainingTimeBox key={p.id} deal={p} quotes={props.quotes} viewer={props.viewer} editable={props.editable} /></dd></div>
         <Detail term="Venue" value={props.venue ? `${props.venue.name}${props.venue.from === 'quotation' ? ' (from quotation)' : ''}` : 'Not set'} />
         <Detail term="Proposal sent" value={formatDate(p.proposalSentDate) || 'Not yet'} />
         <Detail term="Next follow-up" value={formatDate(p.followUpDate) || 'Not set'} />

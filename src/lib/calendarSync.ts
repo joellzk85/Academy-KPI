@@ -2,12 +2,13 @@
 // Pure functions (no network), used by the server (serverCalendar.ts) and tested on their own.
 //   - CRM calendar events            (events/{id})
 //   - deal appointments              (pipelines[].appointment)
-//   - training dates of won deals    (pipelines[].trainingDate), all day
+//   - training dates of won deals    (pipelines[].trainingDate), at the training time (quotation or deal), else all day
 // Each item has a fixed Google event id made from its CRM key, so syncing twice never makes duplicates.
 
 import { dealOwnerId, dealStage } from './deals';
 import { MODE_LABELS } from './appointments';
 import { ChecklistTask, dealVenue, effectiveTrainer } from './checklist';
+import { parseTimeRange, trainingTimeOf } from './trainingTime';
 
 export const TIME_ZONE = 'Asia/Kuala_Lumpur';
 
@@ -59,6 +60,16 @@ export function whenFor(date: string, time?: string, hours = 1): Pick<GoogleItem
   return {
     start: { dateTime: `${d}T${pad(hm[0])}:${pad(hm[1])}:00`, timeZone: TIME_ZONE },
     end: { dateTime: `${endDate}T${pad(Math.floor(e / 60))}:${pad(e % 60)}:00`, timeZone: TIME_ZONE },
+  };
+}
+
+// A start-end time on one day (Malaysia time).
+export function rangeOn(date: string, start: [number, number], end: [number, number]): Pick<GoogleItem, 'start' | 'end'> {
+  const d = date.slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    start: { dateTime: `${d}T${pad(start[0])}:${pad(start[1])}:00`, timeZone: TIME_ZONE },
+    end: { dateTime: `${d}T${pad(end[0])}:${pad(end[1])}:00`, timeZone: TIME_ZONE },
   };
 }
 
@@ -114,11 +125,15 @@ export function buildDesired(s: SyncData): GoogleItem[] {
       const venue = dealVenue(cl, quotes, s.venues);
       const trainerTask = (cl?.tasks || []).find((x: ChecklistTask) => x.kind === 'trainer');
       const trainer = effectiveTrainer(trainerTask, quotes, s.trainers);
+      // The time comes from the quotation, or the deal if it was changed there; unreadable = all day.
+      const time = trainingTimeOf(d, quotes);
+      const range = parseTimeRange(time?.text);
       out.push({
         key: `train:${d.id}`,
         summary: `Training: ${clientName(d)}${prog ? ` – ${prog}` : ''}`,
         description: lines(
           prog && `Programme: ${prog}`,
+          time && `Time: ${time.text}`,
           `Venue: ${venue ? venue.name : 'not set yet'}`,
           `Trainer: ${trainer ? trainer.name : 'not set yet'}`,
           d.participants && `Participants: ${d.participants}`,
@@ -126,7 +141,7 @@ export function buildDesired(s: SyncData): GoogleItem[] {
           footer,
         ),
         location: venue?.name || undefined,
-        ...whenFor(d.trainingDate),
+        ...(range ? rangeOn(d.trainingDate, range.start, range.end) : whenFor(d.trainingDate)),
       });
     }
   });

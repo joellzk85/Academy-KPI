@@ -8,6 +8,7 @@ import {
 } from '../lib/checklist';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import DealChecklist, { ProgressBar, startChecklist, useChecklistSettings } from './DealChecklist';
+import TrainingTimeBox from './TrainingTimeBox';
 import HrdcQueries from './HrdcQueries';
 import MoneyPanel, { MoneyOverview, useMoneySettings } from './Money';
 import { MoneyIn, MoneyOut, moneyFlags, moneySettled } from '../lib/money';
@@ -274,6 +275,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
             </div>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
               <div><dt className="text-sm text-ink-soft">Training date</dt><dd className="font-semibold"><TrainingDate key={openDeal.id} deal={openDeal} viewer={viewer} label={whenText(openDeal)} /></dd></div>
+              <div><dt className="text-sm text-ink-soft">Training time</dt><dd className="font-semibold"><TrainingTimeBox key={openDeal.id} deal={openDeal} quotes={quotes.filter(q => q.pipelineId === openDeal.id)} viewer={viewer} editable /></dd></div>
               <div><dt className="text-sm text-ink-soft">Paid by</dt><dd className="font-semibold">{openDeal.fundingType ? FUNDING_LABELS[openDeal.fundingType as FundingType] : 'Not set'}</dd></div>
               <div><dt className="text-sm text-ink-soft">Rep</dt><dd className="font-semibold">{personName(dealOwnerId(openDeal))}</dd></div>
               <div><dt className="text-sm text-ink-soft">Value</dt><dd className="font-semibold">{dealValue(openDeal) ? formatRM(dealValue(openDeal)) : '—'}</dd></div>
