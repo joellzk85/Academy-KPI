@@ -74,20 +74,20 @@ const SHORTCUTS: { id: ShortcutId; label: string; icon: React.ComponentType<{ cl
   { id: 'ws_trainers', label: 'Trainers', icon: GraduationCap, need: 'workspace', tab: 'trainerList' },
   { id: 'ws_venues', label: 'Venues', icon: MapPin, need: 'workspace', tab: 'venue' },
   { id: 'ws_todo', label: 'To-do', icon: ListTodo, need: 'workspace', tab: 'tasks' },
-  { id: 'calendar', label: 'Full calendar', icon: CalendarDays, need: 'all' },
   { id: 'admin_work', label: 'Admin work', icon: ClipboardCheck, need: 'staff' },
   { id: 'aw_queue', label: 'Work queue', icon: ListChecks, need: 'staff', view: 'queue' },
   { id: 'aw_money', label: 'Money', icon: Wallet, need: 'staff', view: 'money' },
   { id: 'aw_programmes', label: 'Programmes', icon: Layers, need: 'staff', view: 'programmes' },
   { id: 'aw_tasks', label: 'Checklist tasks', icon: ListOrdered, need: 'staff', view: 'tasks' },
   { id: 'aw_backup', label: 'Backup', icon: DatabaseBackup, need: 'staff', view: 'backup' },
-  { id: 'management', label: 'Management', icon: ShieldCheck, need: 'management' },
   { id: 'mg_dashboard', label: 'Team performance', icon: LineChart, need: 'management', view: 'dashboard' },
   { id: 'mg_pl', label: 'Project P&L', icon: PieChart, need: 'management', view: 'pl' },
   { id: 'mg_team', label: 'Team', icon: UserCog, need: 'management', view: 'team' },
   { id: 'mg_data', label: 'Data tools', icon: Wrench, need: 'management', view: 'data' },
 ];
-const DEFAULT_SHORTCUTS: ShortcutId[] = ['workspace', 'admin_work', 'management'];
+// "Management" and "Full calendar" were removed as duplicates (Joel, 2026-10-17): the top bar has a Management
+// tab, and the calendar card has "Add event / full calendar". Saved ones are simply no longer shown.
+const DEFAULT_SHORTCUTS: ShortcutId[] = ['workspace', 'admin_work'];
 
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
@@ -181,7 +181,6 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const goShortcut = (s: typeof SHORTCUTS[number]) => {
     if (!mayUse(s.need)) return;
     if (s.need === 'workspace') return nav.openWorkspace(viewer.id, s.tab);
-    if (s.id === 'calendar') return setShowFullCalendar(true);
     if (s.need === 'staff') return nav.openAdminWork(s.view as any);
     if (s.need === 'management') return nav.openManagement(s.view as any);
   };

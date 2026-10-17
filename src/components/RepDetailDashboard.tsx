@@ -1994,7 +1994,7 @@ export default function RepDetailDashboard({
 
       {/* Menu (collapsible) and the active page */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <WorkspaceMenu active={activeSubTab} onSelect={(k) => (k === 'admin_work' ? onOpenAdminWork?.() : handleSubTabChange(k as SubTab))} items={workspaceMenuItems} />
+        <WorkspaceMenu active={activeSubTab} onSelect={(k) => (k === 'admin_work' ? onOpenAdminWork?.() : handleSubTabChange(k as SubTab))} items={workspaceMenuItems} prefsId={viewer?.id || rep.id} />
 
         {/* Right Side: Active Workspace Section */}
         <div className="min-w-0 flex-1 space-y-5">
