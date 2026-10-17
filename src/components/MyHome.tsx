@@ -12,6 +12,8 @@ import {
   OPEN_STAGES, STAGE_LABELS, DealStage, journeyStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
 } from '../lib/deals';
 import { metricsFor, countAuto, monthKpi } from '../lib/kpi';
+import { periodFor } from '../lib/salesTarget';
+import { useSalesTarget } from '../lib/useSalesTarget';
 import { checklistFlags, daysUntil, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
 import { MoneyIn, MoneyOut, canDecide, dealPL, isPaid, moneyFlags } from '../lib/money';
@@ -176,7 +178,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       {/* 1. Calendar (small) and 2. Performance (one row) */}
       <div className="grid items-stretch gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
         <CompactCalendar events={events} today={today} showFull={showFullCalendar} onToggleFull={() => setShowFullCalendar(v => !v)} />
-        <Performance viewer={viewer} representatives={representatives} deals={deals} today={today} />
+        <Performance viewer={viewer} representatives={representatives} deals={deals} today={today} nameOf={nameOf} clientName={clientName} />
       </div>
 
       {/* The full calendar opens full width under the calendar and Performance row (Joel, 2026-10-17) */}
@@ -295,7 +297,9 @@ function EditBar({ hidden, wide, onAdd, onReset }: { hidden: typeof CARDS; wide:
 }
 
 // ---------- Performance rings ----------
-// Outer (big) ring: sales won this year vs the year's target (monthly target x 12).
+// Outer (big) ring: sales won in the target period so far vs the period's target. The period and the
+// company target are set by Management (lib/salesTarget.ts); not set = January to December, and the
+// company target is the sum of each person's (monthly target x months).
 // Inner (small) ring: sales won this month vs the monthly target.
 function salesTarget(rep: Representative): number | null {
   const m = metricsFor(rep).find(x => x.key === 'salesFigure');
@@ -314,24 +318,28 @@ function wonBetween(deals: any[], from: string, to: string, ownerId?: string): n
 
 const MONTH_ABBR = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
-function Performance({ viewer, representatives, deals, today }: { viewer: Viewer; representatives: Representative[]; deals: any[]; today: string }) {
-  const year = today.slice(0, 4);
+function Performance({ viewer, representatives, deals, today, nameOf, clientName }: {
+  viewer: Viewer; representatives: Representative[]; deals: any[]; today: string; nameOf: (id: string) => string; clientName: (p: any) => string;
+}) {
+  const target = useSalesTarget();
+  const period = periodFor(target, today);
   const monthStart = today.slice(0, 7) + '-01';
-  const yearStart = `${year}-01-01`;
+  const [showDeals, setShowDeals] = useState<string | null>(null);   // 'company' or a person's id
   const monthLabel = new Date(today + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long' });
-  const monthKey = `${MONTH_ABBR[Number(today.slice(5, 7)) - 1]}-${year.slice(2)}`;
+  const monthKey = `${MONTH_ABBR[Number(today.slice(5, 7)) - 1]}-${today.slice(2, 4)}`;
 
   const sellers = representatives.filter(r => salesTarget(r) !== null);
   const ringFor = (rep: Representative) => {
     const monthly = salesTarget(rep) || 0;
     return {
-      yearValue: wonBetween(deals, yearStart, today, rep.id), yearTarget: monthly * 12,
+      yearValue: wonBetween(deals, period.start, period.upTo, rep.id), yearTarget: monthly * period.months,
       monthValue: countAuto('won', deals, rep.id, monthKey), monthTarget: monthly,
     };
   };
+  const sumMonthly = sellers.reduce((t, r) => t + (salesTarget(r) || 0), 0);
   const company = {
-    yearValue: wonBetween(deals, yearStart, today), yearTarget: sellers.reduce((t, r) => t + (salesTarget(r) || 0) * 12, 0),
-    monthValue: wonBetween(deals, monthStart, today), monthTarget: sellers.reduce((t, r) => t + (salesTarget(r) || 0), 0),
+    yearValue: wonBetween(deals, period.start, period.upTo), yearTarget: target ? target.total : sumMonthly * period.months,
+    monthValue: wonBetween(deals, monthStart, today), monthTarget: target ? target.monthly : sumMonthly,
   };
   const me = representatives.find(r => r.id === viewer.id);
   const meRing = me && salesTarget(me) !== null ? ringFor(me) : null;
@@ -342,16 +350,16 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
   // gets a row of small rings, one per person, underneath.
   const main: { key: string; label: string; ring: Ring }[] = [];
   if (showCompany) main.push({ key: 'company', label: 'Company', ring: company });
-  if (meRing) main.push({ key: 'me', label: 'Me', ring: meRing });
+  if (meRing) main.push({ key: viewer.id, label: 'Me', ring: meRing });
   const team = viewer.role === 'management' ? sellers.filter(r => r.id !== viewer.id).map(r => ({ key: r.id, label: r.name, ring: ringFor(r) })) : [];
-  const tip = (label: string, ring: Ring) => `${label}\nYear ${year}: ${formatRM(ring.yearValue)} of ${formatRM(ring.yearTarget)} (${pct(ring.yearValue, ring.yearTarget)}%)\n${monthLabel}: ${formatRM(ring.monthValue)} of ${formatRM(ring.monthTarget)} (${pct(ring.monthValue, ring.monthTarget)}%)`;
+  const tip = (label: string, ring: Ring) => `${label}\n${period.label}: ${formatRM(ring.yearValue)} of ${formatRM(ring.yearTarget)} (${pct(ring.yearValue, ring.yearTarget)}%)\n${monthLabel}: ${formatRM(ring.monthValue)} of ${formatRM(ring.monthTarget)} (${pct(ring.monthValue, ring.monthTarget)}%)`;
 
   return (
     <section className="flex h-full flex-col rounded-2xl border border-line bg-white p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-bold">Performance</h2>
         <span className="flex items-center gap-3 text-xs text-ink-soft">
-          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#0E6E62]" />Outer ring: year {year}</span>
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#0E6E62]" />Outer ring: {period.set ? period.label : `year ${today.slice(0, 4)}`}</span>
           <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-[#5DB3A6]" />Inner ring: {monthLabel}</span>
         </span>
       </div>
@@ -369,13 +377,16 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
                   <div className="min-w-0 space-y-2">
                     <p className="text-lg font-bold">{label}</p>
                     <div>
-                      <p className="flex items-center gap-1.5 text-xs text-ink-soft"><span className="h-2 w-2 rounded-sm bg-[#0E6E62]" />Year {year}</p>
+                      <p className="flex items-center gap-1.5 text-xs text-ink-soft"><span className="h-2 w-2 rounded-sm bg-[#0E6E62]" />{period.label}</p>
                       <p className="text-[15px]"><strong className="tabular-nums">{formatRM(ring.yearValue)}</strong> <span className="text-ink-soft">of {formatRM(ring.yearTarget)} · {pct(ring.yearValue, ring.yearTarget)}%</span></p>
                     </div>
                     <div>
                       <p className="flex items-center gap-1.5 text-xs text-ink-soft"><span className="h-2 w-2 rounded-sm bg-[#5DB3A6]" />{monthLabel}</p>
                       <p className="text-[15px]"><strong className="tabular-nums">{formatRM(ring.monthValue)}</strong> <span className="text-ink-soft">of {formatRM(ring.monthTarget)} · {pct(ring.monthValue, ring.monthTarget)}%</span></p>
                     </div>
+                    <button type="button" onClick={() => setShowDeals(s => (s === key ? null : key))} className="text-sm font-semibold text-accent hover:underline">
+                      {showDeals === key ? 'Hide the deals' : 'See the deals'}
+                    </button>
                   </div>
                 </div>
               ))}
@@ -387,7 +398,9 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
               <div className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-3">
                 {team.map(({ key, label, ring }) => (
                   <div key={key} className="flex flex-col items-center text-center" title={tip(label, ring)}>
-                    <Rings ring={ring} size={96} monthLabel={monthLabel} />
+                    <button type="button" onClick={() => setShowDeals(s => (s === key ? null : key))} aria-label={`See ${label}'s won deals`} className="rounded-full">
+                      <Rings ring={ring} size={96} monthLabel={monthLabel} />
+                    </button>
                     <span className="mt-1 w-full truncate text-sm font-semibold">{label}</span>
                     <span className="text-xs text-ink-soft">{monthLabel.slice(0, 3)} {pct(ring.monthValue, ring.monthTarget)}% · Year {pct(ring.yearValue, ring.yearTarget)}%</span>
                   </div>
@@ -397,7 +410,66 @@ function Performance({ viewer, representatives, deals, today }: { viewer: Viewer
           )}
         </div>
       )}
+      {showDeals && (
+        <WonList
+          title={showDeals === 'company' ? 'Company' : showDeals === viewer.id ? 'Me' : nameOf(showDeals)}
+          deals={deals.filter(p => { const d = dealWonDate(p); return d && d >= period.start && d <= period.upTo && (showDeals === 'company' || dealOwnerId(p) === showDeals); })}
+          periodLabel={period.label} monthStart={monthStart} sellerIds={new Set(sellers.map(r => r.id))}
+          nameOf={nameOf} clientName={clientName} onClose={() => setShowDeals(null)}
+        />
+      )}
     </section>
+  );
+}
+
+// The won deals behind a ring, so every figure can be traced (Joel, 2026-10-17).
+function WonList({ title, deals, periodLabel, monthStart, sellerIds, nameOf, clientName, onClose }: {
+  title: string; deals: any[]; periodLabel: string; monthStart: string; sellerIds: Set<string>;
+  nameOf: (id: string) => string; clientName: (p: any) => string; onClose: () => void;
+}) {
+  const list = [...deals].sort((a, b) => dealWonDate(b).localeCompare(dealWonDate(a)));
+  const total = list.reduce((t, p) => t + dealValue(p), 0);
+  const month = list.filter(p => dealWonDate(p) >= monthStart).reduce((t, p) => t + dealValue(p), 0);
+  return (
+    <div className="mt-4 rounded-xl border border-line p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-semibold">{title}: deals won, {periodLabel} so far</p>
+        <button type="button" onClick={onClose} className="text-sm font-semibold text-accent hover:underline">Close</button>
+      </div>
+      {list.length === 0 ? <p className="mt-2 text-sm text-ink-soft">No deals won in this period yet.</p> : (
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full min-w-[30rem] text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-ink-soft">
+                <th className="py-1.5 pr-3 font-semibold">Won on</th>
+                <th className="py-1.5 pr-3 font-semibold">Client and programme</th>
+                <th className="py-1.5 pr-3 font-semibold">Owner</th>
+                <th className="py-1.5 text-right font-semibold">Value</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {list.map(p => {
+                const owner = dealOwnerId(p);
+                return (
+                  <tr key={p.id}>
+                    <td className="whitespace-nowrap py-1.5 pr-3">{formatDate(dealWonDate(p))}{dealWonDate(p) >= monthStart && <span className="ml-1 rounded bg-accent-soft px-1 text-xs text-accent">this month</span>}</td>
+                    <td className="py-1.5 pr-3">{clientName(p)} <span className="text-ink-soft">· {p.courseName || 'No programme'}</span></td>
+                    <td className="py-1.5 pr-3">{nameOf(owner) || 'Unknown'}{!sellerIds.has(owner) && <span className="block text-xs text-ink-soft">no sales target, so not in anyone's ring</span>}</td>
+                    <td className="whitespace-nowrap py-1.5 text-right tabular-nums">{formatRM(dealValue(p))}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-line font-semibold">
+                <td className="py-1.5 pr-3" colSpan={3}>Total ({list.length} deal{list.length === 1 ? '' : 's'}) · this month {formatRM(month)}</td>
+                <td className="whitespace-nowrap py-1.5 text-right tabular-nums">{formatRM(total)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

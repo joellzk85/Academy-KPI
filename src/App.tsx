@@ -923,6 +923,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 onMonthChange={handleMonthChange}
                 onOpenTeam={() => setManagementView('team')}
                 pipelinesSync={pipelinesSync}
+                people={teamMembers.map(m => ({ id: m.id, name: m.name }))}
               />
               )}
             </motion.div>

@@ -46,14 +46,16 @@ service cloud.firestore {
     }
 
     // Settings. The admin checklist's master task list and money settings: Admin and Management only.
+    // sales_target (the company sales target and its period): Management only.
     // google_calendar (the shared Google Calendar's ID and sync status) and backup_settings (the backup Google Sheet
     // and last result) are written only by the CRM server.
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings']))
-                            || (docId in ['checklist_tasks', 'money_settings'] && isStaff());
-      allow delete: if (docId == 'passwords' && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings']));
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'sales_target']))
+                            || (docId in ['checklist_tasks', 'money_settings'] && isStaff())
+                            || (docId == 'sales_target' && isManagement());
+      allow delete: if (docId in ['passwords', 'sales_target'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'sales_target']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
