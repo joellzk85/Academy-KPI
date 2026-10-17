@@ -9,6 +9,7 @@ import { STAGE_LABELS, canQuote, dealOwnerId, dealStage, dealValue, formatDate, 
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
+import PickOrType, { nameOptions } from './PickOrType';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
 // A quotation is made for a deal (or a client). While it's a draft, the client's details, programme,
@@ -126,7 +127,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
 }
 
 // ---------- Choose the deal (or client) ----------
-function Chooser({ deals, clients, sources, personName, onPick, onCancel, title = 'Which agreed deal is this quotation for?' }: {
+function Chooser({ deals, clients, sources, personName, onPick, onCancel, title = 'Which approved deal is this quotation for?' }: {
   deals: any[]; clients: any[]; sources: QuoteSources; personName: (id?: string) => string;
   onPick: (p: { deal?: any; clientId?: string }) => void; onCancel: () => void; title?: string;
 }) {
@@ -155,7 +156,7 @@ function Chooser({ deals, clients, sources, personName, onPick, onCancel, title 
               <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, programme or rep" className={`${input} pl-9`} aria-label="Search deals" />
             </div>
             <ul className="mt-3 max-h-[50vh] divide-y divide-line overflow-y-auto rounded-xl border border-line">
-              {list.length === 0 && <li className="p-4 text-ink-soft">No agreed deals found.</li>}
+              {list.length === 0 && <li className="p-4 text-ink-soft">No approved deals found.</li>}
               {list.map(d => (
                 <li key={d.id}>
                   <button type="button" onClick={() => onPick({ deal: d })} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface">
@@ -168,7 +169,7 @@ function Chooser({ deals, clients, sources, personName, onPick, onCancel, title 
                 </li>
               ))}
             </ul>
-            <p className="mt-3 text-sm text-ink-soft">Only deals where the client has agreed to the proposal are listed. On the deal, click "Client agreed" first.</p>
+            <p className="mt-3 text-sm text-ink-soft">Only deals where the client has approved the proposal are listed. On the deal, click "Client approved" first.</p>
           </>
         ) : (
           <div className="space-y-3">
@@ -368,7 +369,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     if (r.issues.length && !window.confirm(`Some details are missing:\n\n• ${r.issues.join('\n• ')}\n\nMark as sent anyway?`)) return;
     // Lock a copy of exactly what prints now.
     return persist({ ...shownQ, status: 'sent', sentAt: new Date().toISOString(), sentById: me.id, sentByName: me.name }, 'Marked as sent and locked').then(async ok => {
-      // The deal moves to "Quotation sent" (if it was at "Client agreed").
+      // The deal moves to "Quotation sent" (if it was at "Client approved").
       if (!ok || !r.deal || dealStage(r.deal) !== 'agreed') return;
       try {
         await updateDoc(doc(db, 'pipelines', r.deal.id), {
@@ -426,10 +427,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     );
   }
 
-  // List choices for the "pick or type" boxes, A–Z.
-  const opts = (list: any[]) => list.filter(x => String(x.name || '').trim())
-    .map(x => ({ id: x.id, name: String(x.name).trim() }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const opts = nameOptions;
   const goto = (tab: Tab, what: string) => onOpenTab ? (
     <button type="button" className={linkBtn} onClick={() => { if (!dirty || window.confirm('Leave this quotation without saving?')) onOpenTab(tab); }}>{what}</button>
   ) : null;
@@ -713,31 +711,6 @@ function AttentionBox({ value, override, clientContact, locked, onChange }: {
         <button type="button" className="text-xs font-semibold text-accent hover:underline" onClick={() => setEditing(true)}>
           {typed ? 'Changed for this quotation · Edit' : 'Change'}
         </button>
-      )}
-    </div>
-  );
-}
-
-// One box for "pick from the list or type your own" (venue, programme, trainer).
-// Typing a name that's in the list links it (read live afterwards); anything else is kept as typed.
-function PickOrType({ id, options, linkedId, text, onChange, placeholder, className, ariaLabel }: {
-  id: string; options: { id: string; name: string }[]; linkedId: string; text: string;
-  onChange: (v: { id: string; text: string }) => void; placeholder?: string; className: string; ariaLabel?: string;
-}) {
-  const linked = linkedId ? options.find(o => o.id === linkedId) : undefined;
-  const value = linked ? linked.name : text;
-  const pick = (v: string) => {
-    const hit = options.find(o => o.name.trim().toLowerCase() === v.trim().toLowerCase() && v.trim());
-    onChange(hit ? { id: hit.id, text: hit.name } : { id: '', text: v });
-  };
-  return (
-    <div>
-      <input id={id} list={`${id}-list`} value={value} onChange={e => pick(e.target.value)} placeholder={placeholder} className={className} aria-label={ariaLabel} autoComplete="off" />
-      <datalist id={`${id}-list`}>
-        {options.map(o => <option key={o.id} value={o.name} />)}
-      </datalist>
-      {(linked || value.trim()) && (
-        <span className={`mt-0.5 block text-xs ${linked ? 'text-accent' : 'text-ink-soft'}`}>{linked ? 'From list' : 'Typed'}</span>
       )}
     </div>
   );

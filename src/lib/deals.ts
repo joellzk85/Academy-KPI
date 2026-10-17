@@ -5,7 +5,8 @@
 
 import { apptOf, apptOverdue } from './appointments';
 
-// The journey (Joel, 2026-10-16): New -> Proposal sent (the pitch) -> Client agreed -> Quotation sent -> Won
+// The journey (Joel, 2026-10-16): New -> Proposal sent (the pitch) -> Client approved -> Quotation sent -> Won
+// ("Client approved" was "Client agreed" until 2026-10-17; the stored value is still 'agreed'.)
 // (the client signed the quotation). The appointment is optional and can happen at any point before Won;
 // 'appointment' is kept as a stage only for deals that are new but have had a meeting.
 export type DealStage = 'lead' | 'appointment' | 'proposal' | 'agreed' | 'quoted' | 'won' | 'lost';
@@ -20,7 +21,7 @@ export const STAGE_LABELS: Record<DealStage, string> = {
   lead: 'New',
   appointment: 'New (met)',
   proposal: 'Proposal sent',
-  agreed: 'Client agreed',
+  agreed: 'Client approved',
   quoted: 'Quotation sent',
   won: 'Won',
   lost: 'Lost',
@@ -89,6 +90,16 @@ export function dealOwnerId(p: any): string {
 export function dealWonDate(p: any): string {
   if (dealStage(p) !== 'won') return '';
   return validDate(p?.wonDate) || validDate(p?.proposalSentDate) || validDate(p?.requestDate);
+}
+
+// The date each journey step was reached, shown under the journey line ('' if not recorded).
+export function stageDate(p: any, st: DealStage): string {
+  if (st === 'lead') return validDate(p?.requestDate);
+  if (st === 'proposal') return validDate(p?.proposalSentDate);
+  if (st === 'agreed') return validDate(p?.agreedDate);
+  if (st === 'quoted') return validDate(p?.quotationSentDate);
+  if (st === 'won') return dealWonDate(p);
+  return '';
 }
 
 export function dealProposalDate(p: any): string {

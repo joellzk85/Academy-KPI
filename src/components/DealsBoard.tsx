@@ -6,10 +6,10 @@ import {
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import {
-  DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention,
+  DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention, stageDate,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM,
 } from '../lib/deals';
-import { progress } from '../lib/checklist';
+import { Picked, dealVenue, progress } from '../lib/checklist';
 import DealChecklist, { startChecklist, useChecklistSettings } from './DealChecklist';
 import HrdcQueries from './HrdcQueries';
 import DealAppointmentBox from './DealAppointmentBox';
@@ -83,6 +83,7 @@ export default function DealsBoard({
   const [queries, setQueries] = useState<HrdcQuery[]>([]);
   const [moneyIn, setMoneyIn] = useState<MoneyIn[]>([]);
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
+  const [venues, setVenues] = useState<any[]>([]);
   const moneySettings = useMoneySettings();
   const checklistSettings = useChecklistSettings();
   const [loaded, setLoaded] = useState(false);
@@ -111,6 +112,7 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
       onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
       onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
+      onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     // Payouts and costs are for Admin and Management only.
     if (viewer.role !== 'rep') {
@@ -173,7 +175,7 @@ export default function DealsBoard({
     if (fu && fu < today) return { text: `Follow-up overdue (${formatDate(fu)})`, urgent };
     if (st === 'lead') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Book an appointment or send the proposal', urgent };
     if (st === 'appointment') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Send the proposal', urgent };
-    if (st === 'agreed') return { text: 'Client agreed: send the quotation', urgent };
+    if (st === 'agreed') return { text: 'Client approved: send the quotation', urgent };
     if (st === 'quoted') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Waiting for the client to sign', urgent };
     return { text: fu ? `Follow up ${formatDate(fu)}` : 'Follow up on the proposal', urgent };
   };
@@ -294,7 +296,7 @@ export default function DealsBoard({
     return writeStage(p, { stage: 'proposal', proposalSentDate: sent }, 'Proposal sent');
   };
 
-  const toAgreed = (p: any) => writeStage(p, { stage: 'agreed', agreedDate: todayIso() }, 'Client agreed to the proposal');
+  const toAgreed = (p: any) => writeStage(p, { stage: 'agreed', agreedDate: todayIso() }, 'Client approved the proposal');
 
   const toQuoted = (p: any) => {
     if (!quotes.some(q => q.pipelineId === p.id)) return setStageError('Create the quotation for this deal first.');
@@ -513,6 +515,7 @@ export default function DealsBoard({
               quotes={quotes.filter(q => q.pipelineId === openDeal.id)}
               outlines={outlines.filter(o => o.pipelineId === openDeal.id)}
               checklist={checklists[openDeal.id] || null}
+              venue={dealVenue(checklists[openDeal.id] || null, quotes.filter(q => q.pipelineId === openDeal.id), venues)}
               programme={programmeOf(openDeal)}
               courseName={courseOf(openDeal)}
               queries={queries.filter(q => q.dealId === openDeal.id)}
@@ -682,6 +685,7 @@ function DealPanel(props: {
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
   editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; checklist: any | null; busy: boolean;
   programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
+  venue: Picked | null;
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; moneySettings: MoneySettings;
   stagePanel: null | 'won' | 'lost'; setStagePanel: (v: null | 'won' | 'lost') => void; stageError: string;
   wonDate: string; setWonDate: (v: string) => void; lostReason: string; setLostReason: (v: string) => void;
@@ -717,6 +721,8 @@ function DealPanel(props: {
           <li key={s} className="flex flex-1 flex-col gap-1.5">
             <span className={`h-1.5 rounded-full ${st === 'lost' ? 'bg-danger/30' : i <= reached ? 'bg-accent' : 'bg-line'}`} />
             <span className={`text-xs font-semibold ${i === reached ? 'text-ink' : 'text-ink-soft'}`}>{STAGE_LABELS[s]}</span>
+            {/* The date the step was done (Joel, 2026-10-17) */}
+            <span className="min-h-[1rem] text-xs text-ink-soft">{i <= reached ? formatDate(stageDate(p, s)) : ''}</span>
           </li>
         ))}
       </ol>
@@ -731,7 +737,7 @@ function DealPanel(props: {
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">
             {(st === 'lead' || st === 'appointment') && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onProposal}>Proposal sent</button>}
-            {st === 'proposal' && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onAgreed}>Client agreed</button>}
+            {st === 'proposal' && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onAgreed}>Client approved</button>}
             {st === 'agreed' && <button type="button" disabled={props.busy} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={props.onCreateQuotation}>Create quotation</button>}
             {st === 'agreed' && hasQuote && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onQuoted}>Quotation sent</button>}
             {st === 'quoted' && <button type="button" className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-[#0B5A50]" onClick={() => props.setStagePanel('won')}><Trophy className="h-4 w-4" /> Mark won (client signed)</button>}
@@ -787,6 +793,7 @@ function DealPanel(props: {
         <Detail term="Type" value={p.type || '—'} />
         <Detail term="Client asked on" value={formatDate(p.requestDate) || '—'} />
         <Detail term="Training date" value={formatDate(p.trainingDate) || 'Not set'} />
+        <Detail term="Venue" value={props.venue ? `${props.venue.name}${props.venue.from === 'quotation' ? ' (from quotation)' : ''}` : 'Not set'} />
         <Detail term="Proposal sent" value={formatDate(p.proposalSentDate) || 'Not yet'} />
         <Detail term="Next follow-up" value={formatDate(p.followUpDate) || 'Not set'} />
         {st === 'won' && <Detail term="Won on" value={formatDate(dealWonDate(p))} />}
@@ -817,7 +824,7 @@ function DealPanel(props: {
         <h4 className="mb-2 font-bold">Documents</h4>
         <div className="space-y-2">
           <DocRow icon={<FileText className="h-4 w-4" />} name="Quotations" items={props.quotes.map(q => q.refNumber || q.id)} onOpen={props.onOpenQuotations} onCreate={props.editable && canQuote(p) ? props.onCreateQuotation : undefined} createLabel="Create quotation" />
-          {!canQuote(p) && st !== 'lost' && <p className="text-sm text-ink-soft">A quotation can be made once the client agrees to the proposal.</p>}
+          {!canQuote(p) && st !== 'lost' && <p className="text-sm text-ink-soft">A quotation can be made once the client approves the proposal.</p>}
           <DocRow icon={<ClipboardList className="h-4 w-4" />} name="Course outlines" items={props.outlines.map(o => o.refNumber || o.courseTitle || o.id)} onOpen={props.onOpenOutlines} onCreate={props.editable ? props.onCreateOutline : undefined} createLabel="Create outline" />
         </div>
       </section>

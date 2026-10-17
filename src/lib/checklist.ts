@@ -37,11 +37,13 @@ export interface ChecklistTask {
   grantAppliedDate?: string;
   grantNumber?: string;
   grantApprovedDate?: string;
-  // Check venue + payment
+  // Check venue + payment (picked from the venue list, or typed)
   venueId?: string;
+  venueName?: string;
   venuePaid?: boolean;
-  // Confirm trainer
+  // Confirm trainer (picked from the trainer list, or typed)
   trainerId?: string;
+  trainerName?: string;
 }
 
 export interface ChecklistSettings {
@@ -113,13 +115,59 @@ export function progress(tasks: ChecklistTask[] | undefined, fundingType?: strin
   return { done: list.filter(t => t.done).length, total: list.length };
 }
 
+// ---------- Venue and trainer from the quotation (Joel, 2026-10-17) ----------
+// Until Admin chooses one on the checklist (or ticks the step), the venue and trainer
+// are read from the deal's quotation: the one marked sent, else the newest draft.
+
+export interface Picked { id: string; name: string; from: 'checklist' | 'quotation' }
+
+export function mainQuote(quotes: any[]): any | null {
+  const sent = quotes.filter(q => q.status === 'sent').sort((a, b) => String(b.sentAt || '').localeCompare(String(a.sentAt || '')));
+  if (sent.length) return sent[0];
+  const drafts = [...quotes].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id).localeCompare(String(a.id)));
+  return drafts[0] || null;
+}
+
+const nameIn = (list: any[], id?: string) => (id ? String(list.find(x => x.id === id)?.name || '').trim() : '');
+
+export function effectiveVenue(t: Partial<ChecklistTask> | undefined, quotes: any[], venues: any[]): Picked | null {
+  if (t?.venueId || t?.venueName?.trim()) {
+    return { id: t.venueId || '', name: nameIn(venues, t.venueId) || (t.venueName || '').trim() || 'Venue chosen', from: 'checklist' };
+  }
+  const q = mainQuote(quotes);
+  const name = q ? nameIn(venues, q.venueId) || String(q.venue || '').trim() : '';
+  return name ? { id: q.venueId || '', name, from: 'quotation' } : null;
+}
+
+export function effectiveTrainer(t: Partial<ChecklistTask> | undefined, quotes: any[], trainers: any[]): Picked | null {
+  if (t?.trainerId || t?.trainerName?.trim()) {
+    return { id: t.trainerId || '', name: nameIn(trainers, t.trainerId) || (t.trainerName || '').trim() || 'Trainer chosen', from: 'checklist' };
+  }
+  const q = mainQuote(quotes);
+  // Every trainer on the quotation's programme lines (other items have none).
+  const found: { id: string; name: string }[] = [];
+  (q?.items || []).filter((it: any) => it.kind !== 'item').forEach((it: any) => {
+    const name = nameIn(trainers, it.trainerId) || String(it.trainer || '').trim();
+    if (name && !found.some(f => f.name.toLowerCase() === name.toLowerCase())) found.push({ id: it.trainerId || '', name });
+  });
+  if (!found.length) return null;
+  return { id: found.length === 1 ? found[0].id : '', name: found.map(f => f.name).join(', '), from: 'quotation' };
+}
+
+// The deal's venue for the deal panel: the checklist's, else the quotation's.
+export function dealVenue(checklist: any | null, quotes: any[], venues: any[]): Picked | null {
+  const t = (checklist?.tasks || []).find((x: ChecklistTask) => x.kind === 'venue');
+  return effectiveVenue(t, quotes, venues);
+}
+
 // What still has to be filled in before a task can be ticked. Empty = ready.
-export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = ''): string {
+// hasVenue / hasTrainer: a venue or trainer is chosen on the checklist or comes from the quotation.
+export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = '', hasVenue = !!t.venueId, hasTrainer = !!t.trainerId): string {
   if (t.kind === 'grant' && grantBlock) return grantBlock;
   if (t.kind === 'grant' && !(t.grantNumber || '').trim()) return 'Enter the grant number once HRDC approves it.';
-  if (t.kind === 'venue' && !t.venueId) return 'Choose the venue first.';
+  if (t.kind === 'venue' && !hasVenue) return 'Choose or type the venue first.';
   if (t.kind === 'venue' && !t.venuePaid) return 'Tick "Venue paid" first.';
-  if (t.kind === 'trainer' && !t.trainerId) return 'Choose the trainer first.';
+  if (t.kind === 'trainer' && !hasTrainer) return 'Choose or type the trainer first.';
   if (t.kind === 'quotation' && dealQuoteCount === 0) return 'Create or link a quotation for this deal first.';
   return '';
 }

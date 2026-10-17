@@ -4,8 +4,10 @@ import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, FileText, ListChecks, 
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
 import {
-  ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, applicableTasks, buildChecklist, isHrdc, newTaskId, progress, readSettings, taskGate,
+  ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, Picked, applicableTasks, buildChecklist, effectiveTrainer, effectiveVenue,
+  isHrdc, newTaskId, progress, readSettings, taskGate,
 } from '../lib/checklist';
+import PickOrType, { nameOptions } from './PickOrType';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -71,14 +73,14 @@ export default function DealChecklist({
   const [newTask, setNewTask] = useState('');
   const editable = viewer.role !== 'rep';
 
+  // Everyone needs the lists: the venue and trainer names show on the checklist for reps too.
   useEffect(() => {
-    if (!editable) return;
     const subs = [
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'trainers_directory')), s => setTrainers(s.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => subs.forEach(u => u());
-  }, [editable]);
+  }, []);
 
   const allTasks: ChecklistTask[] = checklist?.tasks || [];
   const tasks = applicableTasks(allTasks, deal.fundingType);
@@ -104,9 +106,16 @@ export default function DealChecklist({
     save(allTasks.map(t => (t.id === id ? { ...t, ...changes } : t)), action);
 
   const markDone = (t: ChecklistTask) => {
-    const gate = taskGate(t, quotes.length, grantBlock);
+    const venue = t.kind === 'venue' ? effectiveVenue(t, quotes, venues) : null;
+    const trainer = t.kind === 'trainer' ? effectiveTrainer(t, quotes, trainers) : null;
+    const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer);
     if (gate) return setError(gate);
-    return patch(t.id, { done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name }, `${t.label}: done`);
+    // A venue or trainer still coming from the quotation is saved on the checklist when ticked,
+    // so later changes to the quotation don't change what Admin confirmed.
+    const keep: Partial<ChecklistTask> = {};
+    if (venue?.from === 'quotation') Object.assign(keep, { venueId: venue.id, venueName: venue.name });
+    if (trainer?.from === 'quotation') Object.assign(keep, { trainerId: trainer.id, trainerName: trainer.name });
+    return patch(t.id, { ...keep, done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name }, `${t.label}: done`);
   };
   const undo = (t: ChecklistTask) => patch(t.id, { done: false, doneAt: '', doneById: '', doneByName: '' }, `${t.label}: reopened`);
 
@@ -239,12 +248,51 @@ function TaskSummary({ t, venues, trainers, quotes, withNote }: { t: ChecklistTa
     if (t.grantAppliedDate) bits.push(`Applied ${formatDate(t.grantAppliedDate)}`);
     if (t.grantNumber) bits.push(`Grant no. ${t.grantNumber}${t.grantApprovedDate ? `, approved ${formatDate(t.grantApprovedDate)}` : ''}`);
   }
-  if (t.kind === 'venue' && t.venueId) bits.push(`${venues.find(v => v.id === t.venueId)?.name || 'Venue chosen'}${t.venuePaid ? ', paid' : ', not paid yet'}`);
-  if (t.kind === 'trainer' && t.trainerId) bits.push(trainers.find(x => x.id === t.trainerId)?.name || 'Trainer chosen');
+  const fromQuote = (p: Picked) => (p.from === 'quotation' ? ' (from quotation)' : '');
+  const venue = t.kind === 'venue' ? effectiveVenue(t, quotes, venues) : null;
+  if (venue) bits.push(`${venue.name}${fromQuote(venue)}${t.venuePaid ? ', paid' : ', not paid yet'}`);
+  const trainer = t.kind === 'trainer' ? effectiveTrainer(t, quotes, trainers) : null;
+  if (trainer) bits.push(`${trainer.name}${fromQuote(trainer)}`);
   if (t.kind === 'quotation') bits.push(quotes.length ? `Quotation ${quotes.map(q => q.refNumber || q.id).join(', ')}` : 'No quotation linked yet');
   if (withNote && t.note) bits.push(t.note);
   if (!bits.length) return null;
   return <p className="text-sm text-ink-soft">{bits.join(' · ')}</p>;
+}
+
+// Venue or trainer on the checklist: starts with the quotation's, and can be picked from the list or typed.
+// A pick from the list saves at once; typed text saves when you leave the box. Clearing it goes back to the quotation's.
+function ChosenBox({ id, busy, options, picked, fromQuote, what, onSave }: {
+  id: string; busy: boolean; options: { id: string; name: string }[];
+  picked: Picked | null; fromQuote: Picked | null; what: 'venue' | 'trainer';
+  onSave: (v: { id: string; text: string }, action: string) => void;
+}) {
+  const [v, setV] = useState({ id: picked?.id || '', text: picked?.name || '' });
+  useEffect(() => setV({ id: picked?.id || '', text: picked?.name || '' }), [picked?.id, picked?.name, picked?.from]);
+  const unchanged = v.id === (picked?.id || '') && v.text.trim() === (picked?.name || '');
+
+  const change = (next: { id: string; text: string }) => {
+    setV(next);
+    if (next.id && next.id !== picked?.id) onSave(next, `${what} chosen`);
+  };
+  const leave = () => {
+    if (unchanged || v.id) return;
+    if (!v.text.trim()) { if (picked?.from === 'checklist') onSave({ id: '', text: '' }, `set back to the quotation's ${what}`); return; }
+    onSave({ id: '', text: v.text.trim() }, `${what} typed`);
+  };
+
+  return (
+    <div>
+      <PickOrType id={id} options={options} linkedId={v.id} text={v.text} onChange={change} onBlur={leave} disabled={busy}
+        placeholder={`Pick from the ${what} list or type one`} className={input}
+        note={unchanged && picked?.from === 'quotation' ? 'From quotation' : undefined} />
+      {picked?.from === 'checklist' && fromQuote && fromQuote.name !== picked.name && (
+        <button type="button" disabled={busy} className="mt-1 text-xs font-semibold text-accent hover:underline"
+          onClick={() => onSave({ id: '', text: '' }, `set back to the quotation's ${what}`)}>
+          Use the quotation's {what} ({fromQuote.name})
+        </button>
+      )}
+    </div>
+  );
 }
 
 // The inputs each kind of task needs before it can be ticked.
@@ -258,7 +306,6 @@ function TaskFields({ t, busy, venues, trainers, quotes, onPatch, onCreateQuotat
   useEffect(() => setNote(t.note || ''), [t.note]);
   useEffect(() => setGrantNo(t.grantNumber || ''), [t.grantNumber]);
   const small = 'mb-1 block text-sm font-medium text-ink-soft';
-  const byName = (a: any, b: any) => String(a.name || '').localeCompare(String(b.name || ''));
 
   return (
     <div className="mt-3 space-y-3 pl-8">
@@ -284,10 +331,9 @@ function TaskFields({ t, busy, venues, trainers, quotes, onPatch, onCreateQuotat
         <div className="grid items-end gap-3 sm:grid-cols-[1fr_auto]">
           <div>
             <label className={small} htmlFor={`v-${t.id}`}>Venue</label>
-            <select id={`v-${t.id}`} disabled={busy} value={t.venueId || ''} onChange={e => onPatch({ venueId: e.target.value }, `${t.label}: venue chosen`)} className={input}>
-              <option value="">Choose from the venue list</option>
-              {[...venues].sort(byName).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
+            <ChosenBox id={`v-${t.id}`} busy={busy} options={nameOptions(venues)} picked={effectiveVenue(t, quotes, venues)}
+              fromQuote={effectiveVenue(undefined, quotes, venues)} what="venue"
+              onSave={(v, action) => onPatch({ venueId: v.id, venueName: v.text }, `${t.label}: ${action}`)} />
           </div>
           <label className="flex items-center gap-2 pb-2 text-[15px]">
             <input type="checkbox" disabled={busy} checked={!!t.venuePaid} onChange={e => onPatch({ venuePaid: e.target.checked }, `${t.label}: ${e.target.checked ? 'marked paid' : 'marked not paid'}`)} className="h-4 w-4 accent-[#0E6E62]" />
@@ -298,10 +344,9 @@ function TaskFields({ t, busy, venues, trainers, quotes, onPatch, onCreateQuotat
       {t.kind === 'trainer' && (
         <div>
           <label className={small} htmlFor={`tr-${t.id}`}>Trainer</label>
-          <select id={`tr-${t.id}`} disabled={busy} value={t.trainerId || ''} onChange={e => onPatch({ trainerId: e.target.value }, `${t.label}: trainer chosen`)} className={input}>
-            <option value="">Choose from the trainer list</option>
-            {[...trainers].sort(byName).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
+          <ChosenBox id={`tr-${t.id}`} busy={busy} options={nameOptions(trainers)} picked={effectiveTrainer(t, quotes, trainers)}
+            fromQuote={effectiveTrainer(undefined, quotes, trainers)} what="trainer"
+            onSave={(v, action) => onPatch({ trainerId: v.id, trainerName: v.text }, `${t.label}: ${action}`)} />
         </div>
       )}
       {t.kind === 'quotation' && (onCreateQuotation || (onOpenQuotations && quotes.length > 0)) && (
