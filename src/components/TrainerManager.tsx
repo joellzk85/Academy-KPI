@@ -29,7 +29,7 @@ const btnPrimary =
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
-const emptyForm = () => ({ name: '', specialization: '', contact: '', email: '', rate: '', onLeave: false, notes: '' });
+const emptyForm = () => ({ name: '', specialization: '', programmeIds: [] as string[], contact: '', email: '', rate: '', onLeave: false, notes: '' });
 type Form = ReturnType<typeof emptyForm>;
 
 const norm = (s?: string) => (s || '').trim().toLowerCase();
@@ -50,7 +50,9 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const [allQuotes, setAllQuotes] = useState<any[]>([]);
   const [checklists, setChecklists] = useState<Record<string, any>>({});
   const [clients, setClients] = useState<any[]>([]);
+  const [programmes, setProgrammes] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [progSearch, setProgSearch] = useState('');
 
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       onSnapshot(query(collection(db, 'quotations')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllQuotes(all); setQuotes(linkedOnly(all)); }),
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -86,21 +89,24 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     return out;
   }, [trainers, deals, checklists, quotes]);
 
-  // Topics already used, suggested as you type.
-  const topics = useMemo(() => Array.from(new Set(trainers.map(t => (t.specialization || '').trim()).filter(Boolean))).sort(), [trainers]);
+  // What a trainer teaches comes from the Programme list (Joel, 2026-10-17). Old typed topics stay as a note.
+  const progName = (id: string) => String(programmes.find(p => p.id === id)?.name || '').trim();
+  const teaches = (t: Trainer) => (t.programmeIds || []).map(progName).filter(Boolean);
+  const progOptions = useMemo(() => [...programmes].filter(p => String(p.name || '').trim()).sort((a, b) => String(a.name).localeCompare(String(b.name))), [programmes]);
 
   const visible = useMemo(() => {
     const q = norm(search);
-    const list = q ? trainers.filter(t => [t.name, t.specialization, t.contact, t.email].some(v => norm(v).includes(q))) : trainers;
+    const list = q ? trainers.filter(t => [t.name, t.specialization, t.contact, t.email, teaches(t).join(' ')].some(v => norm(v).includes(q))) : trainers;
     return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }));
-  }, [trainers, search]);
+  }, [trainers, search, programmes]);
 
   const openTrainer = trainers.find(t => t.id === openId) || null;
 
   // ---------- Add / edit ----------
   const startNew = () => { setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
   const startEdit = (t: Trainer) => {
-    setForm({ name: t.name || '', specialization: t.specialization || '', contact: t.contact || '', email: t.email || '', rate: t.rate ? String(t.rate) : '', onLeave: t.status === 'On Leave', notes: t.notes || '' });
+    setForm({ name: t.name || '', specialization: t.specialization || '', programmeIds: (t.programmeIds || []).filter(id => programmes.some(p => p.id === id)), contact: t.contact || '', email: t.email || '', rate: t.rate ? String(t.rate) : '', onLeave: t.status === 'On Leave', notes: t.notes || '' });
+    setProgSearch('');
     setFormError(''); setDupId(null); setEditing(t.id);
   };
   const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
@@ -116,7 +122,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     if (email && !/^\S+@\S+\.\S+$/.test(email)) return setFormError("That email address doesn't look right.");
 
     const details = {
-      name, specialization: form.specialization.trim(), contact: form.contact.trim(), email,
+      name, specialization: form.specialization.trim(), programmeIds: form.programmeIds, contact: form.contact.trim(), email,
       rate: parseFloat(form.rate.replace(/[^0-9.]/g, '')) || 0,
       status: (form.onLeave ? 'On Leave' : 'Available') as Trainer['status'],
       notes: form.notes.trim(),
@@ -197,7 +203,9 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         ) : (
           <ul className="divide-y divide-line">
             {visible.map(t => {
-              const sub = [t.specialization, t.contact].map(x => (x || '').trim()).filter(Boolean).join(' · ');
+              const taught = teaches(t);
+              const what = taught.length ? (taught.length > 2 ? `${taught.slice(0, 2).join(', ')} +${taught.length - 2} more` : taught.join(', ')) : t.specialization;
+              const sub = [what, t.contact].map(x => (x || '').trim()).filter(Boolean).join(' · ');
               const next = nextTraining[t.id];
               return (
                 <li key={t.id}>
@@ -207,7 +215,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                         <span className="truncate font-semibold">{t.name}</span>
                         {t.status === 'On Leave' && <span className="shrink-0 rounded-md bg-attention-soft px-2 py-0.5 text-xs font-semibold text-attention">On leave</span>}
                       </span>
-                      <span className="block truncate text-sm text-ink-soft">{sub || 'No topic or phone yet'}</span>
+                      <span className="block truncate text-sm text-ink-soft">{sub || 'No programmes or phone yet'}</span>
                     </span>
                     <span className="hidden w-28 shrink-0 text-right text-sm font-semibold tabular-nums sm:block">{t.rate ? `${formatRM(t.rate)}/day` : ''}</span>
                     <span className="w-32 shrink-0 text-right text-sm text-ink-soft">{next ? `Next ${formatDate(next)}` : 'No training booked'}</span>
@@ -225,6 +233,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
           <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <TrainerPanel
               trainer={openTrainer}
+              teaches={teaches(openTrainer)}
               bookings={bookingsOf(openTrainer)}
               clients={clients}
               today={today}
@@ -253,9 +262,41 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                 <input id="t-name" value={form.name} onChange={e => set({ name: e.target.value })} className={input} autoFocus />
               </div>
               <div>
-                <label className={label} htmlFor="t-topic">Topics <span className="font-normal text-ink-soft">(what they train)</span></label>
-                <input id="t-topic" list="t-topic-list" value={form.specialization} onChange={e => set({ specialization: e.target.value })} placeholder="e.g. Leadership, Sales, Excel" className={input} autoComplete="off" />
-                <datalist id="t-topic-list">{topics.map(x => <option key={x} value={x} />)}</datalist>
+                <span className={label}>Programmes they teach <span className="font-normal text-ink-soft">(from the Programme list)</span></span>
+                {form.programmeIds.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {form.programmeIds.map(id => (
+                      <span key={id} className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-1 text-sm font-semibold text-accent">
+                        {progName(id)}
+                        <button type="button" onClick={() => set({ programmeIds: form.programmeIds.filter(x => x !== id) })} aria-label={`Remove ${progName(id)}`}><X className="h-3.5 w-3.5" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {progOptions.length === 0 ? (
+                  <p className="text-sm text-ink-soft">The Programme list is empty. Programmes are added in Admin work → Programmes, or on a deal.</p>
+                ) : (
+                  <div className="rounded-lg border border-line">
+                    <input value={progSearch} onChange={e => setProgSearch(e.target.value)} placeholder="Search programmes" aria-label="Search programmes" className="w-full rounded-t-lg border-b border-line px-3 py-2 text-[15px] focus:outline-none" />
+                    <ul className="max-h-48 overflow-y-auto py-1">
+                      {progOptions.filter(p => !progSearch.trim() || norm(p.name).includes(norm(progSearch))).map(p => (
+                        <li key={p.id}>
+                          <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[15px] hover:bg-surface">
+                            <input type="checkbox" checked={form.programmeIds.includes(p.id)} className="h-4 w-4 accent-[#0E6E62]"
+                              onChange={e => set({ programmeIds: e.target.checked ? [...form.programmeIds, p.id] : form.programmeIds.filter(x => x !== p.id) })} />
+                            {p.name}
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {form.specialization.trim() && (
+                  <div className="mt-2 rounded-lg bg-surface px-3 py-2 text-sm">
+                    <span className="font-semibold">Topics typed before:</span> {form.specialization}
+                    <span className="block text-ink-soft">Kept as a note. Tick the matching programmes above, then <button type="button" className="font-semibold text-accent hover:underline" onClick={() => set({ specialization: '' })}>remove this note</button>.</span>
+                  </div>
+                )}
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
@@ -300,7 +341,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
 }
 
 function TrainerPanel(props: {
-  trainer: Trainer; bookings: Booking[]; clients: any[]; today: string;
+  trainer: Trainer; teaches: string[]; bookings: Booking[]; clients: any[]; today: string;
   canDelete: boolean; busy: boolean; error: string; onClose: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   const { trainer: t, bookings, today } = props;
@@ -328,10 +369,18 @@ function TrainerPanel(props: {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-lg font-bold"><GraduationCap className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{t.name}</span></h3>
-          <p className="mt-0.5 text-[15px] text-ink-soft">{[t.specialization, t.status === 'On Leave' ? 'On leave' : 'Available'].filter(Boolean).join(' · ')}</p>
+          <p className="mt-0.5 text-[15px] text-ink-soft">{t.status === 'On Leave' ? 'On leave' : 'Available'}</p>
         </div>
         <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
       </div>
+
+      <section>
+        <h4 className="text-sm font-semibold text-ink-soft">Programmes they teach</h4>
+        {props.teaches.length ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">{props.teaches.map(n => <span key={n} className="rounded-full bg-accent-soft px-2.5 py-1 text-sm font-semibold text-accent">{n}</span>)}</div>
+        ) : <p className="mt-1 text-[15px] text-ink-soft">None ticked yet. Use Edit details.</p>}
+        {(t.specialization || '').trim() && <p className="mt-1.5 text-sm text-ink-soft">Topics typed before: {t.specialization}</p>}
+      </section>
 
       <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>
 

@@ -1,7 +1,8 @@
 // Course outlines, one source of truth (2026-10-17, like quotations).
 // While an outline is a draft, these are read live:
 //   prepared for (company)  <- client list (the deal's client if a deal is linked)
-//   course title            <- the deal's programme name, when useProgrammeName is on
+//   course title            <- the programme's name, when useProgrammeName is on. The programme is the
+//                              outline's own (programmeId), else the linked deal's (Joel, 2026-10-17).
 //   owner                   <- the deal's owner
 // "Mark as sent" writes the resolved text into the outline and locks it; "Revise" unlocks it.
 
@@ -20,7 +21,13 @@ export interface ResolvedOutline {
   deal: any | null;
   client: any | null;
   ownerId: string;
-  programmeName: string; // the deal's programme name, if any
+  programmeName: string; // the outline's programme name (its own, else the deal's), if any
+  programmeId: string;
+}
+
+// The programme an outline is for: its own, else its deal's.
+export function outlineProgrammeId(o: { programmeId?: string }, deal: any | null): string {
+  return o.programmeId || deal?.programmeId || '';
 }
 
 export function outlineSent(o: CourseOutline): boolean {
@@ -37,8 +44,11 @@ export function resolveOutline(o: CourseOutline, s: OutlineSources): ResolvedOut
   const clientId = deal?.clientId || o.clientId || '';
   const client = clientId ? s.clients.find(c => c.id === clientId) || null : null;
   const ownerId = (deal && dealOwnerId(deal)) || o.ownerId || o.creatorId || '';
-  const programmeName = dealProgrammeName(deal, s.programmes);
-  if (outlineSent(o)) return { o, deal, client, ownerId, programmeName };
+  const programmeId = outlineProgrammeId(o, deal);
+  const programmeName = o.programmeId
+    ? String(s.programmes.find(p => p.id === o.programmeId)?.name || '').trim()
+    : dealProgrammeName(deal, s.programmes);
+  if (outlineSent(o)) return { o, deal, client, ownerId, programmeName, programmeId };
 
   const out: CourseOutline = { ...o, clientId: clientId || o.clientId };
   if (client) out.preparedForCompany = client.companyName || '';
@@ -46,7 +56,7 @@ export function resolveOutline(o: CourseOutline, s: OutlineSources): ResolvedOut
   const owner = s.people.find(p => p.id === ownerId);
   if (owner) { out.ownerId = owner.id; out.ownerName = owner.name; }
   out.items = (o.items || []).map((m, i) => ({ ...m, no: i + 1 }));
-  return { o: out, deal, client, ownerId, programmeName };
+  return { o: out, deal, client, ownerId, programmeName, programmeId };
 }
 
 // Reference numbers: CO/YYYYMMDD/NN, counting that day's outlines.

@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { deleteDoc, doc, setDoc, writeBatch } from 'firebase/firestore';
+import React, { useEffect, useMemo, useState } from 'react';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, writeBatch } from 'firebase/firestore';
+import { linkedOnly } from '../lib/linked';
+import { outlineProgrammeId } from '../lib/outlineResolve';
 import { Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
@@ -124,6 +126,21 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
     return m;
   }, [deals]);
 
+  // Programmes, course outlines and trainers belong together (Joel, 2026-10-17): each programme shows its
+  // outlines (the outline's own programme, else its deal's) and the trainers who teach it.
+  const [outlines, setOutlines] = useState<any[]>([]);
+  const [trainers, setTrainers] = useState<any[]>([]);
+  useEffect(() => {
+    const subs = [
+      onSnapshot(query(collection(db, 'course_outlines')), s => setOutlines(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => setOutlines([])),
+      onSnapshot(query(collection(db, 'trainers_directory')), s => setTrainers(s.docs.map(d => ({ ...d.data(), id: d.id }))), () => setTrainers([])),
+    ];
+    return () => subs.forEach(u => u());
+  }, []);
+  const outlinesOf = (id: string) => outlines.filter(o => !o.isHidden && o.id !== 'outline_default'
+    && outlineProgrammeId(o, o.pipelineId ? deals.find(d => d.id === o.pipelineId) || null : null) === id);
+  const trainersOf = (id: string) => trainers.filter(t => (t.programmeIds || []).includes(id)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
   const counts = useMemo(() => {
     const c: Record<Filter, number> = { all: programmes.length, not_registered: 0, submitted: 0, approved: 0 };
     programmes.forEach(p => { c[programmeStatus(p)]++; });
@@ -188,8 +205,16 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
 
   const remove = async (p: Programme) => {
     if (usage[p.id]) return setError(`"${p.name}" is used on ${usage[p.id]} deal${usage[p.id] === 1 ? '' : 's'}, so it can't be deleted.`);
-    if (!window.confirm(`Delete "${p.name}" from the programme list?`)) return;
+    const nOut = outlinesOf(p.id).length;
+    if (nOut) return setError(`"${p.name}" has ${nOut} course outline${nOut === 1 ? '' : 's'}, so it can't be deleted. Change their programme first.`);
+    const teachers = trainersOf(p.id);
+    if (!window.confirm(`Delete "${p.name}" from the programme list?${teachers.length ? ` It will also be unticked for ${teachers.length} trainer${teachers.length === 1 ? '' : 's'} (${teachers.map(t => t.name).join(', ')}).` : ''}`)) return;
     try {
+      if (teachers.length) {
+        const batch = writeBatch(db);
+        teachers.forEach(t => batch.update(doc(db, 'trainers_directory', t.id), { programmeIds: (t.programmeIds || []).filter((x: string) => x !== p.id) }));
+        await batch.commit();
+      }
       await deleteDoc(doc(db, 'programmes', p.id));
       setEditing(null);
     } catch (err) {
@@ -242,7 +267,7 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{p.name}</span>
                       <span className="block truncate text-sm text-ink-soft">
-                        {p.hrdcCode ? `HRDC code ${p.hrdcCode}` : 'No HRDC code'} · used on {usage[p.id] || 0} deal{usage[p.id] === 1 ? '' : 's'}
+                        {p.hrdcCode ? `HRDC code ${p.hrdcCode}` : 'No HRDC code'} · {usage[p.id] || 0} deal{usage[p.id] === 1 ? '' : 's'} · {outlinesOf(p.id).length} outline{outlinesOf(p.id).length === 1 ? '' : 's'} · {trainersOf(p.id).length} trainer{trainersOf(p.id).length === 1 ? '' : 's'}
                       </span>
                     </span>
                     <span className="flex items-center gap-2 text-sm text-ink-soft sm:w-64 sm:justify-end">
@@ -299,6 +324,26 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
                 <label htmlFor="pg-code" className={label}>HRDC programme code</label>
                 <input id="pg-code" value={form.hrdcCode} onChange={e => setForm(f => ({ ...f, hrdcCode: e.target.value }))} className={input} placeholder="From the HRDC portal, once given" />
               </div>
+              {editing !== 'new' && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-line p-3">
+                    <p className="text-sm font-semibold text-ink-soft">Course outlines</p>
+                    {outlinesOf(editing).length === 0 ? <p className="mt-1 text-sm text-ink-soft">None yet. Create one in Course outlines and choose this programme.</p> : (
+                      <ul className="mt-1 space-y-1 text-[15px]">
+                        {outlinesOf(editing).map(o => <li key={o.id}>{o.refNumber || 'Outline'} <span className="text-sm text-ink-soft">· {o.status === 'sent' ? 'Sent' : 'Draft'}{o.preparedForCompany ? ` · ${o.preparedForCompany}` : ''}</span></li>)}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-line p-3">
+                    <p className="text-sm font-semibold text-ink-soft">Trainers who teach it</p>
+                    {trainersOf(editing).length === 0 ? <p className="mt-1 text-sm text-ink-soft">None yet. Tick this programme on a trainer in Trainers.</p> : (
+                      <ul className="mt-1 space-y-1 text-[15px]">
+                        {trainersOf(editing).map(t => <li key={t.id}>{t.name}{t.status === 'On Leave' && <span className="text-sm text-attention"> · on leave</span>}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
               <div>
                 <label htmlFor="pg-notes" className={label}>Notes</label>
                 <textarea id="pg-notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className={`${input} min-h-[80px]`} />

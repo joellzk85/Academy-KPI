@@ -86,7 +86,8 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date), date,
       preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
       clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
-      useProgrammeName: !!deal && !!dealProgrammeName(deal, programmes),
+      programmeId: deal?.programmeId || base?.programmeId || '',
+      useProgrammeName: !!(deal?.programmeId || base?.programmeId) || (!!deal && !!dealProgrammeName(deal, programmes)),
       status: 'draft', sharedWithIds: [], isHidden: false,
     };
     setChoosing(null);
@@ -174,7 +175,7 @@ function StartChooser({ deal, outlines, sources, onPick, onBack, onCancel }: {
   const progName = dealProgrammeName(deal, sources.programmes).toLowerCase();
   const resolved = useMemo(() => outlines.filter(o => o.id !== 'outline_default' && !o.isHidden).map(o => resolveOutline(o, sources)), [outlines, sources]);
   const sameProgramme = (r: ReturnType<typeof resolveOutline>) =>
-    !!progName && ((!!deal?.programmeId && r.deal?.programmeId === deal.programmeId) || (r.o.courseTitle || '').trim().toLowerCase() === progName);
+    !!progName && ((!!deal?.programmeId && r.programmeId === deal.programmeId) || (r.o.courseTitle || '').trim().toLowerCase() === progName);
   const t = search.trim().toLowerCase();
   const list = resolved
     .filter(r => !t || `${r.o.courseTitle} ${r.o.preparedForCompany} ${r.o.refNumber}`.toLowerCase().includes(t))
@@ -412,8 +413,8 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const downloadPdf = () => { if (preview) window.print(); else { printAfterRender.current = true; setPreview(true); } };
   const relink = (deal: any | null) => {
     set(deal
-      ? { pipelineId: deal.id, clientId: deal.clientId || '', useProgrammeName: !!dealProgrammeName(deal, sources.programmes) }
-      : { pipelineId: '', clientId: '', useProgrammeName: false });
+      ? { pipelineId: deal.id, clientId: deal.clientId || '', programmeId: o.programmeId || deal.programmeId || '', useProgrammeName: !!(o.programmeId || deal.programmeId) || !!dealProgrammeName(deal, sources.programmes) }
+      : { pipelineId: '', clientId: '', useProgrammeName: !!o.programmeId });
     setRelinking(false);
   };
 
@@ -510,16 +511,24 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
         <Card title="2. Course details">
           <div className="space-y-3">
             <div>
+              <label className={label} htmlFor="o-prog">Programme <span className="font-normal text-ink-soft">(optional; links this outline to the Programme list)</span></label>
+              <select id="o-prog" value={r.programmeId} onChange={e => set({ programmeId: e.target.value, useProgrammeName: !!e.target.value })} className={input}>
+                <option value="">{r.deal?.programmeId ? 'Use the deal\'s programme' : 'None (general outline)'}</option>
+                {[...sources.programmes].sort((a, b) => String(a.name).localeCompare(String(b.name))).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              {!o.programmeId && r.deal?.programmeId && <p className="mt-0.5 text-xs text-ink-soft">From the deal.</p>}
+            </div>
+            <div>
               <label className={label} htmlFor="o-title">Course title</label>
               {o.useProgrammeName && r.programmeName ? (
                 <div className="rounded-lg bg-surface px-3 py-2">
                   <p className="font-semibold">{r.programmeName}</p>
-                  <p className="text-sm text-ink-soft">From the deal's programme. {!locked && <button type="button" className={linkBtn} onClick={() => set({ useProgrammeName: false, courseTitle: r.programmeName })}>Type a different title</button>}</p>
+                  <p className="text-sm text-ink-soft">The programme's name. {!locked && <button type="button" className={linkBtn} onClick={() => set({ useProgrammeName: false, courseTitle: r.programmeName })}>Type a different title</button>}</p>
                 </div>
               ) : (
                 <>
                   <input id="o-title" value={o.courseTitle || ''} onChange={e => set({ courseTitle: e.target.value })} className={input} placeholder="e.g. Leadership Essentials for New Managers" />
-                  {r.programmeName && !locked && <button type="button" className={`${linkBtn} mt-1`} onClick={() => set({ useProgrammeName: true })}>Use the deal's programme name ({r.programmeName})</button>}
+                  {r.programmeName && !locked && <button type="button" className={`${linkBtn} mt-1`} onClick={() => set({ useProgrammeName: true })}>Use the programme's name ({r.programmeName})</button>}
                 </>
               )}
             </div>

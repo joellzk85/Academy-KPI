@@ -188,6 +188,11 @@ Joel's input: HRDC can raise **queries** before the training is approved, during
 - Work queue: an open query is a red flag, an overdue query goes to the top, and a deal with open queries isn't "All done". A programme that isn't approved is an amber flag while the grant step is open. Programmes → "Waiting on HRDC" lists submitted programmes.
 - Still to confirm with Joel: whether HRDC gives a programme code on approval (the field is optional), and who usually handles queries.
 - A useful next step: add "Verify T3 attendance" as an after-training, HRDC-only checklist task (Joel can add it himself in Checklist tasks).
+- **Programmes, course outlines and trainers belong together (Joel, 2026-10-17: "program list, course outline, trainer topics should co-relate"):** the Programme list is the master.
+  - **Course outlines** have an optional `programmeId` (Joel: optional). The editor's "Programme" box picks from the list; blank = use the linked deal's programme, or none for a general outline. The course title follows the programme's name (`useProgrammeName`) unless "Type a different title". New outlines take the deal's (or the copied outline's) programme. "Start from" puts outlines of the same programme first. Logic: `outlineProgrammeId` and `resolveOutline` in `lib/outlineResolve.ts`.
+  - **Trainers** have `programmeIds` ("Programmes they teach", ticked from the Programme list), which **replaced** the free-text Topics (Joel). Old `specialization` text is kept and shown as "Topics typed before" until someone removes it. The list, search and panel use the programme names.
+  - **Admin work → Programmes:** each row shows deals · outlines · trainers, and the panel lists the programme's course outlines and the trainers who teach it. Delete is refused while deals or outlines use the programme; trainers who teach it get it unticked.
+  - **Trainer pickers** (quotation lines, the checklist's Confirm trainer step) list the trainers who teach that programme first, marked "Teaches this programme" (`trainerOptions` in `PickOrType.tsx`).
 
 ## 6b. Phase 3, money (built 2026-10-16)
 
@@ -303,7 +308,7 @@ What was built:
 - **Trainers redesign (2026-10-17, like Clients):** `src/components/TrainerManager.tsx` rewritten in the new style.
   - The screen has a title with a count, one search box, **Add trainer**, then an A–Z list (name, On leave tag, topics · phone, daily rate, next training date).
   - The side panel shows Call / WhatsApp / Email, daily rate, status and notes, then **upcoming and past trainings, read live from the deals**. These are deals (not lost) where the checklist's trainer, or else the quotation's, is this trainer (`trainerBookings` in `src/lib/trainers.ts`). Each is marked Confirmed, Won not confirmed yet, or On the quotation.
-  - **Topics** (`specialization`) is free text with existing topics suggested; it was a fixed list of 6 made-up options.
+  - **Topics** (`specialization`) was free text; replaced on 2026-10-17 by "Programmes they teach" (see section 6a).
   - **"Booked" was removed** (Joel). Status is Available or On leave only; old "Booked" records show as Available, and bookings come from the deals.
   - **Only Management can delete a trainer**, and only if no quotation or admin checklist uses them. `trainers_directory` has its own rule and left the catch-all list. **Rules need publishing.**
   - Removed: the stat boxes, dark control panel, status and sort filters, undo banner and the 8-column table.

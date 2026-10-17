@@ -9,7 +9,7 @@ import { STAGE_LABELS, canQuote, dealOwnerId, dealStage, dealValue, formatDate, 
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
-import PickOrType, { nameOptions } from './PickOrType';
+import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import { linkedOnly } from '../lib/linked';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
@@ -592,7 +592,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
                         )}
                       </td>
                       <td className="py-1 pr-2">
-                        <PickOrType id={`q-trainer-${it.id}`} options={opts(sources.trainers)} linkedId={it.trainerId || ''} text={it.trainer || ''}
+                        <PickOrType id={`q-trainer-${it.id}`} options={trainerOptions(sources.trainers, it.programmeId)} linkedId={it.trainerId || ''} text={it.trainer || ''}
                           onChange={v => setItem(i, { trainerId: v.id, trainer: v.text })}
                           placeholder="Pick or type" className={cell} ariaLabel={`Trainer, line ${i + 1}`} />
                       </td>

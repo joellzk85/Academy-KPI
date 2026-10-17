@@ -217,7 +217,8 @@ export interface CourseOutline {
   clientId?: string;
   pipelineId?: string;
   // Redesign (2026-10-17): read live from the deal while a draft, locked copy once sent.
-  useProgrammeName?: boolean;   // course title = the deal's programme name (else courseTitle as typed)
+  useProgrammeName?: boolean;   // course title = the programme's name (else courseTitle as typed)
+  programmeId?: string;         // the programme this outline is for (optional; else the linked deal's programme)
   status?: 'draft' | 'sent';
   sentAt?: string;
   sentById?: string;
@@ -244,7 +245,8 @@ export interface Client {
 export interface Trainer {
   id: string;
   name: string;
-  specialization: string;
+  specialization: string;       // old free-text topics, kept as a note (programmeIds replaced it, 2026-10-17)
+  programmeIds?: string[];      // programmes from the Programme list this trainer can teach
   contact?: string;
   email?: string;
   rate: number;

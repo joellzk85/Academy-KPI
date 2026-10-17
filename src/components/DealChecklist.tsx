@@ -7,7 +7,7 @@ import {
   ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, Picked, applicableTasks, buildChecklist, effectiveTrainer, effectiveVenue,
   isHrdc, newTaskId, progress, readSettings, taskGate,
 } from '../lib/checklist';
-import PickOrType, { nameOptions } from './PickOrType';
+import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -208,7 +208,7 @@ export default function DealChecklist({
               )}
             </div>
             {editable && !t.done && !arranging && (
-              <TaskFields t={t} busy={busy} venues={venues} trainers={trainers} quotes={quotes}
+              <TaskFields t={t} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
                 onPatch={(c, a) => patch(t.id, c, a)} onCreateQuotation={onCreateQuotation} onOpenQuotations={onOpenQuotations} />
             )}
           </li>
@@ -262,7 +262,7 @@ function TaskSummary({ t, venues, trainers, quotes, withNote }: { t: ChecklistTa
 // Venue or trainer on the checklist: starts with the quotation's, and can be picked from the list or typed.
 // A pick from the list saves at once; typed text saves when you leave the box. Clearing it goes back to the quotation's.
 function ChosenBox({ id, busy, options, picked, fromQuote, what, onSave }: {
-  id: string; busy: boolean; options: { id: string; name: string }[];
+  id: string; busy: boolean; options: { id: string; name: string; hint?: string }[];
   picked: Picked | null; fromQuote: Picked | null; what: 'venue' | 'trainer';
   onSave: (v: { id: string; text: string }, action: string) => void;
 }) {
@@ -296,8 +296,8 @@ function ChosenBox({ id, busy, options, picked, fromQuote, what, onSave }: {
 }
 
 // The inputs each kind of task needs before it can be ticked.
-function TaskFields({ t, busy, venues, trainers, quotes, onPatch, onCreateQuotation, onOpenQuotations }: {
-  t: ChecklistTask; busy: boolean; venues: any[]; trainers: any[]; quotes: any[];
+function TaskFields({ t, busy, venues, trainers, quotes, onPatch, onCreateQuotation, onOpenQuotations, programmeId }: {
+  t: ChecklistTask; busy: boolean; venues: any[]; trainers: any[]; quotes: any[]; programmeId?: string;
   onPatch: (c: Partial<ChecklistTask>, action: string) => void;
   onCreateQuotation?: () => void; onOpenQuotations?: () => void;
 }) {
@@ -344,7 +344,7 @@ function TaskFields({ t, busy, venues, trainers, quotes, onPatch, onCreateQuotat
       {t.kind === 'trainer' && (
         <div>
           <label className={small} htmlFor={`tr-${t.id}`}>Trainer</label>
-          <ChosenBox id={`tr-${t.id}`} busy={busy} options={nameOptions(trainers)} picked={effectiveTrainer(t, quotes, trainers)}
+          <ChosenBox id={`tr-${t.id}`} busy={busy} options={trainerOptions(trainers, programmeId)} picked={effectiveTrainer(t, quotes, trainers)}
             fromQuote={effectiveTrainer(undefined, quotes, trainers)} what="trainer"
             onSave={(v, action) => onPatch({ trainerId: v.id, trainerName: v.text }, `${t.label}: ${action}`)} />
         </div>
