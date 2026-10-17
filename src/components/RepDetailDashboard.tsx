@@ -13,6 +13,7 @@ import KpiPage, { asksFor } from './KpiPage';
 import WorkspaceMenu, { MENU_LABELS, MenuItem } from './WorkspaceMenu';
 import DealsBoard from './DealsBoard';
 import { buildQuotationForDeal } from '../lib/dealDocs';
+import { dealNeedsAttention, dealOwnerId } from '../lib/deals';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -1720,20 +1721,6 @@ export default function RepDetailDashboard({
   // Helper calculation formulas matching screenshot 2
   const sumArray = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
-  const isOverdue = (p: any) => {
-    if (p.status !== 'Pending') return false;
-    if (p.proposalSentDate && p.proposalSentDate !== 'not yet') return false;
-    try {
-      const reqDate = new Date(p.requestDate);
-      const today = new Date();
-      const diffTime = today.getTime() - reqDate.getTime();
-      const diffDays = diffTime / (1000 * 60 * 60 * 24);
-      return diffDays > 2;
-    } catch {
-      return false;
-    }
-  };
-
   const getWeekFromDate = (dateStr: string): number => {
     try {
       const d = new Date(dateStr);
@@ -1988,7 +1975,9 @@ export default function RepDetailDashboard({
 
   // Selected Section Header Title
   const kpiAsksOpen = asksFor(rep, reps).filter(a => !a.done).length;
-  const dealsAlert = pipelines.some(isOverdue) ? 'Follow-up overdue' : pipelines.some(p => p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id)) ? 'Help asked' : undefined;
+  // Same as the Deals screen: only this person's own deals, or a teammate's deal they've been asked to help on.
+  const dealsAlert = pipelines.some(p => dealOwnerId(p) === rep.id && dealNeedsAttention(p)) ? 'Deal needs attention'
+    : pipelines.some(p => dealOwnerId(p) !== rep.id && p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id)) ? 'Help asked' : undefined;
   const workspaceMenuItems: MenuItem[] = [
     { key: 'kpi', label: MENU_LABELS.kpi, alert: kpiAsksOpen ? `${kpiAsksOpen} teammate request${kpiAsksOpen === 1 ? '' : 's'}` : undefined },
     { key: 'pipeline', label: MENU_LABELS.pipeline, alert: dealsAlert },
@@ -2113,13 +2102,13 @@ export default function RepDetailDashboard({
 
     // 4. Overdue Pipeline Deals (Owned by this representative)
     pipelines.forEach((p: any) => {
-      if (p.ownerId === rep.id && isOverdue(p)) {
+      if (dealOwnerId(p) === rep.id && dealNeedsAttention(p)) {
         list.push({
           id: `pipeline_overdue_${p.id}`,
           type: 'pipeline_overdue',
           icon: '🚨',
-          title: 'Overdue Pipeline Deal',
-          message: `Deal for client "${p.clientName}" is pending for over 2 days with no proposal sent!`,
+          title: 'Deal needs attention',
+          message: `Deal for client "${p.clientName || p.client || ''}" needs a follow-up.`,
           detail: 'Click to view Pipeline Management and update deal status.',
           subtab: 'pipeline',
           severity: 'danger'

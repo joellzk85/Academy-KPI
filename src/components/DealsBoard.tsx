@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle, Check, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import {
-  DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal,
+  DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM,
 } from '../lib/deals';
 import { progress } from '../lib/checklist';
@@ -165,18 +165,17 @@ export default function DealsBoard({
       return { text: `Won ${formatDate(dealWonDate(p))}${pr ? `, admin ${pr.done} of ${pr.total}` : ''}`, urgent: false };
     }
     if (st === 'lost') return { text: p.lostReason ? `Lost: ${p.lostReason}` : 'Lost', urgent: false };
+    // Red or not comes from dealNeedsAttention, the same check as the red dot on the Deals menu.
+    const urgent = dealNeedsAttention(p, today);
     const ap = apptOf(p);
-    if (apptOverdue(p, today)) return { text: `Appointment on ${formatDate(ap!.date)} not logged`, urgent: true };
-    if (ap?.status === 'booked') return { text: `Appointment ${formatDate(ap.date)}${ap.time ? `, ${apptTime(ap.time)}` : ''}`, urgent: false };
-    if (fu && fu < today) return { text: `Follow-up overdue (${formatDate(fu)})`, urgent: true };
-    if (st === 'lead') {
-      const age = p.requestDate ? (Date.now() - new Date(p.requestDate).getTime()) / 86400000 : 0;
-      return { text: fu ? `Follow up ${formatDate(fu)}` : 'Book an appointment or send the proposal', urgent: age > 2 && !fu };
-    }
-    if (st === 'appointment') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Send the proposal', urgent: false };
-    if (st === 'agreed') return { text: 'Client agreed: send the quotation', urgent: false };
-    if (st === 'quoted') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Waiting for the client to sign', urgent: false };
-    return { text: fu ? `Follow up ${formatDate(fu)}` : 'Follow up on the proposal', urgent: false };
+    if (apptOverdue(p, today)) return { text: `Appointment on ${formatDate(ap!.date)} not logged`, urgent };
+    if (ap?.status === 'booked') return { text: `Appointment ${formatDate(ap.date)}${ap.time ? `, ${apptTime(ap.time)}` : ''}`, urgent };
+    if (fu && fu < today) return { text: `Follow-up overdue (${formatDate(fu)})`, urgent };
+    if (st === 'lead') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Book an appointment or send the proposal', urgent };
+    if (st === 'appointment') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Send the proposal', urgent };
+    if (st === 'agreed') return { text: 'Client agreed: send the quotation', urgent };
+    if (st === 'quoted') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Waiting for the client to sign', urgent };
+    return { text: fu ? `Follow up ${formatDate(fu)}` : 'Follow up on the proposal', urgent };
   };
 
   // ---------- Create / edit ----------
@@ -331,21 +330,33 @@ export default function DealsBoard({
     return writeStage(p, { stage: back, wonDate: '', lostReason: '', lostNote: '' }, dealStage(p) === 'won' ? 'Win undone' : 'Deal reopened');
   };
 
-  // Delete a deal (creator or Management). Not allowed once it's won or has linked records.
+  // Delete a deal (creator or Management). Not allowed once it's won, or with a sent quotation, money or HRDC queries.
+  // Draft quotations on the deal are deleted with it, after asking.
   const deleteDeal = async (p: any) => {
     const linked: string[] = [];
     if (dealStage(p) === 'won') linked.push('it is won');
-    const nq = quotes.filter(q => q.pipelineId === p.id).length;
-    if (nq) linked.push(`${nq} quotation${nq === 1 ? '' : 's'}`);
+    const dealQuotes = quotes.filter(q => q.pipelineId === p.id);
+    const refs = (list: any[]) => list.map(q => q.refNumber || 'no reference').join(', ');
+    const sent = dealQuotes.filter(q => q.status === 'sent');
+    const drafts = dealQuotes.filter(q => q.status !== 'sent');
+    if (sent.length) linked.push(`quotation ${refs(sent)} has been sent`);
     const nm = moneyIn.filter(m => m.dealId === p.id).length + moneyOut.filter(m => m.dealId === p.id).length;
     if (nm) linked.push(`${nm} money record${nm === 1 ? '' : 's'}`);
     const nh = queries.filter(q => q.dealId === p.id).length;
     if (nh) linked.push(`${nh} HRDC quer${nh === 1 ? 'y' : 'ies'}`);
     if (linked.length) return setStageError(`This deal can't be deleted because ${linked.join(', ')}. Use "Mark lost" instead.`);
-    if (!window.confirm(`Delete the deal for ${clientName(p)}? This can't be undone.`)) return;
+    // Reps can only delete their own quotations (database rule), so someone else's draft must go first.
+    const notMine = viewer.role === 'rep' ? drafts.filter(q => q.ownerId !== viewer.id && q.creatorId !== viewer.id) : [];
+    if (notMine.length) return setStageError(`Draft quotation ${refs(notMine)} on this deal belongs to someone else. Ask them, Admin or Management to delete it first.`);
+    const also = drafts.length ? ` and its draft quotation${drafts.length === 1 ? '' : 's'} ${refs(drafts)}` : '';
+    if (!window.confirm(`Delete the deal for ${clientName(p)}${also}? This can't be undone.`)) return;
     setBusy(true);
     try {
-      await deleteDoc(doc(db, 'pipelines', p.id));
+      // All or nothing: the deal and its drafts go together.
+      const batch = writeBatch(db);
+      drafts.forEach(q => batch.delete(doc(db, 'quotations', q.id)));
+      batch.delete(doc(db, 'pipelines', p.id));
+      await batch.commit();
       setOpenId(null);
       flash('Deal deleted');
     } catch (err) {

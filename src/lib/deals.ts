@@ -3,6 +3,8 @@
 // carry over. New fields: stage, appointmentDate, wonDate, lostDate,
 // lostReason, fundingType. Older records without them are read sensibly.
 
+import { apptOf, apptOverdue } from './appointments';
+
 // The journey (Joel, 2026-10-16): New -> Proposal sent (the pitch) -> Client agreed -> Quotation sent -> Won
 // (the client signed the quotation). The appointment is optional and can happen at any point before Won;
 // 'appointment' is kept as a stage only for deals that are new but have had a meeting.
@@ -57,6 +59,19 @@ export function dealStage(p: any): DealStage {
 // The old screens still read "status", so it is kept in step with the stage.
 export function statusForStage(stage: DealStage): 'Pending' | 'Won' | 'Lost' {
   return stage === 'won' ? 'Won' : stage === 'lost' ? 'Lost' : 'Pending';
+}
+
+// Does an open deal need attention now? The red rows on Deals and the red dot on the Deals menu both use this:
+// an appointment not logged a day after it, a follow-up date that has passed, or a new deal over 2 days old with nothing planned.
+export function dealNeedsAttention(p: any, today = todayIso()): boolean {
+  const st = dealStage(p);
+  if (!OPEN_STAGES.includes(st)) return false;
+  if (apptOverdue(p, today)) return true;
+  if (apptOf(p)?.status === 'booked') return false;
+  const fu = validDate(p?.followUpDate);
+  if (fu && fu < today) return true;
+  if (st === 'lead' && !fu && p?.requestDate) return (Date.now() - new Date(p.requestDate).getTime()) / 86400000 > 2;
+  return false;
 }
 
 // Who may edit the appointment and delete the deal: the person who created it, or Management (Joel, 2026-10-16).
