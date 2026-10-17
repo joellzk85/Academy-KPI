@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowDown, ArrowUp, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardCheck, Eye, EyeOff, LayoutGrid, Loader2, ShieldCheck, Users,
+  AlertTriangle, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardCheck, GripVertical, LayoutGrid, Loader2, Plus, RotateCcw, ShieldCheck, Users, X,
 } from 'lucide-react';
+import GridLayout, { WidthProvider } from 'react-grid-layout';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
 import { db, friendlyError } from '../lib/firebase';
 import { CalendarEvent, Representative } from '../types';
 import {
@@ -83,6 +86,8 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [customising, setCustomising] = useState(false);
   const [prefsError, setPrefsError] = useState('');
+  const [savedLayout, setSavedLayout] = useState<Cell[] | null>(null);
+  const wide = useWide();
   const [teammate, setTeammate] = useState('');
 
   useEffect(() => {
@@ -91,7 +96,12 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
       onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(doc(db, 'user_prefs', viewer.id), s => { const c = s.data()?.homeCards; setSavedCards(Array.isArray(c) ? c : null); setPrefsLoaded(true); }, () => setPrefsLoaded(true)),
+      onSnapshot(doc(db, 'user_prefs', viewer.id), s => {
+        const c = s.data()?.homeCards, l = s.data()?.homeLayout;
+        setSavedCards(Array.isArray(c) ? c : null);
+        setSavedLayout(Array.isArray(l) ? l : null);
+        setPrefsLoaded(true);
+      }, () => setPrefsLoaded(true)),
     ];
     // Payouts and programme admin are for Admin and Management only.
     if (staff) {
@@ -104,15 +114,24 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const allowed = CARDS.filter(c => c.roles.includes(viewer.role));
   const cards: CardId[] = (savedCards || DEFAULT_CARDS[viewer.role]).filter(id => allowed.some(c => c.id === id));
 
-  const saveCards = async (next: CardId[]) => {
-    setSavedCards(next);
+  // Card choice and layout are saved together on the person's own prefs (only they can read or write them).
+  const layout = layoutFor(cards, savedLayout);
+  const savePrefs = async (nextCards: CardId[], nextLayout: Cell[]) => {
+    const cells = nextLayout.filter(c => nextCards.includes(c.i as CardId)).map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
+    setSavedCards(nextCards);
+    setSavedLayout(cells);
     setPrefsError('');
     try {
-      await setDoc(doc(db, 'user_prefs', viewer.id), { homeCards: next, updatedAt: Date.now() }, { merge: true });
+      await setDoc(doc(db, 'user_prefs', viewer.id), { homeCards: nextCards, homeLayout: cells, updatedAt: Date.now() }, { merge: true });
     } catch (err) {
       setPrefsError(friendlyError(err));
     }
   };
+  // After a drag or resize: keep the new positions, and the card order (for phones) top to bottom, left to right.
+  const onLayoutDone = (next: Cell[]) => savePrefs([...next].sort((a, b) => a.y - b.y || a.x - b.x).map(c => c.i as CardId), next);
+  const addCard = (id: CardId) => savePrefs([...cards, id], layoutFor([...cards, id], layout));
+  const removeCard = (id: CardId) => savePrefs(cards.filter(c => c !== id), layout.filter(c => c.i !== id));
+  const resetLayout = () => savePrefs(DEFAULT_CARDS[viewer.role].filter(id => allowed.some(c => c.id === id)), layoutFor(DEFAULT_CARDS[viewer.role], null));
 
   const nameOf = (id: string) => people.find(p => p.id === id)?.name || 'Former team member';
   const clientName = (p: any) => clients.find(c => c.id === p.clientId)?.companyName || p.client || 'No client';
@@ -170,14 +189,34 @@ export default function MyHome({ viewer, people, representatives, deals, events,
           </button>
         </div>
         {prefsError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{prefsError}</p>}
-        {customising && <Customiser allowed={allowed} cards={cards} onChange={saveCards} />}
+        {customising && <EditBar hidden={allowed.filter(c => !cards.includes(c.id))} wide={wide} onAdd={addCard} onReset={resetLayout} />}
         {!prefsLoaded ? (
           <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading your cards…</p>
         ) : cards.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-line p-6 text-center text-ink-soft">No cards chosen. Click Customise to add some.</p>
+        ) : wide ? (
+          // Computers: drag a card by its title and pull its right or bottom edge to resize (only while customising).
+          <Grid
+            className={customising ? 'home-grid editing' : 'home-grid'}
+            layout={layout}
+            cols={COLS}
+            rowHeight={ROW_H}
+            margin={[16, 16]}
+            containerPadding={[0, 0]}
+            isDraggable={customising}
+            isResizable={customising}
+            draggableHandle=".card-drag"
+            resizeHandles={['e', 's', 'se']}
+            compactType="vertical"
+            onDragStop={l => onLayoutDone(l as Cell[])}
+            onResizeStop={l => onLayoutDone(l as Cell[])}
+          >
+            {cards.map(id => <div key={id}><Card id={id} ctx={ctx} editing={customising} onRemove={() => removeCard(id)} /></div>)}
+          </Grid>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {cards.map(id => <Card key={id} id={id} ctx={ctx} />)}
+          // Phones and narrow windows: cards stack in the chosen order.
+          <div className="grid gap-4">
+            {cards.map(id => <Card key={id} id={id} ctx={ctx} editing={customising} onRemove={() => removeCard(id)} stacked />)}
           </div>
         )}
       </section>
@@ -185,35 +224,70 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   );
 }
 
-// ---------- Customise ----------
-function Customiser({ allowed, cards, onChange }: { allowed: typeof CARDS; cards: CardId[]; onChange: (c: CardId[]) => void }) {
-  const move = (i: number, dir: -1 | 1) => {
-    const j = i + dir;
-    if (j < 0 || j >= cards.length) return;
-    const next = [...cards];
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
-  };
-  const hidden = allowed.filter(c => !cards.includes(c.id));
+// ---------- Customise (drag and resize, Joel 2026-10-17) ----------
+// Cards sit on a 12-column grid. While customising, a card moves by its title bar and resizes by its
+// right edge, bottom edge or corner (react-grid-layout). Each person's layout is saved in user_prefs.homeLayout.
+type Cell = { i: string; x: number; y: number; w: number; h: number; minW?: number; minH?: number };
+const COLS = 12;
+const ROW_H = 40;
+const DEFAULT_H = 7;
+const Grid = WidthProvider(GridLayout);
+
+// Saved positions where there are some; new cards go underneath, two to a row (Notices full width).
+function layoutFor(cards: CardId[], saved: Cell[] | null): Cell[] {
+  const out: Cell[] = [];
+  cards.forEach(id => {
+    const s = saved?.find(c => c.i === id);
+    if (!s) return;
+    const w = Math.min(COLS, Math.max(3, Number(s.w) || 6));
+    out.push({ i: id, x: Math.min(COLS - w, Math.max(0, Number(s.x) || 0)), y: Math.max(0, Number(s.y) || 0), w, h: Math.max(4, Number(s.h) || DEFAULT_H) });
+  });
+  let y = out.reduce((m, c) => Math.max(m, c.y + c.h), 0);
+  let x = 0;
+  cards.forEach(id => {
+    if (out.some(c => c.i === id)) return;
+    const w = id === 'notices' ? COLS : COLS / 2;
+    if (x + w > COLS) { x = 0; y += DEFAULT_H; }
+    out.push({ i: id, x, y, w, h: DEFAULT_H });
+    x += w;
+    if (x >= COLS) { x = 0; y += DEFAULT_H; }
+  });
+  return out.map(c => ({ ...c, minW: 3, minH: 4 }));
+}
+
+// Dragging and resizing only on wide screens; narrower ones stack the cards.
+function useWide(): boolean {
+  const q = '(min-width: 1024px)';
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const on = () => setWide(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, []);
+  return wide;
+}
+
+function EditBar({ hidden, wide, onAdd, onReset }: { hidden: typeof CARDS; wide: boolean; onAdd: (id: CardId) => void; onReset: () => void }) {
   return (
-    <div className="rounded-2xl border border-line bg-white p-4">
-      <p className="mb-3 text-sm text-ink-soft">Your choice is saved to your login, so it follows you to any computer or phone. Nobody else's page changes.</p>
-      <ul className="divide-y divide-line">
-        {cards.map((id, i) => (
-          <li key={id} className="flex items-center gap-2 py-2">
-            <span className="flex-1 font-semibold">{CARDS.find(c => c.id === id)?.title}</span>
-            <button type="button" className={iconBtn} disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
-            <button type="button" className={iconBtn} disabled={i === cards.length - 1} onClick={() => move(i, 1)} aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
-            <button type="button" className={`${btnSecondary} py-1`} onClick={() => onChange(cards.filter(c => c !== id))}><EyeOff className="h-3.5 w-3.5" /> Hide</button>
-          </li>
-        ))}
+    <div className="space-y-3 rounded-2xl border border-accent/30 bg-accent-soft/40 p-4">
+      <p className="text-sm text-ink">
+        {wide
+          ? <>Drag a card by its <strong>title</strong> to move it. Pull its <strong>right or bottom edge</strong> (or the corner) to resize it. <strong>×</strong> removes it.</>
+          : <>On a small screen cards stack in order. Use a computer to move and resize them. <strong>×</strong> removes a card.</>}
+        {' '}Saved to your login; nobody else's page changes.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {hidden.length > 0 && <span className="text-sm font-semibold">Add a card:</span>}
         {hidden.map(c => (
-          <li key={c.id} className="flex items-center gap-2 py-2 text-ink-soft">
-            <span className="flex-1">{c.title}</span>
-            <button type="button" className={`${btnSecondary} py-1`} onClick={() => onChange([...cards, c.id])}><Eye className="h-3.5 w-3.5" /> Show</button>
-          </li>
+          <button key={c.id} type="button" onClick={() => onAdd(c.id)} className="inline-flex items-center gap-1 rounded-full border border-line bg-white px-3 py-1 text-sm font-medium hover:bg-surface">
+            <Plus className="h-3.5 w-3.5" />{c.title}
+          </button>
         ))}
-      </ul>
+        <button type="button" onClick={() => { if (window.confirm('Go back to the standard cards and layout for your role?')) onReset(); }} className="ml-auto inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline">
+          <RotateCcw className="h-3.5 w-3.5" /> Reset layout
+        </button>
+      </div>
     </div>
   );
 }
@@ -423,34 +497,59 @@ type CardCtx = {
 
 type Item = { key: string; title: string; sub?: string; level?: 'danger' | 'attention'; onClick?: () => void };
 
-function Card({ id, ctx }: { id: CardId; ctx: CardCtx; key?: string }) {
+function Card({ id, ctx, editing, onRemove, stacked }: { id: CardId; ctx: CardCtx; editing: boolean; onRemove: () => void; stacked?: boolean; key?: string }) {
   const title = CARDS.find(c => c.id === id)?.title || '';
-  if (id === 'notices') return <div className="lg:col-span-2">{ctx.notices}</div>;
-  const { items, empty, footer } = cardContent(id, ctx);
-  return (
-    <div className="rounded-2xl border border-line bg-white p-4">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="font-bold">{title}</h3>
-        {items.length > 0 && <span className="rounded-md bg-surface px-2 py-0.5 text-xs font-semibold text-ink-soft">{items.length}</span>}
+  // On the grid a card fills its cell and scrolls inside; stacked (phones) it is as tall as its content.
+  const shell = `flex flex-col rounded-2xl border bg-white ${stacked ? '' : 'h-full'} ${editing ? 'border-dashed border-accent/60 shadow-sm' : 'border-line'}`;
+  const titleBar = (badge?: React.ReactNode) => (
+    <div className={`card-drag flex items-center justify-between gap-2 px-4 pt-3 ${editing && !stacked ? 'cursor-move select-none' : ''}`}>
+      <h3 className="flex min-w-0 items-center gap-1.5 font-bold">
+        {editing && !stacked && <GripVertical className="h-4 w-4 shrink-0 text-ink-soft" aria-hidden />}
+        <span className="truncate">{title}</span>
+      </h3>
+      <span className="flex items-center gap-1">
+        {badge}
+        {editing && (
+          <button type="button" onMouseDown={e => e.stopPropagation()} onClick={onRemove} className="rounded-md p-1 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove ${title}`}>
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </span>
+    </div>
+  );
+  if (id === 'notices') {
+    return (
+      <div className={shell}>
+        {titleBar()}
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">{ctx.notices}</div>
       </div>
-      {items.length === 0 ? <p className="text-[15px] text-ink-soft">{empty}</p> : (
-        <ul className="divide-y divide-line">
-          {items.slice(0, 8).map(it => (
-            <li key={it.key}>
-              <button type="button" disabled={!it.onClick} onClick={it.onClick} className="flex w-full items-start gap-2 py-2 text-left enabled:hover:bg-surface">
-                {it.level && <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${it.level === 'danger' ? 'text-danger' : 'text-attention'}`} />}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{it.title}</span>
-                  {it.sub && <span className={`block text-sm ${it.level === 'danger' ? 'text-danger' : it.level === 'attention' ? 'text-attention' : 'text-ink-soft'}`}>{it.sub}</span>}
-                </span>
-                {it.onClick && <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" />}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {items.length > 8 && <p className="pt-2 text-sm text-ink-soft">and {items.length - 8} more</p>}
-      {footer}
+    );
+  }
+  const { items, empty, footer } = cardContent(id, ctx);
+  const shown = stacked ? items.slice(0, 8) : items.slice(0, 40);
+  return (
+    <div className={shell}>
+      {titleBar(items.length > 0 && <span className="rounded-md bg-surface px-2 py-0.5 text-xs font-semibold text-ink-soft">{items.length}</span>)}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-2">
+        {items.length === 0 ? <p className="text-[15px] text-ink-soft">{empty}</p> : (
+          <ul className="divide-y divide-line">
+            {shown.map(it => (
+              <li key={it.key}>
+                <button type="button" disabled={!it.onClick || editing} onClick={it.onClick} className="flex w-full items-start gap-2 py-2 text-left enabled:hover:bg-surface">
+                  {it.level && <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${it.level === 'danger' ? 'text-danger' : 'text-attention'}`} />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-semibold">{it.title}</span>
+                    {it.sub && <span className={`block text-sm ${it.level === 'danger' ? 'text-danger' : it.level === 'attention' ? 'text-attention' : 'text-ink-soft'}`}>{it.sub}</span>}
+                  </span>
+                  {it.onClick && <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" />}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {items.length > shown.length && <p className="pt-2 text-sm text-ink-soft">and {items.length - shown.length} more</p>}
+        {footer}
+      </div>
     </div>
   );
 }

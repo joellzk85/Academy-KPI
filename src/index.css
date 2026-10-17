@@ -123,3 +123,14 @@ body {
   outline: 2px solid #0E6E62;
   outline-offset: 2px;
 }
+
+/* My home cards: drag and resize (react-grid-layout, 2026-10-17) */
+.home-grid .react-grid-item { transition: transform 150ms ease; }
+.home-grid .react-grid-item.react-grid-placeholder { background: #0E6E62; opacity: 0.12; border-radius: 1rem; }
+.home-grid .react-grid-item.react-draggable-dragging { z-index: 20; box-shadow: 0 12px 30px rgba(28, 43, 69, 0.18); border-radius: 1rem; }
+.home-grid:not(.editing) .react-resizable-handle { display: none; }
+.home-grid.editing .react-resizable-handle { opacity: 0.7; }
+.home-grid.editing .react-resizable-handle-e,
+.home-grid.editing .react-resizable-handle-s { background: none; }
+.home-grid.editing .react-resizable-handle-e::after { content: ''; position: absolute; right: 3px; top: 50%; width: 4px; height: 36px; margin-top: -18px; border-radius: 4px; background: #0E6E62; opacity: 0.45; }
+.home-grid.editing .react-resizable-handle-s::after { content: ''; position: absolute; bottom: 3px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 4px; background: #0E6E62; opacity: 0.45; }

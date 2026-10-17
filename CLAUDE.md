@@ -61,7 +61,7 @@ Every piece of information is typed once, in one home; everything else points to
 - **Database:** Firebase Firestore, project `gen-lang-client-0779528352`, default database.
 - **Hosting:** Firebase App Hosting, backend `nextacademy2`. It **builds and deploys automatically from GitHub `main`**. Live site: https://nextacademy2--gen-lang-client-0779528352.asia-southeast1.hosted.app
 - **GitHub is the master copy:** https://github.com/joellzk85/Academy-KPI. Google AI Studio is no longer used and must never be used to edit again (it can't pull, and saving from it would overwrite newer work).
-- **Build check:** `npm install` then `npm run build`. Type errors about the `key` prop appear because `@types/react` isn't installed; Vite ignores them and they are pre-existing.
+- **Build check:** `npm install` then `npm run build`. Since 2026-10-17 `@types/react` is installed (through `@types/react-grid-layout`), so the old `key` prop type errors are gone. `npx tsc --noEmit` now shows only 2 warnings, in the unused old `handleCellChange` in `RepDetailDashboard.tsx` (delete it in a tidy-up). Vite ignores type errors.
 - **Database rules:** `firestore.rules` in the repo must be **published manually** in the Firebase console (Firestore Database, Rules, paste, Publish) after the matching code is live. Walk Joel through it, and remind him whenever rules change. Rules changes must be published after the new build is live, never before.
 - **Commits:** author `joellzk85 <lzk.joel@gmail.com>` is set for this repo. Joel pushes via PowerShell from `C:\Users\Joel\Documents\CRM` if your push needs his GitHub sign-in.
 
@@ -214,6 +214,10 @@ What was built:
   - **Performance layout, again (Joel, 2026-10-17: keep the 2 rings, fix size and position):** the main rings (Company and/or Me, 148px) sit on the left, filling their block with the figures beside them. Each person gets medium rings (96px) on the right in a wrapping grid. It stacks on phones. Inside each ring the year % is big, with the month % small underneath. Empty (0%) arcs are no longer drawn as stray dots.
   - Joel asked: everyone has their own My home (yes). Content depends on role, and each person's Customise choice affects only their own page.
   - Admin work can be opened on a chosen tab (`initialView`) from the cards.
+  - **Drag-and-drop cards (Joel, 2026-10-17):** the My cards area uses **react-grid-layout 1.5.4** (pinned; 1.5.0–1.5.3 shipped stray files), with a 12-column grid and 40px rows. **Customise** turns on dragging (by the card's title bar, `.card-drag`) and resizing (right edge, bottom edge, corner), with × to remove, "Add a card" chips and "Reset layout". Outside Customise nothing moves.
+    - Each person's layout is saved with their cards in `user_prefs/{id}.homeLayout` (`[{i,x,y,w,h}]`); `homeCards` is kept in top-to-bottom order for phones. New cards go underneath, two per row (`layoutFor`).
+    - Under 1024px wide the cards just stack. Cards fill their cell and scroll inside. Handle and drop-shadow styles are in `src/index.css` (`.home-grid`).
+    - Tested with a temporary local page: dragging, resizing, reflow and phone stacking work.
   - **Rules:** `user_prefs` was added to `firestore.rules`. Published by Joel on 2026-10-17.
 - **Workspace and KPI page redesign (2026-10-16, Joel: "the UI is bad")**:
   - Workspace header is now name + role + page; the **Co-Pilot (AI chat) was removed everywhere** (header button, floating bubble, Management button). Its unused state and handler, and the `/api/copilot` server route, are still in `App.tsx`/`server.ts`; delete them in a later tidy-up.
