@@ -74,5 +74,5 @@ export default function WorkspaceMenu({ items, active, onSelect }: { items: Menu
 // Plain names for each menu item (also used for the page header).
 export const MENU_LABELS: Record<MenuKey, string> = {
   kpi: 'KPI', pipeline: 'Deals', quotation: 'Quotations', course_outline: 'Course outlines', client: 'Clients',
-  trainerList: 'Trainers', venue: 'Venues', admin_record: 'Admin records', tasks: 'Pending tasks',
+  trainerList: 'Trainers', venue: 'Venues', admin_record: 'Admin records', tasks: 'To-do',
 };

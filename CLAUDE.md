@@ -112,7 +112,8 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 ### Data policy (agreed)
 
 - **Keep:** clients, venues (`venues_directory`), trainers (`trainers_directory`), quotations, deals (`pipelines`), course outlines.
-- **Clear (only via the Data tools button, Joel clicks it himself):** appointments, admin_records, payments, client_payments, events, tasks, project_pls, links, and old `reps` docs from the previous login system.
+- **Clear (only via the Data tools button, Joel clicks it himself):** appointments, admin_records, payments, client_payments, events, project_pls, links, and old `reps` docs from the previous login system.
+- **Decided 2026-10-17:** **tasks** were taken off the clear list because the new To-do screen uses them.
 - **Decided 2026-10-16:** Joel keeps only **KPI history (`month_kpis`)** from the old clear list, so it was removed from `DataTools.tsx`. Everything else on the list is cleared, including calendar events, tasks and saved links, even though those screens still exist; they just start empty.
 
 ## 5. Status
@@ -280,6 +281,13 @@ What was built:
   - **"Booked" was removed** (Joel). Status is Available or On leave only; old "Booked" records show as Available, and bookings come from the deals.
   - **Only Management can delete a trainer**, and only if no quotation or admin checklist uses them. `trainers_directory` has its own rule and left the catch-all list. **Rules need publishing.**
   - Removed: the stat boxes, dark control panel, status and sort filters, undo banner and the 8-column table.
+- **To-do (redesigned 2026-10-17, was "Pending tasks"):** `src/components/TasksPage.tsx`, logic in `src/lib/tasks.ts`.
+  - **One shared task per job.** The old screen made a copy for the person it was assigned to, so ticks drifted apart. Old copies (`isDuplicate`) are now skipped. Field names are kept (`detail`, `dateline`, `status` Not done/Done, `assignedById`, `assignedToId`), plus `doneAt`, `doneByName` and `pipelineId` (the deal it is about). Very old tasks fall back to `ownerRepId`.
+  - The screen has a quick add bar (what, due, assign to: me by default or any teammate, optional deal), then the views **My to-do / I asked others / Everyone's** (Management). Tasks are grouped Overdue, Today, Next 7 days, Later, No date, with Done collapsed.
+  - Tick the circle to finish a task. Click a task to open the side panel: edit, reassign, link a deal, delete.
+  - Menu item renamed **To-do**. Its red dot shows only for tasks assigned to that person that are **overdue or due today** (`needsDoingNow`).
+  - **Rules:** `tasks` has its own rule. Anyone adds a task as themselves; the assignee, the assigner (or old `ownerRepId`) and Management can change it; only the assigner or Management can delete. **Rules need publishing.**
+  - The old task handlers and state are still in `RepDetailDashboard.tsx` but can no longer be reached. Delete them in a tidy-up.
 - **Venues redesign (2026-10-17, like Trainers):** `src/components/VenueManager.tsx` rewritten in the new style.
   - The screen has a title with a count, one search box, **Add venue**, then an A–Z list (small photo if `pictures` is a link, name, Under renovation tag, distance · contact, meeting package, next training).
   - The side panel shows the photo, the contact (Call / WhatsApp when the contact text has a phone number: `phoneIn` in `src/lib/venues.ts`), packages, facilities and remarks, then **upcoming and past trainings there, read live**. These are deals (not lost) whose venue is this one (`venueBookings`, using the same rule as the deal panel's Venue line: the checklist's venue, else the quotation's).

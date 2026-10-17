@@ -5,6 +5,8 @@ import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
 import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3, CheckSquare, Square, FolderCheck, Search, Layers, CheckCheck } from 'lucide-react';
 import QuotationsPage from './QuotationsPage';
 import CourseOutlinesPage from './CourseOutlinesPage';
+import TasksPage from './TasksPage';
+import { needsDoingNow } from '../lib/tasks';
 import AdminRecordManager from './AdminRecordManager';
 import ClientManager from './ClientManager';
 import TrainerManager from './TrainerManager';
@@ -13,7 +15,7 @@ import KpiPage, { asksFor } from './KpiPage';
 import WorkspaceMenu, { MENU_LABELS, MenuItem } from './WorkspaceMenu';
 import DealsBoard from './DealsBoard';
 import { buildQuotationForDeal } from '../lib/dealDocs';
-import { dealNeedsAttention, dealOwnerId } from '../lib/deals';
+import { dealNeedsAttention, dealOwnerId, todayIso } from '../lib/deals';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -1662,7 +1664,8 @@ export default function RepDetailDashboard({
   useEffect(() => {
     if (!db) return;
 
-    const q = query(collection(db, 'tasks'), where('ownerRepId', '==', rep.id));
+    // All tasks: the menu dot looks for ones assigned to this person (see lib/tasks.ts).
+    const q = query(collection(db, 'tasks'));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const firestoreTasks: any[] = [];
       snapshot.forEach((doc) => {
@@ -1953,7 +1956,7 @@ export default function RepDetailDashboard({
     { key: 'trainerList', label: MENU_LABELS.trainerList },
     { key: 'venue', label: MENU_LABELS.venue },
     ...(rep.role === 'admin' ? [{ key: 'admin_record' as const, label: MENU_LABELS.admin_record }] : []),
-    { key: 'tasks', label: MENU_LABELS.tasks, alert: tasks.some(t => t.status !== 'Done') ? 'Tasks pending' : undefined },
+    { key: 'tasks', label: MENU_LABELS.tasks, alert: tasks.some(t => needsDoingNow(t, rep.id, todayIso())) ? 'Task due' : undefined },
   ];
 
   const getSectionTitle = () => {
@@ -2017,347 +2020,7 @@ export default function RepDetailDashboard({
               onOpenOutlines={() => setActiveSubTab('course_outline')}
             />
           ) : activeSubTab === 'tasks' ? (
-            /* PENDING TASKS LOG SYSTEM */
-            <div className="space-y-6">
-              {taskUndoMessage && (
-                <div className="bg-slate-900 text-white rounded-xl p-3 px-4 flex items-center justify-between text-xs shadow-md animate-fade-in border border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>{taskUndoMessage}</span>
-                  </div>
-                  <button
-                    onClick={handleTaskUndo}
-                    className="flex items-center gap-1.5 text-[11px] font-black text-emerald-400 hover:text-emerald-300 bg-white/10 hover:bg-white/15 px-3 py-1 rounded-lg transition-all uppercase tracking-wider cursor-pointer"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" /> Undo
-                  </button>
-                </div>
-              )}
-              
-              {/* Specialized Tasks Header */}
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex items-center justify-center" id="tasks-wireframe-header">
-                <div className="border border-slate-800 rounded-xl px-12 py-3 bg-white text-center">
-                  <span className="text-xl md:text-2xl font-normal text-slate-500 font-sans tracking-wide">
-                    Pending Tasks Dashboard
-                  </span>
-                </div>
-              </div>
-
-              {/* Two Column Workspace: Left (Form), Right (List) */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* Left Form: Create Tasks */}
-                <div className="lg:col-span-4 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                  <div className="p-4 bg-blue-600 text-white flex items-center justify-between">
-                    <h5 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
-                      <Plus className="w-4 h-4 text-white" />
-                      Create Tasks
-                    </h5>
-                    <span className="text-[9px] bg-blue-700 font-bold px-2 py-0.5 rounded border border-blue-800 uppercase font-mono">
-                      Realtime Form
-                    </span>
-                  </div>
-
-                  <form onSubmit={handleAddTaskSubmit} className="p-5 space-y-4">
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Date Task Created
-                      </label>
-                      <input 
-                        type="date" 
-                        value={new Date().toISOString().substring(0, 10)} 
-                        disabled 
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 text-slate-400 font-mono cursor-not-allowed focus:outline-none" 
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Task Detail
-                      </label>
-                      <textarea
-                        required
-                        rows={3}
-                        placeholder="Describe the tasks details, deliverable, or action points..."
-                        value={taskDetail}
-                        onChange={(e) => setTaskDetail(e.target.value)}
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Dateline (Deadline)
-                      </label>
-                      <input
-                        type="date"
-                        required
-                        value={taskDateline}
-                        onChange={(e) => setTaskDateline(e.target.value)}
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white font-mono"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1.5">
-                        Assign To Team Member
-                      </label>
-                      <select
-                        value={taskAssignedToId}
-                        onChange={(e) => setTaskAssignedToId(e.target.value)}
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-blue-500 bg-white"
-                      >
-                        <option value="">-- Assign to Myself ({rep.name}) --</option>
-                        {reps.filter(m => m.id !== rep.id).map(m => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                      </select>
-                      <span className="text-[10px] text-slate-400 font-mono block mt-1.5 leading-relaxed">
-                        Note: Assigning to another rep creates an identical duplicate on their task list.
-                      </span>
-                    </div>
-
-                    <button
-                      type="submit"
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider py-2.5 rounded-lg transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer mt-2"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Create & Assign Task
-                    </button>
-                  </form>
-                </div>
-
-                {/* Right Panel: Task List */}
-                <div className="lg:col-span-8 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden flex flex-col">
-                  
-                  {/* Header & Controls bar */}
-                  <div className="p-4 bg-slate-800 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <h5 className="text-xs font-black uppercase tracking-wider font-display flex items-center gap-1.5 text-white">
-                      <Briefcase className="w-4 h-4 text-blue-400" />
-                      Assigned Pending Tasks ({tasks.length})
-                    </h5>
-
-                    {/* Sorting & Hiding Options Bar */}
-                    <div className="flex flex-wrap items-center gap-3">
-                      
-                      {/* Sort selection */}
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-black uppercase text-slate-400 font-mono">Sort by:</span>
-                        <select
-                          value={taskSortBy}
-                          onChange={(e) => setTaskSortBy(e.target.value as any)}
-                          className="bg-slate-700 text-white text-[10px] font-black uppercase rounded px-2.5 py-1 focus:outline-none border border-slate-600 font-mono cursor-pointer"
-                        >
-                          <option value="dateCreated">Created Date</option>
-                          <option value="dateline">Dateline / Due</option>
-                        </select>
-                      </div>
-
-                      {/* Hide Done Toggle */}
-                      <button
-                        type="button"
-                        onClick={() => setTaskHideDone(!taskHideDone)}
-                        className={`text-[10px] font-black uppercase rounded px-2.5 py-1 border transition-colors ${taskHideDone ? 'bg-amber-600 text-white border-amber-500' : 'bg-slate-700 text-slate-300 border-slate-600'}`}
-                      >
-                        {taskHideDone ? 'Showing Pending Only' : 'Showing All Statuses'}
-                      </button>
-
-                    </div>
-                  </div>
-
-                  {/* Tasks List */}
-                  {tasks.length === 0 ? (
-                    <div className="p-12 text-center text-slate-400 text-xs italic bg-slate-50/50">
-                      No pending tasks created or assigned yet. Fill in the form on the left to schedule assignments.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse min-w-[900px]">
-                        <thead>
-                          <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                            <th className="p-4 w-[100px]">Date Created</th>
-                            <th className="p-4 min-w-[420px]">Task Details</th>
-                            <th className="p-4 w-[100px]">Dateline / Due</th>
-                            <th className="p-4 w-[90px] text-center">Status</th>
-                            <th className="p-4 w-[130px]">Assigned By / To</th>
-                            <th className="p-4 w-[80px] text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-150 text-slate-700 font-sans text-xs">
-                          {[...tasks]
-                            .filter(t => !taskHideDone || t.status !== 'Done')
-                            .sort((a, b) => {
-                              if (taskSortBy === 'dateline') {
-                                return new Date(a.dateline || 0).getTime() - new Date(b.dateline || 0).getTime();
-                              }
-                              const timeDiff = new Date(b.dateCreated || 0).getTime() - new Date(a.dateCreated || 0).getTime();
-                              if (timeDiff === 0) {
-                                return (b.createdAt || 0) - (a.createdAt || 0);
-                              }
-                              return timeDiff;
-                            })
-                            .map((t) => {
-                              const isCompleted = t.status === 'Done';
-                              return (
-                                <tr 
-                                  key={t.id} 
-                                  className={`hover:bg-slate-50/50 transition-colors ${t.isHidden ? 'opacity-30' : ''} ${t.isDuplicate ? 'bg-blue-50/10' : ''}`}
-                                >
-                                  <td className="p-4 font-mono font-bold text-slate-400 align-top">
-                                    {t.dateCreated}
-                                  </td>
-                                  <td className="p-4 align-top">
-                                    {(() => {
-                                      const isExpanded = expandedTaskIds.has(t.id);
-                                      const { summary, fields } = parseTaskDetail(t.detail || '');
-                                      const hasStructuredFields = fields.length > 0;
-                                      const isLong = !hasStructuredFields && (t.detail || '').length > 160;
-
-                                      return (
-                                        <div className="min-w-[420px] max-w-[640px]">
-                                          <p className={`font-bold text-slate-800 leading-snug break-words ${isCompleted ? 'text-slate-400 line-through decoration-slate-300' : ''} ${!hasStructuredFields && !isExpanded && isLong ? 'line-clamp-2' : ''}`}>
-                                            {summary}
-                                          </p>
-
-                                          {hasStructuredFields && isExpanded && (
-                                            <dl className={`mt-2 space-y-1.5 border-l-2 pl-3 ${isCompleted ? 'border-slate-200' : 'border-blue-200'}`}>
-                                              {fields.map((f, i) => (
-                                                <div key={i} className="grid grid-cols-[130px_1fr] gap-x-2 text-[11px] leading-snug">
-                                                  <dt className={`font-black uppercase tracking-wide ${isCompleted ? 'text-slate-300' : 'text-slate-400'}`}>
-                                                    {f.label}
-                                                  </dt>
-                                                  <dd className={`font-semibold break-words ${isCompleted ? 'text-slate-400 line-through decoration-slate-300' : 'text-slate-600'}`}>
-                                                    {f.value}
-                                                  </dd>
-                                                </div>
-                                              ))}
-                                            </dl>
-                                          )}
-
-                                          {(hasStructuredFields || isLong) && (
-                                            <button
-                                              type="button"
-                                              onClick={() => toggleTaskExpanded(t.id)}
-                                              className="mt-1.5 text-[10px] font-black uppercase tracking-wider text-blue-600 hover:text-blue-800 flex items-center gap-0.5"
-                                            >
-                                              {isExpanded ? (
-                                                <>Show less <ChevronUp className="w-3 h-3" /></>
-                                              ) : (
-                                                <>{hasStructuredFields ? `+${fields.length} details` : 'Show more'} <ChevronDown className="w-3 h-3" /></>
-                                              )}
-                                            </button>
-                                          )}
-
-                                          {t.isDuplicate && (
-                                            <span className="inline-block mt-1.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-indigo-50 border border-indigo-200 text-indigo-700 font-mono">
-                                              Received Copy
-                                            </span>
-                                          )}
-                                        </div>
-                                      );
-                                    })()}
-                                  </td>
-                                  <td className="p-4 font-mono text-red-600 font-extrabold align-top">
-                                    {t.dateline}
-                                  </td>
-                                  <td className="p-4 text-center align-top">
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        const newStatus = t.status === 'Done' ? 'Not done' : 'Done';
-                                        const updated = tasks.map(item => {
-                                          if (item.id === t.id) {
-                                            return { ...item, status: newStatus };
-                                          }
-                                          return item;
-                                        });
-                                        setTasks(updated);
-                                        localStorage.setItem(`next_tasks_${rep.id}`, JSON.stringify(updated));
-                                        try {
-                                          await updateDoc(doc(db, 'tasks', t.id), { status: newStatus });
-                                        } catch (err) {
-                                          console.error("Error updating task status:", err);
-                                        }
-                                      }}
-                                      className={`px-3 py-1 rounded-full font-black text-[9px] uppercase tracking-widest cursor-pointer transition-all ${isCompleted ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}
-                                    >
-                                      {t.status}
-                                    </button>
-                                  </td>
-                                  <td className="p-4 align-top space-y-1">
-                                    <div className="text-[10px]">
-                                      <span className="text-slate-400 font-bold font-mono">BY:</span>{' '}
-                                      <span className="font-extrabold text-slate-700">{t.assignedBy}</span>
-                                    </div>
-                                    <div className="text-[10px]">
-                                      <span className="text-slate-400 font-bold font-mono">TO:</span>{' '}
-                                      <span className="font-extrabold text-blue-600">{t.assignedTo}</span>
-                                    </div>
-                                  </td>
-                                  <td className="p-4 text-right align-top">
-                                    <div className="flex items-center justify-end gap-1.5">
-                                      {/* Hide/Unhide Option */}
-                                      <button
-                                        type="button"
-                                        onClick={async () => {
-                                          const nextHidden = !t.isHidden;
-                                          const updated = tasks.map(item => {
-                                            if (item.id === t.id) {
-                                              return { ...item, isHidden: nextHidden };
-                                            }
-                                            return item;
-                                          });
-                                          setTasks(updated);
-                                          localStorage.setItem(`next_tasks_${rep.id}`, JSON.stringify(updated));
-                                          try {
-                                            await updateDoc(doc(db, 'tasks', t.id), { isHidden: nextHidden });
-                                          } catch (err) {
-                                            console.error("Error updating task visibility:", err);
-                                          }
-                                        }}
-                                        className="text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-                                        title={t.isHidden ? 'Unhide Task' : 'Hide Task'}
-                                      >
-                                        {t.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                      </button>
-
-                                      {/* Delete Task Option */}
-                                      <button
-                                        type="button"
-                                        onClick={async () => {
-                                          if (window.confirm("Are you sure you want to delete this task?")) {
-                                            setPreviousTasks(JSON.parse(JSON.stringify(tasks)));
-                                            setTaskUndoMessage("Task deleted successfully.");
-                                            const updated = tasks.filter(item => item.id !== t.id);
-                                            setTasks(updated);
-                                            localStorage.setItem(`next_tasks_${rep.id}`, JSON.stringify(updated));
-                                            try {
-                                              await deleteDoc(doc(db, 'tasks', t.id));
-                                            } catch (err) {
-                                              console.error("Error deleting task:", err);
-                                            }
-                                          }
-                                        }}
-                                        className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-                                        title="Delete Task"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                </div>
-
-              </div>
-
-            </div>
+            <TasksPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenDeals={() => handleSubTabChange('pipeline')} />
           ) : (
             /* DYNAMIC GOOGLE LINK VIEW FOR OTHER PAGES */
             <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-xs text-center space-y-6 min-h-[420px] flex flex-col justify-center items-center">

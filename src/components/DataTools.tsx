@@ -16,13 +16,13 @@ const LINKED_COLLECTIONS: { name: string; label: string }[] = [
 ];
 
 // Data Joel chose to clear (2026-10-16): everything old except KPI history (month_kpis), which he keeps.
+// Tasks were taken off this list on 2026-10-17: the new To-do screen uses them.
 const CLEAR_COLLECTIONS: { name: string; label: string }[] = [
   { name: 'appointments', label: 'Appointments' },
   { name: 'admin_records', label: 'Admin checklists' },
   { name: 'payments', label: 'Payment vouchers' },
   { name: 'client_payments', label: 'Client payments' },
   { name: 'events', label: 'Calendar events' },
-  { name: 'tasks', label: 'Tasks' },
   { name: 'project_pls', label: 'P&L sheets' },
   { name: 'links', label: 'Saved Google links' },
 ];
@@ -244,7 +244,7 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
       <section className="rounded-2xl border border-line bg-white p-5">
         <h3 className="flex items-center gap-2 font-bold"><Trash2 className="h-4 w-4 text-danger" /> Clear old data</h3>
         <p className="mt-1 text-[15px] leading-relaxed text-ink-soft">
-          Removes the old data you agreed to drop, so the rebuilt screens start clean. Your clients, venues, trainers, programmes, quotations, deals, course outlines, KPI history, checklists, HRDC queries and money records are kept.
+          Removes the old data you agreed to drop, so the rebuilt screens start clean. Your clients, venues, trainers, programmes, quotations, deals, course outlines, KPI history, checklists, HRDC queries, money records and to-do tasks are kept.
         </p>
         {clearCounts === null ? (
           <p className="mt-4 flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Counting…</p>
