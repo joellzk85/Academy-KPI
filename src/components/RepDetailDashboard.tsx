@@ -4,7 +4,7 @@ import { getRepMetrics } from '../initialData';
 import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
 import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3, CheckSquare, Square, FolderCheck, Search, Layers, CheckCheck } from 'lucide-react';
 import QuotationsPage from './QuotationsPage';
-import CourseOutlineGenerator from './CourseOutlineGenerator';
+import CourseOutlinesPage from './CourseOutlinesPage';
 import AdminRecordManager from './AdminRecordManager';
 import ClientManager from './ClientManager';
 import TrainerManager from './TrainerManager';
@@ -1178,45 +1178,11 @@ export default function RepDetailDashboard({
     }
   };
 
-  // Creates a bare-bones draft Course Outline directly linked to this Won pipeline deal,
-  // then switches to the Course Outline tab so the rep can flesh it out.
-  const handleCreateOutlineForPipeline = async (p: any) => {
-    const newId = `outline_${Date.now()}`;
-    const newObj = {
-      id: newId,
-      refNumber: `CO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      date: new Date().toISOString().substring(0, 10),
-      courseTitle: p.courseName || 'New Professional Course Outline',
-      durationDays: 1,
-      totalHours: 7,
-      category: 'Software Engineering',
-      level: 'Intermediate',
-      audience: 'Working professionals seeking technical skills.',
-      prerequisites: 'Basic knowledge of the course topic.',
-      overview: 'Provide a brief summary detailing the key learning journeys, industry relevances, and targeted skill upgrades here.',
-      outcomes: ['List learning outcome #1 here'],
-      items: [{
-        id: `module_1_${Date.now()}`,
-        no: 1,
-        moduleTitle: 'Module 1: Foundations',
-        topics: '• Key Concept 1\n• Hands-on Project Part A',
-        duration: '3 Hours',
-        methodology: 'Hands-on training'
-      }],
-      preparedBy: rep.name,
-      creatorId: rep.id,
-      ownerId: rep.id,
-      ownerName: rep.name,
-      preparedForCompany: p.client || '',
-      clientId: p.clientId || '',
-      pipelineId: p.id
-    };
-    try {
-      await setDoc(doc(db, 'course_outlines', newId), newObj);
-      setActiveSubTab('course_outline');
-    } catch (err) {
-      console.error('Create course outline for pipeline failed:', err);
-    }
+  // "Create outline" on a deal: open Course outlines at "Start from" for that deal (nothing is saved until Save).
+  const [outlineStartDeal, setOutlineStartDeal] = useState<any | null>(null);
+  const handleCreateOutlineForPipeline = (p: any) => {
+    setOutlineStartDeal(p);
+    setActiveSubTab("course_outline");
   };
 
   // Real-time Firestore sync for pipelines
@@ -2029,7 +1995,7 @@ export default function RepDetailDashboard({
           {activeSubTab === 'quotation' ? (
             <QuotationsPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenTab={(t) => handleSubTabChange(t as SubTab)} />
           ) : activeSubTab === 'course_outline' ? (
-            <CourseOutlineGenerator key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
+            <CourseOutlinesPage key={rep.id} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => setOutlineStartDeal(null)} onOpenTab={(t) => handleSubTabChange(t as SubTab)} />
           ) : activeSubTab === 'admin_record' ? (
             <AdminRecordManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'client' ? (

@@ -273,6 +273,17 @@ What was built:
   - Add/edit form: the same fields as before (company name, industry, HRDC registered, address; contact name, job title, phone, email; notes). Only the company name is required. A duplicate company name is refused, with an "Open it" link.
   - **Only Management can delete a client** (Joel), and only when no deal or quotation uses it. `clients` now has its own rule in `firestore.rules` (any member reads, adds, edits; delete Management only) and was taken out of the catch-all list. **Rules need publishing.**
   - Removed: the four stat boxes, the dark control panel, sort drop-down, undo banner and the old "View 360" pop-up (it read old appointments, admin records and payments).
+- **Course outlines redesign (2026-10-17, Joel: "similar to quotation"):** `src/components/CourseOutlinesPage.tsx` replaced `CourseOutlineGenerator.tsx` (deleted). It works the same way as quotations.
+  - **List**: search, Mine / Shared with me (plus Everyone's for Admin and Management), Show hidden, and a ⋯ menu (Open, Duplicate, Hide, Delete). Each row shows title, ref, Draft/Sent, client, "N days · M modules", date and owner.
+  - **New outline**: 1) "Which deal is this for?": any open or won deal, since outlines often go with the proposal, or "general outline, not for a client". 2) "Start from": blank, or a copy of an earlier outline, with the same programme listed first. So a programme's modules are typed once and reused.
+  - "Create outline" on a deal opens step 2 for that deal (`outlineStartDeal` in `RepDetailDashboard.tsx`). Nothing is saved until Save.
+  - **Editor** (one column): 1 Deal and client (read live; a general outline has a typed "Prepared for"), 2 Course details, 3 Overview and learning outcomes (one per line), 4 Modules (title, duration, method, topics; add, remove, reorder), 5 Share with teammates.
+    - The course title follows the deal's programme name (`useProgrammeName`) unless "Type a different title" is clicked.
+    - The bottom bar has Save, Preview, Download PDF and Mark as sent (locks; Revise unlocks).
+  - Live details come from `src/lib/outlineResolve.ts` (`resolveOutline`): company from the client list, title from the deal's programme, owner from the deal. New references are `CO/YYYYMMDD/NN`.
+  - **Printout**: `src/components/CourseOutlineDocument.tsx`, the old layout unchanged (minus the editor hint text).
+  - Removed: the 4 layout modes, split view, the made-up "Web Technologies" sample modules, pagination, undo banner and the old tagging that made copies (replaced by `sharedWithIds`).
+  - **Rules:** `course_outlines` now has its own rule like quotations (own, shared, tagged, or Admin and Management; old outlines with no owner stay open) and left the catch-all list. **Rules need publishing.**
 - **Still open from the tidy-up:**
   - **Old "P&L" tab retired** (Joel, 2026-10-16): its button, screen and demo-data writer were removed, and a saved 'pl' tab redirects to Deals. Its state and handlers (`projectPLs`, `getDefaultProjectPLs`, tabulation helpers) are still in `RepDetailDashboard.tsx` but can no longer be reached. Delete them during the screen redesign. Old `project_pls` data stays until cleared in Data tools.
   - **"Admin work" moved (Joel, 2026-10-16):** it is no longer in the top bar. It is a shortcut on My home, shown only to Admin and Management, with a "Back to My home" link.

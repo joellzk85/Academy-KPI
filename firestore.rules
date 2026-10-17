@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion)
+// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion + course outlines)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -150,6 +150,24 @@ service cloud.firestore {
         || (isMember() && request.auth.uid in quotePeople(resource.data));
     }
 
+    // Course outlines: same as quotations. Reps change their own, ones shared with them, or ones they're
+    // asked to help on; Admin and Management can change any. Old outlines with no owner stay open.
+    match /course_outlines/{outlineId} {
+      function outlinePeople(d) {
+        return [d.get('ownerId', ''), d.get('creatorId', '')];
+      }
+      allow read: if isMember();
+      allow create: if isStaff()
+        || (isMember() && request.auth.uid in outlinePeople(request.resource.data));
+      allow update: if isStaff()
+        || (isMember() && (request.auth.uid in outlinePeople(resource.data)
+                           || resource.data.get('taggedRepId', '') == request.auth.uid
+                           || request.auth.uid in resource.data.get('sharedWithIds', [])
+                           || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == '')));
+      allow delete: if isStaff()
+        || (isMember() && request.auth.uid in outlinePeople(resource.data));
+    }
+
     // My home: each person saves only their own card choice.
     match /user_prefs/{memberId} {
       allow read, write: if isMember() && request.auth.uid == memberId;
@@ -179,7 +197,7 @@ service cloud.firestore {
     match /{coll}/{docId=**} {
       allow read, write: if isMember() && coll in [
         'admin_records', 'appointments', 'client_payments',
-        'course_outlines', 'events', 'links', 'payments',
+        'events', 'links', 'payments',
         'project_pls', 'tasks',
         'trainers_directory', 'venues_directory'
       ];

@@ -214,6 +214,13 @@ export interface CourseOutline {
   preparedForCompany?: string;
   clientId?: string;
   pipelineId?: string;
+  // Redesign (2026-10-17): read live from the deal while a draft, locked copy once sent.
+  useProgrammeName?: boolean;   // course title = the deal's programme name (else courseTitle as typed)
+  status?: 'draft' | 'sent';
+  sentAt?: string;
+  sentById?: string;
+  sentByName?: string;
+  sharedWithIds?: string[];     // teammates who can open and edit this same outline
 }
 
 export interface Client {
