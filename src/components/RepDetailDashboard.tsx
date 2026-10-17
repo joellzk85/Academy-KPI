@@ -7,7 +7,6 @@ import QuotationsPage from './QuotationsPage';
 import CourseOutlinesPage from './CourseOutlinesPage';
 import TasksPage from './TasksPage';
 import { needsDoingNow } from '../lib/tasks';
-import AdminRecordManager from './AdminRecordManager';
 import ClientManager from './ClientManager';
 import TrainerManager from './TrainerManager';
 import VenueManager from './VenueManager';
@@ -305,12 +304,15 @@ export default function RepDetailDashboard({
   viewer,
   onOpenAdminWork
 }: RepDetailDashboardProps) {
-  // The old payment, P&L and appointment screens were retired; anyone left on them lands on Deals.
+  // The old payment, P&L, appointment and Admin records screens were retired; anyone left on them,
+  // however they got there, lands on Deals.
+  const RETIRED_TABS: SubTab[] = ['payment', 'client_payments', 'pl', 'appointments', 'admin_record'];
   const savedSubTab = (): SubTab => {
     const saved = localStorage.getItem(`next_active_subtab_${rep.id}`) as SubTab | null;
-    return saved === 'payment' || saved === 'client_payments' || saved === 'pl' || saved === 'appointments' || saved === 'admin_record' ? 'pipeline' : saved || 'kpi';
+    return saved && RETIRED_TABS.includes(saved) ? 'pipeline' : saved || 'kpi';
   };
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>(savedSubTab);
+  const [chosenSubTab, setActiveSubTab] = useState<SubTab>(savedSubTab);
+  const activeSubTab: SubTab = RETIRED_TABS.includes(chosenSubTab) ? 'pipeline' : chosenSubTab;
   const [subTabHistory, setSubTabHistory] = useState<SubTab[]>(() => [savedSubTab()]);
 
   const handleSubTabChange = (newTab: SubTab) => {
@@ -1999,8 +2001,6 @@ export default function RepDetailDashboard({
             <QuotationsPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenTab={(t) => handleSubTabChange(t as SubTab)} />
           ) : activeSubTab === 'course_outline' ? (
             <CourseOutlinesPage key={rep.id} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => setOutlineStartDeal(null)} onOpenTab={(t) => handleSubTabChange(t as SubTab)} />
-          ) : activeSubTab === 'admin_record' ? (
-            <AdminRecordManager key={rep.id} rep={rep} reps={reps} requestManagerPermission={requestManagerPermission} />
           ) : activeSubTab === 'client' ? (
             <ClientManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
           ) : activeSubTab === 'trainerList' ? (
