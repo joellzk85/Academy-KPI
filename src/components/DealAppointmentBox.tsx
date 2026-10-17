@@ -5,6 +5,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { FUNDING_LABELS, FundingType, dealStage, dealValue, formatDate, statusForStage, todayIso } from '../lib/deals';
 import { ApptMode, DealAppointment, MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import { ProgrammePicker } from './Programmes';
+import { dealContact } from '../lib/contacts';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -178,7 +179,7 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
     date: held?.date || (a?.status === 'booked' ? a.date : todayIso()),
     time: a?.time || '',
     mode: (a?.mode || 'face') as ApptMode,
-    metWith: held?.metWith || (client?.contactName && client.contactName !== 'N/A' ? client.contactName : ''),
+    metWith: held?.metWith || dealContact(deal, client)?.name || '',
     programmeId: deal.programmeId || '',
     trainingDate: /^\d{4}-\d{2}-\d{2}/.test(deal.trainingDate || '') ? deal.trainingDate.slice(0, 10) : '',
     participants: deal.participants ? String(deal.participants) : '',

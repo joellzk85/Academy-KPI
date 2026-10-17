@@ -11,6 +11,7 @@
 
 import { Quotation, QuotationItem } from '../types';
 import { dealOwnerId, formatDate } from './deals';
+import { dealContact } from './contacts';
 
 // Standard terms and conditions printed on every quotation unless edited.
 export const DEFAULT_TERMS = [
@@ -65,8 +66,8 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
   const attnOverride = (q.attnOverride || '').trim();
   if (client) {
     out.company = client.companyName || '';
-    // The client's contact person, unless a different PIC was typed for this quotation.
-    out.attn = attnOverride || (client.contactName && client.contactName !== 'N/A' ? client.contactName : '');
+    // The deal's attention person (else the client's main contact), unless a different PIC was typed for this quotation.
+    out.attn = attnOverride || dealContact(deal, client)?.name || '';
     out.address = client.address || '';
     if (!out.address) issues.push(`${out.company || 'This client'} has no address in the client list.`);
     if (!out.attn) issues.push(`${out.company || 'This client'} has no contact person in the client list.`);

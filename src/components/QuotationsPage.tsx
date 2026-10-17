@@ -9,6 +9,7 @@ import { STAGE_LABELS, canQuote, dealOwnerId, dealStage, dealValue, formatDate, 
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
+import { dealContact } from '../lib/contacts';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import { linkedOnly } from '../lib/linked';
 
@@ -493,7 +494,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
               <AttentionBox
                 value={shownQ.attn}
                 override={q.attnOverride || ''}
-                clientContact={r.client.contactName && r.client.contactName !== 'N/A' ? r.client.contactName : ''}
+                clientContact={dealContact(r.deal, r.client)?.name || ''}
                 locked={locked}
                 onChange={v => set({ attnOverride: v })}
               />

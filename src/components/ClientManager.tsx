@@ -6,6 +6,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, formatDate, formatRM } from '../lib/deals';
 import { MoneyIn } from '../lib/money';
 import { linkedOnly } from '../lib/linked';
+import { Contact, clientContacts, mainContactFields, newContactId } from '../lib/contacts';
 
 // Clients (redesigned 2026-10-17): one shared list, the same details as before.
 // Anyone can add and edit; only Management can delete, and only a client no deal or quotation uses.
@@ -26,9 +27,11 @@ const btnPrimary =
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
+// Contact persons (PICs): a client can have several (Joel, 2026-10-17). The first is the main one.
+const emptyContact = (): Contact => ({ id: newContactId(), name: '', designation: '', phone: '', email: '' });
 const emptyForm = () => ({
   companyName: '', industry: '', address: '', hrdcRegistered: true,
-  contactName: '', designation: '', phone: '', email: '', notes: '',
+  contacts: [emptyContact()] as Contact[], notes: '',
 });
 type Form = ReturnType<typeof emptyForm>;
 
@@ -91,7 +94,7 @@ export default function ClientManager({ rep, reps, viewer }: ClientManagerProps)
   const visible = useMemo(() => {
     const q = norm(search);
     const list = q
-      ? clients.filter(c => [c.companyName, c.contactName, c.phone, c.email, c.industry].some(v => norm(v).includes(q)))
+      ? clients.filter(c => [c.companyName, c.industry, ...clientContacts(c).flatMap(p => [p.name, p.phone, p.email])].some(v => norm(v).includes(q)))
       : clients;
     return [...list].sort((a, b) => (a.companyName || '').localeCompare(b.companyName || '', 'en', { sensitivity: 'base' }));
   }, [clients, search]);
@@ -106,7 +109,7 @@ export default function ClientManager({ rep, reps, viewer }: ClientManagerProps)
   const startEdit = (c: Client) => {
     setForm({
       companyName: c.companyName || '', industry: c.industry || '', address: c.address || '', hrdcRegistered: !!c.hrdcRegistered,
-      contactName: shown(c.contactName), designation: c.designation || '', phone: c.phone || '', email: c.email || '', notes: c.notes || '',
+      contacts: clientContacts(c).length ? clientContacts(c) : [emptyContact()], notes: c.notes || '',
     });
     setFormError(''); setDupId(null); setEditing(c.id);
   };
@@ -119,12 +122,16 @@ export default function ClientManager({ rep, reps, viewer }: ClientManagerProps)
     if (!name) return setFormError('Enter the company name.');
     const dup = clients.find(c => c.id !== editing && norm(c.companyName) === norm(name));
     if (dup) { setDupId(dup.id); return setFormError(`"${dup.companyName}" is already in the client list.`); }
-    const email = form.email.trim();
-    if (email && !/^\S+@\S+\.\S+$/.test(email)) return setFormError('That email address doesn\'t look right.');
+    const contacts = form.contacts
+      .map(p => ({ id: p.id || newContactId(), name: (p.name || '').trim(), designation: (p.designation || '').trim(), phone: (p.phone || '').trim(), email: (p.email || '').trim() }))
+      .filter(p => p.name || p.phone || p.email);
+    if (contacts.some(p => !p.name)) return setFormError('Every contact person needs a name.');
+    const badEmail = contacts.find(p => p.email && !/^\S+@\S+\.\S+$/.test(p.email));
+    if (badEmail) return setFormError(`${badEmail.name}'s email address doesn't look right.`);
 
     const details = {
       companyName: name, industry: form.industry.trim(), address: form.address.trim(), hrdcRegistered: form.hrdcRegistered,
-      contactName: form.contactName.trim(), designation: form.designation.trim(), phone: form.phone.trim(), email, notes: form.notes.trim(),
+      contacts, ...mainContactFields(contacts), notes: form.notes.trim(),
     };
     setBusy(true);
     try {
@@ -270,26 +277,30 @@ export default function ClientManager({ rep, reps, viewer }: ClientManagerProps)
                 </div>
               </fieldset>
 
-              <fieldset className="space-y-4">
-                <legend className="mb-3 text-[15px] font-bold">Contact person</legend>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className={label} htmlFor="c-contact">Name</label>
-                    <input id="c-contact" value={form.contactName} onChange={e => set({ contactName: e.target.value })} className={input} />
-                  </div>
-                  <div>
-                    <label className={label} htmlFor="c-designation">Job title</label>
-                    <input id="c-designation" value={form.designation} onChange={e => set({ designation: e.target.value })} placeholder="e.g. HR Manager" className={input} />
-                  </div>
-                  <div>
-                    <label className={label} htmlFor="c-phone">Phone</label>
-                    <input id="c-phone" type="tel" value={form.phone} onChange={e => set({ phone: e.target.value })} placeholder="e.g. 012-345 6789" className={input} />
-                  </div>
-                  <div>
-                    <label className={label} htmlFor="c-email">Email</label>
-                    <input id="c-email" type="email" value={form.email} onChange={e => set({ email: e.target.value })} className={input} />
-                  </div>
-                </div>
+              <fieldset className="space-y-3">
+                <legend className="mb-1 text-[15px] font-bold">Contact persons</legend>
+                <p className="text-sm text-ink-soft">The first is the main contact. Deals pick their attention person from this list.</p>
+                {form.contacts.map((p, i) => {
+                  const setP = (patch: Partial<Contact>) => set({ contacts: form.contacts.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+                  return (
+                    <div key={p.id} className="rounded-xl border border-line p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-ink-soft">{i === 0 ? 'Main contact' : `Contact ${i + 1}`}</span>
+                        <span className="flex gap-3 text-sm font-semibold">
+                          {i > 0 && <button type="button" className="text-accent hover:underline" onClick={() => set({ contacts: [p, ...form.contacts.filter((_, k) => k !== i)] })}>Make main</button>}
+                          {form.contacts.length > 1 && <button type="button" className="text-danger hover:underline" onClick={() => set({ contacts: form.contacts.filter((_, k) => k !== i) })}>Remove</button>}
+                        </span>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <input value={p.name} onChange={e => setP({ name: e.target.value })} placeholder="Name" aria-label={`Contact ${i + 1} name`} className={input} />
+                        <input value={p.designation || ''} onChange={e => setP({ designation: e.target.value })} placeholder="Job title, e.g. HR Manager" aria-label={`Contact ${i + 1} job title`} className={input} />
+                        <input type="tel" value={p.phone || ''} onChange={e => setP({ phone: e.target.value })} placeholder="Phone, e.g. 012-345 6789" aria-label={`Contact ${i + 1} phone`} className={input} />
+                        <input type="email" value={p.email || ''} onChange={e => setP({ email: e.target.value })} placeholder="Email" aria-label={`Contact ${i + 1} email`} className={input} />
+                      </div>
+                    </div>
+                  );
+                })}
+                <button type="button" className={btnSecondary} onClick={() => set({ contacts: [...form.contacts, emptyContact()] })}><Plus className="h-4 w-4" /> Add another contact person</button>
               </fieldset>
 
               <div>
@@ -323,9 +334,7 @@ function ClientPanel(props: {
   canDelete: boolean; busy: boolean; error: string; onClose: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   const { client: c, deals, quotes } = props;
-  const contact = shown(c.contactName);
-  const phone = shown(c.phone);
-  const wa = phone ? whatsappLink(phone) : '';
+  const contacts = clientContacts(c);
   const dealIds = new Set(deals.map(d => d.id));
   const money = props.moneyIn.filter(m => dealIds.has(m.dealId));
   const invoiced = money.reduce((s, m) => s + (Number(m.amount) || 0), 0);
@@ -345,18 +354,28 @@ function ClientPanel(props: {
 
       <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>
 
-      {/* Contact */}
+      {/* Contact persons */}
       <section className="rounded-xl border border-line p-4">
-        <h4 className="text-sm font-semibold text-ink-soft">Contact person</h4>
-        {contact || phone || c.email ? (
-          <>
-            <p className="mt-1 font-semibold">{contact || 'No name'}{c.designation ? <span className="font-normal text-ink-soft">, {c.designation}</span> : null}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className={btnSecondary}><Phone className="h-4 w-4" /> {phone}</a>}
-              {wa && <a href={wa} target="_blank" rel="noreferrer" className={btnSecondary}><MessageCircle className="h-4 w-4" /> WhatsApp</a>}
-              {c.email && <a href={`mailto:${c.email}`} className={btnSecondary}><Mail className="h-4 w-4" /> {c.email}</a>}
-            </div>
-          </>
+        <h4 className="text-sm font-semibold text-ink-soft">Contact person{contacts.length === 1 ? '' : 's'}</h4>
+        {contacts.length ? (
+          <ul className="mt-1 divide-y divide-line">
+            {contacts.map((p, i) => {
+              const phone = shown(p.phone);
+              const wa = phone ? whatsappLink(phone) : '';
+              return (
+                <li key={p.id} className="py-2.5">
+                  <p className="font-semibold">{p.name}{p.designation ? <span className="font-normal text-ink-soft">, {p.designation}</span> : null}{i === 0 && contacts.length > 1 && <span className="ml-2 rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Main</span>}</p>
+                  {(phone || p.email) && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {phone && <a href={`tel:${phone.replace(/\s/g, '')}`} className={btnSecondary}><Phone className="h-4 w-4" /> {phone}</a>}
+                      {wa && <a href={wa} target="_blank" rel="noreferrer" className={btnSecondary}><MessageCircle className="h-4 w-4" /> WhatsApp</a>}
+                      {p.email && <a href={`mailto:${p.email}`} className={btnSecondary}><Mail className="h-4 w-4" /> {p.email}</a>}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         ) : (
           <p className="mt-1 text-[15px] text-ink-soft">No contact details yet. Click Edit details to add them.</p>
         )}

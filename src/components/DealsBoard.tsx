@@ -20,6 +20,8 @@ import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
 import { HrdcQuery, Programme, grantBlockReason } from '../lib/programmes';
 import { linkedOnly } from '../lib/linked';
+import { clientContacts, dealContact, mainContactFields, newContactId } from '../lib/contacts';
+import PickOrType from './PickOrType';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -55,6 +57,10 @@ const STAGE_TONE: Record<DealStage, string> = {
 
 const emptyForm = () => ({
   clientId: '',
+  contactId: '',          // attention person: one of the client's contact persons…
+  contactName: '',        // …or typed
+  contactPhone: '',
+  saveContact: true,      // save a typed person to the client's contact list
   programmeId: '',
   courseName: '',
   type: 'Training',
@@ -193,6 +199,10 @@ export default function DealsBoard({
   const startEdit = (p: any) => {
     setForm({
       clientId: p.clientId && clients.some(c => c.id === p.clientId) ? p.clientId : '',
+      contactId: p.contactId || '',
+      contactName: p.contactId ? '' : (p.contactName || ''),
+      contactPhone: '',
+      saveContact: true,
       programmeId: p.programmeId && programmes.some(x => x.id === p.programmeId) ? p.programmeId : '',
       courseName: courseOf(p),
       type: p.type || 'Training',
@@ -230,12 +240,29 @@ export default function DealsBoard({
     try {
       const existing = editing && editing !== 'new' ? deals.find(p => p.id === editing) : null;
       const id = existing ? existing.id : `pipe_${Date.now()}`;
+      // Attention person: one of the client's contact persons, or typed (and, if ticked, added to the client's list).
+      const people_ = clientContacts(client);
+      let contactId = people_.some(x => x.id === form.contactId) ? form.contactId : '';
+      let contactName = '';
+      const typed = form.contactName.trim();
+      if (!contactId && typed) {
+        const same = people_.find(x => x.name.trim().toLowerCase() === typed.toLowerCase());
+        if (same) contactId = same.id;
+        else if (form.saveContact) {
+          const added = { id: newContactId(), name: typed, designation: '', phone: form.contactPhone.trim(), email: '' };
+          const next = [...people_, added];
+          await setDoc(doc(db, 'clients', client.id), { contacts: next, ...mainContactFields(next) }, { merge: true });
+          contactId = added.id;
+        } else contactName = typed;
+      }
       const changes: string[] = [];
       if (existing && dealOwnerId(existing) !== newOwner.id) changes.push(`Owner changed to ${newOwner.name}`);
       const data: any = {
         id,
         clientId: client.id,
         client: client.companyName,
+        contactId,
+        contactName,
         programmeId: programme.id,
         courseName: programme.name,
         type: form.type,
@@ -569,9 +596,33 @@ export default function DealsBoard({
                   value={form.clientId}
                   legacyName={editing !== 'new' ? deals.find(p => p.id === editing)?.client : ''}
                   viewer={viewer}
-                  onChange={id => setForm(f => ({ ...f, clientId: id }))}
+                  onChange={id => setForm(f => ({ ...f, clientId: id, contactId: clientContacts(clients.find(c => c.id === id))[0]?.id || '', contactName: '', contactPhone: '' }))}
                 />
               </div>
+              {form.clientId && (() => {
+                const client = clients.find(c => c.id === form.clientId);
+                const people_ = clientContacts(client);
+                const typedNew = !form.contactId && form.contactName.trim() !== '' && !people_.some(x => x.name.trim().toLowerCase() === form.contactName.trim().toLowerCase());
+                return (
+                  <div>
+                    <label htmlFor="d-attn" className={label}>Attention to <span className="font-normal text-ink-soft">(the person at the client)</span></label>
+                    <PickOrType id="d-attn" options={people_.map(x => ({ id: x.id, name: x.name, hint: x.designation || undefined }))}
+                      linkedId={form.contactId} text={form.contactName}
+                      onChange={v => setForm(f => ({ ...f, contactId: v.id, contactName: v.id ? '' : v.text }))}
+                      placeholder={people_.length ? 'Pick from the list or type a name' : 'Type the name'} className={input}
+                      note={form.contactId ? `From ${client?.companyName || 'the client'}'s contacts` : undefined} />
+                    {typedNew && (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <input value={form.contactPhone} onChange={e => setForm(f => ({ ...f, contactPhone: e.target.value }))} placeholder="Their phone (optional)" aria-label="Attention person's phone" className={input} />
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.saveContact} onChange={e => setForm(f => ({ ...f, saveContact: e.target.checked }))} className="h-4 w-4 accent-[#0E6E62]" />
+                          Add to {client?.companyName || 'the client'}'s contact persons
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div>
                 <span className={label}>Programme</span>
                 <ProgrammePicker
@@ -800,7 +851,7 @@ function DealPanel(props: {
         <Detail term="Proposal sent" value={formatDate(p.proposalSentDate) || 'Not yet'} />
         <Detail term="Next follow-up" value={formatDate(p.followUpDate) || 'Not set'} />
         {st === 'won' && <Detail term="Won on" value={formatDate(dealWonDate(p))} />}
-        {props.client && <Detail term="Contact" value={[props.client.contactName, props.client.phone].filter(Boolean).join(', ') || '—'} />}
+        {props.client && (() => { const pic = dealContact(p, props.client); return <Detail term="Attention to" value={pic ? [pic.name + (pic.designation ? ` (${pic.designation})` : ''), pic.phone].filter(Boolean).join(', ') : '—'} />; })()}
         {props.client && <Detail term="HRDC registered" value={props.client.hrdcRegistered ? 'Yes' : 'No'} />}
       </dl>
       {props.programme && (
@@ -992,7 +1043,7 @@ function ClientPicker({ clients, value, legacyName, viewer, onChange }: {
       <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-3 py-2">
         <span className="min-w-0">
           <span className="block truncate font-semibold">{selected.companyName}</span>
-          {selected.contactName && <span className="block truncate text-sm text-ink-soft">{selected.contactName}</span>}
+          {selected.industry && <span className="block truncate text-sm text-ink-soft">{selected.industry}</span>}
         </span>
         <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => { setOpen(true); setQueryText(''); }}>Change</button>
       </div>

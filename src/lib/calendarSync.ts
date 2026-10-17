@@ -6,6 +6,7 @@
 // Each item has a fixed Google event id made from its CRM key, so syncing twice never makes duplicates.
 
 import { dealOwnerId, dealStage } from './deals';
+import { dealContact } from './contacts';
 import { MODE_LABELS } from './appointments';
 import { ChecklistTask, dealVenue, effectiveTrainer } from './checklist';
 import { parseTimeRange, trainingTimeOf } from './trainingTime';
@@ -99,7 +100,8 @@ export function buildDesired(s: SyncData): GoogleItem[] {
     const owner = nameOf(dealOwnerId(d));
     const prog = programmeName(d);
     const client = clientOf(d);
-    const contact = client ? [client.contactName, client.phone].filter((x: any) => x && x !== 'N/A').join(', ') : '';
+    const pic = client ? dealContact(d, client) : null;
+    const contact = pic ? [pic.name, pic.phone].filter(Boolean).join(', ') : '';
 
     // 2. Deal appointments (booked or held), at the booked time
     const a = d.appointment;
