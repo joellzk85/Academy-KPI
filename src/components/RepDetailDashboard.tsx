@@ -17,6 +17,7 @@ import { buildQuotationForDeal } from '../lib/dealDocs';
 import { dealNeedsAttention, dealOwnerId, todayIso } from '../lib/deals';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { linkedOnly } from '../lib/linked';
 
 interface RepDetailDashboardProps {
   rep: Representative;
@@ -1154,12 +1155,12 @@ export default function RepDetailDashboard({
     const unsubQ = onSnapshot(query(collection(db, 'quotations')), (snap) => {
       const list: any[] = [];
       snap.forEach(d => list.push({ ...d.data(), id: d.id }));
-      setQuotationsForPipelines(list);
+      setQuotationsForPipelines(linkedOnly(list));
     });
     const unsubO = onSnapshot(query(collection(db, 'course_outlines')), (snap) => {
       const list: any[] = [];
       snap.forEach(d => list.push({ ...d.data(), id: d.id }));
-      setOutlinesForPipelines(list);
+      setOutlinesForPipelines(linkedOnly(list));
     });
     return () => {
       unsubQ();
@@ -1197,7 +1198,8 @@ export default function RepDetailDashboard({
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const firestorePipes: any[] = [];
       snapshot.forEach((docSnap) => {
-        firestorePipes.push({ ...docSnap.data(), id: docSnap.id });
+        const p = { ...docSnap.data(), id: docSnap.id };
+        if (linkedOnly([p]).length) firestorePipes.push(p);
       });
 
       if (firestorePipes.length > 0) {

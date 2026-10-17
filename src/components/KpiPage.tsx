@@ -6,6 +6,7 @@ import { Representative } from '../types';
 import { AUTO_SOURCE_LABELS, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, takesTyped, weekIndexOf } from '../lib/kpi';
 import { useKpiSources } from '../lib/useKpiSources';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
+import { linkedOnly } from '../lib/linked';
 
 // The KPI page (redesigned 2026-10-16).
 // - Numbers: automatic KPIs are counted from deals (or, for Admin, HRDC claims recorded and venues
@@ -58,7 +59,7 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
 }) {
   const [deals, setDeals] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => onSnapshot(query(collection(db, 'pipelines')), s => { setDeals(s.docs.map(d => ({ ...d.data(), id: d.id }))); setLoaded(true); }, () => setLoaded(true)), []);
+  useEffect(() => onSnapshot(query(collection(db, 'pipelines')), s => { setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))); setLoaded(true); }, () => setLoaded(true)), []);
   const sources = useKpiSources();
 
   const isMe = !viewer || viewer.id === rep.id;

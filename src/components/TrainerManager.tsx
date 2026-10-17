@@ -6,6 +6,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealStage, formatDate, formatRM, todayIso } from '../lib/deals';
 import { ChecklistTask } from '../lib/checklist';
 import { Booking, trainerBookings } from '../lib/trainers';
+import { linkedOnly } from '../lib/linked';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -44,6 +45,9 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const [trainers, setTrainers] = useState<Trainer[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
+  // Every record, including old ones not linked yet (hidden on screen), so nothing they use can be deleted.
+  const [allDeals, setAllDeals] = useState<any[]>([]);
+  const [allQuotes, setAllQuotes] = useState<any[]>([]);
   const [checklists, setChecklists] = useState<Record<string, any>>({});
   const [clients, setClients] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -61,8 +65,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   useEffect(() => {
     const subs = [
       onSnapshot(query(collection(db, 'trainers_directory')), s => { setTrainers(s.docs.map(d => ({ ...(d.data() as Trainer), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
-      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'pipelines')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllDeals(all); setDeals(linkedOnly(all)); }),
+      onSnapshot(query(collection(db, 'quotations')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllQuotes(all); setQuotes(linkedOnly(all)); }),
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
@@ -138,7 +142,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
 
   // ---------- Delete (Management only) ----------
   const usedOn = (t: Trainer) => {
-    const inQuotes = quotes.filter(q => (q.items || []).some((it: any) => it.trainerId === t.id)).length;
+    const inQuotes = allQuotes.filter(q => (q.items || []).some((it: any) => it.trainerId === t.id)).length;
     const inChecklists = Object.values(checklists).filter((c: any) => (c.tasks || []).some((x: ChecklistTask) => x.kind === 'trainer' && x.trainerId === t.id)).length;
     return { inQuotes, inChecklists };
   };

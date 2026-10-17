@@ -8,6 +8,7 @@ import {
   MONEY_STATUS_LABELS, ProjectRow, TRAINING_STATUS_LABELS, costsByCategory, inPeriod, projectRows, projectTotals,
 } from '../lib/projectPL';
 import { useMoneySettings } from './Money';
+import { linkedOnly } from '../lib/linked';
 
 // Management → Project P&L (2026-10-17). One row per won deal (training session), worked out
 // live from the deal's money in and money out (lib/projectPL.ts). Invoices, claims and costs are
@@ -37,7 +38,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'money_in')), s => setIns(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
       onSnapshot(query(collection(db, 'money_out')), s => setOuts(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))),
-      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
       onSnapshot(query(collection(db, 'project_pl')), s => setPlDocs(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
     ];
     return () => subs.forEach(u => u());

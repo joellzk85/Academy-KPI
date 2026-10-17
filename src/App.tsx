@@ -47,6 +47,7 @@ import { metricsFor } from './lib/kpi';
 import { appointmentEvents } from './lib/appointments';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
 import { runBackup } from './lib/backupApi';
+import { linkedOnly, setLinkedTeam } from './lib/linked';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -183,6 +184,8 @@ export default function App() {
 // The CRM itself (only runs after a successful login).
 // ============================================================
 function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; teamMembers: TeamMember[] }) {
+  // Old records not linked to a Team member yet are hidden everywhere (lib/linked.ts).
+  setLinkedTeam(teamMembers.map(m => m.id));
   const isManagement = currentMember.role === 'management';
   const isRep = currentMember.role === 'rep';
   const isStaff = !isRep; // Admin or Management
@@ -405,7 +408,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     const unsubscribePipes = onSnapshot(collection(db, 'pipelines'), (snapshot) => {
       const pipes: any[] = [];
       snapshot.forEach((docSnap) => {
-        pipes.push({ ...docSnap.data(), id: docSnap.id });
+        const p = { ...docSnap.data(), id: docSnap.id };
+        if (linkedOnly([p]).length) pipes.push(p);
       });
       if (pipes.length > 0) {
         pipes.sort((a, b) => b.id.localeCompare(a.id));
@@ -456,7 +460,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     const unsubscribeQuotes = onSnapshot(collection(db, 'quotations'), (snapshot) => {
       const quotes: any[] = [];
       snapshot.forEach((docSnap) => {
-        quotes.push({ ...docSnap.data(), id: docSnap.id });
+        const q = { ...docSnap.data(), id: docSnap.id };
+        if (linkedOnly([q]).length) quotes.push(q);
       });
       if (quotes.length > 0) {
         quotes.sort((a, b) => a.id.localeCompare(b.id));
@@ -472,7 +477,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     const unsubscribeOutlines = onSnapshot(collection(db, 'course_outlines'), (snapshot) => {
       const cos: any[] = [];
       snapshot.forEach((docSnap) => {
-        cos.push({ ...docSnap.data(), id: docSnap.id });
+        const o = { ...docSnap.data(), id: docSnap.id };
+        if (linkedOnly([o]).length) cos.push(o);
       });
       if (cos.length > 0) {
         cos.sort((a, b) => a.id.localeCompare(b.id));

@@ -19,6 +19,7 @@ import MoneyPanel, { RepMoneyStatus, useMoneySettings } from './Money';
 import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
 import { HrdcQuery, Programme, grantBlockReason } from '../lib/programmes';
+import { linkedOnly } from '../lib/linked';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -105,10 +106,10 @@ export default function DealsBoard({
 
   useEffect(() => {
     const subs = [
-      onSnapshot(query(collection(db, 'pipelines')), s => { setDeals(s.docs.map(d => ({ ...d.data(), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
+      onSnapshot(query(collection(db, 'pipelines')), s => { setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))); setLoaded(true); }, () => setLoaded(true)),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(query(collection(db, 'course_outlines')), s => setOutlines(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
+      onSnapshot(query(collection(db, 'course_outlines')), s => setOutlines(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
       onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),

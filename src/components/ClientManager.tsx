@@ -5,6 +5,7 @@ import { Representative, Client } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, formatDate, formatRM } from '../lib/deals';
 import { MoneyIn } from '../lib/money';
+import { linkedOnly } from '../lib/linked';
 
 // Clients (redesigned 2026-10-17): one shared list, the same details as before.
 // Anyone can add and edit; only Management can delete, and only a client no deal or quotation uses.
@@ -45,6 +46,9 @@ export default function ClientManager({ rep, reps, viewer }: ClientManagerProps)
   const [clients, setClients] = useState<Client[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
+  // Every record, including old ones not linked yet (hidden on screen), so nothing they use can be deleted.
+  const [allDeals, setAllDeals] = useState<any[]>([]);
+  const [allQuotes, setAllQuotes] = useState<any[]>([]);
   const [moneyIn, setMoneyIn] = useState<MoneyIn[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -61,8 +65,8 @@ export default function ClientManager({ rep, reps, viewer }: ClientManagerProps)
   useEffect(() => {
     const subs = [
       onSnapshot(query(collection(db, 'clients')), s => { setClients(s.docs.map(d => ({ ...(d.data() as Client), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
-      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'pipelines')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllDeals(all); setDeals(linkedOnly(all)); }),
+      onSnapshot(query(collection(db, 'quotations')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllQuotes(all); setQuotes(linkedOnly(all)); }),
       onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
     ];
     return () => subs.forEach(u => u());
@@ -72,10 +76,10 @@ export default function ClientManager({ rep, reps, viewer }: ClientManagerProps)
   const personName = (id: string) => reps.find(r => r.id === id)?.name || (id === viewer.id ? viewer.name : 'Former team member');
 
   // A client's deals: linked by clientId, or older deals typed with the same company name.
-  const dealsOf = (c: Client) => deals.filter(p => p.clientId === c.id || (!p.clientId && norm(p.client) === norm(c.companyName)));
-  const quotesOf = (c: Client) => {
-    const ids = new Set(dealsOf(c).map(p => p.id));
-    return quotes.filter(q => q.clientId === c.id || (q.pipelineId && ids.has(q.pipelineId)) || (!q.clientId && !q.pipelineId && norm(q.company) === norm(c.companyName)));
+  const dealsOf = (c: Client, list = deals) => list.filter(p => p.clientId === c.id || (!p.clientId && norm(p.client) === norm(c.companyName)));
+  const quotesOf = (c: Client, list = quotes, dealList = deals) => {
+    const ids = new Set(dealsOf(c, dealList).map(p => p.id));
+    return list.filter(q => q.clientId === c.id || (q.pipelineId && ids.has(q.pipelineId)) || (!q.clientId && !q.pipelineId && norm(q.company) === norm(c.companyName)));
   };
 
   const dealCount = useMemo(() => {
@@ -144,7 +148,7 @@ export default function ClientManager({ rep, reps, viewer }: ClientManagerProps)
   // ---------- Delete (Management only) ----------
   const remove = async (c: Client) => {
     setPanelError('');
-    const nd = dealsOf(c).length, nq = quotesOf(c).length;
+    const nd = dealsOf(c, allDeals).length, nq = quotesOf(c, allQuotes, allDeals).length;
     if (nd || nq) {
       const parts = [nd ? `${nd} deal${nd === 1 ? '' : 's'}` : '', nq ? `${nq} quotation${nq === 1 ? '' : 's'}` : ''].filter(Boolean);
       return setPanelError(`This client can't be deleted because ${parts.join(' and ')} use${nd + nq === 1 ? 's' : ''} it.`);

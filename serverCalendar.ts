@@ -12,6 +12,7 @@
 import type { Express } from 'express';
 import { admin, UserError, callerFrom, managementFrom, route } from './serverAuth';
 import { TIME_ZONE, buildDesired, googleIdFor, signature, GoogleItem } from './src/lib/calendarSync';
+import { ownedByTeam } from './src/lib/linked';
 
 const API = 'https://www.googleapis.com/calendar/v3';
 const METADATA = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default';
@@ -98,7 +99,9 @@ async function loadSyncData() {
   ]);
   const checklists: Record<string, any> = {};
   checklistDocs.forEach((c: any) => { checklists[c.id] = c; });
-  return { events, deals, checklists, quotes, clients, programmes, venues, trainers, team: team.map((t: any) => ({ id: t.id, name: t.name || '' })) };
+  // Old deals and quotations not linked to a Team member yet stay off the calendar (src/lib/linked.ts).
+  const teamIds = new Set<string>(team.map((t: any) => t.id));
+  return { events, deals: deals.filter((d: any) => ownedByTeam(d, teamIds)), checklists, quotes: quotes.filter((q: any) => ownedByTeam(q, teamIds)), clients, programmes, venues, trainers, team: team.map((t: any) => ({ id: t.id, name: t.name || '' })) };
 }
 
 function eventBody(item: GoogleItem, id: string) {

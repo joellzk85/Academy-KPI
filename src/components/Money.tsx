@@ -8,6 +8,7 @@ import {
   canDecide, dealPL, expectedFor, isPaid, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
+import { linkedOnly } from '../lib/linked';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -375,7 +376,7 @@ export function MoneyOverview({ viewer }: { viewer: Viewer }) {
 
   useEffect(() => {
     const subs = [
-      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'money_in')), s => setIns(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
       onSnapshot(query(collection(db, 'money_out')), s => setOuts(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))),

@@ -5,6 +5,7 @@ import { Representative, Venue } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealStage, formatDate, todayIso } from '../lib/deals';
 import { VenueBooking, phoneIn, venueBookings } from '../lib/venues';
+import { linkedOnly } from '../lib/linked';
 
 // Venues (redesigned 2026-10-17, like Clients and Trainers): one shared list, the same details as before.
 // Status is only Available / Under renovation: bookings show by themselves from the deals (Joel removed "Booked").
@@ -47,6 +48,9 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
+  // Every record, including old ones not linked yet (hidden on screen), so nothing they use can be deleted.
+  const [allDeals, setAllDeals] = useState<any[]>([]);
+  const [allQuotes, setAllQuotes] = useState<any[]>([]);
   const [checklists, setChecklists] = useState<Record<string, any>>({});
   const [clients, setClients] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -64,8 +68,8 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
   useEffect(() => {
     const subs = [
       onSnapshot(query(collection(db, 'venues_directory')), s => { setVenues(s.docs.map(d => ({ ...(d.data() as Venue), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
-      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'pipelines')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllDeals(all); setDeals(linkedOnly(all)); }),
+      onSnapshot(query(collection(db, 'quotations')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllQuotes(all); setQuotes(linkedOnly(all)); }),
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
@@ -141,7 +145,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
   // ---------- Delete (Management only) ----------
   const remove = async (v: Venue) => {
     setPanelError('');
-    const inQuotes = quotes.filter(q => q.venueId === v.id).length;
+    const inQuotes = allQuotes.filter(q => q.venueId === v.id).length;
     const inChecklists = Object.values(checklists).filter((c: any) => (c.tasks || []).some((x: any) => x.kind === 'venue' && x.venueId === v.id)).length;
     if (inQuotes || inChecklists) {
       const parts = [inQuotes ? `${inQuotes} quotation${inQuotes === 1 ? '' : 's'}` : '', inChecklists ? `${inChecklists} admin checklist${inChecklists === 1 ? '' : 's'}` : ''].filter(Boolean);

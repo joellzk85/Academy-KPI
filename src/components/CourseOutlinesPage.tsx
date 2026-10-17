@@ -8,6 +8,7 @@ import { CourseOutline, CourseOutlineItem, Representative } from '../types';
 import { STAGE_LABELS, dealOwnerId, dealStage, formatDate, todayIso } from '../lib/deals';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
 import CourseOutlineDocument from './CourseOutlineDocument';
+import { linkedOnly } from '../lib/linked';
 
 // Course outlines (redesigned 2026-10-17, like quotations).
 // An outline is made for a deal (or as a general outline with no client), starting blank or from a copy
@@ -51,10 +52,10 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
 
   useEffect(() => {
     const subs = [
-      onSnapshot(query(collection(db, 'course_outlines')), s => { setOutlines(s.docs.map(d => ({ ...(d.data() as CourseOutline), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
+      onSnapshot(query(collection(db, 'course_outlines')), s => { setOutlines(linkedOnly(s.docs.map(d => ({ ...(d.data() as CourseOutline), id: d.id })))); setLoaded(true); }, () => setLoaded(true)),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
     ];
     return () => subs.forEach(u => u());
   }, []);

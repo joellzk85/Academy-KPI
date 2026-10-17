@@ -5,6 +5,7 @@ import { Representative } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { dealOwnerId, dealStage, formatDate, todayIso } from '../lib/deals';
 import { GROUP_LABELS, GROUP_ORDER, Task, TaskGroup, assigneeOf, assignerOf, isDone, isRealTask, taskGroup } from '../lib/tasks';
+import { linkedOnly } from '../lib/linked';
 
 // To-do (redesigned 2026-10-17). One shared task per job (no copies): quick add at the top,
 // "My to-do" / "I asked others" / "Everyone's" (Management), grouped by when it's due.
@@ -50,7 +51,7 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
   useEffect(() => {
     const subs = [
       onSnapshot(query(collection(db, 'tasks')), s => { setTasks(s.docs.map(d => ({ ...(d.data() as Task), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
-      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => subs.forEach(u => u());

@@ -10,6 +10,7 @@ import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
 import PickOrType, { nameOptions } from './PickOrType';
+import { linkedOnly } from '../lib/linked';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
 // A quotation is made for a deal (or a client). While it's a draft, the client's details, programme,
@@ -60,12 +61,12 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
 
   useEffect(() => {
     const subs = [
-      onSnapshot(query(collection(db, 'quotations')), s => { setQuotes(s.docs.map(d => ({ ...(d.data() as Quotation), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
+      onSnapshot(query(collection(db, 'quotations')), s => { setQuotes(linkedOnly(s.docs.map(d => ({ ...(d.data() as Quotation), id: d.id })))); setLoaded(true); }, () => setLoaded(true)),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'trainers_directory')), s => setTrainers(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
     ];
     return () => subs.forEach(u => u());
   }, []);
