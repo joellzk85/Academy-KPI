@@ -35,6 +35,7 @@ import Logo from './components/Logo';
 const HomeDashboard = React.lazy(() => import('./components/HomeDashboard'));
 const RepDetailDashboard = React.lazy(() => import('./components/RepDetailDashboard'));
 const ManagementDashboard = React.lazy(() => import('./components/ManagementDashboard'));
+const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
 const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
@@ -212,7 +213,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   };
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [managementView, setManagementView] = useState<'dashboard' | 'team' | 'data'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'pl' | 'team' | 'data'>('dashboard');
   const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks'>('queue');
 
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
@@ -882,7 +883,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['pl', 'Project P&L'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -900,6 +901,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 <TeamManager currentMember={currentMember} teamMembers={teamMembers} />
               ) : managementView === 'data' ? (
                 <DataTools teamMembers={teamMembers} />
+              ) : managementView === 'pl' ? (
+                <ProjectPL pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
               ) : (
               <ManagementDashboard
                 reps={representatives}

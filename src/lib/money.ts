@@ -12,7 +12,7 @@ export type InSource = 'hrdc' | 'client';
 export type OutStatus = 'pending' | 'approved' | 'rejected' | 'paid';
 export type OutTiming = 'before' | 'after';
 
-export const OUT_CATEGORIES = ['Trainer', 'Venue', 'Hotel', 'Bus', 'Materials', 'Facilitator', 'Staff claim', 'Other'];
+export const OUT_CATEGORIES = ['Trainer', 'Venue', 'Hotel', 'Bus', 'Materials', 'Facilitator', 'Commission', 'Staff claim', 'Other'];
 
 export const OUT_STATUS_LABELS: Record<OutStatus, string> = {
   pending: 'Waiting for approval',
