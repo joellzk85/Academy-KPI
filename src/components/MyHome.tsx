@@ -72,6 +72,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const today = todayIso();
   const checklistSettings = useChecklistSettings();
   const moneySettings = useMoneySettings();
+  const [showFullCalendar, setShowFullCalendar] = useState(false);
   const [checklists, setChecklists] = useState<Record<string, any>>({});
   const [queries, setQueries] = useState<HrdcQuery[]>([]);
   const [moneyIn, setMoneyIn] = useState<MoneyIn[]>([]);
@@ -153,9 +154,12 @@ export default function MyHome({ viewer, people, representatives, deals, events,
 
       {/* 1. Calendar (small) and 2. Performance (one row) */}
       <div className="grid items-stretch gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <CompactCalendar events={events} today={today} full={calendar} />
+        <CompactCalendar events={events} today={today} showFull={showFullCalendar} onToggleFull={() => setShowFullCalendar(v => !v)} />
         <Performance viewer={viewer} representatives={representatives} deals={deals} today={today} />
       </div>
+
+      {/* The full calendar opens full width under the calendar and Performance row (Joel, 2026-10-17) */}
+      {showFullCalendar && <div>{calendar}</div>}
 
       {/* 3. My cards */}
       <section className="space-y-3">
@@ -352,10 +356,9 @@ function Rings({ ring, size, monthLabel = '' }: { ring: Ring; size: number; mont
 // "Add event / full calendar" opens the full calendar with Google sync.
 const DOW = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
-function CompactCalendar({ events, today, full }: { events: CalendarEvent[]; today: string; full: React.ReactNode }) {
+function CompactCalendar({ events, today, showFull, onToggleFull }: { events: CalendarEvent[]; today: string; showFull: boolean; onToggleFull: () => void }) {
   const [cursor, setCursor] = useState(() => ({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) - 1 }));
   const [hover, setHover] = useState<string | null>(null);
-  const [showFull, setShowFull] = useState(false);
   const first = new Date(cursor.y, cursor.m, 1);
   const lead = (first.getDay() + 6) % 7;   // weeks start on Monday
   const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
@@ -403,10 +406,9 @@ function CompactCalendar({ events, today, full }: { events: CalendarEvent[]; tod
           </>
         ) : <p className="text-ink-soft">Point at a date to see its events.</p>}
       </div>
-      <button type="button" className="mt-2 text-sm font-semibold text-accent hover:underline" onClick={() => setShowFull(v => !v)}>
+      <button type="button" className="mt-2 text-sm font-semibold text-accent hover:underline" onClick={onToggleFull}>
         {showFull ? 'Hide full calendar' : 'Add event / full calendar'}
       </button>
-      {showFull && <div className="mt-3">{full}</div>}
     </section>
   );
 }
