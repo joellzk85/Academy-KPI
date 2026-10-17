@@ -503,7 +503,7 @@ export default function DealsBoard({
       {/* Deal panel */}
       {openDeal && !editing && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
-          <div className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <DealPanel
               deal={openDeal}
               clientName={clientName(openDeal)}
@@ -554,7 +554,7 @@ export default function DealsBoard({
       {/* Create / edit form */}
       {editing && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true">
-          <div className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-xl">
+          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl">
             <div className="mb-5 flex items-start justify-between gap-4">
               <h3 className="text-lg font-bold">{editing === 'new' ? 'New deal' : 'Edit deal'}</h3>
               <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>

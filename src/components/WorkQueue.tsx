@@ -264,7 +264,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
 
       {openDeal && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
-          <div className="h-full w-full max-w-xl space-y-5 overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] space-y-5 overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <h3 className="truncate text-lg font-bold">{clientName(openDeal)}</h3>
