@@ -11,7 +11,7 @@ import { CalendarEvent, Representative } from '../types';
 import {
   OPEN_STAGES, STAGE_LABELS, DealStage, journeyStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
 } from '../lib/deals';
-import { metricsFor, countAuto } from '../lib/kpi';
+import { metricsFor, countAuto, monthKpi } from '../lib/kpi';
 import { checklistFlags, daysUntil, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
 import { MoneyIn, MoneyOut, canDecide, dealPL, isPaid, moneyFlags } from '../lib/money';
@@ -79,6 +79,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const [checklists, setChecklists] = useState<Record<string, any>>({});
   const [queries, setQueries] = useState<HrdcQuery[]>([]);
   const [moneyIn, setMoneyIn] = useState<MoneyIn[]>([]);
+  const [venues, setVenues] = useState<any[]>([]);
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
@@ -95,6 +96,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
       onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
+      onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(doc(db, 'user_prefs', viewer.id), s => {
         const c = s.data()?.homeCards, l = s.data()?.homeLayout;
@@ -146,7 +148,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const wonDeals = useMemo(() => deals.filter(p => dealStage(p) === 'won'), [deals]);
   const mine = (p: any) => dealOwnerId(p) === viewer.id;
   const ctx: CardCtx = {
-    viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, programmes, representatives,
+    viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, programmes, representatives, venues,
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices,
   };
 
@@ -490,7 +492,7 @@ function CompactCalendar({ events, today, showFull, onToggleFull }: { events: Ca
 // ---------- Cards ----------
 type CardCtx = {
   viewer: Viewer; today: string; deals: any[]; wonDeals: any[]; checklists: Record<string, any>; queries: HrdcQuery[];
-  moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; programmes: any[]; representatives: Representative[];
+  moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; programmes: any[]; representatives: Representative[]; venues: any[];
   checklistSettings: any; moneySettings: any; nameOf: (id: string) => string; clientName: (p: any) => string;
   openDeal: (p: any) => void; nav: MyHomeNav; mine: (p: any) => boolean; notices: React.ReactNode;
 };
@@ -590,11 +592,9 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       const me = c.representatives.find(r => r.id === c.viewer.id);
       if (!me) return { items: [], empty: 'You have no KPI set.' };
       const monthKey = `${MONTH_ABBR[Number(c.today.slice(5, 7)) - 1]}-${c.today.slice(2, 4)}`;
-      const rows = metricsFor(me).map(m => {
-        const typed = Array.isArray((me.kpi as any)?.[m.key]) ? (me.kpi as any)[m.key].reduce((t: number, x: number) => t + (Number(x) || 0), 0) : 0;
-        const value = m.auto ? countAuto(m.auto, c.deals, me.id, monthKey) : typed;
-        return { m, value, p: pct(value, m.targetVal) };
-      });
+      // Same counting as the KPI page (lib/kpi.ts monthKpi).
+      const rows = monthKpi(me, c.deals, monthKey, { claims: c.moneyIn, venues: c.venues }).rows
+        .map(({ m, total }) => ({ m, value: total, p: pct(total, m.targetVal) }));
       return {
         items: [], empty: '',
         footer: (

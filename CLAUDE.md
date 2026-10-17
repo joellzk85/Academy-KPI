@@ -106,9 +106,15 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `sales_standard` | Closing RM 60%, Appointment 20%, Proposal 20% | all from deals |
 | `sales_public` | Closing RM 60%, Appointment 20%, Public Programme pax 20% | last one typed weekly |
 | `sales_trainer` | Closing RM 50%, Preview 17%, Proposal 17%, Trainer Opportunity Day 16% | last one typed weekly; Preview counts appointments, as before |
-| `admin_ops` | Perf. rating 50%, Claim submission 40%, Venue database 10% | all typed weekly |
+| `admin_ops` | Perf. rating 50%, Claim submission 40%, Venue database 10% | rating typed weekly; claims and venues automatic plus typed (see below) |
 
-The defaults are `sales_standard` for reps and `admin_ops` for admins until Management picks a template. Later, Claim submission can switch to automatic from Phase 2B/3 claim tracking; flag it to Joel when you get there.
+The defaults are `sales_standard` for reps and `admin_ops` for admins until Management picks a template.
+
+**Admin's claims and venues are automatic (Joel, 2026-10-17), with typed extras added on top:**
+- **Claim submission** counts the HRDC claims (`money_in`, source hrdc) the person **recorded** (`createdById`), by submission date (`invoiceDate`). Client invoices don't count. Older claims without `createdById` aren't counted.
+- **Venue database** counts the venues the person **added** (`venues_directory.createdBy`), by the Malaysian date of `createdAt`.
+- Both have `plusTyped` in `KPI_TEMPLATES`: "Key in weekly numbers" still works for them, and typed numbers are **added** to the automatic count (the KPI page shows "N automatic + M typed"). Performance rating stays typed only.
+- Counting is in `countAuto`/`monthKpi` (`lib/kpi.ts`, sources from `useKpiSources`), shared by the KPI page, Team performance and My home's "My KPI" card. `withoutAutoKpis` in `App.tsx` keeps typed numbers for `plusTyped` KPIs.
 
 ### Data policy (agreed)
 

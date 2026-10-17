@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Gauge, KeyRound, Loader2, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
 import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { KPI_TEMPLATES, templateById, defaultTemplateIdFor, metricsFor } from '../lib/kpi';
+import { AUTO_SOURCE_LABELS, KPI_TEMPLATES, templateById, defaultTemplateIdFor, metricsFor } from '../lib/kpi';
 import { db, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember, TeamRole, ROLE_LABELS } from '../types';
 
@@ -471,7 +471,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
               <div key={m.key} className="flex items-center justify-between gap-3">
                 <label htmlFor={`kt-${m.key}`} className="text-sm font-semibold">
                   {m.label}
-                  <span className="block font-normal text-ink-soft">{m.targetLabel}{m.auto ? ', from deals' : ', typed in weekly'}</span>
+                  <span className="block font-normal text-ink-soft">{m.targetLabel}{!m.auto ? ', typed in weekly' : m.plusTyped ? `, ${AUTO_SOURCE_LABELS[m.auto]} plus typed` : `, ${AUTO_SOURCE_LABELS[m.auto]}`}</span>
                 </label>
                 <input
                   id={`kt-${m.key}`}

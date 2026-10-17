@@ -3,12 +3,14 @@ import { collection, onSnapshot, query } from 'firebase/firestore';
 import { Check, HandHelping, Loader2, Pencil, UserCheck } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { Representative } from '../types';
-import { metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, weekIndexOf } from '../lib/kpi';
+import { AUTO_SOURCE_LABELS, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, takesTyped, weekIndexOf } from '../lib/kpi';
+import { useKpiSources } from '../lib/useKpiSources';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 
 // The KPI page (redesigned 2026-10-16).
-// - Numbers: automatic KPIs are counted from deals; typed KPIs (e.g. Admin's rating, claims,
-//   venues) are keyed in per week. Saved per person per month in month_kpis (via onUpdateRepKpi).
+// - Numbers: automatic KPIs are counted from deals (or, for Admin, HRDC claims recorded and venues
+//   added); typed KPIs (e.g. Admin's rating) are keyed in per week. Admin's claims and venues also
+//   take typed numbers, added on top of the automatic count. Saved per person per month in month_kpis (via onUpdateRepKpi).
 // - Weekly check-in: what I got done, where I need help, target date, accountability partner,
 //   and teammates I'd like help from. Stored in the same per-week lists as before, so old entries show.
 // - "Done" on a teammate's request is saved in the helper's own month doc (helpDoneList) because
@@ -57,6 +59,7 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
   const [deals, setDeals] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => onSnapshot(query(collection(db, 'pipelines')), s => { setDeals(s.docs.map(d => ({ ...d.data(), id: d.id }))); setLoaded(true); }, () => setLoaded(true)), []);
+  const sources = useKpiSources();
 
   const isMe = !viewer || viewer.id === rep.id;
   const canEdit = isMe || (viewer && viewer.role !== 'rep');
@@ -65,8 +68,8 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
   const thisMonth = monthPrefix(selectedMonth) === todayIso().slice(0, 7);
 
   // Shared with Management's Team performance (lib/kpi.ts), so both show the same numbers.
-  const { rows, score } = monthKpi(rep, deals, selectedMonth);
-  const typed = metrics.filter(m => !m.auto);
+  const { rows, score } = monthKpi(rep, deals, selectedMonth, sources);
+  const typed = metrics.filter(takesTyped);
 
   const save = (changes: Record<string, any>) => onUpdateRepKpi(rep.id, { ...JSON.parse(JSON.stringify(rep.kpi || {})), ...changes });
   const fmt = (isRM: boolean, v: number) => (isRM ? formatRM(v) : String(Math.round(v * 10) / 10));
@@ -100,11 +103,14 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
           <p className="mt-4 flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Counting from deals…</p>
         ) : (
           <ul className="mt-4 space-y-3">
-            {rows.map(({ m, total, pct }) => (
+            {rows.map(({ m, total, pct, autoTotal, typedTotal }) => (
               <li key={m.key}>
                 <div className="flex flex-wrap justify-between gap-2 text-[15px]">
-                  <span className="font-semibold">{m.label} <span className="text-sm font-normal text-ink-soft">({m.auto ? 'from deals' : 'typed in weekly'})</span></span>
-                  <span className="tabular-nums text-ink-soft"><strong className="text-ink">{fmt(m.isRM, total)}</strong> of {fmt(m.isRM, m.targetVal)} · {pct}%</span>
+                  <span className="font-semibold">{m.label} <span className="text-sm font-normal text-ink-soft">({!m.auto ? 'typed in weekly' : m.plusTyped ? `${AUTO_SOURCE_LABELS[m.auto]}, plus any typed` : AUTO_SOURCE_LABELS[m.auto]})</span></span>
+                  <span className="tabular-nums text-ink-soft">
+                    <strong className="text-ink">{fmt(m.isRM, total)}</strong> of {fmt(m.isRM, m.targetVal)} · {pct}%
+                    {m.plusTyped && typedTotal > 0 && <span className="block text-right text-xs">{fmt(m.isRM, autoTotal)} automatic + {fmt(m.isRM, typedTotal)} typed</span>}
+                  </span>
                 </div>
                 <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${pct >= 100 ? 'bg-accent' : pct >= 50 ? 'bg-[#5DB3A6]' : 'bg-attention'}`} style={{ width: `${pct}%` }} /></div>
               </li>
@@ -169,7 +175,7 @@ function WeeklyTable({ rows, typed, canEdit, kpi, fmt, onSave }: {
           </thead>
           <tbody>
             {rows.map(({ m, weeks, total }) => {
-              const editable = editing && !m.auto;
+              const editable = editing && takesTyped(m);
               return (
                 <tr key={m.key} className="border-b border-line last:border-0">
                   <td className="py-2.5 pr-3 font-semibold">{m.label}</td>
@@ -190,6 +196,12 @@ function WeeklyTable({ rows, typed, canEdit, kpi, fmt, onSave }: {
         </table>
       </div>
       {editing && typed.some(m => /rating/i.test(m.label)) && <p className="mt-2 text-sm text-ink-soft">Ratings are from 1 to 5 each week.</p>}
+      {editing && typed.some(m => m.plusTyped) && (
+        <p className="mt-1 text-sm text-ink-soft">
+          {typed.filter(m => m.plusTyped).map(m => m.label).join(' and ')} {typed.filter(m => m.plusTyped).length > 1 ? 'are' : 'is'} counted automatically.
+          Only type extras the CRM doesn't know about; they are added on top.
+        </p>
+      )}
     </section>
   );
 }

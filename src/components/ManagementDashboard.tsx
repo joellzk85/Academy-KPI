@@ -8,6 +8,7 @@ import {
   dealWonDate, formatDate, formatRM, journeyStage, todayIso,
 } from '../lib/deals';
 import { metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
+import { useKpiSources } from '../lib/useKpiSources';
 
 // Management → Dashboard: Team performance (rebuilt 2026-10-17).
 // Everything is counted from deals by the same rules as the KPI page and My home rings
@@ -55,9 +56,10 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
   }, [deals, prefix]);
 
   // ---------- Team table ----------
+  const kpiSources = useKpiSources();
   const team = useMemo(() => reps
-    .map(r => ({ rep: r, ...monthKpi(r, deals, selectedMonth) }))
-    .sort((a, b) => b.score - a.score || a.rep.name.localeCompare(b.rep.name)), [reps, deals, selectedMonth]);
+    .map(r => ({ rep: r, ...monthKpi(r, deals, selectedMonth, kpiSources) }))
+    .sort((a, b) => b.score - a.score || a.rep.name.localeCompare(b.rep.name)), [reps, deals, selectedMonth, kpiSources]);
 
   // ---------- Pipeline ----------
   const open = deals.filter(p => OPEN_JOURNEY.includes(journeyStage(dealStage(p))));

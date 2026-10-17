@@ -193,11 +193,11 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [monthKpiDocs, setMonthKpiDocs] = useState<Record<string, Representative['kpi']>>({});
 
   // Automatic KPIs (counted from deals) are never typed in, so any old typed
-  // numbers for them are ignored.
+  // numbers for them are ignored. Ones that also take typed extras (plusTyped) keep them.
   const withoutAutoKpis = (person: { id: string; role?: string; kpiTemplate?: string; targets?: any }, kpi: Representative['kpi'] | undefined) => {
     const base: any = JSON.parse(JSON.stringify(kpi || emptyKpi()));
     metricsFor(person).forEach(m => {
-      if (m.auto) base[m.key] = [0, 0, 0, 0, 0];
+      if (m.auto && !m.plusTyped) base[m.key] = [0, 0, 0, 0, 0];
       else if (!Array.isArray(base[m.key])) base[m.key] = [0, 0, 0, 0, 0];
     });
     return base as Representative['kpi'];

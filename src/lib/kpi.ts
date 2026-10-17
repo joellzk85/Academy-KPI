@@ -1,12 +1,23 @@
 // KPI templates and counting (Phase 2A).
 // Each person's KPI set is chosen by Management from these templates in the
-// Team tab. "Automatic" KPIs are counted from deals; the rest are typed in
-// weekly, exactly as before.
+// Team tab. "Automatic" KPIs are counted from deals, HRDC claims or the venue list;
+// the rest are typed in weekly, exactly as before. Some automatic KPIs also take typed
+// numbers, added on top (plusTyped: Admin's claims and venues, Joel 2026-10-17).
 
 import { dealOwnerId, dealWonDate, dealProposalDate, dealAppointmentDate, dealValue } from './deals';
 
 export type MetricKey = 'salesFigure' | 'proposals' | 'preview' | 'extraMetric';
-export type AutoSource = 'won' | 'proposals' | 'appointments' | null;
+export type AutoSource = 'won' | 'proposals' | 'appointments' | 'claims' | 'venues' | null;
+
+// Where each automatic KPI is counted from, in plain words (KPI page).
+export const AUTO_SOURCE_LABELS: Record<string, string> = {
+  won: 'from deals', proposals: 'from deals', appointments: 'from deals',
+  claims: 'HRDC claims recorded', venues: 'venues added',
+};
+
+// Lists the non-deal KPIs are counted from: money_in (HRDC claims, counted for the person who
+// recorded them, by submission date) and venues_directory (counted for who added it, by date added).
+export interface KpiSources { claims?: any[]; venues?: any[] }
 
 export interface TemplateMetric {
   key: MetricKey;
@@ -16,6 +27,7 @@ export interface TemplateMetric {
   isRM: boolean;
   weight: number;
   auto: AutoSource;
+  plusTyped?: boolean;     // automatic, plus anything typed in weekly
 }
 
 export interface KpiTemplate {
@@ -60,11 +72,11 @@ export const KPI_TEMPLATES: KpiTemplate[] = [
   {
     id: 'admin_ops',
     name: 'Admin: rating, claims, venues',
-    description: 'Performance rating 50%, Claim submission 40%, Venue database 10%. All typed in weekly.',
+    description: 'Performance rating 50% (typed in weekly), Claim submission 40% (HRDC claims they recorded, plus any typed), Venue database 10% (venues they added, plus any typed).',
     metrics: [
       { key: 'salesFigure', label: 'Perf. Rating (1-5)', targetLabel: '5 / week (25 total)', defaultTarget: 25, isRM: false, weight: 0.5, auto: null },
-      { key: 'proposals', label: 'Claim Submission', targetLabel: 'claims / month', defaultTarget: 1, isRM: false, weight: 0.4, auto: null },
-      { key: 'preview', label: 'Venue Database', targetLabel: 'venues / month', defaultTarget: 20, isRM: false, weight: 0.1, auto: null },
+      { key: 'proposals', label: 'Claim Submission', targetLabel: 'claims / month', defaultTarget: 1, isRM: false, weight: 0.4, auto: 'claims', plusTyped: true },
+      { key: 'preview', label: 'Venue Database', targetLabel: 'venues / month', defaultTarget: 20, isRM: false, weight: 0.1, auto: 'venues', plusTyped: true },
     ],
   },
 ];
@@ -126,10 +138,23 @@ export function weekIndexOf(iso: string): number {
   return 4;
 }
 
+// Malaysia date (YYYY-MM-DD) of a saved time: a number (ms) or a Firestore date.
+function dayOf(v: any): string {
+  const ms = typeof v === 'number' ? v : typeof v?.toMillis === 'function' ? v.toMillis() : typeof v === 'string' ? Date.parse(v) : NaN;
+  return Number.isFinite(ms) ? new Date(ms + 8 * 3600000).toISOString().slice(0, 10) : '';
+}
+
 // Counts one automatic KPI for a person in a month (optionally one week).
-export function countAuto(source: AutoSource, deals: any[], ownerId: string, month: string, week?: number): number {
+export function countAuto(source: AutoSource, deals: any[], ownerId: string, month: string, week?: number, sources: KpiSources = {}): number {
   if (!source) return 0;
   const prefix = monthPrefix(month);
+  const inRange = (date: string) => !!date && (!prefix || date.startsWith(prefix)) && (week === undefined || weekIndexOf(date) === week);
+  if (source === 'claims') {
+    return (sources.claims || []).filter(m => m.source === 'hrdc' && m.createdById === ownerId && inRange(String(m.invoiceDate || '').slice(0, 10))).length;
+  }
+  if (source === 'venues') {
+    return (sources.venues || []).filter(v => v.createdBy === ownerId && inRange(dayOf(v.createdAt))).length;
+  }
   let total = 0;
   for (const p of deals || []) {
     if (dealOwnerId(p) !== ownerId) continue;
@@ -141,10 +166,15 @@ export function countAuto(source: AutoSource, deals: any[], ownerId: string, mon
   return total;
 }
 
-// Automatic value for one of a person's KPI keys (0 when that KPI is typed in).
+// Automatic value for one of a person's deal-counted KPI keys (0 when that KPI is typed in).
 export function autoValueFor(rep: RepLike, key: MetricKey, deals: any[], month: string, week?: number): number {
   const metric = metricsFor(rep).find(m => m.key === key);
   return metric ? countAuto(metric.auto, deals, rep.id, month, week) : 0;
+}
+
+// Does this KPI take typed weekly numbers (typed only, or automatic plus typed)?
+export function takesTyped(m: TemplateMetric): boolean {
+  return !m.auto || !!m.plusTyped;
 }
 
 // Does this person's Closing RM come from deals? (Admins' first KPI is a rating instead.)
@@ -155,14 +185,16 @@ export function salesIsFromDeals(rep: RepLike): boolean {
 
 // One person's KPIs for a month: each KPI's weekly values, total and % of target, and the weighted score.
 // Used by the KPI page and Management's Team performance, so both always show the same numbers.
-export interface KpiRow { m: ResolvedMetric; weeks: number[]; total: number; pct: number }
-export function monthKpi(rep: RepLike & { kpi?: any }, deals: any[], month: string): { rows: KpiRow[]; score: number } {
+export interface KpiRow { m: ResolvedMetric; weeks: number[]; total: number; pct: number; autoTotal: number; typedTotal: number }
+export function monthKpi(rep: RepLike & { kpi?: any }, deals: any[], month: string, sources: KpiSources = {}): { rows: KpiRow[]; score: number } {
   const kpi: any = rep.kpi || {};
   const rows = metricsFor(rep).map(m => {
-    const weeks = [0, 1, 2, 3, 4].map(w => (m.auto ? countAuto(m.auto, deals, rep.id, month, w) : Number(kpi[m.key]?.[w]) || 0));
+    const autoWeeks = [0, 1, 2, 3, 4].map(w => (m.auto ? countAuto(m.auto, deals, rep.id, month, w, sources) : 0));
+    const typedWeeks = [0, 1, 2, 3, 4].map(w => (takesTyped(m) ? Number(kpi[m.key]?.[w]) || 0 : 0));
+    const weeks = autoWeeks.map((a, w) => a + typedWeeks[w]);
     const total = weeks.reduce((a, b) => a + b, 0);
     const pct = m.targetVal > 0 ? Math.min(100, Math.round((total / m.targetVal) * 100)) : 0;
-    return { m, weeks, total, pct };
+    return { m, weeks, total, pct, autoTotal: autoWeeks.reduce((a, b) => a + b, 0), typedTotal: typedWeeks.reduce((a, b) => a + b, 0) };
   });
   return { rows, score: Math.round(rows.reduce((t, r) => t + r.pct * r.m.weight, 0)) };
 }
