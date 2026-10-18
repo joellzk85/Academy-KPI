@@ -1,4 +1,4 @@
-// Makes a quotation PDF in the browser (2026-10-18), so it can be downloaded in one click, attached to an
+// Makes a quotation (or payment request) PDF in the browser (2026-10-18), so it can be downloaded in one click, attached to an
 // Outlook email or shared to WhatsApp. It draws the same printable layout (QuotationDocument) off screen,
 // takes a picture of it and cuts that into A4 pages, preferring a blank line as the place to cut so text
 // rows aren't split across pages.
@@ -51,7 +51,12 @@ function lastBlankRow(ctx: CanvasRenderingContext2D, from: number, to: number, w
   return -1;
 }
 
-export async function makeQuotationPdf(q: Quotation): Promise<Blob> {
+export function makeQuotationPdf(q: Quotation): Promise<Blob> {
+  return makeDocumentPdf(React.createElement(QuotationDocument, { q }), `Quotation ${q.refNumber || ''}`.trim());
+}
+
+// Any printable document whose sheet has the class "print-paper" (quotations, payment requests).
+export async function makeDocumentPdf(element: React.ReactElement, title: string): Promise<Blob> {
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas-pro'), import('jspdf')]);
 
   const host = document.createElement('div');
@@ -59,10 +64,10 @@ export async function makeQuotationPdf(q: Quotation): Promise<Blob> {
   document.body.appendChild(host);
   const root = createRoot(host);
   try {
-    root.render(React.createElement(QuotationDocument, { q }));
+    root.render(element);
     await new Promise(r => window.setTimeout(r, 150));
     const paper = host.querySelector('.print-paper') as HTMLElement | null;
-    if (!paper) throw new Error('The quotation could not be drawn.');
+    if (!paper) throw new Error('The document could not be drawn.');
     // A plain sheet: no card border, shadow or rounded corners, A4 margins.
     Object.assign(paper.style, { border: 'none', boxShadow: 'none', borderRadius: '0', minWidth: '0', maxWidth: 'none', width: `${PAGE_W_PX}px`, margin: '0', padding: '48px' });
     await inlineImages(paper);
@@ -109,7 +114,7 @@ export async function makeQuotationPdf(q: Quotation): Promise<Blob> {
       first = false;
       top = cut;
     }
-    pdf.setProperties({ title: `Quotation ${q.refNumber || ''}`.trim(), author: 'NEXT Academy' });
+    pdf.setProperties({ title, author: 'NEXT Academy' });
     return pdf.output('blob');
   } finally {
     root.unmount();

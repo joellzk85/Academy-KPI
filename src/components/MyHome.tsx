@@ -17,7 +17,7 @@ import { periodFor } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
-import { MoneyIn, MoneyOut, canDecide, dealPL, isPaid, moneyFlags } from '../lib/money';
+import { MoneyIn, MoneyOut, canDecide, dealPL, isCompanyPayment, isPaid, moneyFlags } from '../lib/money';
 import { useChecklistSettings } from './DealChecklist';
 import { useMoneySettings } from './Money';
 import { MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
@@ -845,7 +845,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           key: `${p.id}_m${i}`, title: deal(p), level: f.level, sub: f.text, onClick: () => c.nav.openAdminWork('money'),
         }));
       });
-      c.moneyOut.filter(o => o.status === 'approved').forEach(o => items.push({ key: o.id, title: `Pay ${o.payee}: ${formatRM(o.amount)}`, sub: `${o.category}, approved by ${o.decidedByName}`, onClick: () => c.nav.openAdminWork('money') }));
+      c.moneyOut.filter(o => o.status === 'approved').forEach(o => items.push({ key: o.id, title: `Pay ${o.payee}: ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment · ' : ''}${o.category}, approved by ${o.decidedByName}`, onClick: () => c.nav.openAdminWork('money') }));
       c.moneyOut.filter(o => o.status === 'rejected' && o.requestedById === c.viewer.id).forEach(o => items.push({ key: o.id, title: `Rejected: ${o.payee} ${formatRM(o.amount)}`, sub: o.rejectReason || 'See the reason and send a new request', level: 'attention', onClick: () => c.nav.openAdminWork('money') }));
       items.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : b.level === 'danger' ? 1 : a.level ? -1 : 1));
       return { items, empty: 'No money jobs waiting.' };
@@ -855,7 +855,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       return {
         items: list.map(o => {
           const p = c.deals.find(d => d.id === o.dealId);
-          return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${p ? deal(p) : 'Deal'} · requested by ${o.requestedByName}`, onClick: () => c.nav.openAdminWork('money') };
+          return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · requested by ${o.requestedByName}`, onClick: () => c.nav.openAdminWork('money') };
         }),
         empty: 'Nothing waiting for your approval.',
       };
@@ -870,6 +870,11 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         toComeIn += pl.toComeIn; toPay += pl.toPayOut; waiting += pl.pendingApproval;
         if (ymd(p.trainingDate).startsWith(month)) profitMonth += pl.profit;
         ins.filter(m => !isPaid(m) && ymd(m.invoiceDate) && -(daysUntil(ymd(m.invoiceDate), c.today) ?? 0) > c.moneySettings.overdueDays).forEach(() => { overdue++; });
+      });
+      // Company payments (not tied to a training) still need paying or approving.
+      c.moneyOut.filter(isCompanyPayment).forEach(o => {
+        if (o.status === 'approved') toPay += Number(o.amount) || 0;
+        if (o.status === 'pending') waiting += Number(o.amount) || 0;
       });
       const tile = (label: string, value: string, tone?: string) => (
         <div className="rounded-xl bg-surface px-3 py-2.5"><p className="text-xs font-semibold text-ink-soft">{label}</p><p className={`text-lg font-bold tabular-nums ${tone || ''}`}>{value}</p></div>

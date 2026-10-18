@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
-import { AlertTriangle, Check, Loader2, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, Loader2, MessageCircle, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
-  DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_CATEGORIES, OUT_STATUS_LABELS, OutStatus, OutTiming,
-  canDecide, dealPL, expectedFor, isPaid, readMoneySettings, shortfall,
+  COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_CATEGORIES, OUT_STATUS_LABELS, OutStatus, OutTiming,
+  canDecide, dealPL, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
 import { linkedOnly } from '../lib/linked';
+import { onPhone } from '../lib/whatsapp';
+import PaymentRequestDocument, { paymentRef, paymentStatusText } from './PaymentRequestDocument';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -32,6 +34,8 @@ const isHrdcDeal = (d: any) => d?.fundingType === 'hrdc' || d?.fundingType === '
 const billsClient = (d: any) => d?.fundingType === 'direct' || d?.fundingType === 'hrdc_topup';
 const num = (s: string) => Number(String(s).replace(/[^0-9.]/g, ''));
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+// Company payments are often small, so they show sen (formatRM rounds to whole ringgit).
+const formatSen = (n: number) => 'RM ' + (Number(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function useMoneySettings(): MoneySettings {
   const [s, setS] = useState<MoneySettings>(DEFAULT_MONEY_SETTINGS);
@@ -112,7 +116,7 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings }: {
         <h5 className="text-sm font-bold uppercase tracking-wide text-ink-soft">Money out</h5>
         {outs.length === 0 && !addingOut && <p className="text-[15px] text-ink-soft">No payment requests yet.</p>}
         <ul className="space-y-2">
-          {[...outs].sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt))).map(o => <OutRow key={o.id} o={o} viewer={viewer} />)}
+          {[...outs].sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt))).map(o => <OutRow key={o.id} o={o} viewer={viewer} docFor={`${deal.client || 'Client'} · ${deal.courseName || 'Training'}`} />)}
         </ul>
         {addingOut ? (
           <OutForm deal={deal} viewer={viewer} onDone={() => setAddingOut(false)} />
@@ -286,13 +290,105 @@ function OutForm({ deal, viewer, onDone }: { deal: any; viewer: Viewer; onDone: 
   );
 }
 
-export function OutRow({ o, viewer, context }: { o: MoneyOut; viewer: Viewer; context?: string; key?: string }) {
+// ---------- Payment request PDF: download, or share to WhatsApp (Joel, 2026-10-18) ----------
+// The PDF tools load only when someone makes one, like quotations.
+async function paymentPdf(o: MoneyOut, forText: string): Promise<{ blob: Blob; name: string }> {
+  const { makeDocumentPdf } = await import('../lib/quotePdf');
+  const blob = await makeDocumentPdf(React.createElement(PaymentRequestDocument, { o, forText }), `Payment request ${paymentRef(o)}`);
+  const name = `Payment request ${paymentRef(o)} - ${String(o.payee || '').replace(/[\\/:*?"<>|]+/g, '').slice(0, 60)}.pdf`;
+  return { blob, name };
+}
+
+function paymentWaText(o: MoneyOut, forText: string): string {
+  return [
+    `Payment request ${paymentRef(o)}`,
+    `${o.category} · ${forText}`,
+    `Pay to: ${o.payee}`,
+    `Total: ${formatSen(o.amount)}`,
+    `Status: ${paymentStatusText(o)}`,
+    '',
+    '(PDF attached)',
+  ].join('\n');
+}
+
+async function saveBlob(blob: Blob, name: string) {
+  const { downloadBlob } = await import('../lib/quotePdf');
+  downloadBlob(blob, name);
+}
+
+function PaymentShare({ o, forText }: { o: MoneyOut; forText: string }) {
+  const [busy, setBusy] = useState<'' | 'pdf' | 'wa'>('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [ready, setReady] = useState<File | null>(null);   // phone: PDF made, share needs one more tap
+
+  const download = async () => {
+    setBusy('pdf'); setMsg(null);
+    try { const { blob, name } = await paymentPdf(o, forText); await saveBlob(blob, name); }
+    catch (e) { setMsg({ ok: false, text: `The PDF could not be made: ${friendlyError(e)}` }); }
+    finally { setBusy(''); }
+  };
+
+  const share = async (file: File) => {
+    try {
+      await navigator.share({ files: [file], text: paymentWaText(o, forText), title: `Payment request ${paymentRef(o)}` });
+      setReady(null);
+      setMsg({ ok: true, text: 'Shared. Check it went to the right chat in WhatsApp.' });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return setReady(null);              // closed the share menu
+      if (e?.name === 'NotAllowedError') return setReady(file);          // took too long: ask for one more tap
+      setReady(null);
+      setMsg({ ok: false, text: 'Your phone could not open the share menu. Use PDF instead and attach it in WhatsApp.' });
+    }
+  };
+
+  const whatsapp = async () => {
+    setMsg(null);
+    const phone = onPhone() && typeof navigator.share === 'function';
+    // Computer: open WhatsApp first (straight from the click, so it isn't blocked); you pick the chat.
+    if (!phone) window.open(`https://wa.me/?text=${encodeURIComponent(paymentWaText(o, forText))}`, '_blank', 'noopener');
+    setBusy('wa');
+    try {
+      const { blob, name } = await paymentPdf(o, forText);
+      const file = new File([blob], name, { type: 'application/pdf' });
+      if (phone && navigator.canShare?.({ files: [file] })) { await share(file); return; }
+      await saveBlob(blob, name);
+      setMsg({ ok: true, text: phone
+        ? 'The PDF was downloaded. Open WhatsApp, pick the chat and attach it (📎, Document).'
+        : `WhatsApp opened: pick the chat, then drag "${name}" from your downloads into it and press send.` });
+    } catch (e) {
+      setMsg({ ok: false, text: `The PDF could not be made: ${friendlyError(e)}` });
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <>
+      <button type="button" disabled={!!busy} className={btnSmall} onClick={download} title="Download as PDF">
+        {busy === 'pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF
+      </button>
+      <button type="button" disabled={!!busy} className={btnSmall} onClick={whatsapp} title="Send the PDF by WhatsApp">
+        {busy === 'wa' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />} WhatsApp
+      </button>
+      {(ready || msg) && (
+        <span className="basis-full">
+          {ready && <button type="button" className={`${btnPrimary} mt-1 py-1.5`} onClick={() => share(ready)}><MessageCircle className="h-3.5 w-3.5" /> PDF ready: share now</button>}
+          {msg && <span role="status" className={`mt-1 block rounded-lg px-2.5 py-1.5 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</span>}
+        </span>
+      )}
+    </>
+  );
+}
+
+export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Viewer; context?: string; docFor?: string; key?: string }) {
   const [mode, setMode] = useState<null | 'reject' | 'pay'>(null);
   const [reason, setReason] = useState('');
   const [pay, setPay] = useState({ date: todayIso(), ref: '' });
   const { busy, error, setError, run } = useRun();
   const decide = canDecide(o, viewer);
   const isMine = o.requestedById === viewer.id;
+  const company = isCompanyPayment(o);
+  const forText = company ? 'Company payment' : docFor || context || 'Training';
 
   const approve = () => run(() => updateDoc(doc(db, 'money_out', o.id), clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' })));
   const reject = () => {
@@ -318,16 +414,25 @@ export function OutRow({ o, viewer, context }: { o: MoneyOut; viewer: Viewer; co
   return (
     <li className="rounded-xl border border-line bg-white px-3.5 py-3">
       <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[14rem] flex-1">
           {context && <p className="text-sm font-semibold text-ink-soft">{context}</p>}
           <p className="flex flex-wrap items-center gap-2 font-semibold">
-            {o.category} · {o.payee} · {formatRM(o.amount)}
+            {o.category} · {o.payee} · {company ? formatSen(o.amount) : formatRM(o.amount)}
             <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${OUT_TONE[o.status]}`}>{OUT_STATUS_LABELS[o.status]}</span>
-            <span className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-soft">{o.timing === 'before' ? 'Deposit before training' : 'After training'}</span>
+            {!company && <span className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-soft">{o.timing === 'before' ? 'Deposit before training' : 'After training'}</span>}
           </p>
+          {company && (o.items || []).length > 0 && (
+            <ul className="mt-1 text-sm text-ink">
+              {(o.items || []).map((it, i) => (
+                <li key={i} className="flex gap-2"><span className="min-w-0 flex-1">{it.description}{Number(it.qty) !== 1 ? ` × ${it.qty}` : ''}</span><span className="tabular-nums">{formatSen(Number(it.qty) * Number(it.price))}</span></li>
+              ))}
+            </ul>
+          )}
           {o.description && <p className="text-sm text-ink-soft">{o.description}</p>}
+          {company && o.neededBy && <p className="text-sm text-ink-soft">Needed by {formatDate(o.neededBy)}</p>}
+          {company && o.paymentDetails && <p className="text-sm text-ink-soft">Payment details: {o.paymentDetails}</p>}
           <p className="text-sm text-ink-soft">
-            Requested by {o.requestedByName} on {formatDate(o.requestedAt)}
+            Requested by {o.requestedByName} on {formatDate(o.requestDate || o.requestedAt)}
             {o.decidedByName && ` · ${o.status === 'rejected' ? 'rejected' : 'approved'} by ${o.decidedByName} on ${formatDate(o.decidedAt || '')}`}
             {o.status === 'rejected' && o.rejectReason ? `: ${o.rejectReason}` : ''}
             {o.status === 'paid' && ` · paid ${formatDate(o.paidDate || '')}${o.paidRef ? ` (ref ${o.paidRef})` : ''} by ${o.paidByName}`}
@@ -335,7 +440,8 @@ export function OutRow({ o, viewer, context }: { o: MoneyOut; viewer: Viewer; co
           {o.status === 'pending' && isMine && <p className="text-sm text-attention">{viewer.role === 'management' ? 'Waiting for the other manager to approve.' : 'Waiting for a manager to approve.'}</p>}
         </div>
         {viewer.role !== 'rep' && !mode && (
-          <span className="flex shrink-0 flex-wrap gap-1">
+          <span className="flex max-w-full shrink-0 flex-wrap justify-end gap-1 sm:max-w-[22rem]">
+            <PaymentShare o={o} forText={forText} />
             {decide && <button type="button" disabled={busy} className={`${btnPrimary} py-1.5`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
             {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={() => { setMode('reject'); setError(''); }}><X className="h-3.5 w-3.5" /> Reject</button>}
             {o.status === 'approved' && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setMode('pay'); setError(''); }}><Check className="h-3.5 w-3.5" /> Mark paid</button>}
@@ -366,6 +472,126 @@ export function OutRow({ o, viewer, context }: { o: MoneyOut; viewer: Viewer; co
   );
 }
 
+// ---------- Company payments: not tied to a training (Joel, 2026-10-18) ----------
+// Stored in money_out with dealId '' and kind 'company', so the same approval rules apply.
+type ItemDraft = { description: string; qty: string; price: string };
+const blankItem = (): ItemDraft => ({ description: '', qty: '1', price: '' });
+
+function CompanyForm({ viewer, onDone }: { viewer: Viewer; onDone: () => void }) {
+  const [f, setF] = useState({ requestDate: todayIso(), category: COMPANY_CATEGORIES[0], payee: '', info: '', neededBy: '', paymentDetails: '' });
+  const [items, setItems] = useState<ItemDraft[]>([blankItem()]);
+  const { busy, error, setError, run } = useRun();
+  const parsed = items.map(i => ({ description: i.description.trim(), qty: num(i.qty), price: num(i.price) }));
+  const total = itemsTotal(parsed);
+  const setItem = (i: number, ch: Partial<ItemDraft>) => setItems(list => list.map((x, j) => (j === i ? { ...x, ...ch } : x)));
+
+  const save = (e: React.FormEvent) => {
+    e.preventDefault();
+    const used = parsed.filter((it, i) => it.description || items[i].price.trim());
+    if (!f.requestDate) return setError('Enter the date of request.');
+    if (!f.payee.trim()) return setError('Enter who is being paid.');
+    if (!used.length) return setError('Add at least one item.');
+    if (used.some(it => !it.description)) return setError('Every item needs a description.');
+    if (used.some(it => !(it.qty > 0) || !(it.price > 0))) return setError('Every item needs a quantity and a price, for example 1 and 250.');
+    const amount = itemsTotal(used);
+    const id = `out_${Date.now()}`;
+    return run(async () => {
+      await setDoc(doc(db, 'money_out', id), {
+        id, dealId: '', kind: 'company', category: f.category, payee: f.payee.trim(), description: f.info.trim(), amount, timing: 'before',
+        requestDate: f.requestDate, items: used, neededBy: f.neededBy, paymentDetails: f.paymentDetails.trim(),
+        status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
+        decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
+      });
+      onDone();
+    });
+  };
+
+  return (
+    <form onSubmit={save} className="space-y-4 rounded-2xl border border-line bg-surface p-4">
+      <p className="font-semibold">Raise a company payment</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div><label className={small} htmlFor="cp-date">Date of request</label><input id="cp-date" type="date" value={f.requestDate} onChange={e => setF(x => ({ ...x, requestDate: e.target.value }))} className={input} /></div>
+        <div>
+          <label className={small} htmlFor="cp-cat">Category</label>
+          <select id="cp-cat" value={f.category} onChange={e => setF(x => ({ ...x, category: e.target.value }))} className={input}>
+            {COMPANY_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div><label className={small} htmlFor="cp-payee">Pay to</label><input id="cp-payee" value={f.payee} onChange={e => setF(x => ({ ...x, payee: e.target.value }))} className={input} placeholder="Name of person or company" /></div>
+        <div><label className={small} htmlFor="cp-need">Needed by (optional)</label><input id="cp-need" type="date" value={f.neededBy} onChange={e => setF(x => ({ ...x, neededBy: e.target.value }))} className={input} /></div>
+      </div>
+
+      <div>
+        <span className={small}>Items</span>
+        <div className="space-y-2">
+          {items.map((it, i) => (
+            <div key={i} className="grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_4rem_6.5rem_auto]">
+              <input value={it.description} onChange={e => setItem(i, { description: e.target.value })} className={`${input} col-span-3 sm:col-span-1`} placeholder="What it is, e.g. Printer toner" aria-label={`Item ${i + 1} description`} />
+              <input inputMode="decimal" value={it.qty} onChange={e => setItem(i, { qty: e.target.value.replace(/[^0-9.]/g, '') })} className={input} aria-label={`Item ${i + 1} quantity`} placeholder="Qty" />
+              <input inputMode="decimal" value={it.price} onChange={e => setItem(i, { price: e.target.value.replace(/[^0-9.]/g, '') })} className={input} aria-label={`Item ${i + 1} price each in RM`} placeholder="RM each" />
+              <button type="button" disabled={items.length === 1} onClick={() => setItems(list => list.filter((_, j) => j !== i))}
+                className="rounded-md p-1.5 text-ink-soft hover:bg-white hover:text-danger disabled:opacity-30" aria-label={`Remove item ${i + 1}`}><X className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <button type="button" className={btnSmall} onClick={() => setItems(list => [...list, blankItem()])}><Plus className="h-3.5 w-3.5" /> Add item</button>
+          <p className="text-[15px]">Total <strong className="tabular-nums">{formatSen(total)}</strong></p>
+        </div>
+      </div>
+
+      <div><label className={small} htmlFor="cp-info">Info</label><textarea id="cp-info" rows={2} value={f.info} onChange={e => setF(x => ({ ...x, info: e.target.value }))} className={input} placeholder="Why it's needed, invoice number, anything the approver should know" /></div>
+      <div><label className={small} htmlFor="cp-bank">Payment details (optional)</label><input id="cp-bank" value={f.paymentDetails} onChange={e => setF(x => ({ ...x, paymentDetails: e.target.value }))} className={input} placeholder="e.g. Maybank, account name, account number" /></div>
+
+      <p className="text-sm text-ink-soft">{viewer.role === 'management' ? 'The other manager must approve this before it can be paid.' : 'A manager must approve this before it can be paid.'}</p>
+      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
+      <div className="flex gap-2">
+        <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Send for approval</button>
+      </div>
+    </form>
+  );
+}
+
+function CompanyPayments({ outs, viewer }: { outs: MoneyOut[]; viewer: Viewer }) {
+  const [adding, setAdding] = useState(false);
+  const [month, setMonth] = useState('');   // '' = all months
+  const list = outs.filter(isCompanyPayment);
+  const dateOf = (o: MoneyOut) => String(o.requestDate || o.requestedAt || '').slice(0, 10);
+  const months = Array.from(new Set(list.map(o => dateOf(o).slice(0, 7)).filter(Boolean))).sort().reverse();
+  const shown = list.filter(o => !month || dateOf(o).startsWith(month))
+    .sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || String(b.requestedAt).localeCompare(String(a.requestedAt)));
+  const sum = (st: OutStatus[]) => shown.filter(o => st.includes(o.status)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-MY', { month: 'long', year: 'numeric' });
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div>
+          <h4 className="font-bold">Company payments</h4>
+          <p className="text-sm text-ink-soft">Payments not tied to a training. Same approval rules.</p>
+        </div>
+        {!adding && <button type="button" className={`${btnPrimary} ml-auto`} onClick={() => setAdding(true)}><Plus className="h-4 w-4" /> Raise a company payment</button>}
+      </div>
+      {adding && <CompanyForm viewer={viewer} onDone={() => setAdding(false)} />}
+      {list.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <select value={month} onChange={e => setMonth(e.target.value)} className={`${input} sm:w-56`} aria-label="Show company payments for one month">
+            <option value="">All months</option>
+            {months.map(m => <option key={m} value={m}>{monthName(m)}</option>)}
+          </select>
+          <p className="text-sm text-ink-soft">
+            Paid <strong className="text-ink">{formatSen(sum(['paid']))}</strong> · Approved, to pay <strong className="text-ink">{formatSen(sum(['approved']))}</strong> · Waiting for approval <strong className="text-ink">{formatSen(sum(['pending']))}</strong>
+          </p>
+        </div>
+      )}
+      {shown.length === 0
+        ? <p className="text-[15px] text-ink-soft">{list.length ? 'No company payments in this month.' : 'No company payments yet.'}</p>
+        : <ul className="space-y-2">{shown.map(o => <OutRow key={o.id} o={o} viewer={viewer} />)}</ul>}
+    </section>
+  );
+}
+
 // ---------- Admin work → Money: everything across deals ----------
 export function MoneyOverview({ viewer }: { viewer: Viewer }) {
   const settings = useMoneySettings();
@@ -385,6 +611,7 @@ export function MoneyOverview({ viewer }: { viewer: Viewer }) {
   }, []);
 
   const dealLabel = (dealId: string) => {
+    if (!dealId) return 'Company payment';
     const d = deals.find(x => x.id === dealId);
     if (!d) return 'Deal no longer exists';
     const c = clients.find(x => x.id === d.clientId)?.companyName || d.client || 'No client';
@@ -415,6 +642,8 @@ export function MoneyOverview({ viewer }: { viewer: Viewer }) {
       <Section title="Money still to come in (oldest first)" empty="Every recorded invoice and claim has been paid.">
         {owed.map(m => <InRow key={m.id} m={m} viewer={viewer} settings={settings} context={dealLabel(m.dealId)} />)}
       </Section>
+
+      <CompanyPayments outs={outs} viewer={viewer} />
 
       <MoneySettingsCard settings={settings} viewer={viewer} />
     </div>

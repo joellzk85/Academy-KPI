@@ -14,6 +14,15 @@ export type OutTiming = 'before' | 'after';
 
 export const OUT_CATEGORIES = ['Trainer', 'Venue', 'Hotel', 'Bus', 'Materials', 'Facilitator', 'Commission', 'Staff claim', 'Other'];
 
+// Company payments: requests not tied to a training (Joel, 2026-10-18). Stored in money_out
+// with an empty dealId and kind 'company', so they follow the same approval rules.
+export const COMPANY_CATEGORIES = ['Office', 'Rental', 'Utilities', 'Marketing', 'Equipment', 'Software and subscriptions', 'Travel', 'Staff claim', 'Other'];
+
+export interface OutItem { description: string; qty: number; price: number }
+
+export const isCompanyPayment = (o: { dealId?: string; kind?: string }) => o.kind === 'company' || !o.dealId;
+export const itemsTotal = (items: OutItem[]) => Math.round(items.reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) * 100) / 100;
+
 export const OUT_STATUS_LABELS: Record<OutStatus, string> = {
   pending: 'Waiting for approval',
   approved: 'Approved, not paid',
@@ -40,7 +49,8 @@ export interface MoneyIn {
 
 export interface MoneyOut {
   id: string;
-  dealId: string;
+  dealId: string;          // '' for a company payment
+  kind?: 'deal' | 'company';
   category: string;
   payee: string;
   description?: string;
@@ -58,6 +68,11 @@ export interface MoneyOut {
   paidRef?: string;
   paidById?: string;
   paidByName?: string;
+  // Company payments only
+  requestDate?: string;    // date of request (typed; defaults to today)
+  items?: OutItem[];       // amount = their total
+  neededBy?: string;
+  paymentDetails?: string; // e.g. bank and account name
 }
 
 export interface MoneySettings {
