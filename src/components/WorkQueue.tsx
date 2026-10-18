@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Loader2, 
 import { db, friendlyError } from '../lib/firebase';
 import { FUNDING_LABELS, FundingType, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
-  APPLIES_LABELS, AppliesTo, ChecklistSettings, KIND_LABELS, TaskTemplate, checklistFlags, daysUntil, newTaskId, progress,
+  APPLIES_LABELS, AppliesTo, ChecklistSettings, KIND_LABELS, RETIRED_BUILTINS, TaskTemplate, checklistFlags, daysUntil, grantNotAppliedFlag, newTaskId, progress,
 } from '../lib/checklist';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import DealChecklist, { ProgressBar, startChecklist, useChecklistSettings } from './DealChecklist';
@@ -120,7 +120,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
     const grantTask = (cl.tasks || []).find((t: any) => t.kind === 'grant');
     const block = grantBlockReason(p, programmeOf(p));
     if (block && grantTask && !grantTask.done) flags.push({ level: 'attention', text: p.programmeId ? 'Programme not yet approved by HRDC' : 'Programme not picked from the list' });
-    flags.push(...checklistFlags(p, cl.tasks, settings, today));
+    flags.push(...checklistFlags(p, cl.tasks, settings, today, dealWonDate(p)));
     const mIn = moneyIn.filter(m => m.dealId === p.id);
     const mOut = moneyOut.filter(m => m.dealId === p.id);
     flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
@@ -128,14 +128,16 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
   }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings]);
   const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
 
+  // Needs attention: any red flag, plus "grant not applied" even while it's amber (Joel, 2026-10-18).
+  const needsAttention = (r: { flags: Flag[] }) => r.flags.some(f => f.level === 'danger' || f.grant);
   const counts = {
     open: rows.filter(r => !r.complete).length,
-    flagged: rows.filter(r => r.flags.some(f => f.level === 'danger')).length,
+    flagged: rows.filter(needsAttention).length,
     done: rows.filter(r => r.complete).length,
   };
 
   const visible = useMemo(() => {
-    const base = rows.filter(r => (filter === 'done' ? r.complete : filter === 'flagged' ? r.flags.some(f => f.level === 'danger') : !r.complete));
+    const base = rows.filter(r => (filter === 'done' ? r.complete : filter === 'flagged' ? needsAttention(r) : !r.complete));
     const q = search.trim().toLowerCase();
     const list = q ? base.filter(r => `${clientName(r.deal)} ${courseOf(r.deal)} ${personName(dealOwnerId(r.deal))}`.toLowerCase().includes(q)) : base;
     return list.sort((a, b) => {
@@ -255,6 +257,14 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
                     </span>
                   </span>
                   <span className="text-sm text-ink-soft">{whenText(p)}</span>
+                  {(() => {
+                    const g = grantNotAppliedFlag(p, undefined, settings, today, dealWonDate(p));
+                    return g && (
+                      <span className={`flex w-full items-center gap-1 text-sm font-semibold ${g.level === 'danger' ? 'text-danger' : 'text-attention'}`}>
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {g.text}
+                      </span>
+                    );
+                  })()}
                   <button type="button" disabled={busyId === p.id} onClick={() => start(p)} className={btnSecondary}>
                     {busyId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Start checklist
                   </button>
@@ -360,6 +370,7 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
       await setDoc(doc(db, 'config', 'checklist_tasks'), {
         tasks: JSON.parse(JSON.stringify(s.tasks.map(t => ({ ...t, label: t.label.trim() })))),
         flagDays: s.flagDays,
+        grantDays: s.grantDays,
         updatedAt: Date.now(),
         updatedById: viewer.id,
         updatedByName: viewer.name,
@@ -402,7 +413,9 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
               <span className="ml-auto flex items-center">
                 <button type="button" className={iconBtn} disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${t.label} up`}><ArrowUp className="h-4 w-4" /></button>
                 <button type="button" className={iconBtn} disabled={i === s.tasks.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${t.label} down`}><ArrowDown className="h-4 w-4" /></button>
-                {t.retired ? (
+                {t.retired && RETIRED_BUILTINS.includes(t.id) ? (
+                  <span className="ml-1 px-2 text-sm text-ink-soft" title="A deal can only be won after its quotation is sent, so this step is always done already">No longer needed</span>
+                ) : t.retired ? (
                   <button type="button" className={`${btnSecondary} ml-1 py-1.5`} onClick={() => update(t.id, { retired: false })}><RotateCcw className="h-3.5 w-3.5" /> Bring back</button>
                 ) : (
                   <button type="button" className={`${btnSecondary} ml-1 py-1.5 text-danger hover:bg-danger-soft`} onClick={() => update(t.id, { retired: true })}>Stop using</button>
@@ -429,6 +442,13 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
         <input id="flag-days" type="number" min={0} max={60} value={s.flagDays}
           onChange={e => edit({ ...s, flagDays: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })} className={`${field} w-28`} />
         <p className="mt-1.5 text-sm text-ink-soft">A deal turns red in the work queue if the grant isn't approved or the trainer isn't confirmed by then. After-training steps only show as a reminder once training day has passed.</p>
+      </div>
+
+      <div className="max-w-md rounded-2xl border border-line bg-white p-4">
+        <label htmlFor="grant-days" className="mb-1.5 block text-sm font-semibold">Flag grant not applied after this many days won</label>
+        <input id="grant-days" type="number" min={1} max={60} value={s.grantDays}
+          onChange={e => edit({ ...s, grantDays: Math.max(1, Math.min(60, Number(e.target.value) || 1)) })} className={`${field} w-28`} />
+        <p className="mt-1.5 text-sm text-ink-soft">HRDC and HRDC + top-up deals only. Amber once the deal was won this many days ago and "Apply grant" has no applied date. Red at double the days, or when training is within the window above.</p>
       </div>
 
       {msg && <p role="status" className={`rounded-lg px-3 py-2.5 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</p>}

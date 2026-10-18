@@ -49,7 +49,14 @@ export interface ChecklistTask {
 export interface ChecklistSettings {
   tasks: TaskTemplate[];
   flagDays: number;       // red flag when training is this many days away or fewer
+  grantDays: number;      // flag an HRDC deal won this many days ago whose grant isn't applied yet
 }
+
+// Built-in steps that are retired for good (Joel, 2026-10-18): "Quotation" is always
+// already done, because a deal can only be won after its quotation is sent.
+// They stay retired even if a saved master list still has them switched on.
+export const RETIRED_BUILTINS = ['quotation'];
+const isRetiredStep = (t: { id?: string; kind?: string }) => t.kind === 'quotation' || RETIRED_BUILTINS.includes(t.id || '');
 
 export const KIND_LABELS: Record<TaskKind, string> = {
   grant: 'HRDC grant',
@@ -66,9 +73,10 @@ export const APPLIES_LABELS: Record<AppliesTo, string> = {
 
 export const DEFAULT_SETTINGS: ChecklistSettings = {
   flagDays: 7,
+  grantDays: 3,
   tasks: [
     { id: 'grant', label: 'Apply grant', kind: 'grant', appliesTo: 'hrdc' },
-    { id: 'quotation', label: 'Quotation', kind: 'quotation', appliesTo: 'all' },
+    { id: 'quotation', label: 'Quotation', kind: 'quotation', appliesTo: 'all', retired: true },
     { id: 'attendance', label: 'Follow up attendance list', kind: 'basic', appliesTo: 'all' },
     { id: 'venue', label: 'Check venue + payment', kind: 'venue', appliesTo: 'all' },
     { id: 'materials', label: 'Prepare materials', kind: 'basic', appliesTo: 'all' },
@@ -85,9 +93,10 @@ export function readSettings(data: any): ChecklistSettings {
   const saved: TaskTemplate[] = Array.isArray(data?.tasks) && data.tasks.length ? data.tasks : [];
   // Built-in tasks added in later updates appear even if the list was saved before.
   // Ones Joel stopped using stay in the saved list as "retired", so they never come back.
-  const tasks = saved.length ? [...saved, ...DEFAULT_SETTINGS.tasks.filter(d => !saved.some(t => t.id === d.id))] : DEFAULT_SETTINGS.tasks;
-  const flagDays = Number.isFinite(Number(data?.flagDays)) && Number(data.flagDays) >= 0 ? Number(data.flagDays) : DEFAULT_SETTINGS.flagDays;
-  return { tasks, flagDays };
+  const merged = saved.length ? [...saved, ...DEFAULT_SETTINGS.tasks.filter(d => !saved.some(t => t.id === d.id))] : DEFAULT_SETTINGS.tasks;
+  const tasks = merged.map(t => (isRetiredStep(t) ? { ...t, retired: true } : t));
+  const num = (v: any, fallback: number) => (Number.isFinite(Number(v)) && v !== '' && v !== null && Number(v) >= 0 ? Number(v) : fallback);
+  return { tasks, flagDays: num(data?.flagDays, DEFAULT_SETTINGS.flagDays), grantDays: num(data?.grantDays, DEFAULT_SETTINGS.grantDays) };
 }
 
 export function newTaskId(): string {
@@ -106,8 +115,10 @@ export function buildChecklist(settings: ChecklistSettings): ChecklistTask[] {
 }
 
 // Tasks that apply to this deal, in the checklist's own order.
+// A retired built-in step (Quotation) still open on an older checklist is left out, so it never
+// blocks "All done" or counts in "X of Y"; one already ticked stays, for the record.
 export function applicableTasks(tasks: ChecklistTask[] | undefined, fundingType?: FundingType | string): ChecklistTask[] {
-  return (tasks || []).filter(t => t.appliesTo !== 'hrdc' || isHrdc(fundingType));
+  return (tasks || []).filter(t => (t.appliesTo !== 'hrdc' || isHrdc(fundingType)) && !(isRetiredStep(t) && !t.done));
 }
 
 export function progress(tasks: ChecklistTask[] | undefined, fundingType?: string): { done: number; total: number } {
@@ -179,10 +190,35 @@ export function daysUntil(iso: string, today: string): number | null {
   return Math.round((a.getTime() - b.getTime()) / 86400000);
 }
 
-export interface Flag { level: 'danger' | 'attention'; text: string }
+export interface Flag { level: 'danger' | 'attention'; text: string; grant?: boolean }
+
+// HRDC deal won a while ago and the grant not applied yet (Joel, 2026-10-18).
+// Amber from settings.grantDays after the won date; red once it's double that, or when training
+// is within the red-flag window. Stops once the training date has passed (the "training date has
+// passed" flag covers it). A won deal with no checklist yet counts as not applied.
+// Direct-pay deals never get it.
+export function grantNotAppliedFlag(deal: any, tasks: ChecklistTask[] | undefined, settings: ChecklistSettings, today: string, wonDate: string): Flag | null {
+  if (!isHrdc(deal?.fundingType) || !wonDate) return null;
+  const grant = (tasks || []).find(t => t.kind === 'grant');
+  if (grant && (grant.done || (grant.grantAppliedDate || '').trim())) return null;
+  if (tasks && !grant) return null;                      // grant step removed from this deal
+  const since = -(daysUntil(wonDate, today) ?? 0);
+  if (since < settings.grantDays) return null;
+  const train = daysUntil(deal?.trainingDate, today);
+  if (train !== null && train < 0) return null;
+  const red = since >= settings.grantDays * 2 || (train !== null && train <= settings.flagDays);
+  return { level: red ? 'danger' : 'attention', text: `Won ${since} day${since === 1 ? '' : 's'} ago, grant not applied`, grant: true };
+}
 
 // Red flags for the admin work queue.
-export function checklistFlags(deal: any, tasks: ChecklistTask[] | undefined, settings: ChecklistSettings, today: string): Flag[] {
+export function checklistFlags(deal: any, tasks: ChecklistTask[] | undefined, settings: ChecklistSettings, today: string, wonDate = ''): Flag[] {
+  const g = grantNotAppliedFlag(deal, tasks, settings, today, wonDate);
+  const rest = trainingFlags(deal, tasks, settings, today);
+  // "Not applied" already says more than "not approved", so only one shows.
+  return g ? [g, ...rest.filter(f => !/grant not approved$/.test(f.text))] : rest;
+}
+
+function trainingFlags(deal: any, tasks: ChecklistTask[] | undefined, settings: ChecklistSettings, today: string): Flag[] {
   const list = applicableTasks(tasks, deal?.fundingType);
   const openAll = list.filter(t => !t.done);
   if (openAll.length === 0) return [];

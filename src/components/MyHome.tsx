@@ -15,7 +15,7 @@ import {
 import { metricsFor, countAuto, monthKpi } from '../lib/kpi';
 import { periodFor } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
-import { checklistFlags, daysUntil, progress, Flag } from '../lib/checklist';
+import { checklistFlags, daysUntil, grantNotAppliedFlag, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
 import { MoneyIn, MoneyOut, canDecide, dealPL, isPaid, moneyFlags } from '../lib/money';
 import { useChecklistSettings } from './DealChecklist';
@@ -798,7 +798,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         items: list.map(({ p, d }) => {
           const cl = c.checklists[p.id];
           const pr = cl ? progress(cl.tasks, p.fundingType) : null;
-          const flags = cl ? checklistFlags(p, cl.tasks, c.checklistSettings, c.today).filter(f => f.level === 'danger') : [];
+          const flags = cl ? checklistFlags(p, cl.tasks, c.checklistSettings, c.today, dealWonDate(p)).filter(f => f.level === 'danger') : [];
           return {
             key: p.id, title: deal(p), level: flags.length ? 'danger' as const : undefined,
             sub: `${d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `In ${d} days`} (${formatDate(ymd(p.trainingDate))}) · ${pr ? `${pr.done} of ${pr.total} ready` : 'checklist not started'}${flags.length ? ` · ${flags[0].text}` : ''}`,
@@ -825,8 +825,13 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           key: q.id, title: deal(p), level: isQueryOverdue(q, c.today) ? 'danger' : 'attention', onClick: () => c.nav.openAdminWork('queue'),
           sub: `HRDC query ${isQueryOverdue(q, c.today) ? 'overdue' : 'open'}, reply by ${formatDate(q.replyBy)}`,
         }));
-        if (!cl) return;
-        checklistFlags(p, cl.tasks, c.checklistSettings, c.today).forEach((f: Flag, i: number) => items.push({
+        if (!cl) {
+          // No checklist yet: the grant can't have been applied.
+          const g = grantNotAppliedFlag(p, undefined, c.checklistSettings, c.today, dealWonDate(p));
+          if (g) items.push({ key: `${p.id}_g`, title: deal(p), level: g.level, sub: `${g.text} (checklist not started)`, onClick: () => c.nav.openAdminWork('queue') });
+          return;
+        }
+        checklistFlags(p, cl.tasks, c.checklistSettings, c.today, dealWonDate(p)).forEach((f: Flag, i: number) => items.push({
           key: `${p.id}_${i}`, title: deal(p), level: f.level, sub: f.text, onClick: () => c.nav.openAdminWork('queue'),
         }));
       });
@@ -895,8 +900,15 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         if (dealStage(p) === 'quoted' && !fu && ymd(p.quotationSentDate) && (daysUntil(ymd(p.quotationSentDate), c.today) ?? 0) <= -7) return true;
         return dealStage(p) === 'proposal' && !fu && sent && (daysUntil(sent, c.today) ?? 0) <= -7;
       });
+      // Won HRDC deals whose grant hasn't been applied (Joel, 2026-10-18).
+      const grantStuck: Item[] = [];
+      c.wonDeals.forEach(p => {
+        const g = grantNotAppliedFlag(p, c.checklists[p.id]?.tasks, c.checklistSettings, c.today, dealWonDate(p));
+        if (g) grantStuck.push({ key: `${p.id}_g`, title: c.clientName(p), level: g.level, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · Won · ${g.text}` });
+      });
+      grantStuck.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : 1));
       return {
-        items: stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${apptOverdue(p, c.today) ? `appointment on ${formatDate(apptOf(p)!.date)} not logged` : ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` })),
+        items: [...grantStuck, ...stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${apptOverdue(p, c.today) ? `appointment on ${formatDate(apptOf(p)!.date)} not logged` : ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` }))],
         empty: 'No stuck deals.',
         footer: (
           <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-3 sm:grid-cols-4">
