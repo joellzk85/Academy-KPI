@@ -13,6 +13,7 @@ export const LIST_NAMES: [string, string][] = [
   ['clients', 'Clients'],
   ['quotations', 'Quotations'],
   ['course_outlines', 'Course outlines'],
+  ['proposal_files', 'Proposal files'],
   ['money_in', 'Money in'],
   ['money_out', 'Money out'],
   ['project_pl', 'Project P&L SST typed'],

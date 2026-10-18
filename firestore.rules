@@ -162,6 +162,15 @@ service cloud.firestore {
         || (isMember() && request.auth.uid in quotePeople(resource.data));
     }
 
+    // Proposal files on deals (2026-10-18): the file is in Storage (storage.rules); this is its record.
+    // Everyone reads; you add records only as yourself; only the uploader or Management deletes.
+    match /proposal_files/{fileId} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.byId == request.auth.uid;
+      allow update: if false;
+      allow delete: if isManagement() || (isMember() && resource.data.byId == request.auth.uid);
+    }
+
     // What the CRM has sent to the shared Google Calendar: only the CRM server uses this.
     match /calendar_sync/{id} {
       allow read, write: if false;

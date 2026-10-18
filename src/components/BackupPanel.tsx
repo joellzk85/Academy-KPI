@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Copy, Download, ExternalLink, Loader2, RefreshCw, Settings2, XCircle } from 'lucide-react';
-import { BackupStatus, backupStatus, downloadBackup, runBackup, saveBackupSheet } from '../lib/backupApi';
+import { CheckCircle2, Copy, Download, ExternalLink, FileArchive, Loader2, RefreshCw, Settings2, XCircle } from 'lucide-react';
+import { BackupStatus, backupStatus, downloadBackup, downloadProposals, runBackup, saveBackupSheet } from '../lib/backupApi';
 import { friendlyError } from '../lib/firebase';
 import { malaysiaTime } from '../lib/backup';
 
@@ -16,7 +16,7 @@ const SHEETS_API = 'https://console.cloud.google.com/apis/library/sheets.googlea
 export default function BackupPanel() {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [loadError, setLoadError] = useState('');
-  const [busy, setBusy] = useState<'' | 'run' | 'download' | 'save'>('');
+  const [busy, setBusy] = useState<'' | 'run' | 'download' | 'zip' | 'save'>('');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [setupOpen, setSetupOpen] = useState(false);
@@ -36,7 +36,7 @@ export default function BackupPanel() {
   };
   useEffect(() => { load(); }, []);
 
-  const act = async (kind: 'run' | 'download' | 'save', fn: () => Promise<string>) => {
+  const act = async (kind: 'run' | 'download' | 'zip' | 'save', fn: () => Promise<string>) => {
     setBusy(kind); setNote(''); setError('');
     try {
       setNote(await fn());
@@ -53,6 +53,7 @@ export default function BackupPanel() {
     return r.skipped === 'running' ? 'A backup is already running. Check again in a minute.' : `Backed up: ${r.summary}.`;
   });
   const download = () => act('download', async () => { await downloadBackup(); return 'The Excel file is downloading. Keep it somewhere safe, it holds all client and money details.'; });
+  const downloadZip = () => act('zip', async () => { await downloadProposals(); return 'The ZIP of all proposal files is downloading (one folder per deal). Keep it somewhere safe.'; });
   const save = () => act('save', async () => {
     const r = await saveBackupSheet(sheet.trim());
     if (!r.configured) return 'Google Sheet disconnected. The daily backup is off.';
@@ -111,6 +112,9 @@ export default function BackupPanel() {
           </button>
           <button type="button" className={btnSecondary} disabled={!!busy} onClick={download}>
             {busy === 'download' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download Excel file
+          </button>
+          <button type="button" className={btnSecondary} disabled={!!busy} onClick={downloadZip}>
+            {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all proposals (ZIP)
           </button>
           <button type="button" className={btnSecondary} onClick={() => setSetupOpen(v => !v)}>
             <Settings2 className="h-4 w-4" /> {setupOpen ? 'Close setup' : connected ? 'Change Google Sheet' : 'Set up'}

@@ -22,6 +22,8 @@ import { HrdcQuery, Programme, grantBlockReason } from '../lib/programmes';
 import { linkedOnly } from '../lib/linked';
 import { clientContacts, dealContact, mainContactFields, newContactId } from '../lib/contacts';
 import PickOrType from './PickOrType';
+import { ProposalDrop, ProposalFilesList } from './ProposalFiles';
+import { ProposalFile } from '../lib/proposals';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -90,6 +92,7 @@ export default function DealsBoard({
   const [programmes, setProgrammes] = useState<Programme[]>([]);
   const [queries, setQueries] = useState<HrdcQuery[]>([]);
   const [moneyIn, setMoneyIn] = useState<MoneyIn[]>([]);
+  const [proposalFiles, setProposalFiles] = useState<ProposalFile[]>([]);
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const [venues, setVenues] = useState<any[]>([]);
   const moneySettings = useMoneySettings();
@@ -120,6 +123,7 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
       onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
       onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
+      onSnapshot(query(collection(db, 'proposal_files')), s => setProposalFiles(s.docs.map(d => ({ ...(d.data() as ProposalFile), id: d.id }))), () => {}),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     // Payouts and costs are for Admin and Management only.
@@ -375,6 +379,8 @@ export default function DealsBoard({
     if (nm) linked.push(`${nm} money record${nm === 1 ? '' : 's'}`);
     const nh = queries.filter(q => q.dealId === p.id).length;
     if (nh) linked.push(`${nh} HRDC quer${nh === 1 ? 'y' : 'ies'}`);
+    const npf = proposalFiles.filter(f => f.dealId === p.id).length;
+    if (npf) linked.push(`it has ${npf} proposal file${npf === 1 ? '' : 's'} (delete ${npf === 1 ? 'it' : 'them'} under Documents first if the deal really is a mistake)`);
     if (linked.length) return setStageError(`This deal can't be deleted because ${linked.join(', ')}. Use "Mark lost" instead.`);
     // Reps can only delete their own quotations (database rule), so someone else's draft must go first.
     const notMine = viewer.role === 'rep' ? drafts.filter(q => q.ownerId !== viewer.id && q.creatorId !== viewer.id) : [];
@@ -564,6 +570,12 @@ export default function DealsBoard({
               programmes={programmes}
               onApptDone={flash}
               onProposal={() => toProposal(openDeal)}
+              proposalFiles={proposalFiles.filter(f => f.dealId === openDeal.id)}
+              onProposalUploaded={(files) => {
+                flash(files.length === 1 ? `Proposal "${files[0].name}" saved` : `${files.length} proposal files saved`);
+                // Uploading at New = the proposal was sent.
+                if (['lead', 'appointment'].includes(dealStage(openDeal))) toProposal(openDeal);
+              }}
               onAgreed={() => toAgreed(openDeal)}
               onQuoted={() => toQuoted(openDeal)}
               onWon={() => confirmWon(openDeal)}
@@ -744,6 +756,7 @@ function DealPanel(props: {
   wonDate: string; setWonDate: (v: string) => void; lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
   onClose: () => void; onEdit: () => void; onProposal: () => void; onAgreed: () => void; onQuoted: () => void;
+  proposalFiles: ProposalFile[]; onProposalUploaded: (files: ProposalFile[]) => void;
   programmes: Programme[]; onApptDone: (msg: string) => void;
   onWon: () => void; onLost: () => void; onReopen: () => void;
   canManage: boolean; onDelete: () => void;
@@ -799,6 +812,9 @@ function DealPanel(props: {
             {st === 'won' && canUndoWin && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onReopen}><Undo2 className="h-4 w-4" /> Undo win</button>}
             <button type="button" className={btnSecondary} onClick={props.onEdit}>Edit details</button>
           </div>
+          {(st === 'lead' || st === 'appointment') && (
+            <ProposalDrop dealId={p.id} viewer={props.viewer} disabled={props.busy} onUploaded={props.onProposalUploaded} />
+          )}
 
           {props.stagePanel === 'won' && (
             <div className="rounded-xl border border-accent/30 bg-accent-soft p-4">
@@ -880,6 +896,7 @@ function DealPanel(props: {
           <DocRow icon={<FileText className="h-4 w-4" />} name="Quotations" items={props.quotes.map(q => q.refNumber || q.id)} onOpen={props.onOpenQuotations} onCreate={props.editable && canQuote(p) ? props.onCreateQuotation : undefined} createLabel="Create quotation" />
           {!canQuote(p) && st !== 'lost' && <p className="text-sm text-ink-soft">A quotation can be made once the client approves the proposal.</p>}
           <DocRow icon={<ClipboardList className="h-4 w-4" />} name="Course outlines" items={props.outlines.map(o => o.refNumber || o.courseTitle || o.id)} onOpen={props.onOpenOutlines} onCreate={props.editable ? props.onCreateOutline : undefined} createLabel="Create outline" />
+          <ProposalFilesList dealId={p.id} files={props.proposalFiles} viewer={props.viewer} editable={props.editable} onUploaded={props.onProposalUploaded} />
         </div>
       </section>
 

@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// NEXT Academy CRM file storage rules (2026-10-18). Publish in Firebase console → Storage → Rules.
+// - Proposal files on deals: proposals/{dealId}/{fileId}_{name}. Records are in Firestore proposal_files.
+// - Only logged-in, active team members (checked against the database's auth_map) can read or add.
+// - Up to 20 MB; PDF, Word or PowerPoint; the uploader is recorded and can't be faked.
+// - Only the uploader or Management can delete. Files are never changed after upload.
+// - Everything else in storage is closed.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function link() {
+      return /databases/(default)/documents/auth_map/$(request.auth.uid);
+    }
+    function isMember() {
+      return request.auth != null && firestore.exists(link()) && firestore.get(link()).data.active == true;
+    }
+    function isManagement() {
+      return isMember() && firestore.get(link()).data.role == 'management';
+    }
+
+    match /proposals/{dealId}/{fileName} {
+      allow read: if isMember();
+      allow create: if isMember()
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('application/(pdf|msword|vnd[.]ms-powerpoint|vnd[.]openxmlformats-officedocument[.](wordprocessingml[.]document|presentationml[.]presentation))')
+        && request.resource.metadata.uploadedBy == request.auth.uid;
+      allow update: if false;
+      allow delete: if isMember() && (resource.metadata.uploadedBy == request.auth.uid || isManagement());
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

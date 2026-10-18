@@ -9,9 +9,16 @@
 //   It runs once a Malaysian day, the first time Admin or Management opens the CRM, or any time with "Back up now".
 // - Excel download: the same tables as an .xlsx file, built here and sent straight to the browser.
 // - Settings and the last result are in config/backup_settings, which only the server writes.
+// - Proposal files (2026-10-18): the file records are a normal list ("Proposal files" tab); the files themselves
+//   download as one ZIP (/api/backup/proposals), one folder per deal.
 
 import type { Express, Request, Response as ExpressResponse } from 'express';
 import ExcelJS from 'exceljs';
+import archiver from 'archiver';
+import { getApps } from 'firebase-admin/app';
+import { getStorage } from 'firebase-admin/storage';
+import firebaseConfig from './firebase-applet-config.json';
+import { safeFileName } from './src/lib/proposals';
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import {
   INFO_TAB, SKIP_CONFIG_DOCS, Table, infoTable, malaysiaDay, orderCollections, sheetIdFrom, toTable, uniqueTabs,
@@ -268,6 +275,73 @@ export function registerBackupRoutes(app: Express) {
       running = null;
     }
   }));
+
+  // Every proposal file as one ZIP, one folder per deal ("Client - Programme").
+  app.post('/api/backup/proposals', async (req: Request, res: ExpressResponse) => {
+    try {
+      await staffFrom(req);
+      const { db } = admin();
+      const all = async (name: string) => (await db.collection(name).get()).docs.map(d => ({ ...d.data(), id: d.id }) as any);
+      const [files, deals, clients, programmes] = await Promise.all([all('proposal_files'), all('pipelines'), all('clients'), all('programmes')]);
+      if (!files.length) throw new UserError(404, 'no-proposals', 'There are no proposal files yet.');
+      const bucket = getStorage(getApps()[0]).bucket((firebaseConfig as any).storageBucket);
+      try {
+        await bucket.file(files[0].path).getMetadata();
+      } catch (e: any) {
+        const code = Number(e?.code);
+        console.error('[backup] storage check failed:', e?.message || e);
+        if (code === 403 || /permission|forbidden/i.test(String(e?.message))) {
+          throw new UserError(503, 'storage-no-access',
+            "The CRM server isn't allowed to read the stored files yet. In Google Cloud → IAM, give firebase-app-hosting-compute@gen-lang-client-0779528352.iam.gserviceaccount.com the role \"Storage Object Viewer\", then try again.");
+        }
+        if (code !== 404) throw new UserError(503, 'storage-error', "The stored files couldn't be read. Try again in a minute.");
+      }
+      const folderOf = new Map<string, string>();
+      const usedFolders = new Set<string>();
+      const folder = (dealId: string) => {
+        if (folderOf.has(dealId)) return folderOf.get(dealId)!;
+        const d = deals.find((x: any) => x.id === dealId);
+        const client = clients.find((c: any) => c.id === d?.clientId)?.companyName || d?.client || 'Deal removed';
+        const prog = programmes.find((x: any) => x.id === d?.programmeId)?.name || d?.courseName || '';
+        let name = safeFileName(`${client}${prog ? ` - ${prog}` : ''}`, 90);
+        if (usedFolders.has(name.toLowerCase())) name = `${name} (${dealId.slice(-6)})`;
+        usedFolders.add(name.toLowerCase());
+        folderOf.set(dealId, name);
+        return name;
+      };
+      const stamp = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="NEXT-Academy-proposals-${stamp}.zip"`);
+      const zip = archiver('zip', { zlib: { level: 6 } });
+      zip.on('warning', (w: any) => console.warn('[backup] zip warning:', w?.message || w));
+      zip.on('error', (e: any) => { console.error('[backup] zip failed:', e); res.end(); });
+      zip.pipe(res);
+      const missing: string[] = [];
+      const usedNames = new Set<string>();
+      for (const f of files.sort((a: any, b: any) => String(a.at).localeCompare(String(b.at)))) {
+        const file = bucket.file(String(f.path || ''));
+        const [exists] = await file.exists().catch(() => [false]);
+        if (!exists) { missing.push(`${folder(f.dealId)}/${f.name}`); continue; }
+        let name = `${folder(f.dealId)}/${String(f.at || '').slice(0, 10)} ${safeFileName(f.name)}`;
+        if (usedNames.has(name.toLowerCase())) name = name.replace(/(\.[^.\/]+)?$/, ` (${f.id.slice(-4)})$1`);
+        usedNames.add(name.toLowerCase());
+        zip.append(file.createReadStream(), { name, date: f.at ? new Date(f.at) : new Date() });
+      }
+      const rows = files.map((f: any) => [String(f.at || '').slice(0, 10), folder(f.dealId), f.name, f.byName || ''].join('\t'));
+      const list = [
+        `NEXT Academy CRM: proposal files, downloaded ${new Date().toISOString()}`, '',
+        ['Date', 'Deal', 'File', 'Uploaded by'].join('\t'), ...rows,
+        ...(missing.length ? ['', 'Missing from storage:', ...missing] : []),
+      ].join('\r\n');
+      zip.append(list, { name: 'List of files.txt' });
+      await zip.finalize();
+    } catch (err: any) {
+      const e = err instanceof UserError ? err : new UserError(500, 'zip-failed', "The ZIP file couldn't be made. Try again in a minute.");
+      if (!(err instanceof UserError)) console.error('[backup] proposals zip failed:', err);
+      if (!res.headersSent) res.status(e.status).json({ ok: false, code: e.code, error: e.message });
+      else res.end();
+    }
+  });
 
   // Download everything as an Excel file.
   app.post('/api/backup/download', async (req: Request, res: ExpressResponse) => {

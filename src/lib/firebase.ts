@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // The main CRM app. We look it up by name so other helpers (like the Google
@@ -13,6 +14,12 @@ export const db = databaseId ? getFirestore(app, databaseId) : getFirestore(app)
 // CRM login session. Passwords are checked by the CRM's own server, which
 // then gives the browser a pass for the database. No emails are used.
 export const auth = getAuth(app);
+
+// Stored files (proposal files on deals, 2026-10-18). Rules: storage.rules.
+export const storage = getStorage(app);
+// Give up after a minute (default 10) so a failed upload says so instead of sitting at 0%.
+storage.maxUploadRetryTime = 60_000;
+storage.maxOperationRetryTime = 30_000;
 
 export class ServerError extends Error {
   code: string;

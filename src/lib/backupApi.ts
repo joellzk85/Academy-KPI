@@ -23,12 +23,17 @@ export const runBackup = (force = false) =>
   callServer<{ skipped?: string; summary?: string }>('/api/backup/run', { force }, true);
 
 // Downloads the Excel backup file to this computer.
-export async function downloadBackup(): Promise<void> {
+export const downloadBackup = () => downloadFrom('/api/backup/download', 'NEXT-Academy-CRM-backup.xlsx', 'The backup file could not be made. Try again in a minute.');
+
+// Downloads every proposal file as one ZIP (2026-10-18).
+export const downloadProposals = () => downloadFrom('/api/backup/proposals', 'NEXT-Academy-proposals.zip', "The ZIP file couldn't be made. Try again in a minute.");
+
+async function downloadFrom(path: string, fallbackName: string, failMessage: string): Promise<void> {
   const user = auth.currentUser;
   if (!user) throw new ServerError('not-logged-in', 'You are logged out. Log in again.');
   let res: Response;
   try {
-    res = await fetch('/api/backup/download', {
+    res = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
       body: '{}',
@@ -39,10 +44,10 @@ export async function downloadBackup(): Promise<void> {
   if (!res.ok) {
     let data: any = null;
     try { data = await res.json(); } catch { /* not JSON */ }
-    throw new ServerError(data?.code || 'server-error', data?.error || 'The backup file could not be made. Try again in a minute.');
+    throw new ServerError(data?.code || 'server-error', data?.error || failMessage);
   }
   const blob = await res.blob();
-  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'NEXT-Academy-CRM-backup.xlsx';
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || fallbackName;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
