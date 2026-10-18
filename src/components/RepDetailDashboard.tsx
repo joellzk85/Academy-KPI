@@ -31,6 +31,10 @@ interface RepDetailDashboardProps {
   onOpenAdminWork?: () => void;     // Admin's menu links to Admin work (it replaced the old Admin records screen)
   openFile?: { kind: SharedKind; id: string } | null;   // My home's "Shared with me": open this file in the editor
   onOpenFileHandled?: () => void;
+  openClientId?: string | null;     // My home's "My follow-ups": open this client's page
+  onOpenClientHandled?: () => void;
+  openDealId?: string | null;       // Management → Team follow-ups: open this deal's panel
+  onOpenDealHandled?: () => void;
 }
 
 type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments' | 'client_payments';
@@ -308,7 +312,11 @@ export default function RepDetailDashboard({
   viewer,
   onOpenAdminWork,
   openFile,
-  onOpenFileHandled
+  onOpenFileHandled,
+  openClientId,
+  onOpenClientHandled,
+  openDealId,
+  onOpenDealHandled
 }: RepDetailDashboardProps) {
   // The old payment, P&L, appointment and Admin records screens were retired; anyone left on them,
   // however they got there, lands on Deals.
@@ -1217,6 +1225,21 @@ export default function RepDetailDashboard({
     else { setOutlineToOpen(openFile.id); handleSubTabChange('course_outline'); }
     onOpenFileHandled?.();
   }, [openFile]);
+  // Client history (2026-10-18): the client page opens deals, files and To-dos; To-do tags open the client page.
+  const [clientToOpen, setClientToOpen] = useState<string | null>(null);
+  const [taskToOpen, setTaskToOpen] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openClientId) return;
+    setClientToOpen(openClientId);
+    handleSubTabChange('client');
+    onOpenClientHandled?.();
+  }, [openClientId]);
+  useEffect(() => {
+    if (!openDealId) return;
+    setDealToOpen(openDealId);
+    handleSubTabChange('pipeline');
+    onOpenDealHandled?.();
+  }, [openDealId]);
   const handleCreateOutlineForPipeline = (p: any) => {
     setOutlineStartDeal(p);
     setActiveSubTab("course_outline");
@@ -2039,7 +2062,12 @@ export default function RepDetailDashboard({
             <CourseOutlinesPage key={`${rep.id}-${sharedFirst === 'course_outline'}`} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => setOutlineStartDeal(null)} onOpenTab={(t) => handleSubTabChange(t as SubTab)}
               openId={outlineToOpen} onOpenHandled={() => setOutlineToOpen(null)} startOnShared={sharedFirst === 'course_outline'} />
           ) : activeSubTab === 'client' ? (
-            <ClientManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
+            <ClientManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }}
+              openClientId={clientToOpen} onOpenClientHandled={() => setClientToOpen(null)}
+              onOpenDeal={(id) => { setDealToOpen(id); setActiveSubTab('pipeline'); }}
+              onOpenQuotation={(id) => { setQuoteFromDeal({ dealId: '', quoteId: id }); setActiveSubTab('quotation'); }}
+              onOpenOutline={(id) => { setOutlineToOpen(id); setActiveSubTab('course_outline'); }}
+              onOpenTask={(id) => { setTaskToOpen(id); setActiveSubTab('tasks'); }} />
           ) : activeSubTab === 'trainerList' ? (
             <TrainerManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
           ) : activeSubTab === 'venue' ? (
@@ -2060,7 +2088,9 @@ export default function RepDetailDashboard({
               onOpenOutlines={() => setActiveSubTab('course_outline')}
             />
           ) : activeSubTab === 'tasks' ? (
-            <TasksPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenDeals={() => handleSubTabChange('pipeline')} />
+            <TasksPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenDeals={() => handleSubTabChange('pipeline')}
+              openTaskId={taskToOpen} onOpenTaskHandled={() => setTaskToOpen(null)}
+              onOpenClient={(id) => { setClientToOpen(id); setActiveSubTab('client'); }} />
           ) : (
             /* DYNAMIC GOOGLE LINK VIEW FOR OTHER PAGES */
             <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-xs text-center space-y-6 min-h-[420px] flex flex-col justify-center items-center">

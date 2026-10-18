@@ -63,6 +63,7 @@ export type FollowUpNote = {
   id: string; date: string; how: FollowUpHow; text: string; nextDate: string;
   at: string; byId: string; byName: string; stage: string;
   decision?: 'keep_open'; reason?: string;
+  followUpById?: string; followUpByName?: string;   // who follows up next (2026-10-18; older notes: the deal owner)
 };
 
 const ymd = (v: any): string => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : '');

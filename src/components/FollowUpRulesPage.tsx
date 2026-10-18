@@ -6,6 +6,9 @@ import {
   DEFAULT_FOLLOW_UP_RULES, FollowUpRules, RULE_STAGES, RULE_STAGE_FROM, RULE_STAGE_LABELS, RuleStage, cleanDays, ordinal,
 } from '../lib/followUps';
 import { useFollowUpRules } from '../lib/useFollowUpRules';
+import { useContactLimits } from '../lib/useClientHistory';
+import { DEFAULT_CONTACT_LIMITS } from '../lib/touchPoints';
+import { ContactDot } from './ClientContactDot';
 
 // Management → Follow-up rules (Joel, 2026-10-18). Checkpoints in days per stage, saved in config/follow_up_rules
 // (Management only). When a deal passes a checkpoint with no follow-up note since, it raises an alert.
@@ -119,6 +122,63 @@ export default function FollowUpRulesPage({ viewer }: { viewer: Viewer }) {
         </button>
         {meta?.updatedByName && <span className="text-sm text-ink-soft">Last changed by {meta.updatedByName}, {new Date(meta.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
       </div>
+
+      <ContactColourLimits viewer={viewer} />
     </div>
+  );
+}
+
+// Client contact colours (Joel, 2026-10-18): days since a client's last touch point. Saved in
+// config/client_contact_colours (Management only; everyone reads it).
+function ContactColourLimits({ viewer }: { viewer: Viewer }) {
+  const { limits, meta } = useContactLimits();
+  const [green, setGreen] = useState(String(limits.green));
+  const [amber, setAmber] = useState(String(limits.amber));
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { if (!dirty) { setGreen(String(limits.green)); setAmber(String(limits.amber)); } }, [limits, dirty]);
+  const g = Math.round(Number(green)), a = Math.round(Number(amber));
+
+  const save = async () => {
+    setMsg(null);
+    if (!Number.isFinite(g) || g < 1 || g > 365) return setMsg({ ok: false, text: 'Green: type a number of days from 1 to 365.' });
+    if (!Number.isFinite(a) || a <= g || a > 730) return setMsg({ ok: false, text: 'Amber must be more days than green (and at most 730).' });
+    setBusy(true);
+    try {
+      await setDoc(doc(db, 'config', 'client_contact_colours'), { green: g, amber: a, updatedAt: new Date().toISOString(), updatedById: viewer.id, updatedByName: viewer.name });
+      setDirty(false);
+      setMsg({ ok: true, text: 'Saved. The client colours use it straight away.' });
+    } catch (e) {
+      setMsg({ ok: false, text: friendlyError(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const edit = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { set(e.target.value.replace(/[^0-9]/g, '')); setDirty(true); setMsg(null); };
+
+  return (
+    <section className={`${card} space-y-4`}>
+      <div>
+        <h3 className="font-bold">Client contact colours</h3>
+        <p className="text-sm text-ink-soft">The dot next to each client, from the days since its last touch point. Shown on the client list, the client page and deal panels.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-[15px]">
+        <label className="flex items-center gap-2"><ContactDot colour="green" /> Green up to
+          <input inputMode="numeric" value={green} onChange={edit(setGreen)} className={input} aria-label="Green: up to this many days" /> days</label>
+        <label className="flex items-center gap-2"><ContactDot colour="amber" /> Amber up to
+          <input inputMode="numeric" value={amber} onChange={edit(setAmber)} className={input} aria-label="Amber: up to this many days" /> days</label>
+        <span className="flex items-center gap-2"><ContactDot colour="red" /> Red after {Number.isFinite(a) && a > 0 ? a : '…'} days</span>
+        <span className="flex items-center gap-2"><ContactDot colour="never" /> Grey: never contacted</span>
+      </div>
+      {msg && <p role={msg.ok ? 'status' : 'alert'} className={`rounded-lg px-3 py-2.5 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" disabled={busy || !dirty} className={btnPrimary} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save colours</button>
+        <button type="button" className={btnSecondary} onClick={() => { setGreen(String(DEFAULT_CONTACT_LIMITS.green)); setAmber(String(DEFAULT_CONTACT_LIMITS.amber)); setDirty(true); setMsg(null); }}>
+          <RotateCcw className="h-4 w-4" /> Back to 30 and 90 days
+        </button>
+        {meta?.updatedByName && <span className="text-sm text-ink-soft">Last changed by {meta.updatedByName}, {new Date(meta.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
+      </div>
+    </section>
   );
 }

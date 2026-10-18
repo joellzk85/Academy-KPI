@@ -14,7 +14,7 @@ type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' }
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
-function storageError(e: any): string {
+export function storageError(e: any): string {
   const code = String(e?.code || '');
   if (code === 'storage/unauthorized') return "You aren't allowed to do that with this file (or the file rules aren't published yet).";
   if (code === 'storage/canceled') return 'The upload was stopped.';
@@ -102,6 +102,19 @@ export function ProposalDrop({ dealId, viewer, disabled, onUploaded }: {
   );
 }
 
+// Open a proposal file in a new tab ('' when it worked, else a plain message). Also used by the client timeline.
+export async function openProposalFile(f: ProposalFile): Promise<string> {
+  const w = window.open('', '_blank');   // opened straight from the click so it isn't blocked
+  try {
+    const url = await getDownloadURL(ref(storage, f.path));
+    if (w) w.location.href = url; else window.location.href = url;
+    return '';
+  } catch (e) {
+    w?.close();
+    return storageError(e);
+  }
+}
+
 // The deal's proposal files, newest first.
 export function ProposalFilesList({ dealId, files, viewer, editable, onUploaded }: {
   dealId: string; files: ProposalFile[]; viewer: Viewer; editable: boolean; onUploaded?: (files: ProposalFile[]) => void;
@@ -114,14 +127,7 @@ export function ProposalFilesList({ dealId, files, viewer, editable, onUploaded 
 
   const open = async (f: ProposalFile) => {
     setListError('');
-    const w = window.open('', '_blank');   // opened straight from the click so it isn't blocked
-    try {
-      const url = await getDownloadURL(ref(storage, f.path));
-      if (w) w.location.href = url; else window.location.href = url;
-    } catch (e) {
-      w?.close();
-      setListError(storageError(e));
-    }
+    setListError(await openProposalFile(f));
   };
   const remove = async (f: ProposalFile) => {
     if (!window.confirm(`Delete "${f.name}"? The file and its backup copy in the CRM are removed. This can't be undone.`)) return;

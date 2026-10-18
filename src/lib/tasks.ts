@@ -4,6 +4,9 @@
 //   detail, dateline (due date), status 'Not done' | 'Done', assignedById/assignedBy, assignedToId/assignedTo.
 // New: doneAt, doneByName, pipelineId (the deal it's about). Old copies made for the assignee
 // (isDuplicate: true) are skipped; the original is the one task.
+// Client tags and several people (2026-10-18): assignedToIds lists everyone it's for (assignedToId stays the first,
+// for older screens); anyone of them can tick it, and it's done for all. clientIds lists clients tagged with "@" in
+// the text; the task shows on those clients' pages, and ticking it done can add a touch point (lib/touchPoints.ts).
 
 export interface Task {
   id: string;
@@ -14,6 +17,9 @@ export interface Task {
   assignedBy?: string;
   assignedToId: string;
   assignedTo?: string;
+  assignedToIds?: string[];
+  clientIds?: string[];
+  clientNames?: string[];     // as tagged, in the same order (the text shows "@<name>")
   pipelineId?: string;
   doneAt?: string;
   doneByName?: string;
@@ -42,6 +48,14 @@ const validDate = (d?: string) => (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/
 // Older tasks may lack the ids; fall back to whose list they sat in.
 export function assigneeOf(t: Task): string {
   return t.assignedToId || t.ownerRepId || '';
+}
+// Everyone the task is for.
+export function assigneesOf(t: Task): string[] {
+  const list = Array.isArray(t.assignedToIds) && t.assignedToIds.length ? t.assignedToIds : [assigneeOf(t)];
+  return [...new Set(list.filter(Boolean))];
+}
+export function isAssignedTo(t: Task, personId: string): boolean {
+  return assigneesOf(t).includes(personId);
 }
 export function assignerOf(t: Task): string {
   return t.assignedById || t.ownerRepId || '';
@@ -74,7 +88,7 @@ export function taskGroup(t: Task, today: string): TaskGroup {
 
 // Red dot on the menu: a task assigned to this person that's overdue or due today.
 export function needsDoingNow(t: Task, personId: string, today: string): boolean {
-  if (!isRealTask(t) || isDone(t) || assigneeOf(t) !== personId) return false;
+  if (!isRealTask(t) || isDone(t) || !isAssignedTo(t, personId)) return false;
   const g = taskGroup(t, today);
   return g === 'overdue' || g === 'today';
 }

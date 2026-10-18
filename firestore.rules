@@ -59,11 +59,11 @@ service cloud.firestore {
     // and last result) and outlook (the Microsoft 365 app's IDs) are written only by the CRM server.
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours']))
                             || (docId in ['checklist_tasks', 'money_settings'] && isStaff())
-                            || (docId in ['sales_target', 'follow_up_rules'] && isManagement());
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules']));
+                            || (docId in ['sales_target', 'follow_up_rules', 'client_contact_colours'] && isManagement());
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -227,8 +227,9 @@ service cloud.firestore {
       allow read: if isMember();
       allow create: if isManagement()
         || (isMember() && request.resource.data.assignedById == request.auth.uid);
+      // Several people (2026-10-18): anyone in assignedToIds may change it too.
       allow update: if isManagement()
-        || (isMember() && request.auth.uid in taskPeople(resource.data));
+        || (isMember() && (request.auth.uid in taskPeople(resource.data) || request.auth.uid in resource.data.get('assignedToIds', [])));
       allow delete: if isManagement()
         || (isMember() && resource.data.get('assignedById', resource.data.get('ownerRepId', '')) == request.auth.uid);
     }
@@ -260,6 +261,18 @@ service cloud.firestore {
     match /clients/{clientId} {
       allow read, create, update: if isMember();
       allow delete: if isManagement();
+    }
+
+    // Client touch points (2026-10-18): everyone reads; anyone adds one as themselves;
+    // only the person who added it, or Management, changes or deletes it.
+    match /client_touch_points/{tpId} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.byId == request.auth.uid
+        && request.resource.data.clientId is string && request.resource.data.clientId != ''
+        && request.resource.data.text is string && request.resource.data.text.size() > 0;
+      allow update: if isManagement()
+        || (isMember() && resource.data.byId == request.auth.uid && request.resource.data.byId == request.auth.uid);
+      allow delete: if isManagement() || (isMember() && resource.data.byId == request.auth.uid);
     }
 
     // KPI settings per person (template and targets): Management only.

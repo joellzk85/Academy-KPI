@@ -16,6 +16,7 @@ import ProgrammesManager, { StatusChip } from './Programmes';
 import BackupPanel from './BackupPanel';
 import { Flag } from '../lib/checklist';
 import { HrdcQuery, Programme, grantBlockReason, isQueryOpen, isQueryOverdue } from '../lib/programmes';
+import { ClientLastTouch } from './ClientContactDot';
 import { linkedOnly } from '../lib/linked';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -282,6 +283,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
               <div className="min-w-0">
                 <h3 className="truncate text-lg font-bold">{clientName(openDeal)}</h3>
                 <p className="text-[15px] text-ink-soft">{courseOf(openDeal) || 'No programme'}</p>
+                <p className="mt-0.5"><ClientLastTouch client={clients.find(c => c.id === openDeal.clientId)} deals={deals} quotes={quotes} /></p>
               </div>
               <button type="button" onClick={() => setOpenId(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>

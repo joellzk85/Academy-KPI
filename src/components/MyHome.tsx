@@ -23,7 +23,11 @@ import { useMoneySettings } from './Money';
 import { MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import { alertText, followUpAlert } from '../lib/followUps';
 import FollowUpAlerts from './FollowUpAlerts';
+import { TeamFollowUpsSummary } from './TeamFollowUps';
 import { SharedItem, SharedKind, useSharedInbox } from '../lib/sharedInbox';
+import { clientDeals, clientQuotes, clientTimeline, touchFollowUpOpen } from '../lib/touchPoints';
+import { useTouchPoints } from '../lib/useClientHistory';
+import { linkedOnly } from '../lib/linked';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -31,7 +35,7 @@ type Viewer = { id: string; name: string; role: Role };
 // ---------- Card library ----------
 // Each person picks their own cards (saved in user_prefs/{their id}). Roles limit what can be picked.
 type CardId =
-  | 'follow_up_alerts'
+  | 'follow_up_alerts' | 'team_follow_ups'
   | 'follow_ups' | 'my_kpi' | 'my_won' | 'next14' | 'new_won' | 'due_now' | 'money_jobs'
   | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments' | 'shared_with_me';
 
@@ -47,6 +51,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'money_position', title: 'Money position', roles: ['management'] },
   { id: 'pipeline', title: 'Pipeline and stuck deals', roles: ['management'] },
   { id: 'follow_up_alerts', title: 'Follow-up alerts', roles: ['management'] },
+  { id: 'team_follow_ups', title: 'Team follow-ups', roles: ['management'] },
   { id: 'team_appointments', title: 'Team appointments this week', roles: ['admin', 'management'] },
   { id: 'shared_with_me', title: 'Shared with me', roles: ['rep', 'admin', 'management'] },   // needs a workspace (where the files open)
   { id: 'programmes_waiting', title: 'Programmes waiting on HRDC', roles: ['admin', 'management'] },
@@ -57,7 +62,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
 const DEFAULT_CARDS: Record<Role, CardId[]> = {
   rep: ['follow_ups', 'my_kpi', 'next14', 'my_won'],
   admin: ['shared_with_me', 'new_won', 'due_now', 'money_jobs', 'next14'],
-  management: ['approvals', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
+  management: ['team_follow_ups', 'approvals', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
 };
 
 // ---------- Shortcut library (Joel, 2026-10-17) ----------
@@ -104,6 +109,8 @@ export interface MyHomeNav {
   openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup') => void;
   openManagement: (view?: 'dashboard' | 'pl' | 'followups' | 'lost' | 'team' | 'data') => void;
   openFile?: (kind: SharedKind, id: string) => void;   // a shared quotation or outline, straight in the editor
+  openClient?: (clientId: string) => void;             // a client's page (client touch point follow-ups)
+  openTeamFollowUps?: (personId?: string) => void;     // Management → Team follow-ups (one person, or '__quiet')
 }
 
 export default function MyHome({ viewer, people, representatives, deals, events, calendar, notices, nav }: {
@@ -128,6 +135,8 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const touchPoints = useTouchPoints();
   const [savedCards, setSavedCards] = useState<CardId[] | null>(null);
   const [savedShortcuts, setSavedShortcuts] = useState<ShortcutId[] | null>(null);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
@@ -144,6 +153,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'quotations')), s => setQuotes(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => {}),
       onSnapshot(doc(db, 'user_prefs', viewer.id), s => {
         const c = s.data()?.homeCards, l = s.data()?.homeLayout, sc = s.data()?.homeShortcuts;
         // Admin people who arranged their own cards before "Shared with me" existed get it once, at the top
@@ -160,6 +170,16 @@ export default function MyHome({ viewer, people, representatives, deals, events,
           const cells = (Array.isArray(l) ? l : []).map((x: Cell) => ({ ...x, y: (Number(x.y) || 0) + DEFAULT_H }));
           setDoc(doc(db, 'user_prefs', viewer.id), {
             homeCards: ['follow_up_alerts', ...c], homeLayout: [{ i: 'follow_up_alerts', x: 0, y: 0, w: COLS / 2, h: DEFAULT_H }, ...cells], followUpCardAdded: true,
+          }, { merge: true }).catch(() => { /* tried again next time */ });
+        }
+        // Management people who arranged their own cards before "Team follow-ups" existed get it once, at the top
+        // (Joel, 2026-10-18). After that it's theirs to keep or remove.
+        // Waits until the Follow-up alerts card above has been added, so the two writes never overwrite each other.
+        if (viewer.role === 'management' && Array.isArray(c) && !c.includes('team_follow_ups') && !s.data()?.teamFollowUpsCardAdded
+          && (c.includes('follow_up_alerts') || s.data()?.followUpCardAdded)) {
+          const cells = (Array.isArray(l) ? l : []).map((x: Cell) => ({ ...x, y: (Number(x.y) || 0) + DEFAULT_H }));
+          setDoc(doc(db, 'user_prefs', viewer.id), {
+            homeCards: ['team_follow_ups', ...c], homeLayout: [{ i: 'team_follow_ups', x: 0, y: 0, w: COLS / 2, h: DEFAULT_H }, ...cells], teamFollowUpsCardAdded: true,
           }, { merge: true }).catch(() => { /* tried again next time */ });
         }
         setSavedCards(Array.isArray(c) ? c : null);
@@ -241,9 +261,29 @@ export default function MyHome({ viewer, people, representatives, deals, events,
 
   const wonDeals = useMemo(() => deals.filter(p => dealStage(p) === 'won'), [deals]);
   const mine = (p: any) => dealOwnerId(p) === viewer.id;
+
+  // Client touch points with "Follow-up by" me that nobody has followed up yet (Joel, 2026-10-18): due within
+  // 7 days or overdue. One line per client (its soonest).
+  const clientFollowUps = useMemo(() => {
+    const out: { clientId: string; title: string; date: string; d: number }[] = [];
+    clients.forEach(cl => {
+      const tps = touchPoints.filter(t => t.clientId === cl.id);
+      const minePending = tps.filter(t => t.followUpById === viewer.id && ymd(t.nextDate));
+      if (!minePending.length) return;
+      const entries = clientTimeline({
+        deals: clientDeals(cl, deals), quotes: clientQuotes(cl, quotes, deals), outlines: [], files: [], touchPoints: tps, tasks: [], nameOf,
+      });
+      const open = minePending.filter(t => touchFollowUpOpen(t, entries)).sort((a, b) => ymd(a.nextDate).localeCompare(ymd(b.nextDate)))[0];
+      if (!open) return;
+      const d = daysUntil(ymd(open.nextDate), today) ?? 99;
+      if (d <= 7) out.push({ clientId: cl.id, title: cl.companyName || 'Client', date: ymd(open.nextDate), d });
+    });
+    return out.sort((a, b) => a.d - b.d);
+  }, [clients, touchPoints, deals, quotes, viewer.id, today, people]);
+
   const ctx: CardCtx = {
     viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, programmes, representatives, venues,
-    checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared,
+    checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
   };
 
   return (
@@ -684,6 +724,7 @@ type CardCtx = {
   checklistSettings: any; moneySettings: any; nameOf: (id: string) => string; clientName: (p: any) => string;
   openDeal: (p: any) => void; nav: MyHomeNav; mine: (p: any) => boolean; notices: React.ReactNode;
   shared: SharedItem[];
+  clientFollowUps: { clientId: string; title: string; date: string; d: number }[];
 };
 
 type Item = { key: string; title: string; sub?: string; level?: 'danger' | 'attention'; onClick?: () => void };
@@ -714,6 +755,16 @@ function Card({ id, ctx, editing, onRemove, stacked }: { id: CardId; ctx: CardCt
         {titleBar()}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-2">
           <FollowUpAlerts deals={ctx.deals} nameOf={ctx.nameOf} clientName={ctx.clientName} onOpen={editing ? undefined : ctx.openDeal} compact />
+        </div>
+      </div>
+    );
+  }
+  if (id === 'team_follow_ups') {
+    return (
+      <div className={shell}>
+        {titleBar()}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-2">
+          <TeamFollowUpsSummary onOpenFull={editing ? undefined : ctx.nav.openTeamFollowUps} />
         </div>
       </div>
     );
@@ -773,8 +824,9 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           sub: apptOverdue(p, c.today) ? `Held ${formatDate(a.date)}? Log what happened` : d === 0 ? `Today${a.time ? `, ${apptTime(a.time)}` : ''} · ${MODE_LABELS[a.mode]}` : `${formatDate(a.date)}${a.time ? `, ${apptTime(a.time)}` : ''} · ${MODE_LABELS[a.mode]}`,
           level: apptOverdue(p, c.today) ? 'danger' as const : d <= 0 ? 'attention' as const : undefined,
         }));
+      // My deals, and deals where I'm the one following up (Follow-up by, 2026-10-18).
       const soon = c.deals
-        .filter(p => c.mine(p) && OPEN_STAGES.includes(dealStage(p)) && ymd(p.followUpDate))
+        .filter(p => (c.mine(p) || p.followUpById === c.viewer.id) && OPEN_STAGES.includes(dealStage(p)) && ymd(p.followUpDate))
         .map(p => ({ p, d: daysUntil(ymd(p.followUpDate), c.today) ?? 99 }))
         .filter(x => x.d <= 7)
         .sort((a, b) => a.d - b.d);
@@ -786,8 +838,13 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         .sort((x, y) => Number(y.a!.decision) - Number(x.a!.decision) || y.a!.daysInStage - x.a!.daysInStage)
         .map(({ p, a }) => ({ key: `fa_${p.id}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'danger' as const, sub: alertText(a!) }));
       const alerted = new Set(alerts.map(x => x.key.slice(3)));
+      const clientItems: Item[] = c.clientFollowUps.map(x => ({
+        key: `cf_${x.clientId}`, title: x.title, onClick: c.nav.openClient ? () => c.nav.openClient!(x.clientId) : undefined,
+        sub: x.d < 0 ? `Client follow-up overdue by ${-x.d} day${x.d === -1 ? '' : 's'}` : x.d === 0 ? 'Client follow-up today' : `Client follow-up ${formatDate(x.date)}`,
+        level: x.d < 0 ? 'danger' as const : x.d === 0 ? 'attention' as const : undefined,
+      }));
       return {
-        items: [...alerts, ...appts, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
+        items: [...alerts, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
           key: p.id, title: c.clientName(p), onClick: () => c.openDeal(p),
           sub: d < 0 ? `Overdue by ${-d} day${d === -1 ? '' : 's'} (${STAGE_LABELS[dealStage(p)]})` : d === 0 ? 'Follow up today' : `Follow up ${formatDate(ymd(p.followUpDate))}`,
           level: d < 0 ? 'danger' : d === 0 ? 'attention' : undefined,

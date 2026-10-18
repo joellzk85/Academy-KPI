@@ -28,6 +28,7 @@ import { clientContacts, dealContact, mainContactFields, newContactId } from '..
 import PickOrType from './PickOrType';
 import { ProposalDrop, ProposalFilesList } from './ProposalFiles';
 import { ProposalFile } from '../lib/proposals';
+import { ClientLastTouch } from './ClientContactDot';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -609,6 +610,7 @@ export default function DealsBoard({
               deal={openDeal}
               clientName={clientName(openDeal)}
               client={clientOf(openDeal)}
+              clientBadge={<ClientLastTouch client={clientOf(openDeal)} deals={deals} quotes={quotes} />}
               ownerName={personName(dealOwnerId(openDeal))}
               personName={personName}
               editable={canEdit(openDeal)}
@@ -837,6 +839,7 @@ function defaultSection(st: DealStage): SectionKey {
 
 function DealPanel(props: {
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
+  clientBadge?: React.ReactNode;
   editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; checklist: any | null; busy: boolean;
   programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
   venue: Picked | null;
@@ -915,6 +918,7 @@ function DealPanel(props: {
         <div className="min-w-0">
           <h3 className="truncate text-lg font-bold">{props.clientName}</h3>
           <p className="text-[15px] text-ink-soft">{props.courseName || 'No programme yet'}</p>
+          {props.clientBadge && <p className="mt-0.5">{props.clientBadge}</p>}
         </div>
         <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
       </div>

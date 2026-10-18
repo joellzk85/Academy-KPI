@@ -39,6 +39,7 @@ const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
 const FollowUpRulesPage = React.lazy(() => import('./components/FollowUpRulesPage'));
+const TeamFollowUpsPage = React.lazy(() => import('./components/TeamFollowUps'));
 const LostDeletedPage = React.lazy(() => import('./components/LostDeletedPage'));
 const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
 const MyHome = React.lazy(() => import('./components/MyHome'));
@@ -222,7 +223,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
   useFollowUpRules();
-  const [managementView, setManagementView] = useState<'dashboard' | 'pl' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
+  const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
   const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks' | 'backup'>('queue');
 
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
@@ -237,6 +239,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
   // Active Representative Selection (reps can only ever open their own workspace)
   const [fileToOpen, setFileToOpen] = useState<{ kind: SharedKind; id: string } | null>(null);   // My home's "Shared with me"
+  const [clientToOpen, setClientToOpen] = useState<{ repId: string; clientId: string } | null>(null);   // My home's "My follow-ups"
+  const [dealToOpen, setDealToOpen] = useState<{ repId: string; dealId: string } | null>(null);   // Management → Team follow-ups
   const [selectedRepId, setSelectedRepId] = useState<string | null>(() => {
     const saved = localStorage.getItem('next_selected_rep_id') || null;
     // Everyone lands on My home after logging in.
@@ -727,6 +731,30 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setFileToOpen({ kind, id });
       homeNav.openWorkspace(currentMember.id, kind === 'quotation' ? 'quotation' : 'course_outline');
     },
+    // A client's page (the client list is shared, so any workspace shows it): my own, else for Management
+    // without a workspace, the first teammate's.
+    openClient: (clientId: string) => {
+      const repId = canOpenWorkspace(currentMember.id) && representatives.some(r => r.id === currentMember.id)
+        ? currentMember.id : isManagement ? representatives[0]?.id : '';
+      if (!repId) return;
+      setClientToOpen({ repId, clientId });
+      homeNav.openWorkspace(repId, 'client');
+    },
+    // A deal's panel in its owner's workspace (Management), else my own.
+    openDeal: (deal: any) => {
+      const owner = deal?.ownerId || deal?.creatorId;
+      const repId = isManagement && representatives.some(r => r.id === owner) ? owner
+        : representatives.some(r => r.id === currentMember.id) ? currentMember.id : isManagement ? representatives[0]?.id : '';
+      if (!repId || !deal?.id) return;
+      setDealToOpen({ repId, dealId: deal.id });
+      homeNav.openWorkspace(repId, 'pipeline');
+    },
+    openTeamFollowUps: (personId?: string) => {
+      if (!isManagement) return;
+      setTeamFollowUpPerson(personId || '');
+      setManagementView('team_followups');
+      handleSwitchTab('management');
+    },
     openWorkspace: (repId: string, subTab?: string) => {
       if (!canOpenWorkspace(repId)) return;
       if (subTab) localStorage.setItem(`next_active_subtab_${repId}`, subTab);
@@ -740,7 +768,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
-    openManagement: (view?: 'dashboard' | 'pl' | 'followups' | 'lost' | 'team' | 'data') => {
+    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'followups' | 'lost' | 'team' | 'data') => {
       if (!isManagement) return;
       if (view) setManagementView(view);
       handleSwitchTab('management');
@@ -908,12 +936,12 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['pl', 'Project P&L'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['pl', 'Project P&L'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
                     aria-selected={managementView === key}
-                    onClick={() => setManagementView(key)}
+                    onClick={() => { setManagementView(key); setTeamFollowUpPerson(''); }}
                     className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
                       managementView === key ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'
                     }`}
@@ -922,7 +950,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   </button>
                 ))}
               </div>
-              {managementView === 'followups' ? (
+              {managementView === 'team_followups' ? (
+                <TeamFollowUpsPage key={teamFollowUpPerson} initialPerson={teamFollowUpPerson} onOpenClient={homeNav.openClient} onOpenDeal={(d) => homeNav.openDeal(pipelinesSync.find((p: any) => p.id === d.id) || d)} />
+              ) : managementView === 'followups' ? (
                 <FollowUpRulesPage viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'lost' ? (
                 <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
@@ -999,6 +1029,10 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   onOpenAdminWork={isStaff ? () => homeNav.openAdminWork() : undefined}
                   openFile={selectedRep.id === currentMember.id ? fileToOpen : null}
                   onOpenFileHandled={() => setFileToOpen(null)}
+                  openClientId={clientToOpen && clientToOpen.repId === selectedRep.id ? clientToOpen.clientId : null}
+                  onOpenClientHandled={() => setClientToOpen(null)}
+                  openDealId={dealToOpen && dealToOpen.repId === selectedRep.id ? dealToOpen.dealId : null}
+                  onOpenDealHandled={() => setDealToOpen(null)}
                 />
               ) : (
                 <div className="text-center py-12 bg-white rounded-xl border border-slate-200">

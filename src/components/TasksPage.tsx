@@ -1,17 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
-import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, Plus, Trash2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, Plus, Trash2, User, X } from 'lucide-react';
 import { Representative } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { dealOwnerId, dealStage, formatDate, todayIso } from '../lib/deals';
-import { GROUP_LABELS, GROUP_ORDER, Task, TaskGroup, assigneeOf, assignerOf, isDone, isRealTask, taskGroup } from '../lib/tasks';
+import { GROUP_LABELS, GROUP_ORDER, Task, TaskGroup, assigneesOf, assignerOf, isAssignedTo, isDone, isRealTask, taskGroup } from '../lib/tasks';
 import { linkedOnly } from '../lib/linked';
+import { useCloseOnOutside } from '../lib/useCloseOnOutside';
+import { useTeamList } from '../lib/useClientHistory';
+import { ClientTouchPoint, TOUCH_HOW_LABELS, TouchHow, newTouchPointId } from '../lib/touchPoints';
 
 // To-do (redesigned 2026-10-17). One shared task per job (no copies): quick add at the top,
 // "My to-do" / "I asked others" / "Everyone's" (Management), grouped by when it's due.
+// Client tags (2026-10-18): typing @ suggests clients and teammates. A client tag ("@Sime Darby") opens that client's
+// page, and the task shows on it. A teammate tag adds them to the people it's for (a task can be for several people;
+// anyone of them can tick it). Ticking a client-tagged task done asks "What happened?" and saves it as a touch point.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 type Scope = 'mine' | 'asked' | 'everyone';
+type Person = { id: string; name: string };
+type ClientRef = { id: string; companyName: string };
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -25,19 +33,30 @@ const GROUP_TONE: Record<TaskGroup, string> = {
   overdue: 'text-danger', today: 'text-attention', week: 'text-ink', later: 'text-ink', nodate: 'text-ink', done: 'text-ink-soft',
 };
 
-export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
+// Client tags still in the text (the "@<name>" wasn't deleted).
+function keptClients(text: string, tags: ClientRef[]): ClientRef[] {
+  return tags.filter((c, i) => tags.findIndex(x => x.id === c.id) === i && text.includes(`@${c.companyName}`));
+}
+const tagsOf = (t: Task): ClientRef[] => (t.clientIds || []).map((id, i) => ({ id, companyName: (t.clientNames || [])[i] || '' })).filter(c => c.companyName);
+
+export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenClient, openTaskId, onOpenTaskHandled }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
   onOpenDeals?: () => void;          // jump to the Deals tab
+  onOpenClient?: (clientId: string) => void;   // a client tag
+  openTaskId?: string | null;        // open this task's panel (from a client page)
+  onOpenTaskHandled?: () => void;
 }) {
   const me: Viewer = viewer || { id: rep.id, name: rep.name, role: (rep.role as any) || 'rep' };
   const isManagement = me.role === 'management';
   const [tasks, setTasks] = useState<Task[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
+  const teamList = useTeamList();
   const [loaded, setLoaded] = useState(false);
   const [scope, setScope] = useState<Scope>('mine');
   const [showDone, setShowDone] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [doneAsk, setDoneAsk] = useState<Task | null>(null);   // "What happened?" before ticking a client-tagged task
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
@@ -45,7 +64,8 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
   // Quick add
   const [detail, setDetail] = useState('');
   const [due, setDue] = useState('');
-  const [assignTo, setAssignTo] = useState(rep.id);
+  const [assignTo, setAssignTo] = useState<string[]>([rep.id]);
+  const [tagged, setTagged] = useState<ClientRef[]>([]);
   const [dealId, setDealId] = useState('');
 
   useEffect(() => {
@@ -57,16 +77,26 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
     return () => subs.forEach(u => u());
   }, []);
 
+  useEffect(() => {
+    if (!openTaskId) return;
+    setOpenId(openTaskId);
+    onOpenTaskHandled?.();
+  }, [openTaskId]);
+
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3000); };
   const today = todayIso();
-  const team = useMemo(() => {
-    const list = reps.map(r => ({ id: r.id, name: r.name }));
+  // Everyone active on the Team list (Management included), plus the workspace people.
+  const team: Person[] = useMemo(() => {
+    const list: Person[] = teamList.filter(p => p.active).map(p => ({ id: p.id, name: p.name }));
+    reps.forEach(r => { if (!list.some(p => p.id === r.id)) list.push({ id: r.id, name: r.name }); });
     if (!list.some(p => p.id === me.id)) list.push({ id: me.id, name: me.name });
     return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [reps, me.id]);
-  const nameOf = (id: string, fallback = '') => team.find(p => p.id === id)?.name || fallback || 'Former team member';
+  }, [teamList, reps, me.id]);
+  const nameOf = (id: string, fallback = '') => team.find(p => p.id === id)?.name || teamList.find(p => p.id === id)?.name || fallback || 'Former team member';
   const clientName = (d: any) => clients.find(c => c.id === d?.clientId)?.companyName || d?.client || 'No client';
   const dealLabel = (d: any) => `${clientName(d)}${d?.courseName ? ` · ${d.courseName}` : ''}`;
+  const clientRefs: ClientRef[] = useMemo(() => clients.filter(c => c.companyName).map(c => ({ id: c.id, companyName: c.companyName }))
+    .sort((a, b) => a.companyName.localeCompare(b.companyName)), [clients]);
 
   // Deals a task can be about: this person's open and won deals (Admin and Management: everyone's).
   const dealChoices = useMemo(() => deals
@@ -74,13 +104,12 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
     .sort((a, b) => dealLabel(a).localeCompare(dealLabel(b))), [deals, clients, rep.id, me.role]);
 
   const real = tasks.filter(isRealTask);
+  const askedOnly = (t: Task) => assignerOf(t) === rep.id && !(assigneesOf(t).length === 1 && isAssignedTo(t, rep.id));
   const counts = {
-    mine: real.filter(t => assigneeOf(t) === rep.id && !isDone(t)).length,
-    asked: real.filter(t => assignerOf(t) === rep.id && assigneeOf(t) !== rep.id && !isDone(t)).length,
+    mine: real.filter(t => isAssignedTo(t, rep.id) && !isDone(t)).length,
+    asked: real.filter(t => askedOnly(t) && !isDone(t)).length,
   };
-  const inScope = real.filter(t => scope === 'everyone' ? true
-    : scope === 'mine' ? assigneeOf(t) === rep.id
-      : assignerOf(t) === rep.id && assigneeOf(t) !== rep.id);
+  const inScope = real.filter(t => scope === 'everyone' ? true : scope === 'mine' ? isAssignedTo(t, rep.id) : askedOnly(t));
 
   const grouped = useMemo(() => {
     const out: Record<TaskGroup, Task[]> = { overdue: [], today: [], week: [], later: [], nodate: [], done: [] };
@@ -95,17 +124,21 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
     e.preventDefault();
     setError('');
     if (!detail.trim()) return setError('Write what needs doing.');
+    if (!assignTo.length) return setError('Pick who it is for.');
     const id = `task_${Date.now()}`;
+    const tags = keptClients(detail, tagged);
     const t: Task = {
       id, detail: detail.trim(), dateline: due, status: 'Not done',
-      assignedById: me.id, assignedBy: me.name, assignedToId: assignTo, assignedTo: nameOf(assignTo),
-      pipelineId: dealId, dateCreated: today, createdAt: Date.now(), ownerRepId: assignTo,
+      assignedById: me.id, assignedBy: me.name, assignedToId: assignTo[0], assignedTo: nameOf(assignTo[0]), assignedToIds: assignTo,
+      clientIds: tags.map(c => c.id), clientNames: tags.map(c => c.companyName),
+      pipelineId: dealId, dateCreated: today, createdAt: Date.now(), ownerRepId: assignTo[0],
     };
     setBusy(true);
     try {
       await setDoc(doc(db, 'tasks', id), t);
-      setDetail(''); setDue(''); setDealId('');
-      flash(assignTo === rep.id ? 'Task added' : `Task sent to ${nameOf(assignTo)}`);
+      setDetail(''); setDue(''); setDealId(''); setTagged([]); setAssignTo([rep.id]);
+      const others = assignTo.filter(x => x !== rep.id);
+      flash(others.length ? `Task sent to ${others.map(x => nameOf(x)).join(', ')}` : 'Task added');
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -113,22 +146,43 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
     }
   };
 
-  const toggleDone = async (t: Task) => {
+  // Ticking a client-tagged task done asks "What happened?" first (optional).
+  const toggleDone = (t: Task) => {
+    if (!isDone(t) && (t.clientIds || []).length) return setDoneAsk(t);
+    return setDone(t, !isDone(t));
+  };
+  const setDone = async (t: Task, done: boolean, note?: { text: string; how: TouchHow }) => {
     setError('');
-    const done = !isDone(t);
     try {
-      await updateDoc(doc(db, 'tasks', t.id), done
-        ? { status: 'Done', doneAt: today, doneByName: me.name }
-        : { status: 'Not done', doneAt: '', doneByName: '' });
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'tasks', t.id), done
+        ? { status: 'Done', doneAt: today, doneByName: me.name, doneById: me.id }
+        : { status: 'Not done', doneAt: '', doneByName: '', doneById: '' });
+      if (done && note?.text.trim()) {
+        tagsOf(t).forEach(c => {
+          const id = newTouchPointId();
+          const tp: ClientTouchPoint = {
+            id, clientId: c.id, date: today, how: note.how, text: note.text.trim().slice(0, 2000), nextDate: '', followUpById: '', followUpByName: '',
+            at: new Date().toISOString(), byId: me.id, byName: me.name, source: 'todo', taskId: t.id,
+          };
+          batch.set(doc(db, 'client_touch_points', id), tp);
+        });
+      }
+      await batch.commit();
+      if (done && note?.text.trim()) flash(`Done, and saved as a touch point on ${tagsOf(t).map(c => c.companyName).join(', ')}`);
     } catch (err) {
       setError(friendlyError(err));
     }
   };
 
   const openTask = tasks.find(t => t.id === openId) || null;
-  const canChange = (t: Task) => isManagement || assigneeOf(t) === me.id || assignerOf(t) === me.id;
+  const canChange = (t: Task) => isManagement || isAssignedTo(t, me.id) || assignerOf(t) === me.id;
   const canDelete = (t: Task) => isManagement || assignerOf(t) === me.id;
   const empty = GROUP_ORDER.every(g => g === 'done' || grouped[g].length === 0);
+  const rowProps = (t: Task, g: TaskGroup) => ({
+    t, g, scope, rep, canTick: canChange(t), nameOf, deal: deals.find(d => d.id === t.pipelineId), dealLabel, onOpenClient,
+    onToggle: () => toggleDone(t), onOpen: () => setOpenId(t.id),
+  });
 
   return (
     <div className="space-y-5 font-sans text-ink">
@@ -136,22 +190,27 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
 
       <div>
         <h2 className="text-xl font-bold">To-do</h2>
-        <p className="text-[15px] text-ink-soft">Jobs for yourself, or for a teammate. They see the same task, so you know when it's done.</p>
+        <p className="text-[15px] text-ink-soft">Jobs for yourself, or for teammates. They see the same task, so you know when it's done. Type @ to tag a client or a teammate.</p>
       </div>
 
       {/* Quick add */}
       <form onSubmit={add} className="space-y-3 rounded-2xl border border-line bg-white p-4">
-        <input value={detail} onChange={e => setDetail(e.target.value)} placeholder="What needs doing?" className={input} aria-label="What needs doing" />
-        <div className="grid gap-3 sm:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1.4fr)_auto] sm:items-end">
+        <MentionInput value={detail} onChange={setDetail} clients={clientRefs} people={team} placeholder="What needs doing? Type @ to tag a client or teammate" ariaLabel="What needs doing"
+          onPickClient={c => setTagged(x => (x.some(y => y.id === c.id) ? x : [...x, c]))}
+          onPickPerson={p => setAssignTo(x => (x.includes(p.id) ? x : [...x, p.id]))} />
+        {keptClients(detail, tagged).length > 0 && (
+          <p className="flex flex-wrap items-center gap-1.5 text-sm text-ink-soft">
+            Shows on the page of {keptClients(detail, tagged).map(c => <span key={c.id} className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-2 py-0.5 font-semibold text-accent"><Building2 className="h-3.5 w-3.5" />{c.companyName}</span>)}
+          </p>
+        )}
+        <div className="grid gap-3 sm:grid-cols-[10rem_minmax(0,1.2fr)_minmax(0,1.2fr)_auto] sm:items-end">
           <div>
             <label className="mb-1 block text-sm text-ink-soft" htmlFor="t-due">Due</label>
             <input id="t-due" type="date" value={due} onChange={e => setDue(e.target.value)} className={input} />
           </div>
           <div>
-            <label className="mb-1 block text-sm text-ink-soft" htmlFor="t-to">Assign to</label>
-            <select id="t-to" value={assignTo} onChange={e => setAssignTo(e.target.value)} className={input}>
-              {team.map(p => <option key={p.id} value={p.id}>{p.id === rep.id ? `${p.name}${rep.id === me.id ? ' (me)' : ''}` : p.name}</option>)}
-            </select>
+            <span className="mb-1 block text-sm text-ink-soft">For</span>
+            <PeoplePicker ids={assignTo} team={team} meId={rep.id === me.id ? me.id : ''} nameOf={nameOf} onChange={setAssignTo} />
           </div>
           <div>
             <label className="mb-1 block text-sm text-ink-soft" htmlFor="t-deal">About a deal <span className="text-ink-soft/70">(optional)</span></label>
@@ -187,7 +246,7 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
             <section key={g}>
               <h3 className={`mb-2 text-[15px] font-bold ${GROUP_TONE[g]}`}>{GROUP_LABELS[g]} ({grouped[g].length})</h3>
               <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white">
-                {grouped[g].map(t => <TaskRow key={t.id} t={t} g={g} scope={scope} rep={rep} canTick={canChange(t)} nameOf={nameOf} deal={deals.find(d => d.id === t.pipelineId)} dealLabel={dealLabel} onToggle={() => toggleDone(t)} onOpen={() => setOpenId(t.id)} />)}
+                {grouped[g].map(t => <TaskRow key={t.id} {...rowProps(t, g)} />)}
               </ul>
             </section>
           ))}
@@ -198,7 +257,7 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
               </button>
               {showDone && (
                 <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white">
-                  {grouped.done.slice(0, 60).map(t => <TaskRow key={t.id} t={t} g="done" scope={scope} rep={rep} canTick={canChange(t)} nameOf={nameOf} deal={deals.find(d => d.id === t.pipelineId)} dealLabel={dealLabel} onToggle={() => toggleDone(t)} onOpen={() => setOpenId(t.id)} />)}
+                  {grouped.done.slice(0, 60).map(t => <TaskRow key={t.id} {...rowProps(t, 'done')} />)}
                 </ul>
               )}
             </section>
@@ -209,62 +268,217 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals }: {
       {openTask && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
           <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
-            <TaskPanel key={openTask.id} t={openTask} team={team} nameOf={nameOf} dealChoices={dealChoices} deals={deals} dealLabel={dealLabel}
-              canChange={canChange(openTask)} canDelete={canDelete(openTask)} me={me} onOpenDeals={onOpenDeals}
+            <TaskPanel key={openTask.id} t={openTask} team={team} clients={clientRefs} nameOf={nameOf} dealChoices={dealChoices} deals={deals} dealLabel={dealLabel}
+              canChange={canChange(openTask)} canDelete={canDelete(openTask)} me={me} onOpenDeals={onOpenDeals} onOpenClient={onOpenClient}
               onClose={() => setOpenId(null)} onToggle={() => toggleDone(openTask)} onSaved={() => flash('Task saved')} onDeleted={() => { setOpenId(null); flash('Task deleted'); }} />
           </div>
         </div>
+      )}
+
+      {doneAsk && (
+        <DoneDialog t={doneAsk} onCancel={() => setDoneAsk(null)}
+          onDone={async note => { const t = doneAsk; setDoneAsk(null); await setDone(t, true, note); }} />
       )}
     </div>
   );
 }
 
-function TaskRow({ t, g, scope, rep, canTick, nameOf, deal, dealLabel, onToggle, onOpen }: {
+// The task's text, with client tags as links to the client page.
+function DetailText({ t, onOpenClient, className }: { t: Task; onOpenClient?: (id: string) => void; className?: string }) {
+  const text = t.detail || 'No details';
+  const tags = tagsOf(t).sort((a, b) => b.companyName.length - a.companyName.length);
+  if (!tags.length) return <span className={className}>{text}</span>;
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(@(?:${tags.map(c => esc(c.companyName)).join('|')}))`, 'g'));
+  return (
+    <span className={className}>
+      {parts.map((part, i) => {
+        const c = part.startsWith('@') ? tags.find(x => `@${x.companyName}` === part) : undefined;
+        if (!c) return <React.Fragment key={i}>{part}</React.Fragment>;
+        return onOpenClient
+          ? <button key={i} type="button" onClick={e => { e.stopPropagation(); onOpenClient(c.id); }} className="font-semibold text-accent hover:underline">{part}</button>
+          : <strong key={i} className="text-accent">{part}</strong>;
+      })}
+    </span>
+  );
+}
+
+function TaskRow({ t, g, scope, rep, canTick, nameOf, deal, dealLabel, onOpenClient, onToggle, onOpen }: {
   t: Task; g: TaskGroup; scope: Scope; rep: Representative; canTick: boolean; nameOf: (id: string, f?: string) => string;
-  deal: any; dealLabel: (d: any) => string; onToggle: () => void; onOpen: () => void; key?: string;
+  deal: any; dealLabel: (d: any) => string; onOpenClient?: (id: string) => void; onToggle: () => void; onOpen: () => void; key?: string;
 }) {
   const done = isDone(t);
+  const forNames = assigneesOf(t).map(id => nameOf(id, id === t.assignedToId ? t.assignedTo : '')).join(', ');
+  const others = assigneesOf(t).filter(id => id !== rep.id).map(id => nameOf(id));
   const who = scope === 'mine'
-    ? (assignerOf(t) !== rep.id ? `From ${nameOf(assignerOf(t), t.assignedBy)}` : '')
-    : scope === 'asked' ? `For ${nameOf(assigneeOf(t), t.assignedTo)}`
-      : `${nameOf(assigneeOf(t), t.assignedTo)}${assignerOf(t) !== assigneeOf(t) ? `, from ${nameOf(assignerOf(t), t.assignedBy)}` : ''}`;
+    ? [assignerOf(t) !== rep.id ? `From ${nameOf(assignerOf(t), t.assignedBy)}` : '', others.length ? `with ${others.join(', ')}` : ''].filter(Boolean).join(', ')
+    : scope === 'asked' ? `For ${forNames}`
+      : `${forNames}${!isAssignedTo(t, assignerOf(t)) || assigneesOf(t).length > 1 ? `, from ${nameOf(assignerOf(t), t.assignedBy)}` : ''}`;
   const when = done ? `Done ${formatDate(t.doneAt || '')}${t.doneByName ? ` by ${t.doneByName}` : ''}` : t.dateline ? formatDate(t.dateline) : '';
   return (
     <li className="flex items-start gap-3 px-4 py-3 hover:bg-surface">
       <button type="button" disabled={!canTick} onClick={onToggle} className="mt-0.5 shrink-0 disabled:cursor-not-allowed disabled:opacity-40" aria-label={done ? 'Mark not done' : 'Mark done'}>
         {done ? <CheckCircle2 className="h-5 w-5 text-accent" /> : <Circle className={`h-5 w-5 ${g === 'overdue' ? 'text-danger' : 'text-ink-soft/60'}`} />}
       </button>
-      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
-        <span className={`block whitespace-pre-line text-[15px] ${done ? 'text-ink-soft line-through' : ''}`}>{t.detail || 'No details'}</span>
+      {/* A div, not a button, so the client tags inside can be their own buttons */}
+      <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }} className="min-w-0 flex-1 cursor-pointer text-left">
+        <DetailText t={t} onOpenClient={onOpenClient} className={`block whitespace-pre-line text-[15px] ${done ? 'text-ink-soft line-through' : ''}`} />
         <span className="mt-0.5 block text-sm text-ink-soft">{[who, deal ? dealLabel(deal) : ''].filter(Boolean).join(' · ')}</span>
-      </button>
+      </div>
       <span className={`shrink-0 text-right text-sm ${g === 'overdue' ? 'font-semibold text-danger' : 'text-ink-soft'}`}>{when}</span>
     </li>
   );
 }
 
-function TaskPanel({ t, team, nameOf, dealChoices, deals, dealLabel, canChange, canDelete, me, onOpenDeals, onClose, onToggle, onSaved, onDeleted }: {
-  t: Task; team: { id: string; name: string }[]; nameOf: (id: string, f?: string) => string; dealChoices: any[]; deals: any[]; dealLabel: (d: any) => string;
-  canChange: boolean; canDelete: boolean; me: Viewer; onOpenDeals?: () => void;
+// ---------- "@" suggestions: clients and teammates ----------
+function MentionInput({ value, onChange, clients, people, onPickClient, onPickPerson, placeholder, ariaLabel, multiline, disabled, id }: {
+  value: string; onChange: (v: string) => void; clients: ClientRef[]; people: Person[];
+  onPickClient: (c: ClientRef) => void; onPickPerson: (p: Person) => void;
+  placeholder?: string; ariaLabel?: string; multiline?: boolean; disabled?: boolean; id?: string;
+}) {
+  const wrap = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
+  const [caret, setCaret] = useState(0);
+  const [closed, setClosed] = useState(false);
+  const [active, setActive] = useState(0);
+  const before = value.slice(0, caret);
+  const m = /(^|\s)@([^@\n]{0,40})$/.exec(before);
+  const q = m ? m[2].trim().toLowerCase() : '';
+  const options = m ? [
+    ...clients.filter(c => !q || c.companyName.toLowerCase().includes(q)).slice(0, 6).map(c => ({ kind: 'client' as const, id: c.id, name: c.companyName, c })),
+    ...people.filter(p => !q || p.name.toLowerCase().includes(q)).slice(0, 4).map(p => ({ kind: 'person' as const, id: p.id, name: p.name, p })),
+  ] : [];
+  const open = !!m && !closed && !disabled && options.length > 0;
+  useCloseOnOutside(wrap, open, () => setClosed(true));
+
+  const pick = (o: typeof options[number]) => {
+    const start = caret - m![2].length - 1;   // the "@"
+    const next = `${value.slice(0, start)}@${o.name} ${value.slice(caret)}`;
+    onChange(next);
+    if (o.kind === 'client') onPickClient(o.c); else onPickPerson(o.p);
+    const pos = start + o.name.length + 2;
+    setCaret(pos);
+    requestAnimationFrame(() => { field.current?.focus(); field.current?.setSelectionRange(pos, pos); });
+  };
+  const common = {
+    ref: field, id, value, disabled, placeholder, 'aria-label': ariaLabel, className: `${input} ${multiline ? 'resize-y' : ''}`,
+    'aria-expanded': open, 'aria-autocomplete': 'list' as const,
+    onChange: (e: React.ChangeEvent<HTMLInputElement & HTMLTextAreaElement>) => { onChange(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); setClosed(false); setActive(0); },
+    onSelect: (e: React.SyntheticEvent<HTMLInputElement & HTMLTextAreaElement>) => setCaret((e.target as HTMLInputElement).selectionStart ?? value.length),
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (!open) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => (a + 1) % options.length); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => (a - 1 + options.length) % options.length); }
+      else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(options[Math.min(active, options.length - 1)]); }
+    },
+  };
+  return (
+    <div ref={wrap} className="relative">
+      {multiline ? <textarea {...common} rows={4} /> : <input {...common} />}
+      {open && (
+        <ul role="listbox" className="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border border-line bg-white py-1 shadow-lg">
+          {options.map((o, i) => (
+            <li key={`${o.kind}_${o.id}`} role="option" aria-selected={i === active}>
+              <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => pick(o)}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[15px] ${i === active ? 'bg-surface' : 'hover:bg-surface'}`}>
+                {o.kind === 'client' ? <Building2 className="h-4 w-4 shrink-0 text-accent" /> : <User className="h-4 w-4 shrink-0 text-ink-soft" />}
+                <span className="truncate">{o.name}</span>
+                <span className="ml-auto shrink-0 text-xs text-ink-soft">{o.kind === 'client' ? 'Client' : 'Teammate'}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ---------- Who it's for: one or more teammates ----------
+function PeoplePicker({ ids, team, meId, nameOf, onChange, disabled }: {
+  ids: string[]; team: Person[]; meId: string; nameOf: (id: string) => string; onChange: (ids: string[]) => void; disabled?: boolean;
+}) {
+  const rest = team.filter(p => !ids.includes(p.id));
+  return (
+    <div className="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-lg border border-line bg-white px-2 py-1.5">
+      {ids.map(id => (
+        <span key={id} className="inline-flex items-center gap-1 rounded-md bg-surface px-2 py-0.5 text-sm font-semibold">
+          {nameOf(id)}{id === meId ? ' (me)' : ''}
+          {!disabled && ids.length > 1 && <button type="button" onClick={() => onChange(ids.filter(x => x !== id))} className="rounded p-0.5 text-ink-soft hover:text-danger" aria-label={`Remove ${nameOf(id)}`}><X className="h-3.5 w-3.5" /></button>}
+        </span>
+      ))}
+      {!disabled && rest.length > 0 && (
+        <select value="" onChange={e => { if (e.target.value) onChange([...ids, e.target.value]); }} aria-label="Add a person" className="min-w-0 flex-1 rounded-md border-0 bg-transparent py-0.5 text-sm text-accent focus:outline-none">
+          <option value="">+ Add a person</option>
+          {rest.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === meId ? ' (me)' : ''}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+// ---------- Ticking a client-tagged task done: "What happened?" ----------
+function DoneDialog({ t, onCancel, onDone }: { t: Task; onCancel: () => void; onDone: (note?: { text: string; how: TouchHow }) => void }) {
+  const [text, setText] = useState('');
+  const [how, setHow] = useState<TouchHow>('call');
+  const names = tagsOf(t).map(c => c.companyName).join(', ');
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/40 p-4" role="dialog" aria-modal="true" aria-labelledby="done-title" onClick={onCancel}>
+      <div className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+        <div>
+          <h3 id="done-title" className="text-lg font-bold">What happened?</h3>
+          <p className="text-sm text-ink-soft">Optional, but it helps the team: it's saved as a touch point on {names}, so it counts as the last contact.</p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {(Object.keys(TOUCH_HOW_LABELS) as TouchHow[]).map(h => (
+            <button key={h} type="button" aria-pressed={how === h} onClick={() => setHow(h)}
+              className={`rounded-full border px-3 py-1 text-sm font-medium ${how === h ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-soft hover:bg-surface'}`}>
+              {TOUCH_HOW_LABELS[h]}
+            </button>
+          ))}
+        </div>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={4} maxLength={2000} autoFocus aria-label="What happened"
+          placeholder="e.g. Called Encik Hafiz; they'll confirm the dates next week" className={`${input} resize-y`} />
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={btnPrimary} disabled={!text.trim()} onClick={() => onDone({ text, how })}><CheckCircle2 className="h-4 w-4" /> Save and mark done</button>
+          <button type="button" className={btnSecondary} onClick={() => onDone()}>Mark done without a note</button>
+          <button type="button" className="text-sm font-semibold text-ink-soft hover:underline" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskPanel({ t, team, clients, nameOf, dealChoices, deals, dealLabel, canChange, canDelete, me, onOpenDeals, onOpenClient, onClose, onToggle, onSaved, onDeleted }: {
+  t: Task; team: Person[]; clients: ClientRef[]; nameOf: (id: string, f?: string) => string; dealChoices: any[]; deals: any[]; dealLabel: (d: any) => string;
+  canChange: boolean; canDelete: boolean; me: Viewer; onOpenDeals?: () => void; onOpenClient?: (id: string) => void;
   onClose: () => void; onToggle: () => void; onSaved: () => void; onDeleted: () => void; key?: string;
 }) {
   const [detail, setDetail] = useState(t.detail || '');
   const [due, setDue] = useState(t.dateline || '');
-  const [to, setTo] = useState(assigneeOf(t));
+  const [to, setTo] = useState<string[]>(assigneesOf(t));
+  const [tagged, setTagged] = useState<ClientRef[]>(tagsOf(t));
   const [dealId, setDealId] = useState(t.pipelineId || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const deal = deals.find(d => d.id === dealId);
-  const changed = detail.trim() !== (t.detail || '') || due !== (t.dateline || '') || to !== assigneeOf(t) || dealId !== (t.pipelineId || '');
+  const tags = keptClients(detail, tagged);
+  const changed = detail.trim() !== (t.detail || '') || due !== (t.dateline || '') || to.join() !== assigneesOf(t).join() || dealId !== (t.pipelineId || '')
+    || tags.map(c => c.id).join() !== (t.clientIds || []).join();
   // Keep a linked deal in the list even if it's not one of this person's choices.
   const choices = deal && !dealChoices.some(d => d.id === deal.id) ? [deal, ...dealChoices] : dealChoices;
+  // Keep everyone it's for in the list, even someone no longer on the team.
+  const people = [...team, ...to.filter(id => !team.some(p => p.id === id)).map(id => ({ id, name: nameOf(id, id === t.assignedToId ? t.assignedTo : '') }))];
 
   const save = async () => {
     setError('');
     if (!detail.trim()) return setError('Write what needs doing.');
+    if (!to.length) return setError('Pick who it is for.');
     setBusy(true);
     try {
-      await updateDoc(doc(db, 'tasks', t.id), { detail: detail.trim(), dateline: due, assignedToId: to, assignedTo: nameOf(to), ownerRepId: to, pipelineId: dealId });
+      await updateDoc(doc(db, 'tasks', t.id), {
+        detail: detail.trim(), dateline: due, assignedToId: to[0], assignedTo: nameOf(to[0]), assignedToIds: to, ownerRepId: to[0], pipelineId: dealId,
+        clientIds: tags.map(c => c.id), clientNames: tags.map(c => c.companyName),
+      });
       onSaved();
     } catch (err) {
       setError(friendlyError(err));
@@ -303,10 +517,22 @@ function TaskPanel({ t, team, nameOf, dealChoices, deals, dealLabel, canChange, 
         </button>
       )}
 
-      <fieldset disabled={!canChange} className="space-y-4">
+      {tagsOf(t).length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-ink-soft">Client:</span>
+          {tagsOf(t).map(c => onOpenClient
+            ? <button key={c.id} type="button" onClick={() => onOpenClient(c.id)} className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-2 py-0.5 font-semibold text-accent hover:underline"><Building2 className="h-3.5 w-3.5" />{c.companyName}</button>
+            : <span key={c.id} className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-2 py-0.5 font-semibold text-accent"><Building2 className="h-3.5 w-3.5" />{c.companyName}</span>)}
+        </div>
+      )}
+
+      <fieldset disabled={!canChange} className="min-w-0 space-y-4">
         <div>
           <label className={label} htmlFor="tp-detail">What needs doing</label>
-          <textarea id="tp-detail" value={detail} onChange={e => setDetail(e.target.value)} rows={4} className={`${input} resize-y`} />
+          <MentionInput id="tp-detail" multiline value={detail} onChange={setDetail} clients={clients} people={team} disabled={!canChange}
+            onPickClient={c => setTagged(x => (x.some(y => y.id === c.id) ? x : [...x, c]))}
+            onPickPerson={p => setTo(x => (x.includes(p.id) ? x : [...x, p.id]))} />
+          <p className="mt-1 text-sm text-ink-soft">Type @ to tag a client or a teammate. Delete a client's @name to untag it.</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
@@ -314,11 +540,8 @@ function TaskPanel({ t, team, nameOf, dealChoices, deals, dealLabel, canChange, 
             <input id="tp-due" type="date" value={due} onChange={e => setDue(e.target.value)} className={input} />
           </div>
           <div>
-            <label className={label} htmlFor="tp-to">Assigned to</label>
-            <select id="tp-to" value={to} onChange={e => setTo(e.target.value)} className={input}>
-              {!team.some(p => p.id === to) && <option value={to}>{t.assignedTo || 'Former team member'}</option>}
-              {team.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? ' (me)' : ''}</option>)}
-            </select>
+            <span className={label}>For</span>
+            <PeoplePicker ids={to} team={people} meId={me.id} nameOf={id => nameOf(id, id === t.assignedToId ? t.assignedTo : '')} onChange={setTo} disabled={!canChange} />
           </div>
         </div>
         <div>
@@ -330,7 +553,7 @@ function TaskPanel({ t, team, nameOf, dealChoices, deals, dealLabel, canChange, 
           {deal && onOpenDeals && <button type="button" className="mt-1 text-sm font-semibold text-accent hover:underline" onClick={onOpenDeals}>Go to Deals</button>}
         </div>
       </fieldset>
-      {!canChange && <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">Only the person it's assigned to, the person who assigned it, or Management can change this task.</p>}
+      {!canChange && <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">Only the people it's for, the person who assigned it, or Management can change this task.</p>}
 
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
 

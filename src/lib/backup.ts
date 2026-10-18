@@ -11,6 +11,7 @@ export const SKIP_CONFIG_DOCS = ['passwords', 'google_calendar', 'backup_setting
 export const LIST_NAMES: [string, string][] = [
   ['pipelines', 'Deals'],
   ['clients', 'Clients'],
+  ['client_touch_points', 'Client touch points'],
   ['quotations', 'Quotations'],
   ['course_outlines', 'Course outlines'],
   ['proposal_files', 'Proposal files'],

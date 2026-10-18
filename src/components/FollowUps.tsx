@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { Loader2, XCircle } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { dealStage, formatDate, todayIso, STAGE_LABELS } from '../lib/deals';
+import { dealOwnerId, dealStage, formatDate, todayIso, STAGE_LABELS } from '../lib/deals';
+import { useTeamList } from '../lib/useClientHistory';
 import { FollowUpAlert, FollowUpHow, FollowUpNote, HOW_LABELS, alertText, followUpNotes, newNoteId } from '../lib/followUps';
 
 // Follow-up notes on a deal (Joel, 2026-10-18): "Log follow-up" in the deal panel's Next step box, and the
@@ -30,6 +31,10 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
   const [text, setText] = useState('');
   const [reason, setReason] = useState('');
   const [nextDate, setNextDate] = useState('');
+  // Who follows up next (2026-10-18): defaults to the deal owner.
+  const team = useTeamList().filter(p => p.active);
+  const [byId, setById] = useState(dealOwnerId(deal) || viewer.id);
+  const people = team.some(p => p.id === byId) || !byId ? team : [{ id: byId, name: deal.ownerName || 'Deal owner', role: '', active: true }, ...team];
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -40,19 +45,22 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
     if (decision && !reason.trim()) return setErr('Say why the deal should stay open.');
     if (!nextDate) return setErr(decision ? 'Pick the next follow-up date.' : 'Pick the next follow-up date, or mark the deal lost.');
     if (nextDate < today) return setErr('The next follow-up date must be today or later.');
+    if (!byId) return setErr('Pick who follows up.');
+    const byName = people.find(p => p.id === byId)?.name || (byId === viewer.id ? viewer.name : '');
     const note: FollowUpNote = {
-      id: newNoteId(), date, how, text: text.trim().slice(0, 1000), nextDate,
+      id: newNoteId(), date, how, text: text.trim().slice(0, 1000), nextDate, followUpById: byId, followUpByName: byName,
       at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, stage: dealStage(deal),
       ...(decision ? { decision: 'keep_open' as const, reason: reason.trim().slice(0, 500) } : {}),
     };
     const action = decision
-      ? `Kept open: ${note.reason}. Next follow-up ${formatDate(nextDate)}`
-      : `Follow-up (${HOW_LABELS[how]}): ${note.text.length > 80 ? note.text.slice(0, 80) + '…' : note.text}. Next ${formatDate(nextDate)}`;
+      ? `Kept open: ${note.reason}. Next follow-up ${formatDate(nextDate)} by ${byName}`
+      : `Follow-up (${HOW_LABELS[how]}): ${note.text.length > 80 ? note.text.slice(0, 80) + '…' : note.text}. Next ${formatDate(nextDate)} by ${byName}`;
     setBusy(true);
     try {
       await updateDoc(doc(db, 'pipelines', deal.id), {
         followUps: [...(Array.isArray(deal.followUps) ? deal.followUps : []), note].slice(-200),
         followUpDate: nextDate,
+        followUpById: byId, followUpByName: byName,
         history: [...(deal.history || []), { at: note.at, byId: viewer.id, byName: viewer.name, action }].slice(-40),
       });
       onDone(decision ? 'Kept open' : 'Follow-up logged');
@@ -101,10 +109,18 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
             placeholder="e.g. Budget is approved in January" />
         </div>
       )}
-      <div className="sm:w-1/2">
-        <label htmlFor="fu-next" className={label}>Next follow-up date</label>
-        <input id="fu-next" type="date" min={today} value={nextDate} onChange={e => setNextDate(e.target.value)} className={input} />
-        {!decision && <p className="mt-1 text-sm text-ink-soft">Not going ahead? <button type="button" onClick={onMarkLost} className="font-semibold text-danger hover:underline">Mark lost</button> instead.</p>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label htmlFor="fu-next" className={label}>Next follow-up date</label>
+          <input id="fu-next" type="date" min={today} value={nextDate} onChange={e => setNextDate(e.target.value)} className={input} />
+          {!decision && <p className="mt-1 text-sm text-ink-soft">Not going ahead? <button type="button" onClick={onMarkLost} className="font-semibold text-danger hover:underline">Mark lost</button> instead.</p>}
+        </div>
+        <div>
+          <label htmlFor="fu-by" className={label}>Follow-up by</label>
+          <select id="fu-by" value={byId} onChange={e => setById(e.target.value)} className={input}>
+            {people.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === viewer.id ? ' (me)' : ''}{p.id === dealOwnerId(deal) ? ' · deal owner' : ''}</option>)}
+          </select>
+        </div>
       </div>
       {err && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{err}</p>}
       <div className="flex flex-wrap gap-2">
@@ -139,7 +155,7 @@ export function FollowUpList({ deal, limit }: { deal: any; limit?: number }) {
             </p>
             <p className="mt-0.5 whitespace-pre-line text-ink">{n.text}</p>
             {n.reason && <p className="mt-0.5 text-ink-soft">Why keep open: {n.reason}</p>}
-            {n.nextDate && <p className="mt-0.5 text-ink-soft">Next follow-up {formatDate(n.nextDate)}</p>}
+            {n.nextDate && <p className="mt-0.5 text-ink-soft">Next follow-up {formatDate(n.nextDate)}{n.followUpByName ? ` by ${n.followUpByName}` : ''}</p>}
           </li>
         ))}
       </ul>
