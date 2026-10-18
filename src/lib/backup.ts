@@ -3,9 +3,9 @@
 // both the Google Sheet copy and the Excel download (serverBackup.ts). Pure, so it can be tested.
 
 // Never backed up: login data and the server's own bookkeeping.
-export const SKIP_COLLECTIONS = ['secrets', 'auth_map', 'calendar_sync', 'user_prefs'];
+export const SKIP_COLLECTIONS = ['secrets', 'server_secrets', 'auth_map', 'calendar_sync', 'user_prefs'];
 // Never backed up from the config list.
-export const SKIP_CONFIG_DOCS = ['passwords', 'google_calendar', 'backup_settings'];
+export const SKIP_CONFIG_DOCS = ['passwords', 'google_calendar', 'backup_settings', 'outlook'];
 
 // Friendly tab names, in the order they appear. Lists not named here (older ones) follow, A to Z.
 export const LIST_NAMES: [string, string][] = [
@@ -26,6 +26,7 @@ export const LIST_NAMES: [string, string][] = [
   ['month_kpis', 'KPI history'],
   ['reps', 'KPI sets and targets'],
   ['team', 'Team'],
+  ['team_emails', 'Team work emails'],
   ['config', 'Settings'],
 ];
 

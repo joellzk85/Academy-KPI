@@ -6,6 +6,7 @@ import { registerAuthRoutes } from "./serverAuth";
 import { registerCalendarRoutes } from "./serverCalendar";
 import { registerBackupRoutes } from "./serverBackup";
 import { registerTrainerLinkRoutes } from "./serverTrainerLinks";
+import { registerMailRoutes } from "./serverMail";
 
 // Load environment variables
 dotenv.config();
@@ -18,6 +19,10 @@ process.on("unhandledRejection", (reason) => {
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+
+  // Outlook email (quotations with their PDF). Registered before the general JSON reader below, because
+  // a PDF is bigger than its 100 KB limit; these routes read their own bodies.
+  registerMailRoutes(app);
 
   app.use(express.json());
 

@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Eye, EyeOff, Gauge, KeyRound, Loader2, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
+import { Eye, EyeOff, Gauge, KeyRound, Loader2, Mail, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
 import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { AUTO_SOURCE_LABELS, KPI_TEMPLATES, templateById, defaultTemplateIdFor, metricsFor } from '../lib/kpi';
 import { db, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember, TeamRole, ROLE_LABELS } from '../types';
+import OutlookSetup from './OutlookSetup';
 
 interface TeamManagerProps {
   currentMember: TeamMember;
@@ -82,6 +83,7 @@ type DialogState =
   | { kind: 'kpi'; member: TeamMember }
   | { kind: 'reset'; member: TeamMember }
   | { kind: 'reactivate'; member: TeamMember }
+  | { kind: 'email'; member: TeamMember }
   | { kind: 'remove'; member: TeamMember; openDeals: { id: string; client: string }[] | null }
   | null;
 
@@ -110,6 +112,34 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     snap.forEach(d => { next[d.id] = d.data(); });
     setKpiDocs(next);
   }), []);
+  // Work emails (the "From" address when sending quotations by Outlook), in team_emails/<memberId>.
+  const [workEmails, setWorkEmails] = useState<Record<string, string>>({});
+  useEffect(() => onSnapshot(collection(db, 'team_emails'), snap => {
+    const next: Record<string, string> = {};
+    snap.forEach(d => { next[d.id] = String(d.data().email || ''); });
+    setWorkEmails(next);
+  }, () => {}), []);
+  const [dialogEmail, setDialogEmail] = useState('');
+  const openEmail = (m: TeamMember) => {
+    setDialogEmail(workEmails[m.id] || '');
+    setDialogError('');
+    setDialog({ kind: 'email', member: m });
+  };
+  const saveEmail = async () => {
+    if (!dialog || dialog.kind !== 'email') return;
+    const email = dialogEmail.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setDialogError("That isn't a valid email address.");
+    setDialogBusy(true);
+    try {
+      await callServer('/api/team/email', { memberId: dialog.member.id, email }, true);
+      flash('ok', email ? `${dialog.member.name}'s work email is saved.` : `${dialog.member.name}'s work email was removed.`);
+      closeDialog();
+    } catch (err) {
+      setDialogError(friendlyError(err));
+      setDialogBusy(false);
+    }
+  };
+
   const [kpiTemplate, setKpiTemplate] = useState('');
   const [kpiTargets, setKpiTargets] = useState<Record<string, string>>({});
 
@@ -360,6 +390,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                     <p className="mt-0.5 text-sm text-ink-soft">
                       {m.mustChangePassword ? 'Has not set their own password yet' : 'Active'}
                       <span className="block">KPIs: {kpiSummary(m)}</span>
+                      <span className="block truncate">{workEmails[m.id] ? `Work email: ${workEmails[m.id]}` : 'No work email yet (needed to send quotations by email)'}</span>
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -378,6 +409,9 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                     </select>
                     <button type="button" className={secondaryBtn} onClick={() => openKpi(m)}>
                       <Gauge className="h-3.5 w-3.5" /> KPIs
+                    </button>
+                    <button type="button" className={secondaryBtn} onClick={() => openEmail(m)}>
+                      <Mail className="h-3.5 w-3.5" /> Work email
                     </button>
                     {!isMe && (
                       <>
@@ -421,6 +455,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
           )}
         </section>
 
+        <div className="space-y-6">
         {/* Add person */}
         <section className="h-fit rounded-2xl border border-line bg-white p-5">
           <h3 className="flex items-center gap-2 font-bold">
@@ -462,6 +497,8 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
             </button>
           </form>
         </section>
+        <OutlookSetup />
+        </div>
       </div>
 
       {/* Dialogs */}
@@ -511,6 +548,24 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
             <button type="button" className={primaryBtn} disabled={dialogBusy} onClick={saveKpi}>
               {dialogBusy && <Loader2 className="h-4 w-4 animate-spin" />}
               Save KPIs
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {dialog && dialog.kind === 'email' && (
+        <Dialog title={`Work email for ${dialog.member.name}`} onClose={closeDialog}>
+          <p className="mb-4 text-[15px] leading-relaxed text-ink-soft">
+            Their Microsoft 365 work email. Quotations they send by email go out from this mailbox and appear in their Outlook Sent Items. It isn't used to log in.
+          </p>
+          <label htmlFor="dlg-email" className={labelClass}>Work email</label>
+          <input id="dlg-email" type="email" value={dialogEmail} onChange={e => { setDialogEmail(e.target.value); setDialogError(''); }} className={inputClass} placeholder="name@nextacademy.my" autoComplete="off" />
+          <p className="mt-1.5 text-sm text-ink-soft">Leave blank to remove it.</p>
+          {dialogError && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{dialogError}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" className={secondaryBtn} onClick={closeDialog}>Cancel</button>
+            <button type="button" className={primaryBtn} disabled={dialogBusy} onClick={saveEmail}>
+              {dialogBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save
             </button>
           </div>
         </Dialog>

@@ -178,6 +178,17 @@ export interface Quotation {
   sentAt?: string;
   sentById?: string;
   sentByName?: string;
+  sendLog?: QuoteSendEntry[];  // each time it was emailed, WhatsApped or marked sent (2026-10-18)
+}
+
+// One "sent" record on a quotation: how, by whom, when and to whom.
+export interface QuoteSendEntry {
+  at: string;
+  byId: string;
+  byName: string;
+  channel: 'email' | 'whatsapp' | 'manual';
+  to?: string;
+  cc?: string;
 }
 
 export interface CourseOutlineItem {

@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
   AlertTriangle, ArrowLeft, Copy, Download, Eye, EyeOff, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Share2, Trash2, Unlock, Users, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { Quotation, QuotationItem, Representative } from '../types';
+import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../types';
 import { STAGE_LABELS, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
@@ -12,11 +12,14 @@ import QuotationDocument from './QuotationDocument';
 import { dealContact } from '../lib/contacts';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import { linkedOnly } from '../lib/linked';
+import QuoteSendDialog from './QuoteSendDialog';
+import { downloadBlob, makeQuotationPdf, pdfFileName } from '../lib/quotePdf';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
 // A quotation is made for a deal (or a client). While it's a draft, the client's details, programme,
 // HRDC code, training date, owner, venue and trainer are read live from their lists (lib/quoteResolve.ts).
-// "Mark as sent" locks a copy of exactly what was sent; "Revise" unlocks it again.
+// "Send" (email from my Outlook, WhatsApp, or download + mark as sent; QuoteSendDialog) locks a copy of exactly
+// what was sent and logs it in sendLog; "Revise" unlocks it again.
 // Sharing: teammates in sharedWithIds can open and edit the same quotation (no copies).
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -98,7 +101,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
     const date = todayIso();
     const copy: Quotation = clean({
       ...q, id: `q_${Date.now()}`, refNumber: nextRef(quotes, date), date, preparedBy: me.name, creatorId: me.id,
-      status: 'draft', sentAt: '', sentById: '', sentByName: '', sharedWithIds: [], isHidden: false,
+      status: 'draft', sentAt: '', sentById: '', sentByName: '', sendLog: [], sharedWithIds: [], isHidden: false,
       taggedRepId: '', taggedRepName: '', taggedBy: '', tagNote: '', isCompleted: false,
     } as Quotation);
     await setDoc(doc(db, 'quotations', copy.id), copy);
@@ -326,7 +329,8 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const printAfterRender = useRef(false);
+  const [sending, setSending] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const r = resolveQuotation(q, sources);
   const shownQ = r.q;                       // what prints
@@ -338,15 +342,6 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const sub = (shownQ.items || []).reduce((t, i) => t + (Number(i.totalFee) || 0), 0);
   const total = totalOf(shownQ);
   const legacy = !r.deal && !r.client && !!(q.company || q.address);
-
-  useEffect(() => {
-    if (preview && printAfterRender.current) {
-      printAfterRender.current = false;
-      const t = document.title;
-      document.title = q.refNumber || 'Quotation';
-      window.setTimeout(() => { window.print(); document.title = t; }, 200);
-    }
-  }, [preview]);
 
   const persist = async (out: Quotation, msg: string) => {
     setBusy(true);
@@ -367,26 +362,48 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     }
   };
   const save = () => persist(q, 'Saved');
-  const markSent = () => {
-    if (r.issues.length && !window.confirm(`Some details are missing:\n\n• ${r.issues.join('\n• ')}\n\nMark as sent anyway?`)) return;
-    // Lock a copy of exactly what prints now.
-    return persist({ ...shownQ, status: 'sent', sentAt: new Date().toISOString(), sentById: me.id, sentByName: me.name }, 'Marked as sent and locked').then(async ok => {
-      // The deal moves to "Quotation sent" (if it was at "Client approved").
-      if (!ok || !r.deal || dealStage(r.deal) !== 'agreed') return;
+  // Sent (by email, WhatsApp or by hand): lock a copy of exactly what prints now, and log how it went.
+  // Sending again after it's locked only adds to the log.
+  const lockAsSent = async (entry: QuoteSendEntry) => {
+    const how = entry.channel === 'email' ? 'Emailed' : entry.channel === 'whatsapp' ? 'Sent by WhatsApp' : 'Marked as sent';
+    const sendLog = [...(q.sendLog || []), entry].slice(-30);
+    const out: Quotation = locked
+      ? { ...q, sendLog }
+      : { ...shownQ, status: 'sent', sentAt: entry.at, sentById: me.id, sentByName: me.name, sendLog };
+    const ok = await persist(out, locked ? how : `${how} and locked`);
+    // The deal moves to "Quotation sent" (if it was at "Client approved").
+    if (ok && !locked && r.deal && dealStage(r.deal) === 'agreed') {
       try {
         await updateDoc(doc(db, 'pipelines', r.deal.id), {
           stage: 'quoted', status: 'Pending', quotationSentDate: todayIso(),
           history: [...(r.deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Quotation ${q.refNumber} sent` }].slice(-40),
         });
       } catch { /* the deal owner or Admin can move it on the deal */ }
-    });
+    }
+    return ok;
   };
+  const ensureSaved = async () => (dirty ? persist(q, 'Saved') : true);
   const revise = () => {
     if (!window.confirm('Unlock this quotation to revise it? It will read the latest client, deal and programme details again.')) return;
     return persist({ ...q, status: 'draft', sentAt: '', sentById: '', sentByName: '' }, 'Unlocked for revision');
   };
   const close = () => { if (!dirty || window.confirm('You have unsaved changes. Leave without saving?')) onClose(); };
-  const downloadPdf = () => { if (preview) window.print(); else { printAfterRender.current = true; setPreview(true); } };
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    setError('');
+    try {
+      downloadBlob(await makeQuotationPdf(shownQ), pdfFileName(shownQ));
+    } catch (e: any) {
+      setError(`The PDF couldn't be made (${e?.message || e}). Open Preview and use Print → Save as PDF instead.`);
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+  const printIt = () => {
+    const t = document.title;
+    document.title = q.refNumber || 'Quotation';
+    window.setTimeout(() => { window.print(); document.title = t; }, 100);
+  };
 
   // Re-link to a deal or client
   const relink = (pick: { deal?: any; clientId?: string }) => {
@@ -413,6 +430,13 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const addItem = (kind: 'programme' | 'item') => setQ(x => ({ ...x, items: [...(x.items || []), { id: `item_${Date.now()}`, no: (x.items || []).length + 1, kind, program: '', code: '', date: '', trainer: '', programmeId: '', trainerId: '', useDealDate: kind === 'programme' && !!x.pipelineId, feePerDay: 0, days: 1, totalFee: 0 }] }));
   const removeItem = (i: number) => setQ(x => ({ ...x, items: (x.items || []).filter((_, k) => k !== i) }));
 
+  const sendDialog = sending ? (
+    <QuoteSendDialog
+      shownQ={shownQ} locked={locked} issues={r.issues} deal={r.deal} client={r.client} ownerId={r.ownerId} me={me}
+      ensureSaved={ensureSaved} onSent={lockAsSent} onClose={() => setSending(false)}
+    />
+  ) : null;
+
   if (preview) {
     return (
       <div className="space-y-4 font-sans text-ink">
@@ -420,11 +444,14 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
           <button type="button" className={btnSecondary} onClick={() => setPreview(false)}><ArrowLeft className="h-4 w-4" /> Back to edit</button>
           <span className="flex items-center gap-2">
             {dirty && <span className="text-sm text-attention">Not saved yet</span>}
-            <button type="button" className={btnPrimary} onClick={() => window.print()}><Download className="h-4 w-4" /> Download PDF</button>
+            <button type="button" className={btnSecondary} onClick={printIt}>Print</button>
+            <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
+            <button type="button" className={btnPrimary} onClick={() => setSending(true)}><Send className="h-4 w-4" /> {locked ? 'Send again' : 'Send'}</button>
           </span>
         </div>
-        <p className="no-print text-sm text-ink-soft">In the print window, choose "Save as PDF" as the printer.</p>
+        {error && <p role="alert" className="no-print rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
         <QuotationDocument q={shownQ} />
+        {sendDialog}
       </div>
     );
   }
@@ -451,7 +478,19 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
       {locked && (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-accent/30 bg-accent-soft p-4 text-accent">
           <Lock className="h-5 w-5" />
-          <p className="min-w-0 flex-1 text-[15px]"><strong>Sent {formatDate(q.sentAt || '')}</strong> by {q.sentByName}. This is the locked copy the client received.</p>
+          <div className="min-w-0 flex-1 text-[15px]">
+            <p><strong>Sent {formatDate(q.sentAt || '')}</strong> by {q.sentByName}. This is the locked copy the client received.</p>
+            {(q.sendLog || []).length > 0 && (
+              <ul className="mt-1 space-y-0.5 text-sm">
+                {(q.sendLog || []).slice().reverse().map((x, i) => (
+                  <li key={`${x.at}-${i}`}>
+                    {x.channel === 'email' ? 'Emailed' : x.channel === 'whatsapp' ? 'WhatsApp' : 'Marked as sent'}
+                    {x.to ? ` to ${x.to}` : ''}{x.cc ? ` (cc ${x.cc})` : ''} · {x.byName} · {formatDate(x.at)} {new Date(x.at).toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit' })}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
         </div>
       )}
@@ -673,13 +712,14 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
           <span className={`text-sm ${dirty ? 'text-attention' : 'text-ink-soft'}`}>{note || (dirty ? 'Not saved yet' : locked ? 'Sent and locked' : 'All changes saved')}</span>
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
-            <button type="button" className={btnSecondary} onClick={downloadPdf}><Download className="h-4 w-4" /> Download PDF</button>
-            {!locked && <button type="button" className={btnSecondary} disabled={busy} onClick={markSent}><Send className="h-4 w-4" /> Mark as sent</button>}
-            <button type="button" className={btnPrimary} disabled={busy || !dirty} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
+            <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
+            <button type="button" className={btnSecondary} disabled={busy || !dirty} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
+            <button type="button" className={btnPrimary} disabled={busy} onClick={() => setSending(true)}><Send className="h-4 w-4" /> {locked ? 'Send again' : 'Send'}</button>
           </span>
         </div>
       </div>
 
+      {sendDialog}
       {relinking && (
         <Chooser deals={dealsForPicker} clients={sources.clients} sources={sources} personName={nameOf} onPick={relink} onCancel={() => setRelinking(false)} title="Link this quotation to a deal" />
       )}

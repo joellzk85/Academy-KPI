@@ -14,6 +14,8 @@ export default defineConfig(() => {
             if (!id.includes('node_modules')) return undefined;
             if (/[\\/]node_modules[\\/](firebase|@firebase)[\\/]/.test(id)) return 'firebase';
             if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react';
+            // The PDF makers load only when someone makes a quotation PDF (src/lib/quotePdf.ts), not at login.
+            if (/[\\/]node_modules[\\/](jspdf|html2canvas|html2canvas-pro|canvg|fflate|fast-png|iobuffer|pako|dompurify|core-js|@babel[\\/]runtime|regenerator-runtime|raf|performance-now|rgbcolor|stackblur-canvas|svg-pathdata|css-line-break|text-segmentation|utrie|base64-arraybuffer)[\\/]/.test(id)) return undefined;
             return 'vendor';
           },
         },

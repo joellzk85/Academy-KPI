@@ -5,6 +5,8 @@ rules_version = '2';
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
 // - The old plain-text password store can no longer be read by anyone.
+// - Outlook email (2026-10-18): team_emails is read by members and written only by the server; config/outlook
+//   is server-only; the Microsoft client secret is in server_secrets, which no browser can read (no rule = no access).
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -40,6 +42,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Work emails (the "From" address for Outlook): every member can read; only the CRM server writes (Management sets them in Team).
+    match /team_emails/{memberId} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+
     // Scrambled passwords: only the CRM server may touch these.
     match /secrets/{memberId} {
       allow read, write: if false;
@@ -47,15 +55,15 @@ service cloud.firestore {
 
     // Settings. The admin checklist's master task list and money settings: Admin and Management only.
     // sales_target (the company sales target and its period): Management only.
-    // google_calendar (the shared Google Calendar's ID and sync status) and backup_settings (the backup Google Sheet
-    // and last result) are written only by the CRM server.
+    // google_calendar (the shared Google Calendar's ID and sync status), backup_settings (the backup Google Sheet
+    // and last result) and outlook (the Microsoft 365 app's IDs) are written only by the CRM server.
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'sales_target']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target']))
                             || (docId in ['checklist_tasks', 'money_settings'] && isStaff())
                             || (docId == 'sales_target' && isManagement());
       allow delete: if (docId in ['passwords', 'sales_target'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'sales_target']));
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
