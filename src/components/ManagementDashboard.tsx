@@ -11,6 +11,7 @@ import { metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix } from '../
 import { useKpiSources } from '../lib/useKpiSources';
 import { SalesTarget, monthsBetween, periodFor, ymLabel } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
+import FollowUpAlerts from './FollowUpAlerts';
 
 // Management → Dashboard: Team performance (rebuilt 2026-10-17).
 // Everything is counted from deals by the same rules as the KPI page and My home rings
@@ -25,12 +26,13 @@ interface Props {
   onSelectRep: (rep: Representative) => void;
   onOpenTeam?: () => void;
   people?: { id: string; name: string }[];   // everyone on the Team list, for owner names
+  onOpenDeal?: (deal: any) => void;     // opens the deal owner's Deals
 }
 
 const card = 'rounded-2xl border border-line bg-white p-5';
 const OPEN_JOURNEY: DealStage[] = ['lead', 'proposal', 'agreed', 'quoted'];
 
-export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam, people = [] }: Props) {
+export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam, people = [], onOpenDeal }: Props) {
   const deals = pipelinesSync || [];
   const [clients, setClients] = useState<any[]>([]);
   useEffect(() => onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))), []);
@@ -141,6 +143,12 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
             ))}
           </ul>
         )}
+      </section>
+
+      {/* Follow-up alerts (Joel, 2026-10-18): deals past a follow-up checkpoint with no note since */}
+      <section className={card}>
+        <h3 className="mb-3 font-bold">Follow-up alerts</h3>
+        <FollowUpAlerts deals={deals} nameOf={personName} clientName={clientName} onOpen={onOpenDeal} />
       </section>
 
       {/* Pipeline snapshot */}

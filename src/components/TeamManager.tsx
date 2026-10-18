@@ -315,7 +315,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
       const snap = await getDocs(query(collection(db, 'pipelines'), where('ownerId', '==', member.id)));
       const open = snap.docs
         .map(d => ({ id: d.id, ...(d.data() as any) }))
-        .filter(p => p.status !== 'Won' && p.status !== 'Lost')
+        .filter(p => p.status !== 'Won' && p.status !== 'Lost' && p.deleted !== true)
         .map(p => ({ id: p.id, client: p.client || 'Unnamed client' }));
       setDialog(d => (d && d.kind === 'remove' && d.member.id === member.id ? { ...d, openDeals: open } : d));
     } catch (err) {

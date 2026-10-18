@@ -38,6 +38,8 @@ const ManagementDashboard = React.lazy(() => import('./components/ManagementDash
 const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
+const FollowUpRulesPage = React.lazy(() => import('./components/FollowUpRulesPage'));
+const LostDeletedPage = React.lazy(() => import('./components/LostDeletedPage'));
 const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
 const MyHome = React.lazy(() => import('./components/MyHome'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
@@ -47,6 +49,7 @@ import { metricsFor, templateById } from './lib/kpi';
 import { appointmentEvents } from './lib/appointments';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
 import { runBackup } from './lib/backupApi';
+import { useFollowUpRules } from './lib/useFollowUpRules';
 import { linkedOnly, setLinkedTeam } from './lib/linked';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
@@ -216,7 +219,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   };
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [managementView, setManagementView] = useState<'dashboard' | 'pl' | 'team' | 'data'>('dashboard');
+  // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
+  useFollowUpRules();
+  const [managementView, setManagementView] = useState<'dashboard' | 'pl' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
   const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks' | 'backup'>('queue');
 
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
@@ -727,7 +732,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
-    openManagement: (view?: 'dashboard' | 'pl' | 'team' | 'data') => {
+    openManagement: (view?: 'dashboard' | 'pl' | 'followups' | 'lost' | 'team' | 'data') => {
       if (!isManagement) return;
       if (view) setManagementView(view);
       handleSwitchTab('management');
@@ -894,8 +899,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
-              <div className="mb-5 inline-flex rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['pl', 'Project P&L'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
+              <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
+                {([['dashboard', 'Dashboard'], ['pl', 'Project P&L'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -909,7 +914,11 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   </button>
                 ))}
               </div>
-              {managementView === 'team' ? (
+              {managementView === 'followups' ? (
+                <FollowUpRulesPage viewer={{ id: currentMember.id, name: currentMember.name }} />
+              ) : managementView === 'lost' ? (
+                <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
+              ) : managementView === 'team' ? (
                 <TeamManager currentMember={currentMember} teamMembers={teamMembers} />
               ) : managementView === 'data' ? (
                 <DataTools teamMembers={teamMembers} />
@@ -926,6 +935,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 selectedMonth={selectedMonth}
                 onMonthChange={handleMonthChange}
                 onOpenTeam={() => setManagementView('team')}
+                onOpenDeal={(p: any) => { const owner = p.ownerId || p.creatorId; homeNav.openWorkspace(representatives.some(r => r.id === owner) ? owner : currentMember.id, 'pipeline'); }}
                 pipelinesSync={pipelinesSync}
                 people={teamMembers.map(m => ({ id: m.id, name: m.name }))}
               />

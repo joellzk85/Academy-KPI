@@ -21,6 +21,8 @@ import { MoneyIn, MoneyOut, canDecide, dealPL, isCompanyPayment, isPaid, moneyFl
 import { useChecklistSettings } from './DealChecklist';
 import { useMoneySettings } from './Money';
 import { MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
+import { alertText, followUpAlert } from '../lib/followUps';
+import FollowUpAlerts from './FollowUpAlerts';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -28,6 +30,7 @@ type Viewer = { id: string; name: string; role: Role };
 // ---------- Card library ----------
 // Each person picks their own cards (saved in user_prefs/{their id}). Roles limit what can be picked.
 type CardId =
+  | 'follow_up_alerts'
   | 'follow_ups' | 'my_kpi' | 'my_won' | 'next14' | 'new_won' | 'due_now' | 'money_jobs'
   | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments';
 
@@ -42,6 +45,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'approvals', title: 'Waiting for my approval', roles: ['management'] },
   { id: 'money_position', title: 'Money position', roles: ['management'] },
   { id: 'pipeline', title: 'Pipeline and stuck deals', roles: ['management'] },
+  { id: 'follow_up_alerts', title: 'Follow-up alerts', roles: ['management'] },
   { id: 'team_appointments', title: 'Team appointments this week', roles: ['admin', 'management'] },
   { id: 'programmes_waiting', title: 'Programmes waiting on HRDC', roles: ['admin', 'management'] },
   { id: 'notices', title: 'Notices', roles: ['rep', 'admin', 'management'] },
@@ -51,7 +55,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
 const DEFAULT_CARDS: Record<Role, CardId[]> = {
   rep: ['follow_ups', 'my_kpi', 'next14', 'my_won'],
   admin: ['new_won', 'due_now', 'money_jobs', 'next14'],
-  management: ['approvals', 'money_position', 'pipeline', 'team_appointments', 'next14'],
+  management: ['approvals', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
 };
 
 // ---------- Shortcut library (Joel, 2026-10-17) ----------
@@ -96,7 +100,7 @@ const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink 
 export interface MyHomeNav {
   openWorkspace: (repId: string, subTab?: string) => void;
   openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup') => void;
-  openManagement: (view?: 'dashboard' | 'pl' | 'team' | 'data') => void;
+  openManagement: (view?: 'dashboard' | 'pl' | 'followups' | 'lost' | 'team' | 'data') => void;
 }
 
 export default function MyHome({ viewer, people, representatives, deals, events, calendar, notices, nav }: {
@@ -139,6 +143,14 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(doc(db, 'user_prefs', viewer.id), s => {
         const c = s.data()?.homeCards, l = s.data()?.homeLayout, sc = s.data()?.homeShortcuts;
+        // Management people who arranged their own cards before "Follow-up alerts" existed get it once, at the top
+        // (Joel, 2026-10-18). After that it's theirs to keep or remove.
+        if (viewer.role === 'management' && Array.isArray(c) && !c.includes('follow_up_alerts') && !s.data()?.followUpCardAdded) {
+          const cells = (Array.isArray(l) ? l : []).map((x: Cell) => ({ ...x, y: (Number(x.y) || 0) + DEFAULT_H }));
+          setDoc(doc(db, 'user_prefs', viewer.id), {
+            homeCards: ['follow_up_alerts', ...c], homeLayout: [{ i: 'follow_up_alerts', x: 0, y: 0, w: COLS / 2, h: DEFAULT_H }, ...cells], followUpCardAdded: true,
+          }, { merge: true }).catch(() => { /* tried again next time */ });
+        }
         setSavedCards(Array.isArray(c) ? c : null);
         setSavedShortcuts(Array.isArray(sc) ? sc : null);
         setSavedLayout(Array.isArray(l) ? l : null);
@@ -682,6 +694,16 @@ function Card({ id, ctx, editing, onRemove, stacked }: { id: CardId; ctx: CardCt
       </span>
     </div>
   );
+  if (id === 'follow_up_alerts') {
+    return (
+      <div className={shell}>
+        {titleBar()}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-2">
+          <FollowUpAlerts deals={ctx.deals} nameOf={ctx.nameOf} clientName={ctx.clientName} onOpen={editing ? undefined : ctx.openDeal} compact />
+        </div>
+      </div>
+    );
+  }
   if (id === 'notices') {
     return (
       <div className={shell}>
@@ -742,8 +764,16 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         .map(p => ({ p, d: daysUntil(ymd(p.followUpDate), c.today) ?? 99 }))
         .filter(x => x.d <= 7)
         .sort((a, b) => a.d - b.d);
+      // Follow-up rules (Joel, 2026-10-18): "1st follow-up due" … "Decision needed" on my deals come first.
+      const alerts: Item[] = c.deals
+        .filter(p => c.mine(p) && OPEN_STAGES.includes(dealStage(p)))
+        .map(p => ({ p, a: followUpAlert(p, c.today) }))
+        .filter(x => x.a)
+        .sort((x, y) => Number(y.a!.decision) - Number(x.a!.decision) || y.a!.daysInStage - x.a!.daysInStage)
+        .map(({ p, a }) => ({ key: `fa_${p.id}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'danger' as const, sub: alertText(a!) }));
+      const alerted = new Set(alerts.map(x => x.key.slice(3)));
       return {
-        items: [...appts, ...soon.map(({ p, d }) => ({
+        items: [...alerts, ...appts, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
           key: p.id, title: c.clientName(p), onClick: () => c.openDeal(p),
           sub: d < 0 ? `Overdue by ${-d} day${d === -1 ? '' : 's'} (${STAGE_LABELS[dealStage(p)]})` : d === 0 ? 'Follow up today' : `Follow up ${formatDate(ymd(p.followUpDate))}`,
           level: d < 0 ? 'danger' : d === 0 ? 'attention' : undefined,
@@ -899,6 +929,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       const open = c.deals.filter(p => OPEN_STAGES.includes(dealStage(p)));
       const stuck = open.filter(p => {
         if (apptOverdue(p, c.today)) return true;
+        if (followUpAlert(p, c.today)) return true;
         const fu = ymd(p.followUpDate);
         if (fu && fu < c.today) return true;
         const sent = ymd(p.proposalSentDate);
@@ -913,7 +944,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       });
       grantStuck.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : 1));
       return {
-        items: [...grantStuck, ...stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${apptOverdue(p, c.today) ? `appointment on ${formatDate(apptOf(p)!.date)} not logged` : ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` }))],
+        items: [...grantStuck, ...stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${apptOverdue(p, c.today) ? `appointment on ${formatDate(apptOf(p)!.date)} not logged` : followUpAlert(p, c.today) ? alertText(followUpAlert(p, c.today)!) : ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` }))],
         empty: 'No stuck deals.',
         footer: (
           <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-3 sm:grid-cols-4">

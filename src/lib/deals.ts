@@ -4,6 +4,7 @@
 // lostReason, fundingType. Older records without them are read sensibly.
 
 import { apptOf, apptOverdue } from './appointments';
+import { followUpAlert } from './followUps';
 
 // The journey (Joel, 2026-10-16): New -> Proposal sent (the pitch) -> Client approved -> Quotation sent -> Won
 // ("Client approved" was "Client agreed" until 2026-10-17; the stored value is still 'agreed'.)
@@ -72,6 +73,24 @@ export const FUNDING_LABELS: Record<FundingType, string> = {
 
 export const LOST_REASONS = ['Price', 'Timing', 'No HRDC levy balance', 'Chose another provider', 'No response', 'Other'];
 
+// Marking a deal lost needs a reason and a short explanation from everyone (Joel, 2026-10-18).
+// The database rules also refuse a lost deal without them (at least 10 characters).
+export const LOST_MIN_WORDS = 3;
+export function wordCount(text: string): number {
+  return String(text || '').trim().split(/\s+/).filter(Boolean).length;
+}
+export function lostNoteProblem(text: string): string {
+  const t = String(text || '').trim();
+  if (wordCount(t) < LOST_MIN_WORDS || t.length < 10) return `Explain in a few words (at least ${LOST_MIN_WORDS}) what happened.`;
+  return '';
+}
+
+// Deleting keeps the deal (Joel, 2026-10-18): it is marked deleted and hidden everywhere (src/lib/linked.ts),
+// and Management can restore it from Management → Lost and deleted.
+export function isDeletedDeal(p: any): boolean {
+  return p?.deleted === true;
+}
+
 const validDate = (d: any): string => (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : '');
 
 export function dealStage(p: any): DealStage {
@@ -89,11 +108,13 @@ export function statusForStage(stage: DealStage): 'Pending' | 'Won' | 'Lost' {
 }
 
 // Does an open deal need attention now? The red rows on Deals and the red dot on the Deals menu both use this:
-// an appointment not logged a day after it, a follow-up date that has passed, or a new deal over 2 days old with nothing planned.
+// an appointment not logged a day after it, a follow-up alert from the follow-up rules (lib/followUps.ts),
+// a follow-up date that has passed, or a new deal over 2 days old with nothing planned.
 export function dealNeedsAttention(p: any, today = todayIso()): boolean {
   const st = dealStage(p);
-  if (!OPEN_STAGES.includes(st)) return false;
+  if (!OPEN_STAGES.includes(st) || isDeletedDeal(p)) return false;
   if (apptOverdue(p, today)) return true;
+  if (followUpAlert(p, today)) return true;
   if (apptOf(p)?.status === 'booked') return false;
   const fu = validDate(p?.followUpDate);
   if (fu && fu < today) return true;
@@ -126,6 +147,16 @@ export function stageDate(p: any, st: DealStage): string {
   if (st === 'quoted') return validDate(p?.quotationSentDate);
   if (st === 'won') return dealWonDate(p);
   return '';
+}
+
+// The furthest open stage a deal reached, from its dates. Used to reopen a lost deal and to show
+// "stage it reached" in Management → Lost and deleted.
+export function reachedStage(p: any): DealStage {
+  if (validDate(p?.quotationSentDate)) return 'quoted';
+  if (validDate(p?.agreedDate)) return 'agreed';
+  if (validDate(p?.proposalSentDate)) return 'proposal';
+  if (p?.appointmentDate || p?.appointmentTicked) return 'appointment';
+  return 'lead';
 }
 
 export function dealProposalDate(p: any): string {

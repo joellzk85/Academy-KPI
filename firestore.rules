@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion + course outlines + trainer and venue deletion + to-do tasks + Google Calendar)
+// NEXT Academy CRM database rules (Phase 3 + My home + shared quotations + deal deletion + client deletion + course outlines + trainer and venue deletion + to-do tasks + Google Calendar + follow-up rules, lost reasons and kept deleted deals)
 // - The Team list is readable by the login screen; only the CRM server changes it.
 // - Passwords live in 'secrets', which no browser can ever read.
 // - Everything else requires a logged-in, active team member.
@@ -54,28 +54,57 @@ service cloud.firestore {
     }
 
     // Settings. The admin checklist's master task list and money settings: Admin and Management only.
-    // sales_target (the company sales target and its period): Management only.
+    // sales_target (the company sales target and its period) and follow_up_rules (follow-up checkpoints per stage): Management only.
     // google_calendar (the shared Google Calendar's ID and sync status), backup_settings (the backup Google Sheet
     // and last result) and outlook (the Microsoft 365 app's IDs) are written only by the CRM server.
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules']))
                             || (docId in ['checklist_tasks', 'money_settings'] && isStaff())
-                            || (docId == 'sales_target' && isManagement());
-      allow delete: if (docId in ['passwords', 'sales_target'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target']));
+                            || (docId in ['sales_target', 'follow_up_rules'] && isManagement());
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
+    // Lost (2026-10-18): a deal can only become lost with a reason and a short explanation (at least 10 characters).
+    // Deleted (2026-10-18): "Delete deal" keeps the deal and marks it deleted. Only its creator or Management may
+    // do that, never on a won deal, and everyone except Management must give a reason. Only Management restores
+    // a deleted deal or changes it while it is deleted.
     match /pipelines/{dealId} {
+      function wasDeleted() {
+        return resource.data.get('deleted', false) == true;
+      }
+      function becomesDeleted() {
+        return request.resource.data.get('deleted', false) == true;
+      }
+      function deleteChangeOk() {
+        return (wasDeleted() == becomesDeleted() && (!wasDeleted() || isManagement()))
+          || (becomesDeleted() && !wasDeleted()
+              && resource.data.get('stage', '') != 'won'
+              && request.resource.data.get('deletedById', '') == request.auth.uid
+              && (isManagement()
+                  || (resource.data.get('creatorId', resource.data.get('ownerId', '')) == request.auth.uid
+                      && request.resource.data.get('deletedReason', '') is string
+                      && request.resource.data.get('deletedReason', '').size() >= 3)))
+          || (wasDeleted() && !becomesDeleted() && isManagement());
+      }
+      function lostOk() {
+        return request.resource.data.get('stage', '') != 'lost'
+          || resource.data.get('stage', '') == 'lost'
+          || (request.resource.data.get('lostReason', '') is string
+              && request.resource.data.get('lostReason', '').size() > 0
+              && request.resource.data.get('lostNote', '') is string
+              && request.resource.data.get('lostNote', '').size() >= 10);
+      }
       allow read: if isMember();
       allow create: if isStaff()
         || (isMember() && request.resource.data.ownerId == request.auth.uid);
-      allow update: if isStaff()
+      allow update: if deleteChangeOk() && lostOk() && (isStaff()
         || (isMember() && ownerOf(resource.data) == request.auth.uid)
         || (isMember()
             && request.auth.uid in resource.data.get('taggedRepIds', [])
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completedTags']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completedTags'])));
       // Delete: only the person who created the deal, or Management, and never a won deal.
       allow delete: if resource.data.get('stage', '') != 'won'
         && (isManagement()

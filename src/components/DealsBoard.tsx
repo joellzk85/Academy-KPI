@@ -8,8 +8,10 @@ import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import {
   DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention, stageDate,
-  dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM, dealGaps, dealAskedFor, DealField,
+  dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM, dealGaps, dealAskedFor, DealField, lostNoteProblem, reachedStage,
 } from '../lib/deals';
+import { FollowUpAlert, alertText, followUpAlert, followUpNotes } from '../lib/followUps';
+import { AlertLine, FollowUpForm, FollowUpList, followUpCountText } from './FollowUps';
 import { GapsBox, MarkWonBox } from './DealGates';
 import { Picked, dealVenue, progress } from '../lib/checklist';
 import DealChecklist from './DealChecklist';
@@ -43,6 +45,7 @@ interface DealsBoardProps {
 }
 
 type Filter = 'open' | DealStage | 'tagged';
+type StagePanel = null | 'won' | 'lost' | 'followup';
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -112,7 +115,7 @@ export default function DealsBoard({
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
-  const [stagePanel, setStagePanel] = useState<null | 'won' | 'lost'>(null);
+  const [stagePanel, setStagePanel] = useState<StagePanel>(null);
   const [gate, setGate] = useState<null | { step: 'proposal' | 'quote'; gaps: DealField[] }>(null);   // missing details box
   const [listWonId, setListWonId] = useState('');   // "Client signed" opened on a list row
   const [lostReason, setLostReason] = useState('');
@@ -202,6 +205,9 @@ export default function DealsBoard({
     const urgent = dealNeedsAttention(p, today);
     const ap = apptOf(p);
     if (apptOverdue(p, today)) return { text: `Appointment on ${formatDate(ap!.date)} not logged`, urgent };
+    // Follow-up rules (Joel, 2026-10-18): "1st follow-up due", ..., "Decision needed".
+    const fa = followUpAlert(p, today);
+    if (fa) return { text: alertText(fa), urgent: true };
     if (ap?.status === 'booked') return { text: `Appointment ${formatDate(ap.date)}${ap.time ? `, ${apptTime(ap.time)}` : ''}`, urgent };
     if (fu && fu < today) return { text: `Follow-up overdue (${formatDate(fu)})`, urgent };
     if (st === 'lead') return { text: fu ? `Follow up ${formatDate(fu)}` : 'Book an appointment or send the proposal', urgent };
@@ -374,26 +380,34 @@ export default function DealsBoard({
     return writeStage(p, { stage: 'quoted', quotationSentDate: todayIso() }, 'Quotation sent');
   };
 
-  const confirmLost = (p: any) => {
+  // A reason and a short explanation are required from everyone (Joel, 2026-10-18).
+  const confirmLost = async (p: any) => {
     if (!lostReason) return setStageError('Choose why the deal was lost.');
-    return writeStage(p, { stage: 'lost', lostDate: todayIso(), lostReason, lostNote: lostNote.trim() }, `Lost: ${lostReason}`);
+    const problem = lostNoteProblem(lostNote);
+    if (problem) return setStageError(problem);
+    const ok = await writeStage(p, {
+      stage: 'lost', lostDate: todayIso(), lostReason, lostNote: lostNote.trim().slice(0, 500),
+      lostById: viewer.id, lostByName: viewer.name, lostAt: new Date().toISOString(),
+    }, `Lost: ${lostReason}. ${lostNote.trim().slice(0, 120)}`);
+    if (ok) { setLostReason(''); setLostNote(''); }
   };
 
   const reopen = (p: any) => {
-    const has = (v: any) => /^\d{4}-\d{2}-\d{2}/.test(v || '');
-    const back: DealStage = has(p.quotationSentDate) ? 'quoted' : has(p.agreedDate) ? 'agreed' : has(p.proposalSentDate) ? 'proposal' : p.appointmentDate || p.appointmentTicked ? 'appointment' : 'lead';
-    return writeStage(p, { stage: back, wonDate: '', lostReason: '', lostNote: '' }, dealStage(p) === 'won' ? 'Win undone' : 'Deal reopened');
+    return writeStage(p, { stage: reachedStage(p), wonDate: '', lostReason: '', lostNote: '', lostById: '', lostByName: '', lostAt: '' }, dealStage(p) === 'won' ? 'Win undone' : p.lostReason ? `Deal reopened (was lost: ${p.lostReason})` : 'Deal reopened');
   };
 
-  // Delete a deal (creator or Management). Not allowed once it's won, or with a sent quotation, money or HRDC queries.
-  // Draft quotations on the deal are deleted with it, after asking.
-  const deleteDeal = async (p: any) => {
+  // Delete a deal (creator or Management). Not allowed once it's won, or with a sent quotation, money, HRDC queries or proposal files.
+  // Since 2026-10-18 the deal is kept, marked deleted (who, when, reason) and hidden everywhere; its draft
+  // quotations and course outlines are hidden with it. Management can restore it in Management → Lost and deleted.
+  const dealDocs = (p: any) => {
+    const dealQuotes = quotes.filter(q => q.pipelineId === p.id);
+    return { drafts: dealQuotes.filter(q => q.status !== 'sent'), sent: dealQuotes.filter(q => q.status === 'sent'), outlines: outlines.filter(o => o.pipelineId === p.id) };
+  };
+  const refs = (list: any[]) => list.map(q => q.refNumber || 'no reference').join(', ');
+  const deleteBlocker = (p: any): string => {
     const linked: string[] = [];
     if (dealStage(p) === 'won') linked.push('it is won');
-    const dealQuotes = quotes.filter(q => q.pipelineId === p.id);
-    const refs = (list: any[]) => list.map(q => q.refNumber || 'no reference').join(', ');
-    const sent = dealQuotes.filter(q => q.status === 'sent');
-    const drafts = dealQuotes.filter(q => q.status !== 'sent');
+    const { drafts, sent, outlines: outs } = dealDocs(p);
     if (sent.length) linked.push(`quotation ${refs(sent)} has been sent`);
     const nm = moneyIn.filter(m => m.dealId === p.id).length + moneyOut.filter(m => m.dealId === p.id).length;
     if (nm) linked.push(`${nm} money record${nm === 1 ? '' : 's'}`);
@@ -401,23 +415,39 @@ export default function DealsBoard({
     if (nh) linked.push(`${nh} HRDC quer${nh === 1 ? 'y' : 'ies'}`);
     const npf = proposalFiles.filter(f => f.dealId === p.id).length;
     if (npf) linked.push(`it has ${npf} proposal file${npf === 1 ? '' : 's'} (delete ${npf === 1 ? 'it' : 'them'} under Documents first if the deal really is a mistake)`);
-    if (linked.length) return setStageError(`This deal can't be deleted because ${linked.join(', ')}. Use "Mark lost" instead.`);
-    // Reps can only delete their own quotations (database rule), so someone else's draft must go first.
-    const notMine = viewer.role === 'rep' ? drafts.filter(q => q.ownerId !== viewer.id && q.creatorId !== viewer.id) : [];
-    if (notMine.length) return setStageError(`Draft quotation ${refs(notMine)} on this deal belongs to someone else. Ask them, Admin or Management to delete it first.`);
-    const also = drafts.length ? ` and its draft quotation${drafts.length === 1 ? '' : 's'} ${refs(drafts)}` : '';
-    if (!window.confirm(`Delete the deal for ${clientName(p)}${also}? This can't be undone.`)) return;
+    if (linked.length) return `This deal can't be deleted because ${linked.join(', ')}. Use "Mark lost" instead.`;
+    // Reps can only change their own (or shared) quotations and outlines (database rule), so someone else's must be dealt with first.
+    if (viewer.role === 'rep') {
+      const mine = (q: any) => q.ownerId === viewer.id || q.creatorId === viewer.id || (q.sharedWithIds || []).includes(viewer.id);
+      const notMine = [...drafts, ...outs].filter(q => !mine(q));
+      if (notMine.length) return `${refs(notMine)} on this deal belong${notMine.length === 1 ? 's' : ''} to someone else. Ask them, Admin or Management to delete ${notMine.length === 1 ? 'it' : 'them'} first.`;
+    }
+    return '';
+  };
+  const deleteDeal = async (p: any, reason: string): Promise<boolean> => {
+    const blocked = deleteBlocker(p);
+    if (blocked) { setStageError(blocked); return false; }
+    if (viewer.role !== 'management' && reason.trim().length < 3) { setStageError('Say why the deal is being deleted.'); return false; }
+    const { drafts, outlines: outs } = dealDocs(p);
     setBusy(true);
+    setStageError('');
     try {
-      // All or nothing: the deal and its drafts go together.
+      // All or nothing: the deal and its drafts are hidden together.
+      const at = new Date().toISOString();
       const batch = writeBatch(db);
-      drafts.forEach(q => batch.delete(doc(db, 'quotations', q.id)));
-      batch.delete(doc(db, 'pipelines', p.id));
+      drafts.forEach(q => batch.update(doc(db, 'quotations', q.id), { dealDeleted: true }));
+      outs.forEach(o => batch.update(doc(db, 'course_outlines', o.id), { dealDeleted: true }));
+      batch.update(doc(db, 'pipelines', p.id), {
+        deleted: true, deletedAt: at, deletedById: viewer.id, deletedByName: viewer.name, deletedReason: reason.trim().slice(0, 500),
+        history: [...(p.history || []), historyEntry(viewer, `Deleted${reason.trim() ? `: ${reason.trim().slice(0, 120)}` : ''}`)].slice(-40),
+      });
       await batch.commit();
       setOpenId(null);
-      flash('Deal deleted');
+      flash('Deal deleted. Management can restore it.');
+      return true;
     } catch (err) {
       setStageError(friendlyError(err));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -621,7 +651,10 @@ export default function DealsBoard({
               onLost={() => confirmLost(openDeal)}
               onReopen={() => reopen(openDeal)}
               canManage={canManageDeal(openDeal, viewer)}
-              onDelete={() => deleteDeal(openDeal)}
+              deleteBlocker={() => deleteBlocker(openDeal)}
+              onDelete={(reason: string) => deleteDeal(openDeal, reason)}
+              alert={followUpAlert(openDeal, todayIso())}
+              onFollowUpDone={(msg: string) => { setStagePanel(null); flash(msg); }}
               onCreateQuotation={() => onCreateQuotation(openDeal)}
               onOpenQuotation={onOpenQuotation ? (id: string) => onOpenQuotation(openDeal, id) : undefined}
               onCreateOutline={() => onCreateOutline(openDeal)}
@@ -794,7 +827,7 @@ export default function DealsBoard({
 // Next step first (Joel, 2026-10-18): under the client name and journey line, one "Next step" box with the single
 // main button for the stage and "Mark lost" as a small link. Everything else folds into sections that open on tap;
 // the most useful one for the stage starts open.
-type SectionKey = 'appointment' | 'details' | 'documents' | 'checklist' | 'hrdc' | 'money' | 'history';
+type SectionKey = 'appointment' | 'followups' | 'details' | 'documents' | 'checklist' | 'hrdc' | 'money' | 'history';
 function defaultSection(st: DealStage): SectionKey {
   if (st === 'lead' || st === 'appointment') return 'appointment';
   if (st === 'won') return 'checklist';
@@ -808,7 +841,8 @@ function DealPanel(props: {
   programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
   venue: Picked | null;
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; moneySettings: MoneySettings;
-  stagePanel: null | 'won' | 'lost'; setStagePanel: (v: null | 'won' | 'lost') => void; stageError: string;
+  stagePanel: StagePanel; setStagePanel: (v: StagePanel) => void; stageError: string;
+  alert: FollowUpAlert | null; onFollowUpDone: (msg: string) => void; deleteBlocker: () => string;
   gate: null | { step: 'proposal' | 'quote'; gaps: DealField[] }; clients: any[];
   onGapSaved: (updated: any) => void; onGapCancel: () => void; onWonDone: (msg: string) => void;
   lostReason: string; setLostReason: (v: string) => void;
@@ -817,7 +851,7 @@ function DealPanel(props: {
   proposalFiles: ProposalFile[]; onProposalUploaded: (files: ProposalFile[]) => void;
   programmes: Programme[]; onApptDone: (msg: string) => void;
   onLost: () => void; onReopen: () => void;
-  canManage: boolean; onDelete: () => void;
+  canManage: boolean; onDelete: (reason: string) => Promise<boolean>;
   onCreateQuotation: () => void; onOpenQuotation?: (quoteId: string) => void; onCreateOutline: () => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
 }) {
   const p = props.deal;
@@ -834,7 +868,13 @@ function DealPanel(props: {
   const openQuote = (q: any) => (props.onOpenQuotation ? props.onOpenQuotation(q.id) : props.onOpenQuotations());
   const pr = props.checklist ? progress(props.checklist.tasks, p.fundingType) : null;
   const ap = apptOf(p);
-  const def = defaultSection(st);
+  // A follow-up alert opens the Follow-ups section first.
+  const def: SectionKey = props.alert && OPEN_STAGES.includes(st) ? 'followups' : defaultSection(st);
+  const nNotes = followUpNotes(p).length;
+  const [deleting, setDeleting] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  useEffect(() => { setDeleting(false); setDeleteReason(''); setDeleteError(''); }, [p.id]);
   const main = 'inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0B5A50] disabled:opacity-60';
   const smallLink = 'inline-flex items-center gap-1 text-sm font-semibold hover:underline';
   const nHist = (p.history || []).length;
@@ -866,7 +906,7 @@ function DealPanel(props: {
       title: `Won ${formatDate(dealWonDate(p))}: handed to admin`,
       hint: pr ? `Admin checklist ${pr.done} of ${pr.total} done.` : 'Admin will start the checklist.',
     };
-    return { title: `Lost on ${formatDate(p.lostDate) || 'an earlier date'}${p.lostReason ? `: ${p.lostReason}` : ''}`, hint: p.lostNote || undefined };
+    return { title: `Lost on ${formatDate(p.lostDate) || 'an earlier date'}${p.lostReason ? `: ${p.lostReason}` : ''}`, hint: [p.lostNote, p.lostByName ? `Marked lost by ${p.lostByName}` : ''].filter(Boolean).join(' · ') || undefined };
   })();
 
   return (
@@ -897,16 +937,29 @@ function DealPanel(props: {
           {st === 'quoted' && <Hourglass className="h-4 w-4 text-ink-soft" />}{next.title}
         </p>
         {next.hint && <p className="mt-0.5 text-sm text-ink-soft">{next.hint}</p>}
+        {props.alert && OPEN_STAGES.includes(st) && <AlertLine alert={props.alert} />}
         {props.editable ? (
           <div className="mt-3 space-y-3">
-            {next.button && props.stagePanel !== 'won' && !props.gate && (
+            {props.alert && OPEN_STAGES.includes(st) && props.stagePanel !== 'followup' && props.stagePanel !== 'lost' && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={props.busy} onClick={() => props.setStagePanel('followup')} className="inline-flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-[#931C13]">
+                  {props.alert.decision ? 'Keep open' : 'Log follow-up'}
+                </button>
+                {props.alert.decision && <button type="button" className={btnSecondary} onClick={() => props.setStagePanel('lost')}><XCircle className="h-4 w-4 text-danger" /> Mark lost</button>}
+              </div>
+            )}
+            {props.stagePanel === 'followup' && (
+              <FollowUpForm deal={p} viewer={props.viewer} alert={props.alert} onDone={props.onFollowUpDone}
+                onCancel={() => props.setStagePanel(null)} onMarkLost={() => props.setStagePanel('lost')} />
+            )}
+            {next.button && props.stagePanel !== 'won' && props.stagePanel !== 'followup' && !props.gate && (
               <div className="flex flex-wrap items-center gap-2">
                 {next.button}
                 {st === 'agreed' && hasQuote && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onQuoted}>Quotation sent another way</button>}
                 {st === 'quoted' && sentQuote && <button type="button" className={btnSecondary} onClick={() => openQuote(sentQuote)}>Open quotation</button>}
               </div>
             )}
-            {(st === 'lead' || st === 'appointment') && !props.gate && (
+            {(st === 'lead' || st === 'appointment') && !props.gate && props.stagePanel !== 'followup' && (
               <ProposalDrop dealId={p.id} viewer={props.viewer} disabled={props.busy} onUploaded={props.onProposalUploaded} />
             )}
             {props.gate && (
@@ -928,7 +981,9 @@ function DealPanel(props: {
                     </button>
                   ))}
                 </div>
-                <input value={props.lostNote} onChange={e => props.setLostNote(e.target.value)} className={`${input} mt-3`} placeholder="Anything worth remembering (optional)" aria-label="Lost note" />
+                <label htmlFor="lost-note" className="mb-1.5 mt-3 block text-sm font-semibold text-danger">What happened? <span className="font-normal">(required, a few words)</span></label>
+                <textarea id="lost-note" value={props.lostNote} onChange={e => props.setLostNote(e.target.value)} className={`${input} min-h-[64px]`} maxLength={500}
+                  placeholder="e.g. Client chose a cheaper in-house trainer" />
                 <div className="mt-3 flex gap-2">
                   <button type="button" className={btnSecondary} onClick={() => props.setStagePanel(null)}>Cancel</button>
                   <button type="button" disabled={props.busy} onClick={props.onLost} className="inline-flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-[#931C13]">Confirm lost</button>
@@ -937,7 +992,8 @@ function DealPanel(props: {
             )}
             {props.stageError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{props.stageError}</p>}
             <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {OPEN_STAGES.includes(st) && props.stagePanel !== 'lost' && <button type="button" className={`${smallLink} text-danger`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-3.5 w-3.5" /> Mark lost</button>}
+              {OPEN_STAGES.includes(st) && !props.alert && props.stagePanel !== 'followup' && <button type="button" className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('followup')}><Plus className="h-3.5 w-3.5" /> Log follow-up</button>}
+              {OPEN_STAGES.includes(st) && props.stagePanel !== 'lost' && props.stagePanel !== 'followup' && !props.alert?.decision && <button type="button" className={`${smallLink} text-danger`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-3.5 w-3.5" /> Mark lost</button>}
               {st === 'lost' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Reopen deal</button>}
               {st === 'won' && canUndoWin && <button type="button" disabled={props.busy} className={`${smallLink} text-ink-soft`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Undo win</button>}
             </div>
@@ -955,6 +1011,11 @@ function DealPanel(props: {
         {/* Appointment (optional, one per deal) */}
         <Fold title="Appointment" hint={ap ? (ap.status === 'booked' ? `Booked ${formatDate(ap.date)}` : `Held ${formatDate(ap.date)}`) : 'None'} defaultOpen={def === 'appointment'} id={p.id}>
           <DealAppointmentBox deal={p} viewer={props.viewer} editable={props.canManage} programmes={props.programmes} client={props.client} onDone={props.onApptDone} />
+        </Fold>
+
+        {/* Follow-up notes (Joel, 2026-10-18) */}
+        <Fold title="Follow-ups" hint={followUpCountText(nNotes)} defaultOpen={def === 'followups'} id={p.id}>
+          <FollowUpList deal={p} />
         </Fold>
 
         {/* Details */}
@@ -1051,7 +1112,32 @@ function DealPanel(props: {
 
       {props.canManage && (
         <div className="pt-1">
-          <button type="button" disabled={props.busy} onClick={props.onDelete} className="inline-flex items-center gap-1.5 text-sm font-semibold text-danger hover:underline"><XCircle className="h-4 w-4" /> Delete deal</button>
+          {!deleting ? (
+            <button type="button" disabled={props.busy} onClick={() => { const b = props.deleteBlocker(); setDeleteError(b); if (!b) setDeleting(true); }}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-danger hover:underline"><XCircle className="h-4 w-4" /> Delete deal</button>
+          ) : (
+            <div className="space-y-3 rounded-xl border border-danger/30 bg-danger-soft p-4">
+              <p className="font-semibold text-danger">Delete this deal?</p>
+              <p className="text-sm text-ink-soft">
+                It disappears from Deals, KPIs and every list{props.quotes.length + props.outlines.length ? ', with its draft quotations and course outlines' : ''}. Management can still see it and restore it.
+              </p>
+              <div>
+                <label htmlFor="del-reason" className="mb-1.5 block text-sm font-semibold text-danger">
+                  Why? <span className="font-normal">{props.viewer.role === 'management' ? '(optional)' : '(required)'}</span>
+                </label>
+                <input id="del-reason" value={deleteReason} onChange={e => setDeleteReason(e.target.value)} className={input} maxLength={500} placeholder="e.g. Created twice by mistake" />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className={btnSecondary} onClick={() => { setDeleting(false); setDeleteError(''); }}>Cancel</button>
+                <button type="button" disabled={props.busy} onClick={() => {
+                  if (props.viewer.role !== 'management' && deleteReason.trim().length < 3) { setDeleteError('Say why the deal is being deleted.'); return; }
+                  setDeleteError('');
+                  props.onDelete(deleteReason);
+                }} className="inline-flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-[#931C13]">Delete deal</button>
+              </div>
+            </div>
+          )}
+          {deleteError && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{deleteError}</p>}
           {props.stageError && !props.editable && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{props.stageError}</p>}
         </div>
       )}

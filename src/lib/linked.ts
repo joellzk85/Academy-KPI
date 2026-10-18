@@ -17,15 +17,28 @@ export function recordOwnerId(r: any): string {
   return r?.ownerId || r?.creatorId || '';
 }
 
+// Deleted deals are kept but hidden everywhere (Joel, 2026-10-18), together with the draft quotations and
+// course outlines that were on them (marked dealDeleted). Management sees them in Management → Lost and deleted.
+export function isDeletedRecord(r: any): boolean {
+  return r?.deleted === true || r?.dealDeleted === true;
+}
+
 export function ownedByTeam(r: any, ids: Set<string>): boolean {
+  if (isDeletedRecord(r)) return false;
   const owner = recordOwnerId(r);
   return !!owner && ids.has(owner);
 }
 
 export function isLinked(r: any): boolean {
+  if (isDeletedRecord(r)) return false;
   return !teamIds || ownedByTeam(r, teamIds);
 }
 
 export function linkedOnly<T>(list: T[]): T[] {
   return list.filter(isLinked);
+}
+
+// Linked records including deleted ones (only for Management → Lost and deleted).
+export function linkedWithDeleted<T>(list: T[]): T[] {
+  return list.filter((r: any) => !teamIds || (!!recordOwnerId(r) && teamIds.has(recordOwnerId(r))));
 }
