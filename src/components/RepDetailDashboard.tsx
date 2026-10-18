@@ -16,7 +16,7 @@ import DealsBoard from './DealsBoard';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { dealNeedsAttention, dealOwnerId, todayIso } from '../lib/deals';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, friendlyError } from '../lib/firebase';
 import { linkedOnly } from '../lib/linked';
 
 interface RepDetailDashboardProps {
@@ -1168,18 +1168,36 @@ export default function RepDetailDashboard({
     };
   }, []);
 
-  // Creates a bare-bones draft Quotation directly linked to this Won pipeline deal,
-  // then switches to the Quotation tab so the rep can flesh it out.
-  // The course line's training date is pre-filled from the pipeline's Training Date
-  // (falls back to the older `potentialDate` field, then blank, so old records never break).
+  // Keep the rep inside the deal (Joel, 2026-10-18): "Create quotation" opens the deal's quotation straight in
+  // the editor. If the deal already has a draft it opens that one, so clicking twice never makes a duplicate;
+  // otherwise a draft linked to the deal is saved and opened. The editor's "Back to deal" (and closing the
+  // "Sent" box) comes back to Deals with this deal's panel open.
+  const [quoteFromDeal, setQuoteFromDeal] = useState<{ dealId: string; quoteId: string } | null>(null);
+  const [dealToOpen, setDealToOpen] = useState<string | null>(null);
+  const openQuoteFromDeal = (dealId: string, quoteId: string) => {
+    setQuoteFromDeal({ dealId, quoteId });
+    setActiveSubTab('quotation');
+  };
   const handleCreateQuotationForPipeline = async (p: any) => {
+    const drafts = quotationsForPipelines
+      .filter(q => q.pipelineId === p.id && q.status !== 'sent')
+      .sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)));
+    if (drafts.length) return openQuoteFromDeal(p.id, drafts[0].id);
     const linkedClient = clientDirectory.find(c => c.id === p.clientId);
-    const cleanQuote = buildQuotationForDeal(p, rep, rep, linkedClient, quotationsForPipelines.length);
+    const ownerId = p.ownerId || p.creatorId || rep.id;
+    const owner = { id: ownerId, name: reps.find(r => r.id === ownerId)?.name || p.ownerName || rep.name };
+    const me = viewer ? { id: viewer.id, name: viewer.name } : { id: rep.id, name: rep.name };
+    const cleanQuote: any = buildQuotationForDeal(p, me, owner, linkedClient, quotationsForPipelines.length);
+    // Same reference numbering as "New quotation": the next free number for today.
+    const prefix = cleanQuote.refNumber.slice(0, cleanQuote.refNumber.lastIndexOf('/') + 1);
+    const used = quotationsForPipelines.map(q => String(q.refNumber || '')).filter(r => r.startsWith(prefix)).map(r => parseInt(r.slice(prefix.length), 10) || 0);
+    cleanQuote.refNumber = `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
     try {
       await setDoc(doc(db, 'quotations', cleanQuote.id), cleanQuote);
-      setActiveSubTab('quotation');
+      openQuoteFromDeal(p.id, cleanQuote.id);
     } catch (err) {
       console.error('Create quotation for pipeline failed:', err);
+      window.alert(`The quotation couldn't be created: ${friendlyError(err)}`);
     }
   };
 
@@ -1990,7 +2008,9 @@ export default function RepDetailDashboard({
         <div className="min-w-0 flex-1 space-y-5">
           
           {activeSubTab === 'quotation' ? (
-            <QuotationsPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenTab={(t) => handleSubTabChange(t as SubTab)} />
+            <QuotationsPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenTab={(t) => handleSubTabChange(t as SubTab)}
+              openFromDeal={quoteFromDeal} onOpenFromDealHandled={() => setQuoteFromDeal(null)}
+              onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} />
           ) : activeSubTab === 'course_outline' ? (
             <CourseOutlinesPage key={rep.id} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => setOutlineStartDeal(null)} onOpenTab={(t) => handleSubTabChange(t as SubTab)} />
           ) : activeSubTab === 'client' ? (
@@ -2007,6 +2027,9 @@ export default function RepDetailDashboard({
               people={reps}
               viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }}
               onCreateQuotation={handleCreateQuotationForPipeline}
+              onOpenQuotation={(p, quoteId) => openQuoteFromDeal(p.id, quoteId)}
+              openDealId={dealToOpen}
+              onOpenDealHandled={() => setDealToOpen(null)}
               onCreateOutline={handleCreateOutlineForPipeline}
               onOpenQuotations={() => setActiveSubTab('quotation')}
               onOpenOutlines={() => setActiveSubTab('course_outline')}

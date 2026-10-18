@@ -38,6 +38,32 @@ export function canQuote(p: any): boolean {
   return st === 'agreed' || st === 'quoted' || st === 'won';
 }
 
+// Details are asked for when they matter, not upfront (Joel, 2026-10-18):
+// a new deal needs only the client, what they asked for (programme or a typed note) and the date asked;
+// "Proposal sent" (and creating the quotation) needs the programme from the list and the deal value;
+// "Won" needs the client, the value and the funding type.
+export type DealField = 'client' | 'programme' | 'value' | 'funding';
+export type GateStep = 'proposal' | 'quote' | 'won';
+export const GAP_LABELS: Record<DealField, string> = {
+  client: 'the client from the client list',
+  programme: 'the programme from the programme list',
+  value: 'the deal value',
+  funding: 'how it will be paid',
+};
+export function dealGaps(p: any, step: GateStep, known: { clientIds: string[]; programmeIds: string[] }): DealField[] {
+  const out: DealField[] = [];
+  if (step === 'won' && !(p?.clientId && known.clientIds.includes(p.clientId))) out.push('client');
+  if (step !== 'won' && !(p?.programmeId && known.programmeIds.includes(p.programmeId))) out.push('programme');
+  if (dealValue(p) <= 0) out.push('value');
+  if (step === 'won' && !p?.fundingType) out.push('funding');
+  return out;
+}
+
+// What the client asked for: the programme's name, else the short note typed on a new deal.
+export function dealAskedFor(p: any, programmeName = ''): string {
+  return programmeName || p?.courseName || (p?.enquiryNote ? `Asked for: ${p.enquiryNote}` : '');
+}
+
 export const FUNDING_LABELS: Record<FundingType, string> = {
   hrdc: 'HRDC claimable',
   direct: 'Direct pay',

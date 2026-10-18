@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowLeft, Copy, Download, Eye, EyeOff, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Share2, Trash2, Unlock, Users, X,
+  AlertTriangle, ArrowLeft, Copy, Trophy, Download, Eye, EyeOff, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Share2, Trash2, Unlock, Users, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../types';
@@ -14,6 +14,7 @@ import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import { linkedOnly } from '../lib/linked';
 import QuoteSendDialog from './QuoteSendDialog';
 import { downloadBlob, makeQuotationPdf, pdfFileName } from '../lib/quotePdf';
+import { MarkWonBox } from './DealGates';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
 // A quotation is made for a deal (or a client). While it's a draft, the client's details, programme,
@@ -47,9 +48,12 @@ function nextRef(all: Quotation[], dateIso: string) {
   return `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
 }
 
-export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
+export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromDeal, onOpenFromDealHandled, onBackToDeal }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
   onOpenTab?: (tab: Tab) => void;   // jump to where a detail is edited
+  openFromDeal?: { dealId: string; quoteId: string } | null;   // opened from a deal: go straight to this quotation
+  onOpenFromDealHandled?: () => void;
+  onBackToDeal?: (dealId: string) => void;   // back to Deals with that deal's panel open
 }) {
   const me: Viewer = viewer || { id: rep.id, name: rep.name, role: (rep.role as any) || 'rep' };
   const staff = me.role !== 'rep';
@@ -62,6 +66,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<{ q: Quotation; isNew: boolean } | null>(null);
   const [choosing, setChoosing] = useState(false);
+  const [fromDealId, setFromDealId] = useState('');
 
   useEffect(() => {
     const subs = [
@@ -74,6 +79,16 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
     ];
     return () => subs.forEach(u => u());
   }, []);
+
+  // Opened from a deal: open that quotation in the editor as soon as it's in the list.
+  useEffect(() => {
+    if (!openFromDeal) return;
+    const q = quotes.find(x => x.id === openFromDeal.quoteId);
+    if (!q) return;
+    open(q);
+    setFromDealId(openFromDeal.dealId);
+    onOpenFromDealHandled?.();
+  }, [openFromDeal, quotes]);
 
   const sources: QuoteSources = useMemo(() => ({ clients, deals, programmes, trainers, venues, people: reps.map(r => ({ id: r.id, name: r.name })) }), [clients, deals, programmes, trainers, venues, reps]);
   const personName = (id?: string) => reps.find(r => r.id === id)?.name || '';
@@ -120,8 +135,11 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab }: {
           isNew={draft.isNew}
           me={me} staff={staff} reps={reps} sources={sources} dealsForPicker={dealsForPicker}
           onOpenTab={onOpenTab}
-          onClose={() => setDraft(null)}
+          onClose={() => { setDraft(null); setFromDealId(''); }}
+          backToDeal={fromDealId && onBackToDeal ? () => onBackToDeal(fromDealId) : undefined}
         />
+      ) : openFromDeal ? (
+        <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Opening the quotation…</p>
       ) : (
         <QuoteList rep={rep} me={me} staff={staff} quotes={quotes} loaded={loaded} sources={sources} personName={personName}
           onNew={() => setChoosing(true)} onOpen={open} onDuplicate={duplicate} />
@@ -316,9 +334,10 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 }
 
 // ---------- Editor ----------
-export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose }: {
+export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, backToDeal }: {
   initial: Quotation; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: QuoteSources; dealsForPicker: any[];
   onOpenTab?: (tab: Tab) => void; onClose: () => void; key?: string;
+  backToDeal?: () => void;   // shown as "Back to deal" when opened from a deal
 }) {
   const [q, setQ] = useState<Quotation>(initial);
   const [saved, setSaved] = useState<string>(isNew ? '' : JSON.stringify(initial));
@@ -331,6 +350,8 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [sentNow, setSentNow] = useState(false);     // sent in this visit: closing the Sent box goes back to the deal
+  const [markingWon, setMarkingWon] = useState(false);
 
   const r = resolveQuotation(q, sources);
   const shownQ = r.q;                       // what prints
@@ -371,6 +392,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
       ? { ...q, sendLog }
       : { ...shownQ, status: 'sent', sentAt: entry.at, sentById: me.id, sentByName: me.name, sendLog };
     const ok = await persist(out, locked ? how : `${how} and locked`);
+    if (ok) setSentNow(true);
     // The deal moves to "Quotation sent" (if it was at "Client approved").
     if (ok && !locked && r.deal && dealStage(r.deal) === 'agreed') {
       try {
@@ -388,6 +410,9 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     return persist({ ...q, status: 'draft', sentAt: '', sentById: '', sentByName: '' }, 'Unlocked for revision');
   };
   const close = () => { if (!dirty || window.confirm('You have unsaved changes. Leave without saving?')) onClose(); };
+  const goBackToDeal = () => { if (backToDeal && (!dirty || window.confirm('You have unsaved changes. Leave without saving?'))) backToDeal(); };
+  // "Client signed: mark deal won" on a sent quotation: same people as on the deal (its owner, Admin, Management).
+  const canMarkWon = !!r.deal && dealStage(r.deal) === 'quoted' && (me.role !== 'rep' || dealOwnerId(r.deal) === me.id);
   const downloadPdf = async () => {
     setPdfBusy(true);
     setError('');
@@ -433,7 +458,8 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const sendDialog = sending ? (
     <QuoteSendDialog
       shownQ={shownQ} locked={locked} issues={r.issues} deal={r.deal} client={r.client} ownerId={r.ownerId} me={me}
-      ensureSaved={ensureSaved} onSent={lockAsSent} onClose={() => setSending(false)}
+      ensureSaved={ensureSaved} onSent={lockAsSent}
+      onClose={() => { setSending(false); if (sentNow && backToDeal) backToDeal(); }}
     />
   ) : null;
 
@@ -441,7 +467,10 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     return (
       <div className="space-y-4 font-sans text-ink">
         <div className="no-print flex flex-wrap items-center justify-between gap-2">
-          <button type="button" className={btnSecondary} onClick={() => setPreview(false)}><ArrowLeft className="h-4 w-4" /> Back to edit</button>
+          <span className="flex flex-wrap items-center gap-2">
+            {backToDeal && <button type="button" className={btnSecondary} onClick={goBackToDeal}><ArrowLeft className="h-4 w-4" /> Back to deal</button>}
+            <button type="button" className={btnSecondary} onClick={() => setPreview(false)}>{backToDeal ? <Pencil className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />} Back to edit</button>
+          </span>
           <span className="flex items-center gap-2">
             {dirty && <span className="text-sm text-attention">Not saved yet</span>}
             <button type="button" className={btnSecondary} onClick={printIt}>Print</button>
@@ -465,7 +494,9 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     <div className="space-y-4 pb-24 font-sans text-ink">
       {/* Top line */}
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className={btnSecondary} onClick={close}><ArrowLeft className="h-4 w-4" /> Quotations</button>
+        {backToDeal
+          ? <button type="button" className={btnSecondary} onClick={goBackToDeal}><ArrowLeft className="h-4 w-4" /> Back to deal</button>
+          : <button type="button" className={btnSecondary} onClick={close}><ArrowLeft className="h-4 w-4" /> Quotations</button>}
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-xl font-bold">{shownQ.company || 'New quotation'}</h2>
           <p className="text-sm text-ink-soft">
@@ -491,8 +522,16 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
               </ul>
             )}
           </div>
-          <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
+          <span className="flex flex-wrap gap-2">
+            {canMarkWon && !markingWon && <button type="button" className={btnPrimary} onClick={() => setMarkingWon(true)}><Trophy className="h-4 w-4" /> Client signed: mark deal won</button>}
+            <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
+          </span>
         </div>
+      )}
+      {locked && markingWon && r.deal && (
+        <MarkWonBox deal={r.deal} programmes={sources.programmes} clients={sources.clients} viewer={me}
+          onDone={msg => { setMarkingWon(false); setNote(msg); window.setTimeout(() => setNote(''), 3500); if (backToDeal) backToDeal(); }}
+          onCancel={() => setMarkingWon(false)} />
       )}
 
       {!locked && editMeta && (
