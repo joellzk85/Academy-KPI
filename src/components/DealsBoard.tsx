@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass,
@@ -1108,6 +1109,8 @@ function ClientPicker({ clients, value, legacyName, viewer, onChange }: {
   const selected = clients.find(c => c.id === value);
   const [queryText, setQueryText] = useState(selected ? '' : legacyName || '');
   const [open, setOpen] = useState(!selected && !!legacyName);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useCloseOnOutside(boxRef, open, () => setOpen(false));
   const [adding, setAdding] = useState(false);
   const [newClient, setNewClient] = useState({ companyName: '', contactName: '', phone: '', hrdcRegistered: true });
   const [err, setErr] = useState('');
@@ -1186,7 +1189,7 @@ function ClientPicker({ clients, value, legacyName, viewer, onChange }: {
   }
 
   return (
-    <div className="relative">
+    <div ref={boxRef} className="relative">
       <Search className="pointer-events-none absolute left-3 top-[19px] h-4 w-4 -translate-y-1/2 text-ink-soft" />
       <input
         value={queryText}

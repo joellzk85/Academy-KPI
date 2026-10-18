@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, writeBatch } from 'firebase/firestore';
 import { linkedOnly } from '../lib/linked';
 import { outlineProgrammeId } from '../lib/outlineResolve';
@@ -35,6 +36,8 @@ export function ProgrammePicker({ programmes, value, legacyName, viewer, onChang
   const selected = programmes.find(p => p.id === value);
   const [queryText, setQueryText] = useState(selected ? '' : legacyName || '');
   const [open, setOpen] = useState(!selected && !!legacyName);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useCloseOnOutside(boxRef, open, () => setOpen(false));
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -78,7 +81,7 @@ export function ProgrammePicker({ programmes, value, legacyName, viewer, onChang
   }
 
   return (
-    <div className="relative">
+    <div ref={boxRef} className="relative">
       <Search className="pointer-events-none absolute left-3 top-[19px] h-4 w-4 -translate-y-1/2 text-ink-soft" />
       <input
         value={queryText}
