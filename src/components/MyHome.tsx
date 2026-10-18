@@ -23,6 +23,7 @@ import { useMoneySettings } from './Money';
 import { MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import { alertText, followUpAlert } from '../lib/followUps';
 import FollowUpAlerts from './FollowUpAlerts';
+import { SharedItem, SharedKind, useSharedInbox } from '../lib/sharedInbox';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -32,7 +33,7 @@ type Viewer = { id: string; name: string; role: Role };
 type CardId =
   | 'follow_up_alerts'
   | 'follow_ups' | 'my_kpi' | 'my_won' | 'next14' | 'new_won' | 'due_now' | 'money_jobs'
-  | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments';
+  | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments' | 'shared_with_me';
 
 const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'follow_ups', title: 'My follow-ups', roles: ['rep', 'admin', 'management'] },
@@ -47,6 +48,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'pipeline', title: 'Pipeline and stuck deals', roles: ['management'] },
   { id: 'follow_up_alerts', title: 'Follow-up alerts', roles: ['management'] },
   { id: 'team_appointments', title: 'Team appointments this week', roles: ['admin', 'management'] },
+  { id: 'shared_with_me', title: 'Shared with me', roles: ['rep', 'admin', 'management'] },   // needs a workspace (where the files open)
   { id: 'programmes_waiting', title: 'Programmes waiting on HRDC', roles: ['admin', 'management'] },
   { id: 'notices', title: 'Notices', roles: ['rep', 'admin', 'management'] },
 ];
@@ -54,7 +56,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
 // Notices are off by default (Joel removed the newsfeed); anyone can switch the card back on.
 const DEFAULT_CARDS: Record<Role, CardId[]> = {
   rep: ['follow_ups', 'my_kpi', 'next14', 'my_won'],
-  admin: ['new_won', 'due_now', 'money_jobs', 'next14'],
+  admin: ['shared_with_me', 'new_won', 'due_now', 'money_jobs', 'next14'],
   management: ['approvals', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
 };
 
@@ -101,6 +103,7 @@ export interface MyHomeNav {
   openWorkspace: (repId: string, subTab?: string) => void;
   openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup') => void;
   openManagement: (view?: 'dashboard' | 'pl' | 'followups' | 'lost' | 'team' | 'data') => void;
+  openFile?: (kind: SharedKind, id: string) => void;   // a shared quotation or outline, straight in the editor
 }
 
 export default function MyHome({ viewer, people, representatives, deals, events, calendar, notices, nav }: {
@@ -143,6 +146,14 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(doc(db, 'user_prefs', viewer.id), s => {
         const c = s.data()?.homeCards, l = s.data()?.homeLayout, sc = s.data()?.homeShortcuts;
+        // Admin people who arranged their own cards before "Shared with me" existed get it once, at the top
+        // (Joel, 2026-10-18). After that it's theirs to keep or remove.
+        if (viewer.role === 'admin' && Array.isArray(c) && !c.includes('shared_with_me') && !s.data()?.sharedCardAdded) {
+          const cells = (Array.isArray(l) ? l : []).map((x: Cell) => ({ ...x, y: (Number(x.y) || 0) + DEFAULT_H }));
+          setDoc(doc(db, 'user_prefs', viewer.id), {
+            homeCards: ['shared_with_me', ...c], homeLayout: [{ i: 'shared_with_me', x: 0, y: 0, w: COLS / 2, h: DEFAULT_H }, ...cells], sharedCardAdded: true,
+          }, { merge: true }).catch(() => { /* tried again next time */ });
+        }
         // Management people who arranged their own cards before "Follow-up alerts" existed get it once, at the top
         // (Joel, 2026-10-18). After that it's theirs to keep or remove.
         if (viewer.role === 'management' && Array.isArray(c) && !c.includes('follow_up_alerts') && !s.data()?.followUpCardAdded) {
@@ -167,8 +178,10 @@ export default function MyHome({ viewer, people, representatives, deals, events,
 
   const hasWorkspace = (id: string) => representatives.some(r => r.id === id);
   // Management with a KPI set (e.g. Ying) can also have the personal KPI cards.
-  const allowed = CARDS.filter(c => c.roles.includes(viewer.role)
-    || (viewer.role === 'management' && hasWorkspace(viewer.id) && (c.id === 'my_kpi' || c.id === 'my_won')));
+  const allowed = CARDS.filter(c => (c.roles.includes(viewer.role)
+    || (viewer.role === 'management' && hasWorkspace(viewer.id) && (c.id === 'my_kpi' || c.id === 'my_won')))
+    && (c.id !== 'shared_with_me' || (hasWorkspace(viewer.id) && !!nav.openFile)));
+  const shared = useSharedInbox(hasWorkspace(viewer.id) ? viewer.id : undefined).items;
 
   // Shortcuts: only the ones this person's role allows, whatever was saved.
   const mayUse = (need: Need) => need === 'all' || (need === 'workspace' ? hasWorkspace(viewer.id) : need === 'staff' ? staff : viewer.role === 'management');
@@ -230,7 +243,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const mine = (p: any) => dealOwnerId(p) === viewer.id;
   const ctx: CardCtx = {
     viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, programmes, representatives, venues,
-    checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices,
+    checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared,
   };
 
   return (
@@ -308,8 +321,8 @@ export default function MyHome({ viewer, people, representatives, deals, events,
             {cards.map(id => <div key={id}><Card id={id} ctx={ctx} editing={customising} onRemove={() => removeCard(id)} /></div>)}
           </Grid>
         ) : (
-          // Phones and narrow windows: cards stack in the chosen order.
-          <div className="grid gap-4">
+          // Phones and narrow windows: cards stack in the chosen order (grid-cols-1 so a long line truncates instead of widening the page).
+          <div className="grid grid-cols-1 gap-4">
             {cards.map(id => <Card key={id} id={id} ctx={ctx} editing={customising} onRemove={() => removeCard(id)} stacked />)}
           </div>
         )}
@@ -670,6 +683,7 @@ type CardCtx = {
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; programmes: any[]; representatives: Representative[]; venues: any[];
   checklistSettings: any; moneySettings: any; nameOf: (id: string) => string; clientName: (p: any) => string;
   openDeal: (p: any) => void; nav: MyHomeNav; mine: (p: any) => boolean; notices: React.ReactNode;
+  shared: SharedItem[];
 };
 
 type Item = { key: string; title: string; sub?: string; level?: 'danger' | 'attention'; onClick?: () => void };
@@ -991,6 +1005,16 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         empty: 'No programmes waiting on HRDC.',
       };
     }
+    case 'shared_with_me':
+      // Quotations and course outlines someone shared with me that I haven't opened yet (lib/sharedInbox.ts).
+      return {
+        items: c.shared.map(f => ({
+          key: `${f.kind}_${f.id}`, onClick: () => c.nav.openFile?.(f.kind, f.id), level: 'attention' as const,
+          title: `${f.kind === 'quotation' ? 'Quotation' : 'Course outline'} ${f.ref} · ${f.client || 'No client yet'}`,
+          sub: `${f.title ? `${f.title} · ` : ''}Shared by ${f.byName || 'a teammate'}, ${formatDate(f.at.slice(0, 10))} ${new Date(f.at).toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit' })}`,
+        })),
+        empty: 'Nothing new shared with you.',
+      };
     default:
       return { items: [], empty: '' };
   }

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowLeft, Copy, Trophy, Download, Eye, EyeOff, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Share2, Trash2, Unlock, Users, X,
+  ArrowLeft, Copy, Trophy, Download, Eye, EyeOff, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Trash2, Unlock, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../types';
@@ -12,9 +12,12 @@ import QuotationDocument from './QuotationDocument';
 import { dealContact } from '../lib/contacts';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import { linkedOnly } from '../lib/linked';
+import ShareWithBox, { NewCount } from './ShareWithBox';
+import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import QuoteSendDialog from './QuoteSendDialog';
 import { downloadBlob, makeQuotationPdf, pdfFileName } from '../lib/quotePdf';
 import { MarkWonBox } from './DealGates';
+import QuoteFixBox from './QuoteFixBox';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
 // A quotation is made for a deal (or a client). While it's a draft, the client's details, programme,
@@ -48,12 +51,13 @@ function nextRef(all: Quotation[], dateIso: string) {
   return `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
 }
 
-export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromDeal, onOpenFromDealHandled, onBackToDeal }: {
+export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromDeal, onOpenFromDealHandled, onBackToDeal, startOnShared }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
   onOpenTab?: (tab: Tab) => void;   // jump to where a detail is edited
   openFromDeal?: { dealId: string; quoteId: string } | null;   // opened from a deal: go straight to this quotation
   onOpenFromDealHandled?: () => void;
   onBackToDeal?: (dealId: string) => void;   // back to Deals with that deal's panel open
+  startOnShared?: boolean;   // opened from a menu red dot: start on "Shared with me"
 }) {
   const me: Viewer = viewer || { id: rep.id, name: rep.name, role: (rep.role as any) || 'rep' };
   const staff = me.role !== 'rep';
@@ -86,7 +90,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromD
     const q = quotes.find(x => x.id === openFromDeal.quoteId);
     if (!q) return;
     open(q);
-    setFromDealId(openFromDeal.dealId);
+    setFromDealId(openFromDeal.dealId);   // blank when opened from My home's 'Shared with me' card
     onOpenFromDealHandled?.();
   }, [openFromDeal, quotes]);
 
@@ -111,7 +115,10 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromD
     setChoosing(false);
     setDraft({ q, isNew: true });
   };
-  const open = (q: Quotation) => setDraft({ q: clean({ ...q, items: q.items || [], remarks: q.remarks || [], terms: q.terms || [] }), isNew: false });
+  const open = (q: Quotation) => {
+    markSharedSeen(me.id, 'quotation', q);   // clears this person's "Shared with me" alert for it
+    setDraft({ q: clean({ ...q, items: q.items || [], remarks: q.remarks || [], terms: q.terms || [] }), isNew: false });
+  };
   const duplicate = async (q: Quotation) => {
     const date = todayIso();
     const copy: Quotation = clean({
@@ -141,7 +148,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromD
       ) : openFromDeal ? (
         <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Opening the quotation…</p>
       ) : (
-        <QuoteList rep={rep} me={me} staff={staff} quotes={quotes} loaded={loaded} sources={sources} personName={personName}
+        <QuoteList rep={rep} me={me} staff={staff} quotes={quotes} loaded={loaded} sources={sources} personName={personName} startOnShared={startOnShared}
           onNew={() => setChoosing(true)} onOpen={open} onDuplicate={duplicate} />
       )}
       {choosing && <Chooser deals={dealsForPicker} clients={clients} sources={sources} personName={personName} onPick={createFor} onCancel={() => setChoosing(false)} />}
@@ -216,12 +223,15 @@ function Chooser({ deals, clients, sources, personName, onPick, onCancel, title 
 // ---------- List ----------
 type Scope = 'mine' | 'shared' | 'everyone';
 
-export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName, onNew, onOpen, onDuplicate }: {
+export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName, onNew, onOpen, onDuplicate, startOnShared }: {
   rep: Representative; me: Viewer; staff: boolean; quotes: Quotation[]; loaded: boolean; sources: QuoteSources; personName: (id?: string) => string;
-  onNew: () => void; onOpen: (q: Quotation) => void; onDuplicate: (q: Quotation) => Promise<void>;
+  onNew: () => void; onOpen: (q: Quotation) => void; onDuplicate: (q: Quotation) => Promise<void>; startOnShared?: boolean;
 }) {
   const canSeeEveryone = staff && me.id === rep.id;
-  const [scope, setScope] = useState<Scope>(canSeeEveryone ? 'everyone' : 'mine');
+  const [scope, setScope] = useState<Scope>(startOnShared ? 'shared' : canSeeEveryone ? 'everyone' : 'mine');
+  // "Shared with me" alerts are the viewer's own, so they show only in their own workspace.
+  const seen = useSharedSeen(me.id === rep.id ? me.id : undefined);
+  const unseen = (q: Quotation) => me.id === rep.id && isUnseen('quotation', q, me.id, seen);
   const [search, setSearch] = useState('');
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
@@ -230,7 +240,7 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
   const resolved = useMemo(() => quotes.map(q => ({ raw: q, r: resolveQuotation(q, sources) })), [quotes, sources]);
   const isMine = (x: { raw: Quotation; r: { ownerId: string } }) => x.r.ownerId === rep.id || x.raw.creatorId === rep.id || (!x.raw.creatorId && !x.raw.ownerId && !!x.raw.preparedBy && x.raw.preparedBy === rep.name);
   const isShared = (q: Quotation) => (q.sharedWithIds || []).includes(rep.id) || q.taggedRepId === rep.id;
-  const counts = { mine: resolved.filter(isMine).length, shared: resolved.filter(x => !isMine(x) && isShared(x.raw)).length };
+  const counts = { mine: resolved.filter(isMine).length, shared: resolved.filter(x => !isMine(x) && isShared(x.raw)).length, unseen: quotes.filter(unseen).length };
 
   const visible = useMemo(() => {
     const t = search.trim().toLowerCase();
@@ -257,7 +267,9 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
           {([...(canSeeEveryone ? [['everyone', "Everyone's"]] : []), ['mine', `Mine (${counts.mine})`], ['shared', `Shared with me (${counts.shared})`]] as [Scope, string][]).map(([k, t]) => (
-            <button key={k} type="button" onClick={() => setScope(k)} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${scope === k ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>{t}</button>
+            <button key={k} type="button" onClick={() => setScope(k)} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold ${scope === k ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>
+              {t}{k === 'shared' && counts.unseen > 0 && <NewCount n={counts.unseen} />}
+            </button>
           ))}
         </div>
         <label className="flex items-center gap-2 text-sm text-ink-soft">
@@ -286,7 +298,7 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
                 <li key={q.id} className="relative flex items-center gap-2 px-4 hover:bg-surface">
                   <button type="button" onClick={() => onOpen(q)} className="grid min-w-0 flex-1 gap-1 py-3 text-left sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1.3fr)_8rem_7rem] sm:items-center sm:gap-4">
                     <span className="min-w-0">
-                      <span className="block truncate font-semibold">{r.q.company || 'No client yet'}</span>
+                      <span className="flex min-w-0 items-center gap-1.5 font-semibold"><span className="truncate">{r.q.company || 'No client yet'}</span>{unseen(q) && <span className="shrink-0 rounded bg-danger px-1.5 text-xs font-semibold text-white">New</span>}</span>
                       <span className="flex items-center gap-1.5 truncate text-sm text-ink-soft">
                         {q.refNumber}
                         {isSent(q) ? <span className="rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Sent</span> : <span className="rounded bg-surface px-1.5 text-xs font-semibold">Draft</span>}
@@ -549,11 +561,12 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
         </div>
       )}
 
-      {!locked && r.issues.length > 0 && (
-        <div className="rounded-2xl border border-attention/30 bg-attention-soft p-4 text-sm text-attention">
-          <p className="mb-1 flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" /> Fix these at the source, and the quotation updates by itself:</p>
-          <ul className="list-disc space-y-0.5 pl-6">{r.issues.map(i => <li key={i}>{i}</li>)}</ul>
-        </div>
+      {!locked && r.fixes.length > 0 && (
+        <QuoteFixBox fixes={r.fixes} deal={r.deal} client={r.client} refNumber={q.refNumber} me={me}
+          onRelink={() => setRelinking(true)}
+          onShowProgrammes={() => document.getElementById('q-programmes')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          goto={goto}
+          onSaved={msg => { setNote(msg); window.setTimeout(() => setNote(''), 3000); }} />
       )}
 
       <fieldset disabled={locked} className="min-w-0 space-y-4">
@@ -606,7 +619,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
         </Card>
 
         {/* 3. Programmes */}
-        <Card title="3. Programmes and other items">
+        <Card id="q-programmes" title="3. Programmes and other items">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[800px] text-[15px]">
               <thead>
@@ -728,18 +741,8 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
       {/* 5. Sharing (allowed even when sent) */}
       <Card title="5. Share with teammates">
         <p className="mb-2 text-[15px] text-ink-soft">People you add can open and edit this same quotation. It appears in their list under "Shared with me".</p>
-        <div className="flex flex-wrap gap-2">
-          {reps.filter(p => p.id !== r.ownerId).map(p => {
-            const on = shared.includes(p.id);
-            return (
-              <button key={p.id} type="button" aria-pressed={on}
-                onClick={() => set({ sharedWithIds: on ? shared.filter(x => x !== p.id) : [...shared, p.id] })}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium ${on ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-soft hover:bg-surface'}`}>
-                {on ? <Users className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}{p.name}
-              </button>
-            );
-          })}
-        </div>
+        <ShareWithBox people={reps.map(p => ({ id: p.id, name: p.name, role: p.role }))} ownerId={r.ownerId} shared={shared} log={q.sharedLog} me={me}
+          onChange={c => set(c)} />
       </Card>
 
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
@@ -797,9 +800,9 @@ function AttentionBox({ value, override, clientContact, locked, onChange }: {
   );
 }
 
-function Card({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+function Card({ id, title, action, children }: { id?: string; title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-line bg-white p-5">
+    <section id={id} className="scroll-mt-24 rounded-2xl border border-line bg-white p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="font-bold">{title}</h3>
         {action}

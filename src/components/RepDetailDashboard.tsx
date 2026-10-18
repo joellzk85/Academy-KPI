@@ -12,6 +12,7 @@ import TrainerManager from './TrainerManager';
 import VenueManager from './VenueManager';
 import KpiPage, { asksFor } from './KpiPage';
 import WorkspaceMenu, { MENU_LABELS, MenuItem } from './WorkspaceMenu';
+import { SharedKind, useSharedInbox } from '../lib/sharedInbox';
 import DealsBoard from './DealsBoard';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { dealNeedsAttention, dealOwnerId, todayIso } from '../lib/deals';
@@ -28,6 +29,8 @@ interface RepDetailDashboardProps {
   onMonthChange: (month: string) => void;
   viewer?: { id: string; name: string; role: 'rep' | 'admin' | 'management' };
   onOpenAdminWork?: () => void;     // Admin's menu links to Admin work (it replaced the old Admin records screen)
+  openFile?: { kind: SharedKind; id: string } | null;   // My home's "Shared with me": open this file in the editor
+  onOpenFileHandled?: () => void;
 }
 
 type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments' | 'client_payments';
@@ -303,7 +306,9 @@ export default function RepDetailDashboard({
   selectedMonth,
   onMonthChange,
   viewer,
-  onOpenAdminWork
+  onOpenAdminWork,
+  openFile,
+  onOpenFileHandled
 }: RepDetailDashboardProps) {
   // The old payment, P&L, appointment and Admin records screens were retired; anyone left on them,
   // however they got there, lands on Deals.
@@ -1203,6 +1208,15 @@ export default function RepDetailDashboard({
 
   // "Create outline" on a deal: open Course outlines at "Start from" for that deal (nothing is saved until Save).
   const [outlineStartDeal, setOutlineStartDeal] = useState<any | null>(null);
+  // "Shared with me" (2026-10-18): a file opened from My home, and which list starts on "Shared with me".
+  const [outlineToOpen, setOutlineToOpen] = useState<string | null>(null);
+  const [sharedFirst, setSharedFirst] = useState<SubTab | null>(null);
+  useEffect(() => {
+    if (!openFile) return;
+    if (openFile.kind === 'quotation') { setQuoteFromDeal({ dealId: '', quoteId: openFile.id }); handleSubTabChange('quotation'); }
+    else { setOutlineToOpen(openFile.id); handleSubTabChange('course_outline'); }
+    onOpenFileHandled?.();
+  }, [openFile]);
   const handleCreateOutlineForPipeline = (p: any) => {
     setOutlineStartDeal(p);
     setActiveSubTab("course_outline");
@@ -1969,11 +1983,15 @@ export default function RepDetailDashboard({
   // Same as the Deals screen: only this person's own deals, or a teammate's deal they've been asked to help on.
   const dealsAlert = pipelines.some(p => dealOwnerId(p) === rep.id && dealNeedsAttention(p)) ? 'Deal needs attention'
     : pipelines.some(p => dealOwnerId(p) !== rep.id && p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id)) ? 'Help asked' : undefined;
+  // Files shared with this person that they haven't opened (only in their own workspace: the alerts are theirs).
+  const inbox = useSharedInbox(viewer && viewer.id !== rep.id ? undefined : rep.id);
   const workspaceMenuItems: MenuItem[] = [
     { key: 'kpi', label: MENU_LABELS.kpi, alert: kpiAsksOpen ? `${kpiAsksOpen} teammate request${kpiAsksOpen === 1 ? '' : 's'}` : undefined },
     { key: 'pipeline', label: MENU_LABELS.pipeline, alert: dealsAlert },
-    { key: 'quotation', label: MENU_LABELS.quotation, alert: hasTaggedQuotations ? 'Tagged quotation' : undefined },
-    { key: 'course_outline', label: MENU_LABELS.course_outline, alert: hasTaggedCourseOutlines ? 'Tagged outline' : undefined },
+    { key: 'quotation', label: MENU_LABELS.quotation, count: inbox.quotations,
+      alert: inbox.quotations ? `${inbox.quotations} shared with you` : hasTaggedQuotations ? 'Tagged quotation' : undefined },
+    { key: 'course_outline', label: MENU_LABELS.course_outline, count: inbox.outlines,
+      alert: inbox.outlines ? `${inbox.outlines} shared with you` : hasTaggedCourseOutlines ? 'Tagged outline' : undefined },
     { key: 'client', label: MENU_LABELS.client },
     { key: 'trainerList', label: MENU_LABELS.trainerList },
     { key: 'venue', label: MENU_LABELS.venue },
@@ -2001,18 +2019,25 @@ export default function RepDetailDashboard({
       
       {/* Menu (collapsible) and the active page */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <WorkspaceMenu active={activeSubTab} onSelect={(k) => (k === 'admin_work' ? onOpenAdminWork?.() : handleSubTabChange(k as SubTab))} items={workspaceMenuItems} prefsId={viewer?.id || rep.id}
+        <WorkspaceMenu active={activeSubTab} items={workspaceMenuItems}
+          onSelect={(k) => {
+            if (k === 'admin_work') return onOpenAdminWork?.();
+            // A red count on Quotations / Course outlines: open the list on "Shared with me".
+            setSharedFirst((k === 'quotation' && inbox.quotations) || (k === 'course_outline' && inbox.outlines) ? k : null);
+            handleSubTabChange(k as SubTab);
+          }} prefsId={viewer?.id || rep.id}
           ownerLabel={viewer && viewer.id !== rep.id ? `${rep.name}'s workspace` : undefined} />
 
         {/* Right Side: Active Workspace Section */}
         <div className="min-w-0 flex-1 space-y-5">
           
           {activeSubTab === 'quotation' ? (
-            <QuotationsPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenTab={(t) => handleSubTabChange(t as SubTab)}
+            <QuotationsPage key={`${rep.id}-${sharedFirst === 'quotation'}`} rep={rep} reps={reps} viewer={viewer} onOpenTab={(t) => handleSubTabChange(t as SubTab)} startOnShared={sharedFirst === 'quotation'}
               openFromDeal={quoteFromDeal} onOpenFromDealHandled={() => setQuoteFromDeal(null)}
               onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} />
           ) : activeSubTab === 'course_outline' ? (
-            <CourseOutlinesPage key={rep.id} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => setOutlineStartDeal(null)} onOpenTab={(t) => handleSubTabChange(t as SubTab)} />
+            <CourseOutlinesPage key={`${rep.id}-${sharedFirst === 'course_outline'}`} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => setOutlineStartDeal(null)} onOpenTab={(t) => handleSubTabChange(t as SubTab)}
+              openId={outlineToOpen} onOpenHandled={() => setOutlineToOpen(null)} startOnShared={sharedFirst === 'course_outline'} />
           ) : activeSubTab === 'client' ? (
             <ClientManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
           ) : activeSubTab === 'trainerList' ? (

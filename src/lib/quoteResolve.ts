@@ -47,7 +47,12 @@ export interface Resolved {
   client: any | null;
   ownerId: string;
   issues: string[];      // missing details to fix at the source
+  fixes: QuoteFix[];     // the same, with what kind each is (the editor's box offers a field to fill each in)
 }
+
+// What a missing detail is, so the "Fix these at the source" box can offer the right field (2026-10-18).
+export type QuoteFixKind = 'client_address' | 'client_contact' | 'no_client' | 'programme_gone' | 'deal_date';
+export interface QuoteFix { kind: QuoteFixKind; text: string }
 
 export function isSent(q: Quotation): boolean {
   return q.status === 'sent';
@@ -58,9 +63,10 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
   const clientId = deal?.clientId || q.clientId || '';
   const client = clientId ? s.clients.find(c => c.id === clientId) || null : null;
   const ownerId = (deal && dealOwnerId(deal)) || q.ownerId || q.creatorId || '';
-  if (isSent(q)) return { q, deal, client, ownerId, issues: [] };
+  if (isSent(q)) return { q, deal, client, ownerId, issues: [], fixes: [] };
 
-  const issues: string[] = [];
+  const fixes: QuoteFix[] = [];
+  const issues = { push: (text: string, kind: QuoteFixKind) => { if (!fixes.some(f => f.kind === kind)) fixes.push({ kind, text }); } };
   const out: Quotation = { ...q, clientId: clientId || q.clientId };
 
   const attnOverride = (q.attnOverride || '').trim();
@@ -69,13 +75,13 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
     // The deal's attention person (else the client's main contact), unless a different PIC was typed for this quotation.
     out.attn = attnOverride || dealContact(deal, client)?.name || '';
     out.address = client.address || '';
-    if (!out.address) issues.push(`${out.company || 'This client'} has no address in the client list.`);
-    if (!out.attn) issues.push(`${out.company || 'This client'} has no contact person in the client list.`);
+    if (!out.address) issues.push(`${out.company || 'This client'} has no address in the client list.`, 'client_address');
+    if (!out.attn) issues.push(`${out.company || 'This client'} has no contact person in the client list.`, 'client_contact');
   } else if (attnOverride) {
     out.attn = attnOverride;
   }
   if (!client && !q.company) {
-    issues.push('Choose the deal or client this quotation is for.');
+    issues.push('Choose the deal or client this quotation is for.', 'no_client');
   }
 
   // Number of participants agreed at the appointment lives on the deal.
@@ -98,16 +104,16 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
     // Picked from a list = read live; typed in = kept as typed.
     const prog = it.programmeId ? s.programmes.find(p => p.id === it.programmeId) : null;
     if (prog) { line.program = prog.name || ''; line.code = prog.hrdcCode || ''; }
-    else if (it.programmeId) issues.push('A programme on this quotation is no longer in the programme list.');
+    else if (it.programmeId) issues.push('A programme on this quotation is no longer in the programme list.', 'programme_gone');
     const trainer = it.trainerId ? s.trainers.find(t => t.id === it.trainerId) : null;
     if (trainer) line.trainer = trainer.name || '';
     if (it.useDealDate && deal) {
       line.date = deal.trainingDate ? formatDate(deal.trainingDate) : '';
-      if (!deal.trainingDate) issues.push('The linked deal has no training date yet.');
+      if (!deal.trainingDate) issues.push('The linked deal has no training date yet.', 'deal_date');
     }
     line.totalFee = (Number(line.feePerDay) || 0) * (Number(line.days) || 0);
     return line;
   });
 
-  return { q: out, deal, client, ownerId, issues: Array.from(new Set(issues)) };
+  return { q: out, deal, client, ownerId, issues: fixes.map(f => f.text), fixes };
 }

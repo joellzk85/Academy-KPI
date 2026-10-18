@@ -11,7 +11,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, BookOpen, Building2, Chevro
 
 export type MenuKey = 'kpi' | 'pipeline' | 'quotation' | 'course_outline' | 'client' | 'trainerList' | 'venue' | 'admin_work' | 'tasks';
 
-export interface MenuItem { key: MenuKey; label: string; alert?: string }
+export interface MenuItem { key: MenuKey; label: string; alert?: string; count?: number }   // count: shown in the red dot (e.g. files shared with you)
 
 const ICONS: Record<MenuKey, React.ComponentType<{ className?: string }>> = {
   kpi: BarChart3,
@@ -68,7 +68,7 @@ export default function WorkspaceMenu({ items: allowedItems, active, onSelect, p
             <button key={it.key} type="button" onClick={() => onSelect(it.key)}
               className={`relative flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold ${on ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft'}`}>
               <Icon className="h-4 w-4" />{it.label}
-              {it.alert && <span className="h-2 w-2 rounded-full bg-danger" aria-label={it.alert} />}
+              {it.count ? <Count n={it.count} label={it.alert} /> : it.alert && <span className="h-2 w-2 rounded-full bg-danger" aria-label={it.alert} />}
             </button>
           );
         })}
@@ -100,7 +100,8 @@ export default function WorkspaceMenu({ items: allowedItems, active, onSelect, p
                   className={`relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[15px] font-semibold transition-colors ${on ? 'bg-accent-soft text-accent' : 'text-ink hover:bg-surface'} ${collapsed ? 'justify-center' : ''}`}>
                   <Icon className="h-[18px] w-[18px] shrink-0" />
                   {!collapsed && <span className="min-w-0 flex-1 truncate">{it.label}</span>}
-                  {it.alert && <span className={`h-2 w-2 shrink-0 rounded-full bg-danger ${collapsed ? 'absolute right-2 top-2' : ''}`} />}
+                  {it.count ? <Count n={it.count} label={it.alert} className={collapsed ? 'absolute right-0.5 top-0.5' : ''} />
+                    : it.alert && <span className={`h-2 w-2 shrink-0 rounded-full bg-danger ${collapsed ? 'absolute right-2 top-2' : ''}`} />}
                 </button>
               </li>
             );
@@ -119,6 +120,10 @@ export default function WorkspaceMenu({ items: allowedItems, active, onSelect, p
       </div>
     </nav>
   );
+}
+
+function Count({ n, label, className = '' }: { n: number; label?: string; className?: string }) {
+  return <span className={`min-w-[1.25rem] shrink-0 rounded-full bg-danger px-1.5 text-center text-xs font-bold leading-5 text-white ${className}`} aria-label={label}>{n}</span>;
 }
 
 // Plain names for each menu item (also used for the page header).

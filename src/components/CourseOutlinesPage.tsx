@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Share2, Trash2, Unlock, Users, X,
+  ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Trash2, Unlock, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { CourseOutline, CourseOutlineItem, Representative } from '../types';
@@ -9,6 +9,8 @@ import { STAGE_LABELS, dealOwnerId, dealStage, formatDate, todayIso } from '../l
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
 import CourseOutlineDocument from './CourseOutlineDocument';
 import { linkedOnly } from '../lib/linked';
+import ShareWithBox, { NewCount } from './ShareWithBox';
+import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
 import { OutlineSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
 import { trainerOptions } from './PickOrType';
@@ -37,9 +39,12 @@ const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const newModule = (): CourseOutlineItem => ({ id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, no: 0, moduleTitle: '', topics: '', duration: '', methodology: '' });
 const summary = (o: CourseOutline) => `${o.durationDays || 0} day${o.durationDays === 1 ? '' : 's'} · ${(o.items || []).length} module${(o.items || []).length === 1 ? '' : 's'}`;
 
-export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onStartHandled, onOpenTab }: {
+export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onStartHandled, onOpenTab, openId, onOpenHandled, startOnShared }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
   startDeal?: any | null;            // "Create outline" on a deal: go straight to "Start from" for it
+  openId?: string | null;            // My home's "Shared with me": open this outline straight in the editor
+  onOpenHandled?: () => void;
+  startOnShared?: boolean;           // opened from a menu red dot: start on "Shared with me"
   onStartHandled?: () => void;
   onOpenTab?: (tab: Tab) => void;
 }) {
@@ -99,7 +104,17 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
     setChoosing(null);
     setDraft({ o, isNew: true });
   };
-  const open = (o: CourseOutline) => setDraft({ o: clean({ ...o, items: o.items || [], outcomes: o.outcomes || [] }), isNew: false });
+  const open = (o: CourseOutline) => {
+    markSharedSeen(me.id, 'outline', o);   // clears this person's "Shared with me" alert for it
+    setDraft({ o: clean({ ...o, items: o.items || [], outcomes: o.outcomes || [] }), isNew: false });
+  };
+  useEffect(() => {
+    if (!openId) return;
+    const o = outlines.find(x => x.id === openId);
+    if (!o) return;
+    open(o);
+    onOpenHandled?.();
+  }, [openId, outlines]);
   const duplicate = async (o: CourseOutline) => {
     const date = todayIso();
     const copy: CourseOutline = clean({
@@ -117,7 +132,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
         <Editor key={draft.o.id} initial={draft.o} isNew={draft.isNew} me={me} staff={staff} reps={reps} sources={sources}
           dealsForPicker={dealsForPicker} onOpenTab={onOpenTab} onClose={() => setDraft(null)} trainers={trainers} links={links} />
       ) : (
-        <OutlineList rep={rep} me={me} staff={staff} outlines={outlines} loaded={loaded} sources={sources} personName={personName} links={links}
+        <OutlineList rep={rep} me={me} staff={staff} outlines={outlines} loaded={loaded} sources={sources} personName={personName} links={links} startOnShared={startOnShared}
           onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} />
       )}
       {choosing?.step === 'deal' && (
@@ -234,13 +249,16 @@ function Modal({ title, onCancel, children }: { title: string; onCancel: () => v
 // ---------- List ----------
 type Scope = 'mine' | 'shared' | 'everyone';
 
-function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, links, onNew, onOpen, onDuplicate }: {
+function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, links, onNew, onOpen, onDuplicate, startOnShared }: {
   rep: Representative; me: Viewer; staff: boolean; outlines: CourseOutline[]; loaded: boolean; sources: OutlineSources; personName: (id?: string) => string;
-  links: TrainerLink[];
+  links: TrainerLink[]; startOnShared?: boolean;
   onNew: () => void; onOpen: (o: CourseOutline) => void; onDuplicate: (o: CourseOutline) => Promise<void>;
 }) {
   const canSeeEveryone = staff && me.id === rep.id;
-  const [scope, setScope] = useState<Scope>(canSeeEveryone ? 'everyone' : 'mine');
+  const [scope, setScope] = useState<Scope>(startOnShared ? 'shared' : canSeeEveryone ? 'everyone' : 'mine');
+  // "Shared with me" alerts are the viewer's own, so they show only in their own workspace.
+  const seen = useSharedSeen(me.id === rep.id ? me.id : undefined);
+  const unseen = (o: CourseOutline) => me.id === rep.id && isUnseen('outline', o, me.id, seen);
   const [search, setSearch] = useState('');
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
@@ -249,7 +267,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
   const resolved = useMemo(() => outlines.map(o => ({ raw: o, r: resolveOutline(o, sources) })), [outlines, sources]);
   const isMine = (x: { raw: CourseOutline; r: { ownerId: string } }) => x.r.ownerId === rep.id || x.raw.creatorId === rep.id || (!x.raw.creatorId && !x.raw.ownerId && !!x.raw.preparedBy && x.raw.preparedBy === rep.name);
   const isShared = (o: CourseOutline) => (o.sharedWithIds || []).includes(rep.id) || o.taggedRepId === rep.id;
-  const counts = { mine: resolved.filter(isMine).length, shared: resolved.filter(x => !isMine(x) && isShared(x.raw)).length };
+  const counts = { mine: resolved.filter(isMine).length, shared: resolved.filter(x => !isMine(x) && isShared(x.raw)).length, unseen: outlines.filter(unseen).length };
 
   const visible = useMemo(() => {
     const t = search.trim().toLowerCase();
@@ -276,7 +294,9 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
           {([...(canSeeEveryone ? [['everyone', "Everyone's"]] : []), ['mine', `Mine (${counts.mine})`], ['shared', `Shared with me (${counts.shared})`]] as [Scope, string][]).map(([k, t]) => (
-            <button key={k} type="button" onClick={() => setScope(k)} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${scope === k ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>{t}</button>
+            <button key={k} type="button" onClick={() => setScope(k)} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold ${scope === k ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>
+              {t}{k === 'shared' && counts.unseen > 0 && <NewCount n={counts.unseen} />}
+            </button>
           ))}
         </div>
         <label className="flex items-center gap-2 text-sm text-ink-soft">
@@ -303,7 +323,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
               <li key={o.id} className="relative flex items-center gap-2 px-4 hover:bg-surface">
                 <button type="button" onClick={() => onOpen(o)} className="grid min-w-0 flex-1 gap-1 py-3 text-left sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_8rem] sm:items-center sm:gap-4">
                   <span className="min-w-0">
-                    <span className="block truncate font-semibold">{r.o.courseTitle || 'Untitled outline'}</span>
+                    <span className="flex min-w-0 items-center gap-1.5 font-semibold"><span className="truncate">{r.o.courseTitle || 'Untitled outline'}</span>{unseen(o) && <span className="shrink-0 rounded bg-danger px-1.5 text-xs font-semibold text-white">New</span>}</span>
                     <span className="flex items-center gap-1.5 truncate text-sm text-ink-soft">
                       {o.refNumber}
                       {outlineSent(o) ? <span className="rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Sent</span> : <span className="rounded bg-surface px-1.5 text-xs font-semibold">Draft</span>}
@@ -620,18 +640,8 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
       {/* 5. Sharing (allowed even when sent) */}
       <Card title="5. Share with teammates">
         <p className="mb-2 text-[15px] text-ink-soft">People you add can open and edit this same outline. It appears in their list under "Shared with me".</p>
-        <div className="flex flex-wrap gap-2">
-          {reps.filter(p => p.id !== r.ownerId).map(p => {
-            const on = shared.includes(p.id);
-            return (
-              <button key={p.id} type="button" aria-pressed={on}
-                onClick={() => set({ sharedWithIds: on ? shared.filter(x => x !== p.id) : [...shared, p.id] })}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium ${on ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-soft hover:bg-surface'}`}>
-                {on ? <Users className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}{p.name}
-              </button>
-            );
-          })}
-        </div>
+        <ShareWithBox people={reps.map(p => ({ id: p.id, name: p.name, role: p.role }))} ownerId={r.ownerId} shared={shared} log={o.sharedLog} me={me}
+          onChange={c => set(c)} />
       </Card>
 
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}

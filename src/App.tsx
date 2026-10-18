@@ -51,6 +51,7 @@ import { googleEvents, syncCalendar } from './lib/googleCalendar';
 import { runBackup } from './lib/backupApi';
 import { useFollowUpRules } from './lib/useFollowUpRules';
 import { linkedOnly, setLinkedTeam } from './lib/linked';
+import { SharedKind } from './lib/sharedInbox';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -235,6 +236,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   });
 
   // Active Representative Selection (reps can only ever open their own workspace)
+  const [fileToOpen, setFileToOpen] = useState<{ kind: SharedKind; id: string } | null>(null);   // My home's "Shared with me"
   const [selectedRepId, setSelectedRepId] = useState<string | null>(() => {
     const saved = localStorage.getItem('next_selected_rep_id') || null;
     // Everyone lands on My home after logging in.
@@ -719,6 +721,12 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   };
 
   const homeNav = {
+    // My home's "Shared with me": open the file in my own workspace's editor.
+    openFile: (kind: SharedKind, id: string) => {
+      if (!canOpenWorkspace(currentMember.id)) return;
+      setFileToOpen({ kind, id });
+      homeNav.openWorkspace(currentMember.id, kind === 'quotation' ? 'quotation' : 'course_outline');
+    },
     openWorkspace: (repId: string, subTab?: string) => {
       if (!canOpenWorkspace(repId)) return;
       if (subTab) localStorage.setItem(`next_active_subtab_${repId}`, subTab);
@@ -989,6 +997,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   onMonthChange={handleMonthChange}
                   viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                   onOpenAdminWork={isStaff ? () => homeNav.openAdminWork() : undefined}
+                  openFile={selectedRep.id === currentMember.id ? fileToOpen : null}
+                  onOpenFileHandled={() => setFileToOpen(null)}
                 />
               ) : (
                 <div className="text-center py-12 bg-white rounded-xl border border-slate-200">

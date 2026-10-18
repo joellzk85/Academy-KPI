@@ -173,6 +173,7 @@ export interface Quotation {
   venueId?: string;
   pipelineId?: string;
   sharedWithIds?: string[];   // teammates who can open and edit this same quotation
+  sharedLog?: Record<string, { at: string; byId: string; byName: string }>;   // who shared it with each of them, and when (alerts)
   // Draft = reads client, deal, programme, trainer and venue live. Sent = the text fields hold the locked copy that was sent.
   status?: 'draft' | 'sent';
   sentAt?: string;
@@ -236,6 +237,7 @@ export interface CourseOutline {
   sentById?: string;
   sentByName?: string;
   sharedWithIds?: string[];     // teammates who can open and edit this same outline
+  sharedLog?: Record<string, { at: string; byId: string; byName: string }>;   // who shared it with each of them, and when (alerts)
 }
 
 export interface Client {
