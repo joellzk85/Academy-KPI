@@ -27,8 +27,9 @@ const ICONS: Record<MenuKey, React.ComponentType<{ className?: string }>> = {
 
 const STORE_KEY = 'next_menu_collapsed';
 
-export default function WorkspaceMenu({ items: allowedItems, active, onSelect, prefsId }: {
+export default function WorkspaceMenu({ items: allowedItems, active, onSelect, prefsId, ownerLabel }: {
   items: MenuItem[]; active: string; onSelect: (k: MenuKey) => void; prefsId?: string;
+  ownerLabel?: string;   // shown only when viewing someone else's workspace, e.g. "Alif's workspace"
 }) {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(STORE_KEY) === '1'; } catch { return false; } });
   const toggle = () => setCollapsed(c => { try { localStorage.setItem(STORE_KEY, c ? '0' : '1'); } catch { /* private window */ } return !c; });
@@ -57,6 +58,7 @@ export default function WorkspaceMenu({ items: allowedItems, active, onSelect, p
 
   return (
     <nav aria-label="Workspace menu" className={`shrink-0 font-sans text-ink lg:sticky lg:top-24 ${collapsed ? 'lg:w-16' : 'lg:w-56'}`}>
+      {ownerLabel && <p className="mb-2 truncate text-sm font-semibold text-accent lg:hidden">{ownerLabel}</p>}
       {/* Phone and tablet: one scrolling row */}
       <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
         {items.map(it => {
@@ -74,6 +76,7 @@ export default function WorkspaceMenu({ items: allowedItems, active, onSelect, p
 
       {/* Desktop: side menu */}
       <div className="hidden rounded-2xl border border-line bg-white p-2 lg:block">
+        {ownerLabel && !collapsed && <p className="mb-1 truncate border-b border-line px-2.5 pb-2 pt-1 text-sm font-semibold text-accent" title={ownerLabel}>{ownerLabel}</p>}
         <button type="button" onClick={toggle} className="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-ink-soft hover:bg-surface"
           aria-label={collapsed ? 'Show menu' : 'Hide menu'} title={collapsed ? 'Show menu' : 'Hide menu'}>
           {collapsed ? <ChevronsRight className="mx-auto h-4 w-4" /> : <><ChevronsLeft className="h-4 w-4" /> Hide menu</>}

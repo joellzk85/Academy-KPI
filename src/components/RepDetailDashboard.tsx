@@ -1981,20 +1981,10 @@ export default function RepDetailDashboard({
   return (
     <div className="space-y-6">
       
-      {/* Header */}
-      <div className="flex items-center gap-3 rounded-2xl border border-line bg-white p-4 font-sans text-ink">
-        <button type="button" onClick={handleBack} className="rounded-lg border border-line p-2 text-ink-soft hover:bg-surface hover:text-ink" aria-label="Back">
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <div className="min-w-0">
-          <p className="truncate text-lg font-bold">{rep.name}</p>
-          <p className="text-sm text-ink-soft">{rep.role === 'management' ? 'Management' : rep.role === 'admin' ? 'Admin' : 'Sales rep'} · {MENU_LABELS[activeSubTab as keyof typeof MENU_LABELS] || 'Workspace'}</p>
-        </div>
-      </div>
-
       {/* Menu (collapsible) and the active page */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <WorkspaceMenu active={activeSubTab} onSelect={(k) => (k === 'admin_work' ? onOpenAdminWork?.() : handleSubTabChange(k as SubTab))} items={workspaceMenuItems} prefsId={viewer?.id || rep.id} />
+        <WorkspaceMenu active={activeSubTab} onSelect={(k) => (k === 'admin_work' ? onOpenAdminWork?.() : handleSubTabChange(k as SubTab))} items={workspaceMenuItems} prefsId={viewer?.id || rep.id}
+          ownerLabel={viewer && viewer.id !== rep.id ? `${rep.name}'s workspace` : undefined} />
 
         {/* Right Side: Active Workspace Section */}
         <div className="min-w-0 flex-1 space-y-5">
