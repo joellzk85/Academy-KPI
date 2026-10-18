@@ -556,7 +556,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
         </div>
       )}
 
-      <fieldset disabled={locked} className="space-y-4">
+      <fieldset disabled={locked} className="min-w-0 space-y-4">
         {/* 1. Deal and client (read live) */}
         <Card title="1. Deal and client" action={!locked && <button type="button" className={linkBtn} onClick={() => setRelinking(true)}><Link2 className="mr-1 inline h-4 w-4" />{r.deal || r.client ? 'Change' : 'Link a deal or client'}</button>}>
           {r.deal && (
