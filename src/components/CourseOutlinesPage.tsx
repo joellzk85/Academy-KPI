@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Trash2, Unlock, X,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Trash2, Unlock, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { CourseOutline, CourseOutlineItem, Representative } from '../types';
-import { STAGE_LABELS, dealOwnerId, dealStage, formatDate, todayIso } from '../lib/deals';
+import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso } from '../lib/deals';
+import { GapsBox } from './DealGates';
+import { Programme } from '../lib/programmes';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
 import CourseOutlineDocument from './CourseOutlineDocument';
 import { linkedOnly } from '../lib/linked';
@@ -39,8 +41,10 @@ const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const newModule = (): CourseOutlineItem => ({ id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, no: 0, moduleTitle: '', topics: '', duration: '', methodology: '' });
 const summary = (o: CourseOutline) => `${o.durationDays || 0} day${o.durationDays === 1 ? '' : 's'} · ${(o.items || []).length} module${(o.items || []).length === 1 ? '' : 's'}`;
 
-export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onStartHandled, onOpenTab, openId, onOpenHandled, startOnShared }: {
+export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onStartHandled, onOpenTab, openId, onOpenHandled, startOnShared, fromDealId, onBackToDeal }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
+  fromDealId?: string | null;        // opened from this deal: the editor shows "Back to deal"
+  onBackToDeal?: (dealId: string) => void;
   startDeal?: any | null;            // "Create outline" on a deal: go straight to "Start from" for it
   openId?: string | null;            // My home's "Shared with me": open this outline straight in the editor
   onOpenHandled?: () => void;
@@ -59,6 +63,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<{ o: CourseOutline; isNew: boolean } | null>(null);
   const [choosing, setChoosing] = useState<null | { step: 'deal' } | { step: 'start'; deal: any | null }>(null);
+  const [backDeal, setBackDeal] = useState<string | null>(null);   // opened from a deal: "Back to deal"
 
   useEffect(() => {
     const subs = [
@@ -71,9 +76,24 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
     return () => subs.forEach(u => u());
   }, []);
 
+  // "Create outline" on a deal: if it already has a draft outline, open that (no duplicates); else "Start from".
   useEffect(() => {
-    if (startDeal) { setDraft(null); setChoosing({ step: 'start', deal: startDeal }); onStartHandled?.(); }
-  }, [startDeal]);
+    if (!startDeal || !loaded) return;
+    setBackDeal(fromDealId || null);
+    const existing = outlines
+      .filter(o => o.pipelineId === startDeal.id && !outlineSent(o))
+      .sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)))[0];
+    if (existing) { setChoosing(null); open(existing); }
+    else { setDraft(null); setChoosing({ step: 'start', deal: startDeal }); }
+    onStartHandled?.();
+  }, [startDeal, loaded]);
+  const leave = () => {
+    const d = backDeal;
+    setDraft(null);
+    setChoosing(null);
+    setBackDeal(null);
+    if (d && onBackToDeal) onBackToDeal(d);
+  };
 
   const sources: OutlineSources = useMemo(() => ({ clients, deals, programmes, people: reps.map(r => ({ id: r.id, name: r.name })) }), [clients, deals, programmes, reps]);
   const personName = (id?: string) => reps.find(r => r.id === id)?.name || '';
@@ -112,6 +132,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
     if (!openId) return;
     const o = outlines.find(x => x.id === openId);
     if (!o) return;
+    setBackDeal(fromDealId || null);
     open(o);
     onOpenHandled?.();
   }, [openId, outlines]);
@@ -130,7 +151,8 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
     <>
       {draft ? (
         <Editor key={draft.o.id} initial={draft.o} isNew={draft.isNew} me={me} staff={staff} reps={reps} sources={sources}
-          dealsForPicker={dealsForPicker} onOpenTab={onOpenTab} onClose={() => setDraft(null)} trainers={trainers} links={links} />
+          dealsForPicker={dealsForPicker} onOpenTab={onOpenTab} onClose={() => { setDraft(null); setBackDeal(null); }} trainers={trainers} links={links}
+          backToDeal={backDeal && onBackToDeal ? leave : undefined} />
       ) : (
         <OutlineList rep={rep} me={me} staff={staff} outlines={outlines} loaded={loaded} sources={sources} personName={personName} links={links} startOnShared={startOnShared}
           onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} />
@@ -141,7 +163,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       )}
       {choosing?.step === 'start' && (
         <StartChooser deal={choosing.deal} outlines={outlines} sources={sources}
-          onPick={base => createFrom(choosing.deal, base)} onBack={() => setChoosing({ step: 'deal' })} onCancel={() => setChoosing(null)} />
+          onPick={base => createFrom(choosing.deal, base)} onBack={() => setChoosing({ step: 'deal' })} onCancel={() => (backDeal ? leave() : setChoosing(null))} />
       )}
     </>
   );
@@ -373,9 +395,10 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 }
 
 // ---------- Editor ----------
-function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, trainers, links }: {
+function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, trainers, links, backToDeal }: {
   initial: CourseOutline; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: OutlineSources; dealsForPicker: any[];
   onOpenTab?: (tab: Tab) => void; onClose: () => void; key?: string; trainers: any[]; links: TrainerLink[];
+  backToDeal?: () => void;   // shown as "Back to deal" when opened from a deal
 }) {
   const [o, setO] = useState<CourseOutline>(initial);
   const [saved, setSaved] = useState<string>(isNew ? '' : JSON.stringify(initial));
@@ -385,6 +408,8 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
+  const [gate, setGate] = useState<DealField[] | null>(null);   // the deal is missing details for "Proposal sent"
+  const [dealWarn, setDealWarn] = useState('');                 // sent, but the deal couldn't be moved
   const printAfterRender = useRef(false);
 
   const r = resolveOutline(o, sources);
@@ -429,15 +454,50 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     }
   };
   const save = () => persist(o, 'Saved');
-  const markSent = () => {
-    if (!shownO.courseTitle?.trim() && !window.confirm('This outline has no course title. Mark as sent anyway?')) return;
-    return persist({ ...shownO, status: 'sent', sentAt: new Date().toISOString(), sentById: me.id, sentByName: me.name }, 'Marked as sent and locked');
+  // Sending the outline is sending the proposal (Joel, 2026-10-19): a deal at New moves to "Proposal sent", with the
+  // same check as the deal's own button (programme from the list and the deal value; GapsBox asks for what's missing).
+  // Only from New, so re-sending keeps the first date, and "Revise" never moves the deal back. Only the deal's
+  // owner, Admin or Management may move it; anyone else still sends the outline and is told the deal stayed.
+  const markSent = async (dealNow?: any) => {
+    const deal = dealNow || r.deal;
+    const atNew = !!deal && ['lead', 'appointment'].includes(dealStage(deal));
+    const mayMove = atNew && canMoveDeal(deal, me);
+    if (!dealNow) {
+      const gaps = mayMove ? dealGaps(deal, 'proposal', { clientIds: sources.clients.map(c => c.id), programmeIds: sources.programmes.map(x => x.id) }) : [];
+      // No title yet, and no programme coming from the box below either: check first.
+      if (!shownO.courseTitle?.trim() && !gaps.includes('programme') && !window.confirm('This outline has no course title. Mark as sent anyway?')) return;
+      if (gaps.length) { setGate(gaps); return; }
+    }
+    setGate(null);
+    setDealWarn('');
+    // Lock what prints now (read again with the details just added, if any).
+    // An outline with no title of its own takes the programme just picked on the deal.
+    const base = dealNow && !o.courseTitle?.trim() && !o.programmeId ? { ...o, useProgrammeName: true } : o;
+    const shown = dealNow ? resolveOutline(base, { ...sources, deals: sources.deals.map(d => (d.id === dealNow.id ? dealNow : d)) }).o : shownO;
+    const ok = await persist({ ...shown, status: 'sent', sentAt: new Date().toISOString(), sentById: me.id, sentByName: me.name }, 'Marked as sent and locked');
+    if (!ok || !atNew) return;
+    if (!mayMove) {
+      setDealWarn(`The deal is still at "New": only ${nameOf(dealOwnerId(deal)) || 'the deal owner'}, Admin or Management can move it to "Proposal sent". Ask them to open the deal and click "Proposal sent".`);
+      return;
+    }
+    try {
+      const sent = /^\d{4}-\d{2}-\d{2}/.test(deal.proposalSentDate || '') ? deal.proposalSentDate : todayIso();
+      await updateDoc(doc(db, 'pipelines', deal.id), {
+        stage: 'proposal', status: statusForStage('proposal'), proposalSentDate: sent,
+        history: [...(deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Proposal sent: course outline ${o.refNumber || ''}`.trim() }].slice(-40),
+      });
+      setNote('Sent and locked. The deal is now at "Proposal sent".');
+      if (backToDeal) backToDeal();
+    } catch (e) {
+      setDealWarn(`The outline is sent, but the deal couldn't be moved to "Proposal sent" (${friendlyError(e)}). Open the deal and click "Proposal sent".`);
+    }
   };
   const revise = () => {
     if (!window.confirm('Unlock this outline to revise it? It will read the latest deal and client details again.')) return;
     return persist({ ...o, status: 'draft', sentAt: '', sentById: '', sentByName: '' }, 'Unlocked for revision');
   };
   const close = () => { if (!dirty || window.confirm('You have unsaved changes. Leave without saving?')) onClose(); };
+  const goBackToDeal = () => { if (backToDeal && (!dirty || window.confirm('You have unsaved changes. Leave without saving?'))) backToDeal(); };
   const downloadPdf = () => { if (preview) window.print(); else { printAfterRender.current = true; setPreview(true); } };
   const relink = (deal: any | null) => {
     set(deal
@@ -462,7 +522,10 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     return (
       <div className="space-y-4 font-sans text-ink">
         <div className="no-print flex flex-wrap items-center justify-between gap-2">
-          <button type="button" className={btnSecondary} onClick={() => setPreview(false)}><ArrowLeft className="h-4 w-4" /> Back to edit</button>
+          <span className="flex flex-wrap items-center gap-2">
+            {backToDeal && <button type="button" className={btnSecondary} onClick={goBackToDeal}><ArrowLeft className="h-4 w-4" /> Back to deal</button>}
+            <button type="button" className={btnSecondary} onClick={() => setPreview(false)}>{backToDeal ? <Pencil className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />} Back to edit</button>
+          </span>
           <span className="flex items-center gap-2">
             {dirty && <span className="text-sm text-attention">Not saved yet</span>}
             <button type="button" className={btnPrimary} onClick={() => window.print()}><Download className="h-4 w-4" /> Download PDF</button>
@@ -478,7 +541,9 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     <div className="space-y-4 pb-24 font-sans text-ink">
       {/* Top line */}
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className={btnSecondary} onClick={close}><ArrowLeft className="h-4 w-4" /> Course outlines</button>
+        {backToDeal
+          ? <button type="button" className={btnSecondary} onClick={goBackToDeal}><ArrowLeft className="h-4 w-4" /> Back to deal</button>
+          : <button type="button" className={btnSecondary} onClick={close}><ArrowLeft className="h-4 w-4" /> Course outlines</button>}
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-xl font-bold">{shownO.courseTitle || 'New course outline'}</h2>
           <p className="text-sm text-ink-soft">
@@ -645,6 +710,15 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
       </Card>
 
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
+      {gate && r.deal && (
+        <GapsBox deal={r.deal} gaps={gate} step="Proposal sent" programmes={sources.programmes as Programme[]} clients={sources.clients} viewer={me}
+          onSaved={updated => markSent(updated)} onCancel={() => setGate(null)} />
+      )}
+      {dealWarn && (
+        <p role="alert" className="flex items-start gap-2 rounded-xl border border-attention/30 bg-attention-soft px-4 py-3 text-[15px] text-attention">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{dealWarn}
+        </p>
+      )}
 
       {/* Bottom bar */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white/95 px-4 py-3 backdrop-blur">
@@ -654,7 +728,9 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
             <button type="button" className={btnSecondary} onClick={downloadPdf}><Download className="h-4 w-4" /> Download PDF</button>
-            {!locked && <button type="button" className={btnSecondary} disabled={busy} onClick={markSent}><Send className="h-4 w-4" /> Mark as sent</button>}
+            {!locked && <button type="button" className={btnSecondary} disabled={busy || !!gate} onClick={() => markSent()}>
+              <Send className="h-4 w-4" /> {r.deal && ['lead', 'appointment'].includes(dealStage(r.deal)) ? 'Mark as sent (proposal)' : 'Mark as sent'}
+            </button>}
             <button type="button" className={btnPrimary} disabled={busy || !dirty} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
           </span>
         </div>

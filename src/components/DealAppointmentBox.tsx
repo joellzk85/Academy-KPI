@@ -22,10 +22,15 @@ const history = (deal: any, viewer: Viewer, action: string) =>
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 // The deal's one appointment: book it, log it (meeting + what the client wants), or see it.
-export default function DealAppointmentBox({ deal, viewer, editable, programmes, client, onDone }: {
-  deal: any; viewer: Viewer; editable: boolean; programmes: any[]; client: any; onDone: (msg: string) => void;
+// Who (2026-10-19): the deal owner, Admin and Management book and log it (canLog), so a rep keeps the
+// Appointment KPI when Admin created the deal. Changing or cancelling a booking, or editing a logged one, stays
+// with the deal's creator and Management (Joel, 2026-10-16), plus whoever booked or logged it.
+export default function DealAppointmentBox({ deal, viewer, canLog, canManage, programmes, client, onDone }: {
+  deal: any; viewer: Viewer; canLog: boolean; canManage: boolean; programmes: any[]; client: any; onDone: (msg: string) => void;
 }) {
   const a = apptOf(deal);
+  const canChangeBooking = canLog && (canManage || (!!a?.bookedById && a.bookedById === viewer.id));
+  const canEditLogged = canLog && (canManage || (!!a?.loggedById && a.loggedById === viewer.id));
   const st = dealStage(deal);
   const open = st === 'lead' || st === 'appointment' || st === 'proposal' || st === 'agreed' || st === 'quoted';   // any time before Won
   const [mode, setMode] = useState<null | 'book' | 'log'>(null);
@@ -80,7 +85,7 @@ export default function DealAppointmentBox({ deal, viewer, editable, programmes,
 
   // Nothing yet
   if (!a) {
-    if (!editable || !open) return null;
+    if (!canLog || !open) return null;
     return (
       <div className="rounded-xl border border-dashed border-line p-3.5">
         <p className="text-[15px] text-ink-soft">Appointment (optional). Skip it and go straight to "Proposal sent" if there's no meeting.</p>
@@ -102,11 +107,11 @@ export default function DealAppointmentBox({ deal, viewer, editable, programmes,
           {overdue ? `Appointment on ${formatDate(a.date)} not logged yet` : `Appointment booked: ${formatDate(a.date)}${a.time ? `, ${apptTime(a.time)}` : ''}`}
         </p>
         <p className="text-sm text-ink-soft">{MODE_LABELS[a.mode]} · booked by {a.bookedByName || 'someone'} · on the team calendar</p>
-        {editable && (
+        {canLog && (
           <div className="mt-2 flex flex-wrap gap-2">
             <button type="button" className={btnPrimary} onClick={() => setMode('log')}><NotebookPen className="h-4 w-4" /> Log what happened</button>
-            <button type="button" className={btnSecondary} onClick={() => setMode('book')}>Change</button>
-            <button type="button" className={btnSecondary} disabled={busy} onClick={cancelBooking}><X className="h-4 w-4" /> Cancel</button>
+            {canChangeBooking && <button type="button" className={btnSecondary} onClick={() => setMode('book')}>Change</button>}
+            {canChangeBooking && <button type="button" className={btnSecondary} disabled={busy} onClick={cancelBooking}><X className="h-4 w-4" /> Cancel</button>}
           </div>
         )}
         {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
@@ -120,10 +125,10 @@ export default function DealAppointmentBox({ deal, viewer, editable, programmes,
     <div className="rounded-xl border border-line bg-surface p-3.5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="font-semibold">Appointment held {formatDate(a.date)}{a.metWith ? ` with ${a.metWith}` : ''}{a.legacy ? '' : ` · ${MODE_LABELS[a.mode]}`}</p>
-        {editable && <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => setMode('log')}><Pencil className="mr-1 inline h-3.5 w-3.5" />Edit</button>}
+        {canEditLogged && <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => setMode('log')}><Pencil className="mr-1 inline h-3.5 w-3.5" />Edit</button>}
       </div>
       {a.legacy ? (
-        <p className="text-sm text-ink-soft">Recorded before appointment details were kept.{editable ? ' Click Edit to add them.' : ''}</p>
+        <p className="text-sm text-ink-soft">Recorded before appointment details were kept.{canEditLogged ? ' Click Edit to add them.' : ''}</p>
       ) : (
         <>
           {a.outcome && <p className="mt-1 text-[15px]"><span className="text-ink-soft">Outcome:</span> {a.outcome}</p>}

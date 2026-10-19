@@ -876,7 +876,7 @@ function Timeline(props: React.ComponentProps<typeof ClientPanel>) {
       {shownEntries.length > limit && (
         <button type="button" className="mt-2 text-sm font-semibold text-accent hover:underline" onClick={() => setLimit(l => l + 50)}>Show {Math.min(50, shownEntries.length - limit)} more</button>
       )}
-      <p className="mt-2 text-sm text-ink-soft">Solid entries count as contact with the client; dashed ones (drafts, booked appointments, outlines, To-dos, lost deals) don't.</p>
+      <p className="mt-2 text-sm text-ink-soft">Solid entries count as contact with the client; dashed ones (drafts, booked appointments, To-dos, lost deals) don't.</p>
     </section>
   );
 }

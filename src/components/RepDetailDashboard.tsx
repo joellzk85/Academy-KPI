@@ -1240,9 +1240,18 @@ export default function RepDetailDashboard({
     handleSubTabChange('pipeline');
     onOpenDealHandled?.();
   }, [openDealId]);
+  // Outlines opened from a deal (2026-10-19) get "Back to deal", like quotations. If the deal already has a
+  // draft outline, "Create outline" opens that one instead of making a second.
+  const [outlineFromDeal, setOutlineFromDeal] = useState<string | null>(null);
   const handleCreateOutlineForPipeline = (p: any) => {
     setOutlineStartDeal(p);
+    setOutlineFromDeal(p.id);
     setActiveSubTab("course_outline");
+  };
+  const openOutlineFromDeal = (p: any, outlineId: string) => {
+    setOutlineToOpen(outlineId);
+    setOutlineFromDeal(p.id);
+    setActiveSubTab('course_outline');
   };
 
   // Real-time Firestore sync for pipelines
@@ -2059,8 +2068,9 @@ export default function RepDetailDashboard({
               openFromDeal={quoteFromDeal} onOpenFromDealHandled={() => setQuoteFromDeal(null)}
               onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} />
           ) : activeSubTab === 'course_outline' ? (
-            <CourseOutlinesPage key={`${rep.id}-${sharedFirst === 'course_outline'}`} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => setOutlineStartDeal(null)} onOpenTab={(t) => handleSubTabChange(t as SubTab)}
-              openId={outlineToOpen} onOpenHandled={() => setOutlineToOpen(null)} startOnShared={sharedFirst === 'course_outline'} />
+            <CourseOutlinesPage key={`${rep.id}-${sharedFirst === 'course_outline'}`} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => { setOutlineStartDeal(null); setOutlineFromDeal(null); }} onOpenTab={(t) => handleSubTabChange(t as SubTab)}
+              openId={outlineToOpen} onOpenHandled={() => { setOutlineToOpen(null); setOutlineFromDeal(null); }} startOnShared={sharedFirst === 'course_outline'}
+              fromDealId={outlineFromDeal} onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} />
           ) : activeSubTab === 'client' ? (
             <ClientManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }}
               openClientId={clientToOpen} onOpenClientHandled={() => setClientToOpen(null)}
@@ -2084,6 +2094,7 @@ export default function RepDetailDashboard({
               openDealId={dealToOpen}
               onOpenDealHandled={() => setDealToOpen(null)}
               onCreateOutline={handleCreateOutlineForPipeline}
+              onOpenOutline={openOutlineFromDeal}
               onOpenQuotations={() => setActiveSubTab('quotation')}
               onOpenOutlines={() => setActiveSubTab('course_outline')}
             />

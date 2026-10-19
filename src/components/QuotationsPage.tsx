@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  ArrowLeft, Copy, Trophy, Download, Eye, EyeOff, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Trash2, Unlock, X,
+  AlertTriangle, ArrowLeft, Copy, Trophy, Download, Eye, EyeOff, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Trash2, Unlock, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../types';
-import { STAGE_LABELS, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
+import { STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
@@ -363,6 +363,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const [sending, setSending] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [sentNow, setSentNow] = useState(false);     // sent in this visit: closing the Sent box goes back to the deal
+  const [dealWarn, setDealWarn] = useState('');      // sent, but the deal couldn't be moved (stays on screen)
   const [markingWon, setMarkingWon] = useState(false);
 
   const r = resolveQuotation(q, sources);
@@ -406,13 +407,20 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     const ok = await persist(out, locked ? how : `${how} and locked`);
     if (ok) setSentNow(true);
     // The deal moves to "Quotation sent" (if it was at "Client approved").
+    // Only the deal's owner, Admin or Management may move it; anyone else is told so instead of failing quietly.
     if (ok && !locked && r.deal && dealStage(r.deal) === 'agreed') {
-      try {
-        await updateDoc(doc(db, 'pipelines', r.deal.id), {
-          stage: 'quoted', status: 'Pending', quotationSentDate: todayIso(),
-          history: [...(r.deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Quotation ${q.refNumber} sent` }].slice(-40),
-        });
-      } catch { /* the deal owner or Admin can move it on the deal */ }
+      if (!canMoveDeal(r.deal, me)) {
+        setDealWarn(`The deal is still at "Client approved": only ${nameOf(dealOwnerId(r.deal)) || 'the deal owner'}, Admin or Management can move it. Ask them to open the deal and click "Quotation sent another way".`);
+      } else {
+        try {
+          await updateDoc(doc(db, 'pipelines', r.deal.id), {
+            stage: 'quoted', status: 'Pending', quotationSentDate: todayIso(),
+            history: [...(r.deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Quotation ${q.refNumber} sent` }].slice(-40),
+          });
+        } catch (e) {
+          setDealWarn(`The quotation is sent, but the deal couldn't be moved to "Quotation sent" (${friendlyError(e)}). Open the deal and click "Quotation sent another way".`);
+        }
+      }
     }
     return ok;
   };
@@ -471,7 +479,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     <QuoteSendDialog
       shownQ={shownQ} locked={locked} issues={r.issues} deal={r.deal} client={r.client} ownerId={r.ownerId} me={me}
       ensureSaved={ensureSaved} onSent={lockAsSent}
-      onClose={() => { setSending(false); if (sentNow && backToDeal) backToDeal(); }}
+      onClose={() => { setSending(false); if (sentNow && backToDeal && !dealWarn) backToDeal(); }}
     />
   ) : null;
 
@@ -539,6 +547,11 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
             <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
           </span>
         </div>
+      )}
+      {dealWarn && (
+        <p role="alert" className="flex items-start gap-2 rounded-xl border border-attention/30 bg-attention-soft px-4 py-3 text-[15px] text-attention">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{dealWarn}
+        </p>
       )}
       {locked && markingWon && r.deal && (
         <MarkWonBox deal={r.deal} programmes={sources.programmes} clients={sources.clients} viewer={me}

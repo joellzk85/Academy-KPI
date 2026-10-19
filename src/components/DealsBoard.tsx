@@ -2,13 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass,
+  AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import {
   DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention, stageDate,
-  dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM, dealGaps, dealAskedFor, DealField, lostNoteProblem, reachedStage,
+  dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM, dealGaps, dealAskedFor, DealField, lostNoteProblem, reachedStage, SKIP_REASONS,
 } from '../lib/deals';
 import { FollowUpAlert, alertText, followUpAlert, followUpNotes } from '../lib/followUps';
 import { AlertLine, FollowUpForm, FollowUpList, followUpCountText } from './FollowUps';
@@ -39,6 +39,7 @@ interface DealsBoardProps {
   onCreateQuotation: (deal: any) => void;   // opens the deal's draft quotation in the editor (or makes one)
   onOpenQuotation?: (deal: any, quoteId: string) => void;   // opens one of the deal's quotations in the editor
   onCreateOutline: (deal: any) => void;
+  onOpenOutline?: (deal: any, outlineId: string) => void;   // opens one of the deal's outlines in the editor ("Back to deal")
   onOpenQuotations: () => void;
   onOpenOutlines: () => void;
   openDealId?: string | null;          // reopen this deal's panel (coming back from its quotation)
@@ -46,7 +47,9 @@ interface DealsBoardProps {
 }
 
 type Filter = 'open' | DealStage | 'tagged';
-type StagePanel = null | 'won' | 'lost' | 'followup';
+type StagePanel = null | 'won' | 'lost' | 'followup' | 'skip';
+type GateStep = 'proposal' | 'quote' | 'skip';
+const GATE_STEP_LABELS: Record<GateStep, string> = { proposal: 'Proposal sent', quote: 'Client approved: create quotation', skip: 'No proposal needed' };
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -92,7 +95,7 @@ function historyEntry(viewer: Viewer, action: string) {
 }
 
 export default function DealsBoard({
-  owner, people, viewer, onCreateQuotation, onOpenQuotation, onCreateOutline, onOpenQuotations, onOpenOutlines, openDealId, onOpenDealHandled,
+  owner, people, viewer, onCreateQuotation, onOpenQuotation, onCreateOutline, onOpenOutline, onOpenQuotations, onOpenOutlines, openDealId, onOpenDealHandled,
 }: DealsBoardProps) {
   const [deals, setDeals] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
@@ -117,7 +120,9 @@ export default function DealsBoard({
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [stagePanel, setStagePanel] = useState<StagePanel>(null);
-  const [gate, setGate] = useState<null | { step: 'proposal' | 'quote'; gaps: DealField[] }>(null);   // missing details box
+  const [gate, setGate] = useState<null | { step: GateStep; gaps: DealField[] }>(null);   // missing details box
+  const [skipReason, setSkipReason] = useState('');   // "No proposal needed"
+  const [skipNote, setSkipNote] = useState('');
   const [listWonId, setListWonId] = useState('');   // "Client signed" opened on a list row
   const [lostReason, setLostReason] = useState('');
   const [lostNote, setLostNote] = useState('');
@@ -373,6 +378,22 @@ export default function DealsBoard({
       const ok = await writeStage(p, { stage: 'agreed', agreedDate: todayIso() }, 'Client approved the proposal');
       if (!ok) return;
     }
+    onCreateQuotation(p);
+  };
+
+  // "No proposal needed" (Joel, 2026-10-19): repeat clients and programmes go from New straight to Client approved
+  // with a reason, and the quotation opens. No proposalSentDate is set, so the Proposal KPI doesn't count it.
+  const skipProposal = async (p: any, checked = false) => {
+    if (!skipReason) return setStageError('Choose why no proposal is needed.');
+    const reason = skipReason === 'Other' ? skipNote.trim() : skipReason;
+    if (reason.length < 3) return setStageError('Write a few words on why no proposal is needed.');
+    const gaps = checked ? [] : dealGaps(p, 'quote', known);
+    if (gaps.length) { setStageError(''); setGate({ step: 'skip', gaps }); return; }
+    setGate(null);
+    const ok = await writeStage(p, { stage: 'agreed', agreedDate: todayIso(), proposalSkipped: true, proposalSkipReason: reason.slice(0, 200) }, `No proposal needed: ${reason.slice(0, 120)}`);
+    if (!ok) return;
+    setSkipReason('');
+    setSkipNote('');
     onCreateQuotation(p);
   };
 
@@ -632,7 +653,10 @@ export default function DealsBoard({
               stageError={stageError}
               gate={gate}
               clients={clients}
-              onGapSaved={(updated) => { const step = gate?.step; setGate(null); if (step === 'proposal') toProposal(updated, true); else if (step === 'quote') approveAndQuote(updated, true); }}
+              onGapSaved={(updated) => { const step = gate?.step; setGate(null); if (step === 'proposal') toProposal(updated, true); else if (step === 'quote') approveAndQuote(updated, true); else if (step === 'skip') skipProposal(updated, true); }}
+              skipReason={skipReason} setSkipReason={setSkipReason}
+              skipNote={skipNote} setSkipNote={setSkipNote}
+              onSkip={() => skipProposal(openDeal)}
               onGapCancel={() => setGate(null)}
               onWonDone={(msg) => { setStagePanel(null); flash(msg); }}
               lostReason={lostReason} setLostReason={setLostReason}
@@ -660,6 +684,7 @@ export default function DealsBoard({
               onCreateQuotation={() => onCreateQuotation(openDeal)}
               onOpenQuotation={onOpenQuotation ? (id: string) => onOpenQuotation(openDeal, id) : undefined}
               onCreateOutline={() => onCreateOutline(openDeal)}
+              onOpenOutline={onOpenOutline ? (id: string) => onOpenOutline(openDeal, id) : undefined}
               onOpenQuotations={onOpenQuotations}
               onOpenOutlines={onOpenOutlines}
             />
@@ -846,7 +871,8 @@ function DealPanel(props: {
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; moneySettings: MoneySettings;
   stagePanel: StagePanel; setStagePanel: (v: StagePanel) => void; stageError: string;
   alert: FollowUpAlert | null; onFollowUpDone: (msg: string) => void; deleteBlocker: () => string;
-  gate: null | { step: 'proposal' | 'quote'; gaps: DealField[] }; clients: any[];
+  gate: null | { step: GateStep; gaps: DealField[] }; clients: any[];
+  skipReason: string; setSkipReason: (v: string) => void; skipNote: string; setSkipNote: (v: string) => void; onSkip: () => void;
   onGapSaved: (updated: any) => void; onGapCancel: () => void; onWonDone: (msg: string) => void;
   lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
@@ -855,7 +881,7 @@ function DealPanel(props: {
   programmes: Programme[]; onApptDone: (msg: string) => void;
   onLost: () => void; onReopen: () => void;
   canManage: boolean; onDelete: (reason: string) => Promise<boolean>;
-  onCreateQuotation: () => void; onOpenQuotation?: (quoteId: string) => void; onCreateOutline: () => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
+  onCreateQuotation: () => void; onOpenQuotation?: (quoteId: string) => void; onCreateOutline: () => void; onOpenOutline?: (outlineId: string) => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
 }) {
   const p = props.deal;
   const st = dealStage(p);
@@ -869,6 +895,11 @@ function DealPanel(props: {
   const sentQuote = newest(props.quotes.filter(q => q.status === 'sent'));
   const draftQuote = newest(props.quotes.filter(q => q.status !== 'sent'));
   const openQuote = (q: any) => (props.onOpenQuotation ? props.onOpenQuotation(q.id) : props.onOpenQuotations());
+  // Course outlines: sending one is sending the proposal (Joel, 2026-10-19).
+  const outlinesNewest = [...props.outlines].sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)));
+  const draftOutline = outlinesNewest.find(o => o.status !== 'sent');
+  const openOutline = (o: any) => (props.onOpenOutline ? props.onOpenOutline(o.id) : props.onOpenOutlines());
+  const skipped = !!p.proposalSkipped && !stageDate(p, 'proposal');
   const pr = props.checklist ? progress(props.checklist.tasks, p.fundingType) : null;
   const ap = apptOf(p);
   // A follow-up alert opens the Follow-ups section first.
@@ -887,8 +918,15 @@ function DealPanel(props: {
   const next: { title: string; hint?: string; button?: React.ReactNode } = (() => {
     if (st === 'lead' || st === 'appointment') return {
       title: 'Next step: send the proposal',
-      hint: 'Meeting the client first is optional (Appointment, below).',
-      button: <button type="button" disabled={props.busy} className={main} onClick={props.onProposal}>Proposal sent</button>,
+      hint: 'Send the course outline (marking it sent moves the deal on), drop the proposal file below, or click "Proposal sent" if it went another way. Meeting the client first is optional.',
+      button: (
+        <>
+          <button type="button" disabled={props.busy} className={main} onClick={props.onProposal}>Proposal sent</button>
+          <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => (draftOutline ? openOutline(draftOutline) : props.onCreateOutline())}>
+            <ClipboardList className="h-4 w-4" /> {draftOutline ? 'Open course outline' : 'Create course outline'}
+          </button>
+        </>
+      ),
     };
     if (st === 'proposal') return {
       title: 'Next step: client approves the proposal',
@@ -930,7 +968,7 @@ function DealPanel(props: {
             <span className={`h-1.5 rounded-full ${st === 'lost' ? 'bg-danger/30' : i <= reached ? 'bg-accent' : 'bg-line'}`} />
             <span className={`text-xs font-semibold ${i === reached ? 'text-ink' : 'text-ink-soft'}`}>{STAGE_LABELS[s]}</span>
             {/* The date the step was done (Joel, 2026-10-17) */}
-            <span className="min-h-[1rem] text-xs text-ink-soft">{i <= reached ? formatDate(stageDate(p, s)) : ''}</span>
+            <span className="min-h-[1rem] text-xs text-ink-soft">{i <= reached ? (s === 'proposal' && skipped ? 'Skipped' : formatDate(stageDate(p, s))) : ''}</span>
           </li>
         ))}
       </ol>
@@ -956,18 +994,40 @@ function DealPanel(props: {
               <FollowUpForm deal={p} viewer={props.viewer} alert={props.alert} onDone={props.onFollowUpDone}
                 onCancel={() => props.setStagePanel(null)} onMarkLost={() => props.setStagePanel('lost')} />
             )}
-            {next.button && props.stagePanel !== 'won' && props.stagePanel !== 'followup' && !props.gate && (
+            {next.button && props.stagePanel !== 'won' && props.stagePanel !== 'followup' && props.stagePanel !== 'skip' && !props.gate && (
               <div className="flex flex-wrap items-center gap-2">
                 {next.button}
                 {st === 'agreed' && hasQuote && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onQuoted}>Quotation sent another way</button>}
                 {st === 'quoted' && sentQuote && <button type="button" className={btnSecondary} onClick={() => openQuote(sentQuote)}>Open quotation</button>}
               </div>
             )}
-            {(st === 'lead' || st === 'appointment') && !props.gate && props.stagePanel !== 'followup' && (
+            {(st === 'lead' || st === 'appointment') && !props.gate && props.stagePanel !== 'followup' && props.stagePanel !== 'skip' && (
               <ProposalDrop dealId={p.id} viewer={props.viewer} disabled={props.busy} onUploaded={props.onProposalUploaded} />
             )}
+            {props.stagePanel === 'skip' && !props.gate && (
+              <div className="rounded-xl border border-line bg-white p-4">
+                <span className="mb-1 block text-sm font-semibold">Why is no proposal needed?</span>
+                <p className="mb-2 text-sm text-ink-soft">The deal goes straight to "Client approved" and the quotation opens. It doesn't count for the Proposal KPI.</p>
+                <div className="flex flex-wrap gap-2">
+                  {SKIP_REASONS.map(r => (
+                    <button key={r} type="button" onClick={() => props.setSkipReason(r)} aria-pressed={props.skipReason === r}
+                      className={`rounded-full border px-3 py-1 text-sm font-medium ${props.skipReason === r ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-soft hover:bg-surface'}`}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {props.skipReason === 'Other' && (
+                  <input value={props.skipNote} onChange={e => props.setSkipNote(e.target.value)} className={`${input} mt-3`} maxLength={200}
+                    placeholder="e.g. Client renewed last year's contract" aria-label="Why no proposal is needed" />
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" className={btnSecondary} onClick={() => props.setStagePanel(null)}>Cancel</button>
+                  <button type="button" disabled={props.busy} className={main} onClick={props.onSkip}><FileText className="h-4 w-4" /> Client approved: create quotation</button>
+                </div>
+              </div>
+            )}
             {props.gate && (
-              <GapsBox deal={p} gaps={props.gate.gaps} step={props.gate.step === 'proposal' ? 'Proposal sent' : 'Client approved: create quotation'}
+              <GapsBox deal={p} gaps={props.gate.gaps} step={GATE_STEP_LABELS[props.gate.step]}
                 programmes={props.programmes} clients={props.clients} viewer={props.viewer} onSaved={props.onGapSaved} onCancel={props.onGapCancel} />
             )}
             {props.stagePanel === 'won' && (
@@ -996,6 +1056,9 @@ function DealPanel(props: {
             )}
             {props.stageError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{props.stageError}</p>}
             <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {(st === 'lead' || st === 'appointment') && !props.gate && props.stagePanel !== 'skip' && props.stagePanel !== 'followup' && props.stagePanel !== 'lost' && (
+                <button type="button" className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('skip')}><SkipForward className="h-3.5 w-3.5" /> No proposal needed</button>
+              )}
               {OPEN_STAGES.includes(st) && !props.alert && props.stagePanel !== 'followup' && <button type="button" className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('followup')}><Plus className="h-3.5 w-3.5" /> Log follow-up</button>}
               {OPEN_STAGES.includes(st) && props.stagePanel !== 'lost' && props.stagePanel !== 'followup' && !props.alert?.decision && <button type="button" className={`${smallLink} text-danger`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-3.5 w-3.5" /> Mark lost</button>}
               {st === 'lost' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Reopen deal</button>}
@@ -1014,7 +1077,7 @@ function DealPanel(props: {
       <div className="divide-y divide-line rounded-2xl border border-line">
         {/* Appointment (optional, one per deal) */}
         <Fold title="Appointment" hint={ap ? (ap.status === 'booked' ? `Booked ${formatDate(ap.date)}` : `Held ${formatDate(ap.date)}`) : 'None'} defaultOpen={def === 'appointment'} id={p.id}>
-          <DealAppointmentBox deal={p} viewer={props.viewer} editable={props.canManage} programmes={props.programmes} client={props.client} onDone={props.onApptDone} />
+          <DealAppointmentBox deal={p} viewer={props.viewer} canLog={props.editable} canManage={props.canManage} programmes={props.programmes} client={props.client} onDone={props.onApptDone} />
         </Fold>
 
         {/* Follow-up notes (Joel, 2026-10-18) */}
@@ -1034,7 +1097,7 @@ function DealPanel(props: {
               <Detail term="Training date" value={formatDate(p.trainingDate) || 'Not set'} />
               <div><dt className="text-sm text-ink-soft">Training time</dt><dd className="font-semibold"><TrainingTimeBox key={p.id} deal={p} quotes={props.quotes} viewer={props.viewer} editable={props.editable} /></dd></div>
               <Detail term="Venue" value={props.venue ? `${props.venue.name}${props.venue.from === 'quotation' ? ' (from quotation)' : ''}` : 'Not set'} />
-              <Detail term="Proposal sent" value={formatDate(p.proposalSentDate) || 'Not yet'} />
+              <Detail term="Proposal sent" value={skipped ? `Skipped: ${p.proposalSkipReason || 'no proposal needed'}` : formatDate(p.proposalSentDate) || 'Not yet'} />
               <Detail term="Next follow-up" value={formatDate(p.followUpDate) || 'Not set'} />
               {st === 'won' && <Detail term="Won on" value={formatDate(dealWonDate(p))} />}
               {props.client && (() => { const pic = dealContact(p, props.client); return <Detail term="Attention to" value={pic ? [pic.name + (pic.designation ? ` (${pic.designation})` : ''), pic.phone].filter(Boolean).join(', ') : '—'} />; })()}
@@ -1061,12 +1124,16 @@ function DealPanel(props: {
         </Fold>
 
         {/* Documents */}
-        <Fold title="Documents and proposal files" hint={`${props.quotes.length} quotation${props.quotes.length === 1 ? '' : 's'} · ${props.proposalFiles.length} proposal file${props.proposalFiles.length === 1 ? '' : 's'}`} defaultOpen={def === 'documents'} id={p.id}>
+        <Fold title="Documents and proposal files" hint={[
+          `${props.quotes.length} quotation${props.quotes.length === 1 ? '' : 's'}`,
+          `${props.outlines.length} course outline${props.outlines.length === 1 ? '' : 's'}`,
+          `${props.proposalFiles.length} proposal file${props.proposalFiles.length === 1 ? '' : 's'}`,
+        ].join(' · ')} defaultOpen={def === 'documents'} id={p.id}>
           <div className="space-y-2">
             <DocRow icon={<FileText className="h-4 w-4" />} name="Quotations" items={props.quotes.map(q => `${q.refNumber || q.id}${q.status === 'sent' ? ' (sent)' : ''}`)}
               onOpen={() => { const q = sentQuote || draftQuote; if (q) openQuote(q); }} onCreate={props.editable && canQuote(p) && !draftQuote ? props.onCreateQuotation : undefined} createLabel="Create quotation" />
             {!canQuote(p) && st !== 'lost' && <p className="text-sm text-ink-soft">A quotation can be made once the client approves the proposal.</p>}
-            <DocRow icon={<ClipboardList className="h-4 w-4" />} name="Course outlines" items={props.outlines.map(o => o.refNumber || o.courseTitle || o.id)} onOpen={props.onOpenOutlines} onCreate={props.editable ? props.onCreateOutline : undefined} createLabel="Create outline" />
+            <OutlineRows outlines={outlinesNewest} onOpen={openOutline} onCreate={props.editable && !draftOutline ? props.onCreateOutline : undefined} />
             <ProposalFilesList dealId={p.id} files={props.proposalFiles} viewer={props.viewer} editable={props.editable} onUploaded={props.onProposalUploaded} />
           </div>
         </Fold>
@@ -1188,6 +1255,34 @@ function DocRow({ icon, name, items, onOpen, onCreate, createLabel }: { icon: Re
         {items.length > 0 && <button type="button" className={btnSecondary} onClick={onOpen}>Open</button>}
         {onCreate && <button type="button" className={btnSecondary} onClick={onCreate}><Plus className="h-3.5 w-3.5" /> {createLabel}</button>}
       </span>
+    </div>
+  );
+}
+
+// The deal's course outlines, each with Draft or "Sent <date> (proposal)", opening straight in the editor.
+// "Create outline" shows only while there's no draft, so a second click never makes a duplicate.
+function OutlineRows({ outlines, onOpen, onCreate }: { outlines: any[]; onOpen: (o: any) => void; onCreate?: () => void }) {
+  return (
+    <div className="rounded-lg border border-line px-3.5 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-semibold"><span className="text-accent"><ClipboardList className="h-4 w-4" /></span>Course outlines ({outlines.length})</span>
+        {onCreate && <button type="button" className={btnSecondary} onClick={onCreate}><Plus className="h-3.5 w-3.5" /> Create outline</button>}
+      </div>
+      {outlines.length > 0 && (
+        <ul className="mt-2 divide-y divide-line">
+          {outlines.map(o => (
+            <li key={o.id}>
+              <button type="button" onClick={() => onOpen(o)} className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 py-1.5 text-left text-sm hover:underline">
+                <span className="font-semibold">{o.refNumber || 'No reference'}</span>
+                {o.courseTitle && <span className="min-w-0 truncate text-ink-soft">{o.courseTitle}</span>}
+                {o.status === 'sent'
+                  ? <span className="rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Sent {formatDate(o.sentAt || '')}</span>
+                  : <span className="rounded bg-surface px-1.5 text-xs font-semibold text-ink-soft">Draft</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

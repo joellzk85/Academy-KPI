@@ -128,6 +128,16 @@ export function canManageDeal(p: any, viewer: { id: string; role: string }): boo
   return viewer.role === 'management' || (p?.creatorId || dealOwnerId(p)) === viewer.id;
 }
 
+// Who may move a deal to its next stage (the database rule): its owner, Admin or Management.
+// A teammate who is only shared on a quotation or outline can send it, but the deal stays where it is.
+export function canMoveDeal(p: any, viewer: { id: string; role: string }): boolean {
+  return viewer.role !== 'rep' || dealOwnerId(p) === viewer.id;
+}
+
+// "No proposal needed" (Joel, 2026-10-19): repeat clients and repeat programmes can go from New straight to
+// Client approved. The deal keeps proposalSkipped and the reason; the Proposal KPI doesn't count it.
+export const SKIP_REASONS = ['Repeat client, same programme', 'Client asked for a quotation directly', 'Other'];
+
 export function dealOwnerId(p: any): string {
   return p?.ownerId || p?.creatorId || '';
 }

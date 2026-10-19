@@ -6,8 +6,9 @@
 // - The timeline is built each time from the deals, quotations, course outlines, proposal files, To-dos and
 //   those touch points. Nothing is copied.
 // - "Last touch point" (and the colour dot) counts real contact only: follow-up notes, logged appointments,
-//   proposals sent, quotations sent, deals won, the date a new deal's client asked, and touch points.
-//   Drafts, booked appointments, course outlines, To-dos and lost deals show on the timeline but don't count.
+//   proposals sent (including a sent course outline), quotations sent, deals won, the date a new deal's client
+//   asked, and touch points. Drafts (quotations and outlines), booked appointments, To-dos and lost deals show on
+//   the timeline but don't count.
 // - The colour limits (30 and 90 days) are config/client_contact_colours, set by Management on the
 //   Follow-up rules page.
 //
@@ -250,7 +251,8 @@ export function clientTimeline(s: TimelineSources): TimelineEntry[] {
       key: `co_${o.id}`, kind: 'outline', date: d, at: o.sentAt || undefined,
       title: `Course outline${o.refNumber ? ` ${o.refNumber}` : ''}${o.status === 'sent' ? ' sent' : ' (draft)'}`,
       text: o.courseTitle || '', byId: o.creatorId || o.ownerId, byName: s.nameOf(o.creatorId || o.ownerId) || o.preparedBy || '',
-      dealId: o.pipelineId || undefined, outlineId: o.id, counts: false,
+      // A sent outline is a proposal sent (Joel, 2026-10-19), so it counts as contact; a draft doesn't.
+      dealId: o.pipelineId || undefined, outlineId: o.id, counts: o.status === 'sent',
     });
   });
 
