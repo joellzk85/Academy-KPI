@@ -22,6 +22,7 @@ import { useChecklistSettings } from './DealChecklist';
 import { useMoneySettings } from './Money';
 import { MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import { alertText, followUpAlert } from '../lib/followUps';
+import { activeHold, holdDue, holdText } from '../lib/dealHold';
 import FollowUpAlerts from './FollowUpAlerts';
 import { TeamFollowUpsSummary } from './TeamFollowUps';
 import { SharedItem, SharedKind, useSharedInbox } from '../lib/sharedInbox';
@@ -903,8 +904,10 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       return {
         items: [...alerts, ...reopen, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
           key: p.id, title: c.clientName(p), onClick: () => c.openDeal(p),
-          sub: d < 0 ? `Overdue by ${-d} day${d === -1 ? '' : 's'} (${STAGE_LABELS[dealStage(p)]})` : d === 0 ? 'Follow up today' : `Follow up ${formatDate(ymd(p.followUpDate))}`,
-          level: d < 0 ? 'danger' : d === 0 ? 'attention' : undefined,
+          // On hold (2026-10-19): the potential date is the follow-up date.
+          sub: activeHold(p) ? (d <= 0 ? 'On hold date reached: resume, hold longer or mark lost' : holdText(p, c.today))
+            : d < 0 ? `Overdue by ${-d} day${d === -1 ? '' : 's'} (${STAGE_LABELS[dealStage(p)]})` : d === 0 ? 'Follow up today' : `Follow up ${formatDate(ymd(p.followUpDate))}`,
+          level: activeHold(p) && d <= 0 ? 'danger' : d < 0 ? 'danger' : d === 0 ? 'attention' : undefined,
         } as Item))],
         empty: 'No follow-ups or appointments in the next 7 days.',
       };
@@ -1057,6 +1060,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       const open = c.deals.filter(p => OPEN_STAGES.includes(dealStage(p)));
       const stuck = open.filter(p => {
         if (apptOverdue(p, c.today)) return true;
+        if (activeHold(p)) return holdDue(p, c.today);
         if (followUpAlert(p, c.today)) return true;
         const fu = ymd(p.followUpDate);
         if (fu && fu < c.today) return true;
@@ -1072,7 +1076,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       });
       grantStuck.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : 1));
       return {
-        items: [...grantStuck, ...stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${apptOverdue(p, c.today) ? `appointment on ${formatDate(apptOf(p)!.date)} not logged` : followUpAlert(p, c.today) ? alertText(followUpAlert(p, c.today)!) : ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` }))],
+        items: [...grantStuck, ...stuck.map(p => ({ key: p.id, title: c.clientName(p), level: 'attention' as const, onClick: () => c.openDeal(p), sub: `${c.nameOf(dealOwnerId(p))} · ${STAGE_LABELS[dealStage(p)]} · ${apptOverdue(p, c.today) ? `appointment on ${formatDate(apptOf(p)!.date)} not logged` : activeHold(p) ? holdText(p, c.today) : followUpAlert(p, c.today) ? alertText(followUpAlert(p, c.today)!) : ymd(p.followUpDate) ? `follow-up was due ${formatDate(ymd(p.followUpDate))}` : 'no follow-up set for 7+ days'}` }))],
         empty: 'No stuck deals.',
         footer: (
           <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-3 sm:grid-cols-4">
@@ -1080,6 +1084,10 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
               const list = open.filter(p => journeyStage(dealStage(p)) === st);
               return <div key={st} className="rounded-xl bg-surface px-3 py-2"><p className="text-xs font-semibold text-ink-soft">{STAGE_LABELS[st]}</p><p className="font-bold">{list.length}</p><p className="text-xs text-ink-soft">{formatRM(list.reduce((t, p) => t + dealValue(p), 0))}</p></div>;
             })}
+            {(() => {
+              const held = open.filter(p => activeHold(p));
+              return held.length > 0 && <p className="col-span-full text-sm text-attention">On hold: {held.length} deal{held.length === 1 ? '' : 's'}, {formatRM(held.reduce((t, p) => t + dealValue(p), 0))} (included above)</p>;
+            })()}
           </div>
         ),
       };

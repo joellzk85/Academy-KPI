@@ -7,6 +7,7 @@ import {
   DealStage, STAGE_LABELS, dealAppointmentDate, dealNeedsAttention, dealOwnerId, dealProposalDate, dealStage, dealValue,
   dealWonDate, formatDate, formatRM, journeyStage, todayIso,
 } from '../lib/deals';
+import { activeHold } from '../lib/dealHold';
 import { metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
 import { useKpiSources } from '../lib/useKpiSources';
 import { SalesTarget, monthsBetween, periodFor, ymLabel } from '../lib/salesTarget';
@@ -77,6 +78,7 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
     return { st, count: list.length, value: list.reduce((t, p) => t + dealValue(p), 0) };
   });
   const stuck = open.filter(p => dealNeedsAttention(p, today));
+  const onHold = open.filter(p => activeHold(p));
   const wonList = deals.filter(p => inMonth(dealWonDate(p))).sort((a, b) => dealWonDate(b).localeCompare(dealWonDate(a)));
   const lostList = deals.filter(p => dealStage(p) === 'lost' && inMonth(String(p.lostDate || '').slice(0, 10)));
   const lostReasons = Object.entries<number>(lostList.reduce((m: Record<string, number>, p) => { const r = p.lostReason || 'No reason given'; m[r] = (m[r] || 0) + 1; return m; }, {}))
@@ -163,6 +165,10 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
               </li>
             ))}
             <li className="flex items-center justify-between gap-2 border-t border-line pt-2 text-[15px]">
+              <span className="text-attention">On hold <span className="text-sm text-ink-soft">(included above)</span></span>
+              <span className="text-right"><strong className="tabular-nums">{onHold.length}</strong> <span className="text-ink-soft">· {formatRM(onHold.reduce((t, p) => t + dealValue(p), 0))}</span></span>
+            </li>
+            <li className="flex items-center justify-between gap-2 text-[15px]">
               <span className={stuck.length ? 'font-semibold text-danger' : ''}>Need attention</span>
               <strong className={`tabular-nums ${stuck.length ? 'text-danger' : ''}`}>{stuck.length}</strong>
             </li>

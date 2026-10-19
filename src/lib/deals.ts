@@ -5,6 +5,7 @@
 
 import { apptOf, apptOverdue } from './appointments';
 import { followUpAlert } from './followUps';
+import { activeHold, holdDue } from './dealHold';
 
 // The journey (Joel, 2026-10-16): New -> Proposal sent (the pitch) -> Client approved -> Quotation sent -> Won
 // ("Client approved" was "Client agreed" until 2026-10-17; the stored value is still 'agreed'.)
@@ -114,6 +115,8 @@ export function dealNeedsAttention(p: any, today = todayIso()): boolean {
   const st = dealStage(p);
   if (!OPEN_STAGES.includes(st) || isDeletedDeal(p)) return false;
   if (apptOverdue(p, today)) return true;
+  // On hold (lib/dealHold.ts): quiet until the potential date, then it needs a decision.
+  if (activeHold(p)) return holdDue(p, today);
   if (followUpAlert(p, today)) return true;
   if (apptOf(p)?.status === 'booked') return false;
   const fu = validDate(p?.followUpDate);

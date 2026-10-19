@@ -3,6 +3,7 @@ import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2, PartyPopper, Copy,
+  PauseCircle, PlayCircle,
 } from 'lucide-react';
 import ProposalTracking from './ProposalTracking';
 import { useProposalAlerts } from '../lib/useProposalLinks';
@@ -35,6 +36,8 @@ import { ProposalDrop, ProposalFilesList } from './ProposalFiles';
 import { ProposalFile } from '../lib/proposals';
 import { ClientLastTouch } from './ClientContactDot';
 import { DuplicateStart, duplicateDeal, repeatDeal, repeatOwner } from '../lib/repeatDeal';
+import { activeHold, canHold, holdDue, holdText } from '../lib/dealHold';
+import { HoldBox, ResumeBox } from './DealHold';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -54,8 +57,8 @@ interface DealsBoardProps {
   onOpenDealHandled?: () => void;
 }
 
-type Filter = 'open' | DealStage | 'tagged';
-type StagePanel = null | 'won' | 'lost' | 'followup' | 'skip' | 'duplicate';
+type Filter = 'open' | DealStage | 'tagged' | 'on_hold';
+type StagePanel = null | 'won' | 'lost' | 'followup' | 'skip' | 'duplicate' | 'hold' | 'resume';
 type DuplicateOptions = { client: { id: string; companyName: string }; trainingDate: string; trainingDays: number; start: DuplicateStart };
 type GateStep = 'proposal' | 'quote' | 'skip';
 const GATE_STEP_LABELS: Record<GateStep, string> = { proposal: 'Proposal sent', quote: 'Client approved: create quotation', skip: 'No proposal needed' };
@@ -199,9 +202,11 @@ export default function DealsBoard({
     myDeals.forEach(p => { const st = journeyStage(dealStage(p)); out[st].count++; out[st].value += dealValue(p); });
     return out;
   }, [myDeals]);
+  const onHoldDeals = useMemo(() => myDeals.filter(p => activeHold(p)), [myDeals]);
 
   const visible = useMemo(() => {
-    const base = filter === 'tagged' ? taggedDeals : myDeals.filter(p => (filter === 'open' ? OPEN_STAGES.includes(dealStage(p)) : journeyStage(dealStage(p)) === filter));
+    const base = filter === 'tagged' ? taggedDeals : filter === 'on_hold' ? myDeals.filter(p => activeHold(p))
+      : myDeals.filter(p => (filter === 'open' ? OPEN_STAGES.includes(dealStage(p)) : journeyStage(dealStage(p)) === filter));
     const q = search.trim().toLowerCase();
     const list = q ? base.filter(p => `${clientName(p)} ${courseOf(p)} ${p.enquiryNote || ''}`.toLowerCase().includes(q)) : base;
     return [...list].sort((a, b) => String(b.requestDate || b.id).localeCompare(String(a.requestDate || a.id)));
@@ -227,6 +232,8 @@ export default function DealsBoard({
     const urgent = dealNeedsAttention(p, today);
     const ap = apptOf(p);
     if (apptOverdue(p, today)) return { text: `Appointment on ${formatDate(ap!.date)} not logged`, urgent };
+    // On hold (2026-10-19): quiet until the potential date.
+    if (activeHold(p)) return { text: holdText(p, today), urgent: holdDue(p, today) };
     // Follow-up rules (Joel, 2026-10-18): "1st follow-up due", ..., "Decision needed".
     const fa = followUpAlert(p, today);
     if (fa) return { text: alertText(fa), urgent: true };
@@ -363,6 +370,7 @@ export default function DealsBoard({
     setStageError('');
     try {
       await updateDoc(doc(db, 'pipelines', p.id), {
+        ...(p.onHold ? { onHold: null } : {}),   // any move ends a hold
         ...changes,
         status: statusForStage(changes.stage),
         history: [...(p.history || []), historyEntry(viewer, action)].slice(-40),
@@ -605,7 +613,7 @@ export default function DealsBoard({
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
-          {([['open', 'Open deals'], ['tagged', `Helping on (${taggedDeals.length})`]] as const).map(([k, t]) => (
+          {([['open', 'Open deals'], ['on_hold', `On hold (${onHoldDeals.length})`], ['tagged', `Helping on (${taggedDeals.length})`]] as const).map(([k, t]) => (
             <button
               key={k}
               type="button"
@@ -616,8 +624,11 @@ export default function DealsBoard({
             </button>
           ))}
         </div>
-        {filter !== 'open' && filter !== 'tagged' && (
+        {filter !== 'open' && filter !== 'tagged' && filter !== 'on_hold' && (
           <span className="text-sm text-ink-soft">Showing {STAGE_LABELS[filter as DealStage].toLowerCase()} deals</span>
+        )}
+        {filter === 'on_hold' && onHoldDeals.length > 0 && (
+          <span className="text-sm text-ink-soft">{formatRM(onHoldDeals.reduce((t, p) => t + dealValue(p), 0))} on hold</span>
         )}
         <div className="relative ml-auto w-full sm:w-64">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
@@ -631,7 +642,7 @@ export default function DealsBoard({
           <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading deals…</p>
         ) : visible.length === 0 ? (
           <div className="p-8 text-center">
-            <p className="font-semibold">{filter === 'tagged' ? 'No one has asked for help on a deal' : 'No deals here yet'}</p>
+            <p className="font-semibold">{filter === 'tagged' ? 'No one has asked for help on a deal' : filter === 'on_hold' ? 'No deals on hold' : 'No deals here yet'}</p>
             {canCreateHere && filter !== 'tagged' && (
               <p className="mt-1 text-[15px] text-ink-soft">Create a deal when a client first gets in touch, then move it along as it progresses.</p>
             )}
@@ -651,6 +662,7 @@ export default function DealsBoard({
                     </span>
                     <span className="flex flex-wrap items-center gap-2 sm:justify-end">
                       <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${STAGE_TONE[st]}`}>{STAGE_LABELS[st]}</span>
+                      {activeHold(p) && <span className="rounded-md border border-attention/40 px-2 py-0.5 text-xs font-semibold text-attention">On hold</span>}
                       {p.fundingType && <span className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-soft">{FUNDING_LABELS[p.fundingType as FundingType]}</span>}
                       <span className="w-28 text-right font-semibold tabular-nums">{dealValue(p) ? formatRM(dealValue(p)) : '—'}</span>
                     </span>
@@ -1037,6 +1049,14 @@ function DealPanel(props: {
     };
     return { title: `Lost on ${formatDate(p.lostDate) || 'an earlier date'}${p.lostReason ? `: ${p.lostReason}` : ''}`, hint: [p.lostNote, p.lostByName ? `Marked lost by ${p.lostByName}` : ''].filter(Boolean).join(' · ') || undefined };
   })();
+  // On hold (Joel, 2026-10-19): Proposal sent, Client approved and Quotation sent offer three choices:
+  // the stage's main step, Put on hold, Mark lost. While on hold: Resume, Hold longer, Mark lost.
+  const today = todayIso();
+  const hold = activeHold(p);
+  const holdIsDue = holdDue(p, today);
+  const holdable = canHold(p);
+  const holdInfo = hold ? `${hold.reason} · ${STAGE_LABELS[st]} · put on hold ${formatDate(hold.since)}${hold.byName ? ` by ${hold.byName}` : ''}` : '';
+  const formOpen = !!props.gate || ['won', 'lost', 'followup', 'skip', 'duplicate', 'hold', 'resume'].includes(props.stagePanel || '');
 
   return (
     <div className="space-y-5 text-ink">
@@ -1062,19 +1082,33 @@ function DealPanel(props: {
       </ol>
 
       {/* Next step */}
-      <section aria-label="Next step" className={`rounded-2xl border p-4 ${st === 'lost' ? 'border-danger/30 bg-danger-soft' : st === 'won' ? 'border-accent/30 bg-accent-soft' : 'border-line bg-surface'}`}>
-        <p className={`flex items-center gap-2 font-bold ${st === 'lost' ? 'text-danger' : st === 'won' ? 'text-accent' : ''}`}>
-          {st === 'quoted' && <Hourglass className="h-4 w-4 text-ink-soft" />}{next.title}
-        </p>
-        {next.hint && <p className="mt-0.5 text-sm text-ink-soft">{next.hint}</p>}
+      <section aria-label="Next step" className={`rounded-2xl border p-4 ${st === 'lost' ? 'border-danger/30 bg-danger-soft' : st === 'won' ? 'border-accent/30 bg-accent-soft' : hold ? 'border-attention/30 bg-attention-soft' : 'border-line bg-surface'}`}>
+        {hold ? (
+          <>
+            <p className={`flex items-center gap-2 font-bold ${holdIsDue ? 'text-danger' : 'text-attention'}`}>
+              {holdIsDue ? <AlertTriangle className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
+              {holdIsDue ? `On hold date reached (${formatDate(hold.until)}): decide what's next` : `On hold until ${formatDate(hold.until)}`}
+            </p>
+            <p className="mt-0.5 text-sm text-ink-soft">{holdInfo}</p>
+            <p className="mt-0.5 text-sm text-ink-soft">{holdIsDue ? 'Contact the client, then resume the deal, hold it longer or mark it lost.' : 'Follow-up reminders are paused until then.'}</p>
+          </>
+        ) : (
+          <>
+            <p className={`flex items-center gap-2 font-bold ${st === 'lost' ? 'text-danger' : st === 'won' ? 'text-accent' : ''}`}>
+              {st === 'quoted' && <Hourglass className="h-4 w-4 text-ink-soft" />}{next.title}
+            </p>
+            {next.hint && <p className="mt-0.5 text-sm text-ink-soft">{next.hint}</p>}
+          </>
+        )}
         {props.alert && OPEN_STAGES.includes(st) && <AlertLine alert={props.alert} />}
         {props.editable ? (
           <div className="mt-3 space-y-3">
-            {props.alert && OPEN_STAGES.includes(st) && props.stagePanel !== 'followup' && props.stagePanel !== 'lost' && (
+            {props.alert && OPEN_STAGES.includes(st) && props.stagePanel !== 'followup' && props.stagePanel !== 'lost' && props.stagePanel !== 'hold' && (
               <div className="flex flex-wrap gap-2">
                 <button type="button" disabled={props.busy} onClick={() => props.setStagePanel('followup')} className="inline-flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-[#931C13]">
                   {props.alert.decision ? 'Keep open' : 'Log follow-up'}
                 </button>
+                {props.alert.decision && holdable && <button type="button" className={btnSecondary} onClick={() => props.setStagePanel('hold')}><PauseCircle className="h-4 w-4 text-attention" /> Put on hold</button>}
                 {props.alert.decision && <button type="button" className={btnSecondary} onClick={() => props.setStagePanel('lost')}><XCircle className="h-4 w-4 text-danger" /> Mark lost</button>}
               </div>
             )}
@@ -1087,11 +1121,30 @@ function DealPanel(props: {
                 nQuotes={props.quotes.length} nOutlines={props.outlines.length}
                 onCreate={props.onDuplicate} onCancel={() => props.setStagePanel(null)} />
             )}
-            {next.button && props.stagePanel !== 'won' && props.stagePanel !== 'followup' && props.stagePanel !== 'skip' && props.stagePanel !== 'duplicate' && !props.gate && (
+            {hold && !formOpen && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" disabled={props.busy} className={main} onClick={() => props.setStagePanel('resume')}><PlayCircle className="h-4 w-4" /> Resume</button>
+                <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => props.setStagePanel('hold')}><PauseCircle className="h-4 w-4 text-attention" /> Hold longer</button>
+                <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => props.setStagePanel('lost')}><XCircle className="h-4 w-4 text-danger" /> Mark lost</button>
+              </div>
+            )}
+            {props.stagePanel === 'hold' && (
+              <HoldBox deal={p} viewer={props.viewer} ownerName={props.ownerName} onDone={props.onFollowUpDone} onCancel={() => props.setStagePanel(null)} />
+            )}
+            {props.stagePanel === 'resume' && (
+              <ResumeBox deal={p} viewer={props.viewer} onDone={props.onFollowUpDone} onCancel={() => props.setStagePanel(null)} />
+            )}
+            {!hold && next.button && props.stagePanel !== 'won' && props.stagePanel !== 'followup' && props.stagePanel !== 'skip' && props.stagePanel !== 'duplicate' && props.stagePanel !== 'hold' && !props.gate && (
               <div className="flex flex-wrap items-center gap-2">
                 {next.button}
                 {st === 'agreed' && hasQuote && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onQuoted}>Quotation sent another way</button>}
                 {st === 'quoted' && sentQuote && <button type="button" className={btnSecondary} onClick={() => openQuote(sentQuote)}>Open quotation</button>}
+                {holdable && props.stagePanel !== 'lost' && !props.alert?.decision && (
+                  <>
+                    <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => props.setStagePanel('hold')}><PauseCircle className="h-4 w-4 text-attention" /> Put on hold</button>
+                    <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => props.setStagePanel('lost')}><XCircle className="h-4 w-4 text-danger" /> Mark lost</button>
+                  </>
+                )}
               </div>
             )}
             {(st === 'lead' || st === 'appointment') && !props.gate && props.stagePanel !== 'followup' && props.stagePanel !== 'skip' && (
@@ -1153,7 +1206,7 @@ function DealPanel(props: {
                 <button type="button" className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('skip')}><SkipForward className="h-3.5 w-3.5" /> No proposal needed</button>
               )}
               {OPEN_STAGES.includes(st) && !props.alert && props.stagePanel !== 'followup' && <button type="button" className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('followup')}><Plus className="h-3.5 w-3.5" /> Log follow-up</button>}
-              {OPEN_STAGES.includes(st) && props.stagePanel !== 'lost' && props.stagePanel !== 'followup' && !props.alert?.decision && <button type="button" className={`${smallLink} text-danger`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-3.5 w-3.5" /> Mark lost</button>}
+              {OPEN_STAGES.includes(st) && !holdable && props.stagePanel !== 'lost' && props.stagePanel !== 'followup' && !props.alert?.decision && <button type="button" className={`${smallLink} text-danger`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-3.5 w-3.5" /> Mark lost</button>}
               {st === 'lost' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Reopen deal</button>}
               {st === 'won' && canUndoWin && <button type="button" disabled={props.busy} className={`${smallLink} text-ink-soft`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Undo win</button>}
               {props.stagePanel !== 'duplicate' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('duplicate')}><Copy className="h-3.5 w-3.5" /> Duplicate deal</button>}

@@ -15,6 +15,7 @@
 // Pure logic (no database code), because the server shares src/lib/deals.ts. The live rules come from
 // useFollowUpRules in src/lib/useFollowUpRules.ts.
 import { dealStage } from './deals';
+import { activeHold } from './dealHold';
 
 export type RuleStage = 'lead' | 'proposal' | 'quoted';
 export const RULE_STAGES: RuleStage[] = ['lead', 'proposal', 'quoted'];
@@ -91,11 +92,13 @@ export function ordinal(n: number): string {
 }
 
 // Which rule stage a deal is in, and the day its clock started. "Appointment" counts as New (as on the journey line).
+// A deal taken off hold (lib/dealHold.ts) starts its clock again from the day it was resumed.
 export function stageClock(p: any): { stage: RuleStage; start: string } | null {
   const st = dealStage(p);
+  const from = (d: string) => { const r = ymd(p?.holdResumedDate); return r && r > d ? r : d; };
   if (st === 'lead' || st === 'appointment') return ymd(p?.requestDate) ? { stage: 'lead', start: ymd(p.requestDate) } : null;
-  if (st === 'proposal') return ymd(p?.proposalSentDate) ? { stage: 'proposal', start: ymd(p.proposalSentDate) } : null;
-  if (st === 'quoted') return ymd(p?.quotationSentDate) ? { stage: 'quoted', start: ymd(p.quotationSentDate) } : null;
+  if (st === 'proposal') return ymd(p?.proposalSentDate) ? { stage: 'proposal', start: from(ymd(p.proposalSentDate)) } : null;
+  if (st === 'quoted') return ymd(p?.quotationSentDate) ? { stage: 'quoted', start: from(ymd(p.quotationSentDate)) } : null;
   return null;
 }
 
@@ -114,6 +117,7 @@ export type FollowUpAlert = {
 
 export function followUpAlert(p: any, today: string, rules: FollowUpRules = activeRules): FollowUpAlert | null {
   if (p?.deleted) return null;
+  if (activeHold(p)) return null;   // on hold: the follow-up alerts pause
   const clock = stageClock(p);
   if (!clock) return null;
   const rule = rules[clock.stage];
