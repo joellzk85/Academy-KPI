@@ -157,7 +157,8 @@ export interface Quotation {
   items: QuotationItem[];
   remarks: string[];
   terms: string[];
-  applySST?: boolean;
+  applySST?: boolean;      // older quotations: add SST on top of the fees
+  sstIncluded?: boolean;   // "Price includes SST" ticked (else SST is not included); see lib/quoteSst.ts
   sstRate?: number;
   taggedBy?: string;
   tagNote?: string;

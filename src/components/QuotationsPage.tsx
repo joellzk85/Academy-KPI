@@ -7,6 +7,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../types';
 import { STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso, trainingDateText, trainingDays } from '../lib/deals';
 import { buildQuotationForDeal } from '../lib/dealDocs';
+import { quoteSst } from '../lib/quoteSst';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
 import { dealContact } from '../lib/contacts';
@@ -53,10 +54,7 @@ const btnSecondary =
 const linkBtn = 'text-sm font-semibold text-accent hover:underline';
 
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
-const totalOf = (q: Quotation) => {
-  const sub = (q.items || []).reduce((t, i) => t + (Number(i.totalFee) || 0), 0);
-  return sub + (q.applySST ? (sub * (q.sstRate || 8)) / 100 : 0);
-};
+const totalOf = (q: Quotation) => quoteSst(q).total;
 
 function nextRef(all: Quotation[], dateIso: string) {
   const prefix = `1G/NA/${dateIso.replace(/-/g, '')}/`;
@@ -121,7 +119,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromD
     } else {
       q = {
         id: `q_${Date.now()}`, refNumber: nextRef(quotes, date), date, attn: '', company: '', address: '', venue: '', time: '', participants: '',
-        trainingProvider: 'NEXT Academy', items: [], remarks: [], terms: DEFAULT_TERMS, applySST: false, sstRate: 8, status: 'draft',
+        trainingProvider: 'NEXT Academy', items: [], remarks: [], terms: DEFAULT_TERMS, applySST: false, sstIncluded: false, sstRate: 8, status: 'draft',
         preparedBy: me.name, creatorId: me.id, ownerId: rep.id, ownerName: rep.name, clientId: pick.clientId || '', pipelineId: '', sharedWithIds: [], isHidden: false,
       };
     }
@@ -389,7 +387,8 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const shared: string[] = q.sharedWithIds || [];
   const nameOf = (id?: string) => reps.find(p => p.id === id)?.name || '';
   const sub = (shownQ.items || []).reduce((t, i) => t + (Number(i.totalFee) || 0), 0);
-  const total = totalOf(shownQ);
+  const sst = quoteSst(shownQ);
+  const total = sst.total;
   const legacy = !r.deal && !r.client && !!(q.company || q.address);
 
   const persist = async (out: Quotation, msg: string) => {
@@ -736,11 +735,17 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
             </div>
           )}
           <div className="mt-4 flex flex-wrap items-center justify-end gap-x-6 gap-y-2 border-t border-line pt-3 text-[15px]">
-            <label className="flex items-center gap-2"><input type="checkbox" checked={!!q.applySST} onChange={e => set({ applySST: e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" /> Add SST</label>
-            {q.applySST && (
+            <label className="flex items-center gap-2"><input type="checkbox" checked={!!q.sstIncluded} onChange={e => set({ sstIncluded: e.target.checked, applySST: false })} className="h-4 w-4 accent-[#0E6E62]" /> Price includes SST</label>
+            {q.applySST && !q.sstIncluded && (
+              <label className="flex items-center gap-2"><input type="checkbox" checked onChange={() => set({ applySST: false })} className="h-4 w-4 accent-[#0E6E62]" /> Add SST on top (older setting)</label>
+            )}
+            {sst.mode !== 'none' && (
               <label className="flex items-center gap-2">Rate <input inputMode="decimal" value={String(q.sstRate || 8)} onChange={e => set({ sstRate: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className="w-16 rounded-md border border-line px-2 py-1 text-center" aria-label="SST rate" />%</label>
             )}
-            <span className="text-ink-soft">Subtotal <strong className="text-ink">{formatRM(sub)}</strong></span>
+            {sst.mode === 'added' && <span className="text-ink-soft">Subtotal <strong className="text-ink">{formatRM(sub)}</strong></span>}
+            {sst.mode === 'included'
+              ? <span className="text-ink-soft">Includes SST <strong className="text-ink">{formatRM(sst.sst)}</strong></span>
+              : sst.mode === 'none' && <span className="text-ink-soft">SST not included</span>}
             <span className="text-lg">Total <strong>{formatRM(total)}</strong></span>
           </div>
         </Card>

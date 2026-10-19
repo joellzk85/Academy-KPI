@@ -5,12 +5,14 @@
 // (and, for HRDC deals, HRDC's % is taken off that estimate), so upcoming trainings
 // don't show a false loss.
 // SST (Joel, 2026-10-17: 8%, amount can be typed): income from invoices is taken to include SST.
-// Automatic SST = the SST part of the income when the deal's quotation adds SST (its rate, normally 8%);
+// Automatic SST = the SST part of the income when the deal's quotation adds SST or its price includes SST
+// (its rate, normally 8%; lib/quoteSst.ts);
 // Management can type the amount instead, saved in project_pl/{dealId}.sstAmount. SST comes off profit.
 
 import { dealOwnerId, dealStage, dealValue, todayIso, trainingEndDate } from './deals';
 import { MoneyIn, MoneyOut, MoneySettings, dealPL, moneySettled } from './money';
 import { mainQuote } from './checklist';
+import { quoteSst } from './quoteSst';
 
 export type TrainingStatus = 'done' | 'today' | 'upcoming' | 'no_date';
 export type MoneyStatus = 'settled' | 'waiting' | 'not_invoiced';
@@ -58,8 +60,7 @@ export interface PLExtras { quotes: any[]; plDocs: Record<string, { sstAmount?: 
 const NO_EXTRAS: PLExtras = { quotes: [], plDocs: {} };
 
 export function quoteSstRate(dealQuotes: any[]): number {
-  const q = mainQuote(dealQuotes);
-  return q?.applySST ? Number(q.sstRate) || 8 : 0;
+  return quoteSst(mainQuote(dealQuotes) || {}).rate;
 }
 
 export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], s: MoneySettings, today = todayIso(), x: PLExtras = NO_EXTRAS): ProjectRow {
@@ -70,12 +71,12 @@ export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], s:
   const lastDay = trainingEndDate(deal) || trainingDate;   // a training of several days is done after its last day
   const training: TrainingStatus = !trainingDate ? 'no_date' : lastDay < today ? 'done' : trainingDate <= today ? 'today' : 'upcoming';
 
-  const sstRate = quoteSstRate(x.quotes.filter(q => q.pipelineId === deal.id));
+  const { rate: sstRate, mode: sstMode } = quoteSst(mainQuote(x.quotes.filter(q => q.pipelineId === deal.id)) || {});
   const typed = x.plDocs[deal.id]?.sstAmount;
   const sstTyped = typeof typed === 'number' && Number.isFinite(typed);
   const estimate = ins.length === 0;
-  // The deal value is before SST, so the estimate adds the quotation's SST on top.
-  const income = estimate ? dealValue(deal) * (1 + sstRate / 100) : pl.invoiced;
+  // The estimate adds the quotation's SST on top of the deal value, unless its price already includes SST.
+  const income = estimate ? dealValue(deal) * (sstMode === 'added' ? 1 + sstRate / 100 : 1) : pl.invoiced;
   const sst = sstTyped ? (typed as number) : (income * sstRate) / (100 + sstRate);
   const hrdcFee = estimate ? (isHrdc(deal) ? income * (s.hrdcDeductionPct / 100) : 0) : pl.hrdcFee + pl.shortfall;
   const profit = income - sst - hrdcFee - pl.costs;

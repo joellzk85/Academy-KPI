@@ -2,6 +2,7 @@ import React from 'react';
 import { Quotation } from '../types';
 import Logo from './Logo';
 import { COMPANY, COMPANY_ADDRESS } from '../lib/company';
+import { quoteSst } from '../lib/quoteSst';
 
 // The printable quotation (A4). Taken unchanged from the old quotation screen so PDFs look the same.
 // Print with window.print(): the styles below hide everything except .print-paper.
@@ -10,11 +11,9 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
   const items = q.items || [];
   const remarks = q.remarks || [];
   const terms = q.terms || [];
-  const applySST = !!q.applySST;
-  const sstRate = q.sstRate || 8;
-  const grandTotal = items.reduce((sum, item) => sum + (Number(item.totalFee) || 0), 0);
-  const sstAmount = applySST ? (grandTotal * sstRate / 100) : 0;
-  const finalTotal = grandTotal + sstAmount;
+  const { mode: sstMode, rate: sstRate, subtotal: grandTotal, sst: sstAmount, total: finalTotal } = quoteSst(q);
+  const applySST = sstMode === 'added';
+  const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="w-full overflow-x-auto pb-4 print:overflow-visible print:pb-0">
@@ -218,11 +217,23 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
             <tr className="bg-slate-55/60 border-t border-slate-300 font-black">
               <td colSpan={6} className="p-4 border-r border-slate-200 text-right uppercase tracking-wider text-xs text-slate-500 font-mono">
                 GRAND TOTAL COURSE FEES CLAIMABLE
+                {sstMode === 'included' && <span className="block pt-1 text-[11px] normal-case tracking-normal">(inclusive of {sstRate}% SST)</span>}
+                {sstMode === 'none' && <span className="block pt-1 text-[11px] normal-case tracking-normal">(SST not included)</span>}
               </td>
               <td colSpan={2} className="p-4 text-right text-base font-mono font-black text-blue-700 bg-slate-50">
                 RM {finalTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </td>
             </tr>
+            {sstMode === 'included' && (
+              <tr className="border-t border-slate-200 text-slate-500">
+                <td colSpan={6} className="p-3 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
+                  SST INCLUDED ABOVE ({sstRate}%)
+                </td>
+                <td colSpan={2} className="p-3 text-right text-sm font-mono">
+                  RM {money(sstAmount)}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
