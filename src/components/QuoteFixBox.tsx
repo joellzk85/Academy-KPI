@@ -53,6 +53,7 @@ function FixField({ fix, deal, client, refNumber, me, onRelink, onShowProgrammes
   const [date, setDate] = useState('');
   const [days, setDays] = useState(deal ? String(trainingDays(deal)) : '1');
   const [address, setAddress] = useState('');
+  const [employer, setEmployer] = useState('');
   const [pic, setPic] = useState({ name: '', designation: '', phone: '' });
 
   const run = async (fn: () => Promise<void>, msg: string) => {
@@ -99,6 +100,20 @@ function FixField({ fix, deal, client, refNumber, me, onRelink, onShowProgrammes
             {saveBtn(!address.trim(), () => run(() => updateDoc(doc(db, 'clients', client.id), { address: address.trim()}), 'Address saved in the client list'))}
           </div>
           <p className="mt-1 text-sm text-ink-soft">Saved in the client list.</p>
+          {err}
+        </>
+      );
+    }
+    case 'client_employer': {
+      if (!client) return null;
+      return (
+        <>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+            <label className="sr-only" htmlFor="fix-employer">Employer name</label>
+            <input id="fix-employer" value={employer} onChange={e => setEmployer(e.target.value)} placeholder="Employer name" className={input} />
+            {saveBtn(!employer.trim(), () => run(() => updateDoc(doc(db, 'clients', client.id), { employerName: employer.trim() }), 'Employer name saved in the client list'))}
+          </div>
+          <p className="mt-1 text-sm text-ink-soft">Saved in the client list. Or address the quotation to the company name instead (section 1).</p>
           {err}
         </>
       );

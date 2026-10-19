@@ -89,7 +89,7 @@ function copyQuotation(src: any, deal: any, viewer: Viewer, owner: Person, allQu
         sharedWithIds: [], sharedLog: {}, isHidden: false, dealDeleted: false,
         taggedRepId: '', taggedRepName: '', taggedBy: '', tagNote: '',
         // Another client: their own company and attention person, not the ones typed for the old client.
-        ...(sameClient ? {} : { attnOverride: '', attn: '', company: '', address: '' }),
+        ...(sameClient ? {} : { attnOverride: '', addressTo: 'company', attn: '', company: '', address: '' }),
         // The new deal's training date is read live; a typed old date is dropped.
         items: (base.items || []).map((it: any) => (it.kind === 'item' ? it : { ...it, date: '', useDealDate: true })),
       })

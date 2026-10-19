@@ -140,14 +140,15 @@ export function costsByCategory(outs: MoneyOut[]): { category: string; amount: n
 }
 
 // The "Project P&L" tab in the data backup (serverBackup.ts): one line per won deal, worked out at backup time.
-export function projectPLBackupRows(rows: ProjectRow[], clientName: (deal: any) => string, personName: (id: string) => string): (string | number)[][] {
+export function projectPLBackupRows(rows: ProjectRow[], clientName: (deal: any) => string, personName: (id: string) => string,
+  employerName: (deal: any) => string = () => ''): (string | number)[][] {
   const r2 = (n: number) => Math.round(n * 100) / 100;
   return [
-    ['Deal id', 'Training date', 'Client', 'Programme', 'Funding', 'Owner', 'Training', 'Money',
+    ['Deal id', 'Training date', 'Client', 'Employer name', 'Programme', 'Funding', 'Owner', 'Training', 'Money',
       'Income (RM, incl. SST)', 'Income is an estimate', 'SST (RM)', 'SST typed or automatic', 'HRDC % and shortfall (RM)',
       'Costs, approved and paid (RM)', 'Profit (RM)', 'Margin %', 'Received (RM)', 'Still to come in (RM)', 'Approved, still to pay (RM)', 'Waiting for approval (RM)'],
     ...rows.map(r => [
-      r.deal.id, r.trainingDate, clientName(r.deal), r.deal.courseName || '', r.deal.fundingType || '', personName(dealOwnerId(r.deal)),
+      r.deal.id, r.trainingDate, clientName(r.deal), employerName(r.deal), r.deal.courseName || '', r.deal.fundingType || '', personName(dealOwnerId(r.deal)),
       TRAINING_STATUS_LABELS[r.training], MONEY_STATUS_LABELS[r.money],
       r2(r.income), r.estimate ? 'Yes' : 'No', r2(r.sst), r.sstTyped ? 'Typed' : r.sstRate ? `Automatic (${r.sstRate}%)` : 'None',
       r2(r.hrdcFee), r2(r.costs), r2(r.profit), Math.round(r.margin), r2(r.received), r2(r.toComeIn), r2(r.toPayOut), r2(r.pendingApproval),

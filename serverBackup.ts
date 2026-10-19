@@ -147,7 +147,8 @@ function projectPLTable(raw: Record<string, { id: string; data: Record<string, a
   const team = list('team');
   const table = projectPLBackupRows(rows,
     p => clients.find(c => c.id === p.clientId)?.companyName || p.client || '',
-    id => team.find(m => m.id === id)?.name || '');
+    id => team.find(m => m.id === id)?.name || '',
+    p => clients.find(c => c.id === p.clientId)?.employerName || '');
   return { collectionId: 'project_pl_report', tab: 'Project P&L', rows: table, count: rows.length };
 }
 

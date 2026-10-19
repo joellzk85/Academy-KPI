@@ -86,6 +86,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
   const pickMonths = (f: string, t: string) => { setFrom(f); setTo(t); };
 
   const clientName = (p: any) => clients.find(c => c.id === p.clientId)?.companyName || p.client || 'No client';
+  const employerName = (p: any) => (clients.find(c => c.id === p.clientId)?.employerName || '').trim();
   const personName = (id: string) => people.find(m => m.id === id)?.name || 'Former team member';
   const mName = (m: string) => MONTHS[Number(m) - 1];
   const periodLabel = from === '01' && to === '12' ? year : from === to ? `${mName(from)} ${year}` : `${mName(from)} to ${mName(to)} ${year}`;
@@ -214,6 +215,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                       </td>
                       <td className="py-2.5 pr-3">
                         <span className="block font-medium">{clientName(r.deal)}</span>
+                        {employerName(r.deal) && <span className="block text-sm">Employer: {employerName(r.deal)}</span>}
                         <span className="block text-sm text-ink-soft">
                           {r.deal.courseName || 'No programme'} · {FUNDING_LABELS[r.deal.fundingType as FundingType] || 'Funding not set'} · {personName(dealOwnerId(r.deal))}
                         </span>
@@ -269,7 +271,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
           <ul className="divide-y divide-line">
             {noDate.map(r => (
               <li key={r.deal.id} className="flex flex-wrap justify-between gap-2 py-2 text-[15px]">
-                <span className="min-w-0">{clientName(r.deal)} <span className="text-ink-soft">· {r.deal.courseName || 'No programme'} · {personName(dealOwnerId(r.deal))}</span></span>
+                <span className="min-w-0">{clientName(r.deal)}{employerName(r.deal) && ` (employer: ${employerName(r.deal)})`} <span className="text-ink-soft">· {r.deal.courseName || 'No programme'} · {personName(dealOwnerId(r.deal))}</span></span>
                 <span className="tabular-nums">{formatRM(r.income)}{r.estimate ? ' (estimate)' : ''} · profit {formatRM(r.profit)}</span>
               </li>
             ))}

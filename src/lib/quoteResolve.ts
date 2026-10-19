@@ -1,6 +1,7 @@
 // One source of truth for quotations.
 // While a quotation is a draft, everything that lives elsewhere is read live:
-//   company, attention, address  <- client list (the deal's client if a deal is linked)
+//   company, attention, address  <- client list (the deal's client if a deal is linked);
+//                                   company = the employer name instead when the quotation says addressTo 'employer'
 //   programme name + HRDC code   <- programme list
 //   training date                <- the deal
 //   owner                        <- the deal's owner
@@ -51,7 +52,7 @@ export interface Resolved {
 }
 
 // What a missing detail is, so the "Fix these at the source" box can offer the right field (2026-10-18).
-export type QuoteFixKind = 'client_address' | 'client_contact' | 'no_client' | 'programme_gone' | 'deal_date' | 'days_mismatch';
+export type QuoteFixKind = 'client_address' | 'client_employer' | 'client_contact' | 'no_client' | 'programme_gone' | 'deal_date' | 'days_mismatch';
 export interface QuoteFix { kind: QuoteFixKind; text: string }
 
 export function isSent(q: Quotation): boolean {
@@ -71,7 +72,10 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
 
   const attnOverride = (q.attnOverride || '').trim();
   if (client) {
-    out.company = client.companyName || '';
+    // Addressed to the company name, or (chosen per quotation) the client's employer name (Joel, 2026-10-19).
+    const employer = (client.employerName || '').trim();
+    out.company = q.addressTo === 'employer' && employer ? employer : client.companyName || '';
+    if (q.addressTo === 'employer' && !employer) issues.push(`${client.companyName || 'This client'} has no employer name in the client list.`, 'client_employer');
     // The deal's attention person (else the client's main contact), unless a different PIC was typed for this quotation.
     out.attn = attnOverride || dealContact(deal, client)?.name || '';
     out.address = client.address || '';

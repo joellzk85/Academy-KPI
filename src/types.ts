@@ -148,6 +148,7 @@ export interface Quotation {
   date: string;
   attn: string;
   attnOverride?: string;   // a different PIC for this quotation only (else the client's contact person)
+  addressTo?: 'company' | 'employer'; // print the client's company name (default) or its employer name
   company: string;
   address: string;
   venue: string;
@@ -265,6 +266,7 @@ export interface CourseOutline {
 export interface Client {
   id: string;
   companyName: string;
+  employerName?: string; // optional, e.g. the employer registered with HRD Corp; shown in Project P&L; a quotation can be addressed to it
   contactName: string;
   designation?: string;
   phone?: string;

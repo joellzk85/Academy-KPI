@@ -610,7 +610,14 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
           )}
           {r.client ? (
             <dl className="grid gap-3 sm:grid-cols-3">
-              <Fact term="Company" value={shownQ.company} />
+              <CompanyBox
+                value={shownQ.company}
+                addressTo={q.addressTo === 'employer' ? 'employer' : 'company'}
+                companyName={r.client.companyName || ''}
+                employerName={(r.client.employerName || '').trim()}
+                locked={locked}
+                onChange={v => set({ addressTo: v })}
+              />
               <AttentionBox
                 value={shownQ.attn}
                 override={q.attnOverride || ''}
@@ -847,6 +854,34 @@ function Card({ id, title, action, children }: { id?: string; title: string; act
       </div>
       {children}
     </section>
+  );
+}
+
+// Who the quotation is addressed to: the client's company name, or its employer name (chosen per quotation, Joel 2026-10-19).
+// The switch shows only when the client has an employer name, or this quotation already asks for it.
+function CompanyBox({ value, addressTo, companyName, employerName, locked, onChange }: {
+  value: string; addressTo: 'company' | 'employer'; companyName: string; employerName: string; locked: boolean;
+  onChange: (v: 'company' | 'employer') => void;
+}) {
+  const choose = !locked && (!!employerName || addressTo === 'employer');
+  return (
+    <div className="rounded-xl bg-surface px-3.5 py-2.5">
+      <dt className="text-sm text-ink-soft">{addressTo === 'employer' ? 'Employer name' : 'Company'}</dt>
+      <dd className={`whitespace-pre-line ${value ? 'font-semibold' : 'text-ink-soft/70'}`}>{value || 'Missing'}</dd>
+      {choose && (
+        <fieldset className="mt-1.5 space-y-1 text-sm">
+          <legend className="sr-only">Address the quotation to</legend>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input type="radio" name="q-address-to" checked={addressTo === 'company'} onChange={() => onChange('company')} className="mt-1 accent-[#0E6E62]" />
+            <span>Company name{companyName ? <span className="text-ink-soft"> ({companyName})</span> : null}</span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input type="radio" name="q-address-to" checked={addressTo === 'employer'} onChange={() => onChange('employer')} className="mt-1 accent-[#0E6E62]" />
+            <span>Employer name{employerName ? <span className="text-ink-soft"> ({employerName})</span> : <span className="text-ink-soft"> (not in the client list yet)</span>}</span>
+          </label>
+        </fieldset>
+      )}
+    </div>
   );
 }
 
