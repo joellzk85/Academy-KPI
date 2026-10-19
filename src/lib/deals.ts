@@ -203,6 +203,15 @@ export function trainingDays(p: any): number {
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
+// Typed training days → the number, or null when it isn't half days between 0.5 and 60. Blank = 1 day.
+export const TRAINING_DAYS_PROBLEM = 'Enter the training days in half days, for example 0.5, 1.5 or 5 (up to 60).';
+export function parseTrainingDays(text: string): number | null {
+  const t = String(text ?? '').trim();
+  if (t === '') return 1;
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 && n <= 60 && (n * 2) % 1 === 0 ? n : null;
+}
+
 export function addDays(iso: string, n: number): string {
   const d = validDate(iso);
   if (!d) return '';

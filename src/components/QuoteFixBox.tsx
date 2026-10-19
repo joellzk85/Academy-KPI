@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { dealOwnerId, formatDate, trainingDateText, trainingDays } from '../lib/deals';
+import { dealOwnerId, formatDate, trainingDateText, trainingDays, parseTrainingDays } from '../lib/deals';
+import TrainingDaysPicker from './TrainingDaysPicker';
 import { clientContacts, mainContactFields, newContactId } from '../lib/contacts';
 import { QuoteFix } from '../lib/quoteResolve';
 
@@ -71,16 +72,18 @@ function FixField({ fix, deal, client, refNumber, me, onRelink, onShowProgrammes
       if (me.role === 'rep' && dealOwnerId(deal) !== me.id) return <>{goto('pipeline', 'Set it on the deal')}</>;
       return (
         <>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="space-y-2">
             <label className="sr-only" htmlFor="fix-date">Training date</label>
             <input id="fix-date" type="date" value={date} onChange={e => setDate(e.target.value)} className={input.replace('w-full', 'w-full sm:w-56')} />
-            <label className="flex items-center gap-1 text-sm text-ink-soft"><input type="number" min="0.5" step="0.5" value={days} onChange={e => setDays(e.target.value)} aria-label="Training days" className={input.replace('w-full', 'w-20')} /> day(s)</label>
-            {saveBtn(!date || !(Number(days) > 0), () => run(() => updateDoc(doc(db, 'pipelines', deal.id), {
-              trainingDate: date,
-              trainingDays: Number(days),
-              history: [...(deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Training date set to ${trainingDateText({ trainingDate: date, trainingDays: Number(days) }, true)} from quotation ${refNumber}` }].slice(-40),
-            }), 'Training date saved on the deal'))}
-            <span className="text-sm text-ink-soft">Saved on the deal.</span>
+            <TrainingDaysPicker id="fix-days" value={days} onChange={setDays} />
+            <div className="flex flex-wrap items-center gap-2">
+              {saveBtn(!date || parseTrainingDays(days) === null, () => run(() => updateDoc(doc(db, 'pipelines', deal.id), {
+                trainingDate: date,
+                trainingDays: parseTrainingDays(days),
+                history: [...(deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Training date set to ${trainingDateText({ trainingDate: date, trainingDays: parseTrainingDays(days) }, true)} from quotation ${refNumber}` }].slice(-40),
+              }), 'Training date saved on the deal'))}
+              <span className="text-sm text-ink-soft">Saved on the deal.</span>
+            </div>
           </div>
           {err}
         </>

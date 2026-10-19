@@ -11,8 +11,9 @@ import { Representative } from '../types';
 import {
   DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention, stageDate,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM, dealGaps, dealAskedFor, DealField, lostNoteProblem, reachedStage, SKIP_REASONS,
-  trainingDays, trainingDateText,
+  trainingDays, trainingDateText, parseTrainingDays, TRAINING_DAYS_PROBLEM,
 } from '../lib/deals';
+import TrainingDaysPicker from './TrainingDaysPicker';
 import { FollowUpAlert, alertText, followUpAlert, followUpNotes } from '../lib/followUps';
 import { AlertLine, FollowUpForm, FollowUpList, followUpCountText } from './FollowUps';
 import { GapsBox, MarkWonBox } from './DealGates';
@@ -285,8 +286,8 @@ export default function DealsBoard({
     const value = form.proposalValue.trim() === '' ? 0 : Number(form.proposalValue);
     if (!Number.isFinite(value) || value < 0) return setFormError('Enter the deal value as a number, for example 15000.');
     if (!form.requestDate) return setFormError('Enter the date the client asked.');
-    const days = form.trainingDays.trim() === '' ? 1 : Number(form.trainingDays);
-    if (!Number.isFinite(days) || days <= 0 || days > 60 || (days * 2) % 1 !== 0) return setFormError('Enter the training days as a number, for example 2 (or 0.5 for half a day).');
+    const days = parseTrainingDays(form.trainingDays);
+    if (days === null) return setFormError(TRAINING_DAYS_PROBLEM);
     const newOwner = people.find(r => r.id === form.ownerId) || owner;
     if (viewer.role === 'rep' && newOwner.id !== viewer.id && editing === 'new') {
       return setFormError('You can only create deals for yourself.');
@@ -842,7 +843,7 @@ export default function DealsBoard({
                   ))}
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <label htmlFor="d-req" className={label}>Client asked on</label>
                   <input id="d-req" type="date" value={form.requestDate} onChange={e => setForm(f => ({ ...f, requestDate: e.target.value }))} className={input} />
@@ -852,14 +853,15 @@ export default function DealsBoard({
                   <input id="d-train" type="date" value={form.trainingDate} onChange={e => setForm(f => ({ ...f, trainingDate: e.target.value }))} className={input} />
                 </div>
                 <div>
-                  <label htmlFor="d-days" className={label}>Training days</label>
-                  <input id="d-days" type="number" inputMode="decimal" min="0.5" step="0.5" placeholder="1" value={form.trainingDays} onChange={e => setForm(f => ({ ...f, trainingDays: e.target.value }))} className={input} />
-                  {form.trainingDate && Number(form.trainingDays) > 1 && <p className="mt-1 text-sm text-ink-soft">{trainingDateText({ trainingDate: form.trainingDate, trainingDays: Number(form.trainingDays) })}</p>}
-                </div>
-                <div>
                   <label htmlFor="d-fu" className={label}>Next follow-up</label>
                   <input id="d-fu" type="date" value={form.followUpDate} onChange={e => setForm(f => ({ ...f, followUpDate: e.target.value }))} className={input} />
                 </div>
+              </div>
+              <div>
+                <TrainingDaysPicker id="d-days" label="How long is the training?" value={form.trainingDays} onChange={v => setForm(f => ({ ...f, trainingDays: v }))} />
+                {form.trainingDate && parseTrainingDays(form.trainingDays) && (
+                  <p className="mt-1.5 text-sm text-ink-soft">Training: {trainingDateText({ trainingDate: form.trainingDate, trainingDays: parseTrainingDays(form.trainingDays) }, true)}</p>
+                )}
               </div>
               <div>
                 <label htmlFor="d-owner" className={label}>Deal owner</label>
@@ -1418,8 +1420,8 @@ function DuplicateBox({ deal, clients, viewer, busy, nQuotes, nOutlines, onCreat
   const submit = () => {
     const client = clients.find(c => c.id === clientId);
     if (!client) return setErr('Choose the client from the client list.');
-    const n = days.trim() === '' ? 1 : Number(days);
-    if (!Number.isFinite(n) || n <= 0 || n > 60 || (n * 2) % 1 !== 0) return setErr('Enter the training days as a number, for example 2 (or 0.5 for half a day).');
+    const n = parseTrainingDays(days);
+    if (n === null) return setErr(TRAINING_DAYS_PROBLEM);
     setErr('');
     onCreate({ client: { id: client.id, companyName: client.companyName || '' }, trainingDate: date, trainingDays: n, start });
   };
@@ -1443,16 +1445,11 @@ function DuplicateBox({ deal, clients, viewer, busy, nQuotes, nOutlines, onCreat
         <ClientPicker clients={clients} value={clientId} viewer={viewer} onChange={pickClient} />
         {sameClient && <p className="mt-1 text-sm text-ink-soft">Same client. Pick another to copy it for a different company.</p>}
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label htmlFor="dup-date" className={label}>New training date <span className="font-normal text-ink-soft">(optional)</span></label>
-          <input id="dup-date" type="date" value={date} onChange={e => setDate(e.target.value)} className={input} />
-        </div>
-        <div>
-          <label htmlFor="dup-days" className={label}>Training days</label>
-          <input id="dup-days" type="number" inputMode="decimal" min="0.5" step="0.5" value={days} onChange={e => setDays(e.target.value)} className={input} />
-        </div>
+      <div>
+        <label htmlFor="dup-date" className={label}>New training date <span className="font-normal text-ink-soft">(optional)</span></label>
+        <input id="dup-date" type="date" value={date} onChange={e => setDate(e.target.value)} className={`${input} sm:w-56`} />
       </div>
+      <TrainingDaysPicker id="dup-days" label="How long is the training?" value={days} onChange={setDays} />
       <div>
         <span className={label}>The new deal starts at</span>
         <div className="flex flex-col gap-2 sm:flex-row">

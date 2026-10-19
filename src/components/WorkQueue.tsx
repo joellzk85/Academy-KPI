@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { FUNDING_LABELS, FundingType, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso, trainingDateText, trainingDays, trainingEndDate } from '../lib/deals';
+import { FUNDING_LABELS, FundingType, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso, trainingDateText, trainingDays, trainingEndDate, parseTrainingDays, TRAINING_DAYS_PROBLEM } from '../lib/deals';
+import TrainingDaysPicker from './TrainingDaysPicker';
 import {
   APPLIES_LABELS, AppliesTo, ChecklistSettings, KIND_LABELS, RETIRED_BUILTINS, TaskTemplate, checklistFlags, daysUntil, grantNotAppliedFlag, newTaskId, progress,
 } from '../lib/checklist';
@@ -290,7 +291,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
               <button type="button" onClick={() => setOpenId(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
-              <div><dt className="text-sm text-ink-soft">Training date</dt><dd className="font-semibold"><TrainingDate key={openDeal.id} deal={openDeal} viewer={viewer} label={whenText(openDeal)} /></dd></div>
+              <div className="col-span-2"><dt className="text-sm text-ink-soft">Training date</dt><dd className="font-semibold"><TrainingDate key={openDeal.id} deal={openDeal} viewer={viewer} label={whenText(openDeal)} /></dd></div>
               <div><dt className="text-sm text-ink-soft">Training time</dt><dd className="font-semibold"><TrainingTimeBox key={openDeal.id} deal={openDeal} quotes={quotes.filter(q => q.pipelineId === openDeal.id)} viewer={viewer} editable /></dd></div>
               <div><dt className="text-sm text-ink-soft">Paid by</dt><dd className="font-semibold">{openDeal.fundingType ? FUNDING_LABELS[openDeal.fundingType as FundingType] : 'Not set'}</dd></div>
               <div><dt className="text-sm text-ink-soft">Rep</dt><dd className="font-semibold">{personName(dealOwnerId(openDeal))}</dd></div>
@@ -499,8 +500,8 @@ function TrainingDate({ deal, viewer, label }: { deal: any; viewer: Viewer; labe
   const [error, setError] = useState('');
   const save = async () => {
     setError('');
-    const n = days.trim() === '' ? 1 : Number(days);
-    if (!Number.isFinite(n) || n <= 0 || n > 60 || (n * 2) % 1 !== 0) return setError('Training days: a number such as 2, or 0.5 for half a day.');
+    const n = parseTrainingDays(days);
+    if (n === null) return setError(TRAINING_DAYS_PROBLEM);
     try {
       await updateDoc(doc(db, 'pipelines', deal.id), {
         trainingDate: value,
@@ -516,12 +517,14 @@ function TrainingDate({ deal, viewer, label }: { deal: any; viewer: Viewer; labe
     return <span>{label} <button type="button" className="ml-1 text-sm font-semibold text-accent hover:underline" onClick={() => setEditing(true)}>{iso(deal.trainingDate) ? 'Change' : 'Set'}</button></span>;
   }
   return (
-    <span className="flex flex-wrap items-center gap-2">
-      <input type="date" value={value} onChange={e => setValue(e.target.value)} className="rounded-lg border border-line px-2 py-1 text-[15px] font-normal" aria-label="Training date" />
-      <label className="flex items-center gap-1 text-sm font-normal text-ink-soft"><input type="number" min="0.5" step="0.5" value={days} onChange={e => setDays(e.target.value)} className="w-16 rounded-lg border border-line px-2 py-1 text-[15px] text-ink" aria-label="Training days" /> day(s)</label>
-      <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={save}>Save</button>
-      <button type="button" className="text-sm font-normal text-ink-soft hover:underline" onClick={() => setEditing(false)}>Cancel</button>
-      {error && <span className="text-sm text-danger">{error}</span>}
-    </span>
+    <div className="space-y-2 font-normal">
+      <input type="date" value={value} onChange={e => setValue(e.target.value)} className="rounded-lg border border-line px-2 py-1 text-[15px]" aria-label="Training date" />
+      <TrainingDaysPicker id="wq-days" value={days} onChange={setDays} />
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={save}>Save</button>
+        <button type="button" className="text-sm text-ink-soft hover:underline" onClick={() => setEditing(false)}>Cancel</button>
+        {error && <span className="text-sm text-danger">{error}</span>}
+      </div>
+    </div>
   );
 }

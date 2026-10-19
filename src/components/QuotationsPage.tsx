@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../types';
-import { STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso, trainingDateText } from '../lib/deals';
+import { STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso, trainingDateText, trainingDays } from '../lib/deals';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
@@ -34,6 +34,17 @@ type Tab = 'client' | 'pipeline' | 'trainerList' | 'venue';
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15 disabled:bg-surface disabled:text-ink-soft';
 const cell = 'w-full rounded-md border border-line bg-white px-2 py-1.5 text-[15px] focus:border-accent focus:outline-none disabled:bg-surface';
+
+// Days / quantity box that keeps what is being typed, so "0.5" (half day) or "1.5" can be typed
+// (turning each keystroke straight into a number used to wipe "0." before the 5).
+function NumberCell({ value, onChange, label }: { value: number; onChange: (n: number) => void; label: string }) {
+  const [text, setText] = useState(value ? String(value) : '');
+  useEffect(() => { if ((Number(text) || 0) !== (Number(value) || 0)) setText(value ? String(value) : ''); }, [value]);
+  return (
+    <input inputMode="decimal" value={text} aria-label={label} className={cell}
+      onChange={e => { const t = e.target.value.replace(/[^0-9.]/g, ''); setText(t); onChange(Number(t) || 0); }} />
+  );
+}
 const label = 'mb-1 block text-sm font-semibold text-ink';
 const btnPrimary =
   'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0B5A50] disabled:opacity-60';
@@ -460,7 +471,8 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
       const d = pick.deal;
       const first = (q.items || [])[0];
       const items = first ? [{ ...first, programmeId: d.programmeId || first.programmeId || '', useDealDate: true }, ...(q.items || []).slice(1)]
-        : [{ id: `item_${Date.now()}`, no: 1, program: '', code: '', date: '', trainer: '', programmeId: d.programmeId || '', useDealDate: true, feePerDay: dealValue(d), days: 1, totalFee: dealValue(d) }];
+        // A training of several days (or half a day): that many days, with the deal value spread over them.
+        : [{ id: `item_${Date.now()}`, no: 1, program: '', code: '', date: '', trainer: '', programmeId: d.programmeId || '', useDealDate: true, feePerDay: Math.round((dealValue(d) / trainingDays(d)) * 100) / 100, days: trainingDays(d), totalFee: dealValue(d) }];
       set({ pipelineId: d.id, clientId: d.clientId || '', items });
     } else {
       set({ pipelineId: '', clientId: pick.clientId || '' });
@@ -657,8 +669,11 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
                   const shown = shownQ.items[i] || it;
                   const money = (
                     <>
-                      <td className="py-1 pr-2"><input inputMode="decimal" value={it.feePerDay ? String(it.feePerDay) : ''} onChange={e => setItem(i, { feePerDay: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className={cell} aria-label={`${it.kind === 'item' ? 'Price each' : 'Rate per day'}, line ${i + 1}`} /></td>
-                      <td className="py-1 pr-2"><input inputMode="numeric" value={it.days ? String(it.days) : ''} onChange={e => setItem(i, { days: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className={cell} aria-label={`${it.kind === 'item' ? 'Quantity' : 'Days'}, line ${i + 1}`} /></td>
+                      <td className="py-1 pr-2"><NumberCell value={it.feePerDay} onChange={n => setItem(i, { feePerDay: n })} label={`${it.kind === 'item' ? 'Price each' : 'Rate per day'}, line ${i + 1}`} /></td>
+                      <td className="py-1 pr-2">
+                        <NumberCell value={it.days} onChange={n => setItem(i, { days: n })} label={`${it.kind === 'item' ? 'Quantity' : 'Days'}, line ${i + 1}`} />
+                        {it.kind !== 'item' && it.days === 0.5 && <span className="mt-0.5 block text-xs text-ink-soft">half day</span>}
+                      </td>
                       <td className="py-2.5 text-right font-semibold tabular-nums">{formatRM(shown.totalFee || 0)}</td>
                       <td className="py-1 pl-1">{!locked && <button type="button" onClick={() => removeItem(i)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove line ${i + 1}`}><X className="h-4 w-4" /></button>}</td>
                     </>
