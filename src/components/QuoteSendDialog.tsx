@@ -37,7 +37,7 @@ type CommonProps = {
 
 // What's being sent (exactly what prints now): a quotation, or a course outline (the proposal).
 type SendDoc = {
-  kind: 'quotation' | 'outline'; id: string; refNumber: string; company: string; attn: string;
+  kind: 'quotation' | 'outline' | 'teambuilding'; id: string; refNumber: string; company: string; attn: string;
   programmes: string[]; fileName: string; makePdf: () => Promise<Blob>;
 };
 
@@ -59,10 +59,16 @@ export function OutlineSendDialog({ shownO, ...rest }: CommonProps & { shownO: C
   return <SendDocDialog doc={doc} {...rest} />;
 }
 
+// Teambuilding proposals (2026-10-19) use the same window: sending one is sending the proposal (TeambuildingPage.tsx).
+export function TeambuildingSendDialog({ sendDoc, ...rest }: CommonProps & { sendDoc: Omit<SendDoc, 'kind'> }) {
+  return <SendDocDialog doc={{ ...sendDoc, kind: 'teambuilding' }} {...rest} />;
+}
+
 function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me, ensureSaved, onSent, onClose }: CommonProps & { doc: SendDoc }) {
   const isQuote = shownQ.kind === 'quotation';
-  const noun = isQuote ? 'quotation' : 'course outline';
-  const Noun = isQuote ? 'Quotation' : 'Course outline';
+  const isTb = shownQ.kind === 'teambuilding';
+  const noun = isQuote ? 'quotation' : isTb ? 'teambuilding proposal' : 'course outline';
+  const Noun = isQuote ? 'Quotation' : isTb ? 'Teambuilding proposal' : 'Course outline';
   const [channel, setChannel] = useState<Channel>('email');
   const [pdf, setPdf] = useState<Blob | null>(null);
   const [pdfError, setPdfError] = useState('');
@@ -88,15 +94,16 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
   const [cc, setCc] = useState('');
   const [subject, setSubject] = useState(isQuote
     ? `Quotation ${shownQ.refNumber}${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`
+    : isTb ? `Teambuilding proposal${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`
     : `Training proposal${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`);
   const [body, setBody] = useState(isQuote
     ? `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our quotation ${shownQ.refNumber} for your review.\n\nShould you have any questions, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`
-    : `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our proposed course outline for your review.\n\nShould you have any questions, or would like any changes, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`,
+    : `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our proposed ${isTb ? 'teambuilding programme' : 'course outline'} for your review.\n\nShould you have any questions, or would like any changes, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`,
   );
   // WhatsApp fields
   const [phone, setPhone] = useState(contact?.phone || '');
   const [waText, setWaText] = useState(
-    `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Attached is our ${isQuote ? `quotation ${shownQ.refNumber}` : 'proposed course outline'} for your review. Please let me know if you have any questions.\n\n${me.name}, NEXT Academy`,
+    `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Attached is our ${isQuote ? `quotation ${shownQ.refNumber}` : isTb ? 'teambuilding proposal' : 'proposed course outline'} for your review. Please let me know if you have any questions.\n\n${me.name}, NEXT Academy`,
   );
 
   // Make the PDF as soon as the window opens, so Send / WhatsApp work in one click.
@@ -134,7 +141,7 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
     try {
       if (!(await ensureSaved())) { setBusy(false); return setError(`Save the ${noun} first (see the message on the ${noun}).`); }
       const r = await callServer<{ to: string[]; cc: string[] }>('/api/mail/send', {
-        [isQuote ? 'quotationId' : 'outlineId']: shownQ.id, to, cc, subject, body, fileName, pdfBase64: await blobToBase64(pdf),
+        [isQuote ? 'quotationId' : isTb ? 'tbProposalId' : 'outlineId']: shownQ.id, to, cc, subject, body, fileName, pdfBase64: await blobToBase64(pdf),
       }, true);
       await finish({ channel: 'email', to: r.to.join(', '), cc: r.cc.join(', ') }, `Emailed to ${r.to.join(', ')}. It's in your Outlook Sent Items.`);
     } catch (e) {
@@ -193,7 +200,7 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
       <div className="w-full max-w-xl rounded-2xl bg-white p-5 font-sans text-ink shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <h3 id="send-title" className="text-lg font-bold">{locked ? 'Send again' : isQuote ? 'Send quotation' : 'Send course outline'}</h3>
+            <h3 id="send-title" className="text-lg font-bold">{locked ? 'Send again' : isQuote ? 'Send quotation' : isTb ? 'Send teambuilding proposal' : 'Send course outline'}</h3>
             <p className="text-sm text-ink-soft">{shownQ.refNumber}{shownQ.company ? ` · ${shownQ.company}` : ''}</p>
           </div>
           <button type="button" onClick={onClose} disabled={busy} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>

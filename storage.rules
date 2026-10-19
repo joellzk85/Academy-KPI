@@ -44,6 +44,19 @@ service firebase.storage {
       allow delete: if isStaff() && (resource.metadata.uploadedBy == request.auth.uid || isManagement());
     }
 
+    // Photos for teambuilding proposals, activities, trainers and venues (2026-10-19): photos/{folder}/{id}.jpg.
+    // Every member uploads (made smaller in the browser first); up to 10 MB; JPG, PNG or WebP.
+    // Never changed or deleted from the CRM, so a proposal that uses a photo never loses it.
+    match /photos/{folder}/{fileName} {
+      allow read: if isMember();
+      allow create: if isMember()
+        && folder in ['activities', 'trainers', 'venues', 'covers']
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)')
+        && request.resource.metadata.uploadedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

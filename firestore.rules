@@ -262,6 +262,37 @@ service cloud.firestore {
         || (isMember() && request.auth.uid in outlinePeople(resource.data));
     }
 
+    // Teambuilding proposals (2026-10-19): the same rights as course outlines (own, shared with, tagged,
+    // or Admin and Management edit any). A separate list, so course outlines are not affected.
+    match /teambuilding_proposals/{proposalId} {
+      function tbPeople(d) {
+        return [d.get('ownerId', ''), d.get('creatorId', '')];
+      }
+      allow read: if isMember();
+      allow create: if isStaff()
+        || (isMember() && request.auth.uid in tbPeople(request.resource.data));
+      allow update: if isStaff()
+        || (isMember() && (request.auth.uid in tbPeople(resource.data)
+                           || request.auth.uid in resource.data.get('sharedWithIds', [])));
+      allow delete: if isStaff()
+        || (isMember() && request.auth.uid in tbPeople(resource.data));
+    }
+
+    // Teambuilding activity library (2026-10-19): everyone reads, adds and edits (Joel: "everyone can amend").
+    // Delete only by the person who added it, or Management (anyone can "Stop using" it instead).
+    match /tb_activities/{activityId} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.get('createdById', '') == request.auth.uid;
+      allow update: if isMember() && request.resource.data.get('createdById', '') == resource.data.get('createdById', '');
+      allow delete: if isManagement()
+        || (isMember() && resource.data.get('createdById', '') == request.auth.uid);
+    }
+
+    // Teambuilding settings (the standard package template): everyone reads and edits.
+    match /tb_settings/{settingId} {
+      allow read, write: if isMember();
+    }
+
     // My home: each person saves only their own card choice.
     match /user_prefs/{memberId} {
       allow read, write: if isMember() && request.auth.uid == memberId;

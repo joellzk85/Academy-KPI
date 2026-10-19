@@ -6,6 +6,8 @@ import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealStage, formatDate, todayIso } from '../lib/deals';
 import { VenueBooking, phoneIn, venueBookings } from '../lib/venues';
 import { linkedOnly } from '../lib/linked';
+import { venuePhotos } from '../lib/teambuilding';
+import PhotoPicker from './PhotoPicker';
 
 // Venues (redesigned 2026-10-17, like Clients and Trainers): one shared list, the same details as before.
 // Status is only Available / Under renovation: bookings show by themselves from the deals (Joel removed "Booked").
@@ -30,7 +32,7 @@ const optional = <span className="font-normal text-ink-soft">(optional)</span>;
 
 const emptyForm = () => ({
   name: '', distance: '', pictures: '', meetingPackagePrice: '', roomPackagePrice: '', dinnerPackage: '',
-  facilities: '', contact: '', remarks: '', renovation: false,
+  facilities: '', contact: '', remarks: '', renovation: false, photos: [] as string[],
 });
 type Form = ReturnType<typeof emptyForm>;
 
@@ -103,7 +105,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
     setForm({
       name: v.name || '', distance: v.distance || '', pictures: v.pictures || '', meetingPackagePrice: v.meetingPackagePrice || '',
       roomPackagePrice: v.roomPackagePrice || '', dinnerPackage: v.dinnerPackage || '', facilities: v.facilities || '',
-      contact: v.contact || '', remarks: v.remarks || '', renovation: v.status === 'Under Renovation',
+      contact: v.contact || '', remarks: v.remarks || '', renovation: v.status === 'Under Renovation', photos: v.photos || [],
     });
     setFormError(''); setDupId(null); setEditing(v.id);
   };
@@ -122,6 +124,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
       meetingPackagePrice: form.meetingPackagePrice.trim(), roomPackagePrice: form.roomPackagePrice.trim(), dinnerPackage: form.dinnerPackage.trim(),
       facilities: form.facilities.trim(), contact: form.contact.trim(), remarks: form.remarks.trim(),
       status: (form.renovation ? 'Under Renovation' : 'Available') as Venue['status'],
+      photos: form.photos.filter(Boolean),
     };
     setBusy(true);
     try {
@@ -200,7 +203,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
               return (
                 <li key={v.id}>
                   <button type="button" onClick={() => { setOpenId(v.id); setPanelError(''); }} className="flex w-full items-center gap-4 px-5 py-3 text-left hover:bg-surface">
-                    <Thumb src={v.pictures} />
+                    <Thumb src={venuePhotos(v)[0] || v.pictures} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
                         <span className="truncate font-semibold">{v.name}</span>
@@ -263,6 +266,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
                     Under renovation (can't be used for now)
                   </label>
                 </div>
+                <PhotoPicker photos={form.photos} onChange={photos => set({ photos })} folder="venues" me={viewer} max={8} label="Photos (shown on teambuilding proposals; the first is the main one)" />
                 <div>
                   <label className={label} htmlFor="v-pic">Picture link {optional}</label>
                   <input id="v-pic" value={form.pictures} onChange={e => set({ pictures: e.target.value })} placeholder="https://…" className={input} />
@@ -364,8 +368,11 @@ function VenuePanel(props: {
         <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
       </div>
 
-      {isLink(v.pictures) && !picFailed && (
-        <img src={v.pictures} alt={v.name} onError={() => setPicFailed(true)} className="max-h-64 w-full rounded-xl object-cover" />
+      {venuePhotos(v)[0] && !picFailed && (
+        <img src={venuePhotos(v)[0]} alt={v.name} onError={() => setPicFailed(true)} className="max-h-64 w-full rounded-xl object-cover" />
+      )}
+      {(v.photos || []).length > 1 && (
+        <div className="-mt-3 flex gap-2 overflow-x-auto">{(v.photos || []).slice(1).map(src => <img key={src} src={src} alt="" className="h-16 w-24 shrink-0 rounded-lg object-cover" />)}</div>
       )}
 
       <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>

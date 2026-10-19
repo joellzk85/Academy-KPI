@@ -11,7 +11,7 @@ import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { linkedOnly } from './linked';
 
-export type SharedKind = 'quotation' | 'outline';
+export type SharedKind = 'quotation' | 'outline' | 'teambuilding';   // teambuilding proposals since 2026-10-19
 export interface ShareEntry { at: string; byId: string; byName: string }
 export type ShareLog = Record<string, ShareEntry>;
 
@@ -61,10 +61,11 @@ export function useSharedSeen(meId?: string): Record<string, string> {
 }
 
 // Everything shared with this person that they haven't opened yet, newest first.
-export function useSharedInbox(meId?: string): { items: SharedItem[]; quotations: number; outlines: number } {
+export function useSharedInbox(meId?: string): { items: SharedItem[]; quotations: number; outlines: number; teambuilding: number } {
   const seen = useSharedSeen(meId);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [outlines, setOutlines] = useState<any[]>([]);
+  const [tbs, setTbs] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
@@ -74,6 +75,7 @@ export function useSharedInbox(meId?: string): { items: SharedItem[]; quotations
     const subs = [
       onSnapshot(query(collection(db, 'quotations')), s => setQuotes(linkedOnly(all(s))), () => {}),
       onSnapshot(query(collection(db, 'course_outlines')), s => setOutlines(linkedOnly(all(s))), () => {}),
+      onSnapshot(query(collection(db, 'teambuilding_proposals')), s => setTbs(linkedOnly(all(s))), () => {}),
       onSnapshot(query(collection(db, 'clients')), s => setClients(all(s)), () => {}),
       onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(all(s))), () => {}),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(all(s)), () => {}),
@@ -82,7 +84,7 @@ export function useSharedInbox(meId?: string): { items: SharedItem[]; quotations
   }, [meId]);
 
   return useMemo(() => {
-    if (!meId) return { items: [], quotations: 0, outlines: 0 };
+    if (!meId) return { items: [], quotations: 0, outlines: 0, teambuilding: 0 };
     const clientOf = (f: any) => {
       const deal = f.pipelineId ? deals.find(d => d.id === f.pipelineId) : null;
       const cid = deal?.clientId || f.clientId;
@@ -93,12 +95,14 @@ export function useSharedInbox(meId?: string): { items: SharedItem[]; quotations
       const deal = f.pipelineId ? deals.find(d => d.id === f.pipelineId) : null;
       const title = kind === 'quotation'
         ? (f.items || []).map((i: any) => progName(i.programmeId) || i.program).find(Boolean) || ''
+        : kind === 'teambuilding' ? f.title || ''
         : progName(f.programmeId) || f.courseTitle || progName(deal?.programmeId) || deal?.courseName || '';
       const e: ShareEntry = f.sharedLog[meId];
       return { kind, id: f.id, ref: f.refNumber || '', title, client: clientOf(f), byName: e.byName || '', at: e.at };
     };
     const q = quotes.filter(f => isUnseen('quotation', f, meId, seen)).map(f => item('quotation', f));
     const o = outlines.filter(f => isUnseen('outline', f, meId, seen)).map(f => item('outline', f));
-    return { items: [...q, ...o].sort((a, b) => b.at.localeCompare(a.at)), quotations: q.length, outlines: o.length };
-  }, [meId, seen, quotes, outlines, clients, deals, programmes]);
+    const t = tbs.filter(f => isUnseen('teambuilding', f, meId, seen)).map(f => item('teambuilding', f));
+    return { items: [...q, ...o, ...t].sort((a, b) => b.at.localeCompare(a.at)), quotations: q.length, outlines: o.length, teambuilding: t.length };
+  }, [meId, seen, quotes, outlines, tbs, clients, deals, programmes]);
 }

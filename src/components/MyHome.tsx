@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import {
   AlertTriangle, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardCheck, GripVertical, LayoutGrid, Loader2, Plus, RotateCcw, ShieldCheck, Users, X,
-  BarChart3, TrendingUp, FileText, BookOpen, Building2, GraduationCap, MapPin, ListTodo, ListChecks, Wallet, Layers, ListOrdered, DatabaseBackup, LineChart, PieChart, UserCog, Wrench,
+  BarChart3, TrendingUp, FileText, BookOpen, Building2, GraduationCap, MapPin, ListTodo, ListChecks, Wallet, Layers, ListOrdered, DatabaseBackup, LineChart, PieChart, UserCog, Wrench, PartyPopper,
 } from 'lucide-react';
 import GridLayout, { WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
@@ -71,7 +71,7 @@ const DEFAULT_CARDS: Record<Role, CardId[]> = {
 // Admin work pages for Admin and Management, Management pages for Management. A saved shortcut the person
 // is no longer allowed is never shown, and every screen still checks the role itself when opened.
 type ShortcutId =
-  | 'workspace' | 'ws_kpi' | 'ws_deals' | 'ws_quotes' | 'ws_outlines' | 'ws_clients' | 'ws_trainers' | 'ws_venues' | 'ws_todo'
+  | 'workspace' | 'ws_kpi' | 'ws_deals' | 'ws_quotes' | 'ws_outlines' | 'ws_teambuilding' | 'ws_clients' | 'ws_trainers' | 'ws_venues' | 'ws_todo'
   | 'calendar' | 'admin_work' | 'aw_queue' | 'aw_money' | 'aw_programmes' | 'aw_tasks' | 'aw_backup'
   | 'management' | 'mg_dashboard' | 'mg_pl' | 'mg_team' | 'mg_data';
 type Need = 'workspace' | 'all' | 'staff' | 'management';
@@ -81,6 +81,7 @@ const SHORTCUTS: { id: ShortcutId; label: string; icon: React.ComponentType<{ cl
   { id: 'ws_deals', label: 'My deals', icon: TrendingUp, need: 'workspace', tab: 'pipeline' },
   { id: 'ws_quotes', label: 'Quotations', icon: FileText, need: 'workspace', tab: 'quotation' },
   { id: 'ws_outlines', label: 'Course outlines', icon: BookOpen, need: 'workspace', tab: 'course_outline' },
+  { id: 'ws_teambuilding', label: 'Teambuilding proposal', icon: PartyPopper, need: 'workspace', tab: 'teambuilding' },
   { id: 'ws_clients', label: 'Clients', icon: Building2, need: 'workspace', tab: 'client' },
   { id: 'ws_trainers', label: 'Trainers', icon: GraduationCap, need: 'workspace', tab: 'trainerList' },
   { id: 'ws_venues', label: 'Venues', icon: MapPin, need: 'workspace', tab: 'venue' },
@@ -1067,7 +1068,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       return {
         items: c.shared.map(f => ({
           key: `${f.kind}_${f.id}`, onClick: () => c.nav.openFile?.(f.kind, f.id), level: 'attention' as const,
-          title: `${f.kind === 'quotation' ? 'Quotation' : 'Course outline'} ${f.ref} · ${f.client || 'No client yet'}`,
+          title: `${f.kind === 'quotation' ? 'Quotation' : f.kind === 'teambuilding' ? 'Teambuilding proposal' : 'Course outline'} ${f.ref} · ${f.client || 'No client yet'}`,
           sub: `${f.title ? `${f.title} · ` : ''}Shared by ${f.byName || 'a teammate'}, ${formatDate(f.at.slice(0, 10))} ${new Date(f.at).toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit' })}`,
         })),
         empty: 'Nothing new shared with you.',

@@ -214,13 +214,16 @@ export function registerMailRoutes(app: Express) {
     const from = cleanEmail(mine.data()?.email);
     if (!from) throw new UserError(400, 'no-work-email', "Your work email isn't in the CRM yet. Ask Management to add it in Team.");
 
-    // A quotation, or (2026-10-19) a course outline sent as the proposal. Same people may send either.
+    // A quotation, or (2026-10-19) a course outline or teambuilding proposal sent as the proposal. Same people may send any.
     const outlineId = String(req.body?.outlineId || '');
-    const docId = outlineId || String(req.body?.quotationId || '');
-    const noun = outlineId ? 'course outline' : 'quotation';
-    const qSnap = docId ? await db.collection(outlineId ? 'course_outlines' : 'quotations').doc(docId).get() : null;
-    if (!qSnap?.exists) throw new UserError(404, outlineId ? 'outline-not-found' : 'quotation-not-found', `Save the ${noun} first, then send it.`);
-    if (!canSendQuotation(qSnap.data(), caller)) throw new UserError(403, outlineId ? 'not-your-outline' : 'not-your-quotation', `You can only send ${noun}s you own or that are shared with you.`);
+    const tbId = String(req.body?.tbProposalId || '');
+    const docId = outlineId || tbId || String(req.body?.quotationId || '');
+    const noun = outlineId ? 'course outline' : tbId ? 'teambuilding proposal' : 'quotation';
+    const coll = outlineId ? 'course_outlines' : tbId ? 'teambuilding_proposals' : 'quotations';
+    const code = outlineId ? 'outline' : tbId ? 'proposal' : 'quotation';
+    const qSnap = docId ? await db.collection(coll).doc(docId).get() : null;
+    if (!qSnap?.exists) throw new UserError(404, `${code}-not-found`, `Save the ${noun} first, then send it.`);
+    if (!canSendQuotation(qSnap.data(), caller)) throw new UserError(403, `not-your-${code}`, `You can only send ${noun}s you own or that are shared with you.`);
 
     const to = recipientList(req.body?.to, 'To');
     const cc = recipientList(req.body?.cc, 'CC');
