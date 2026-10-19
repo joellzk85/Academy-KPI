@@ -5,8 +5,9 @@
 
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { Quotation } from '../types';
+import { CourseOutline, Quotation } from '../types';
 import QuotationDocument from '../components/QuotationDocument';
+import CourseOutlineDocument from '../components/CourseOutlineDocument';
 
 const PAGE_W_PX = 900;          // drawn at the on-screen preview's width (so the table fits), then shrunk to A4
 const SCALE = 2;                // sharper text
@@ -49,6 +50,14 @@ function lastBlankRow(ctx: CanvasRenderingContext2D, from: number, to: number, w
     if (blank) return from + y;
   }
   return -1;
+}
+
+// Course outlines (2026-10-19): the same one-click PDF, for Download PDF and the outline's Send.
+export const outlinePdfFileName = (o: CourseOutline) =>
+  `Course outline ${String(o.refNumber || o.id).replace(/[\\/:*?"<>|]+/g, '-')}${o.courseTitle ? ` - ${o.courseTitle.replace(/[\\/:*?"<>|]+/g, '').slice(0, 60)}` : ''}${o.preparedForCompany ? ` - ${o.preparedForCompany.replace(/[\\/:*?"<>|]+/g, '').slice(0, 40)}` : ''}.pdf`;
+
+export function makeOutlinePdf(o: CourseOutline): Promise<Blob> {
+  return makeDocumentPdf(React.createElement(CourseOutlineDocument, { o }), `Course outline ${o.refNumber || ''}`.trim());
 }
 
 export function makeQuotationPdf(q: Quotation): Promise<Blob> {

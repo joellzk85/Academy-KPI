@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward,
+  AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
@@ -29,6 +29,7 @@ import PickOrType from './PickOrType';
 import { ProposalDrop, ProposalFilesList } from './ProposalFiles';
 import { ProposalFile } from '../lib/proposals';
 import { ClientLastTouch } from './ClientContactDot';
+import { repeatDeal, repeatOwner } from '../lib/repeatDeal';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -397,6 +398,25 @@ export default function DealsBoard({
     onCreateQuotation(p);
   };
 
+  // "Repeat this deal" (Joel, 2026-10-19): a new deal at Client approved with a copy of this deal's quotation (lib/repeatDeal.ts).
+  const repeat = async (p: any) => {
+    const owner = repeatOwner(p, viewer, people);
+    const value = dealValue(p);
+    if (!window.confirm(`Start a new deal for ${clientName(p)}: ${courseOf(p) || 'same programme'}${value ? `, ${formatRM(value)}` : ''}, for ${owner.name}?\n\nIt goes straight to "Client approved" (no proposal needed) and opens a copy of this deal's quotation with today's date.`)) return;
+    setBusy(true);
+    setStageError('');
+    try {
+      const r = await repeatDeal(p, viewer, people.map(x => ({ id: x.id, name: x.name })), quotes);
+      flash('Repeat deal created');
+      if (onOpenQuotation) onOpenQuotation({ id: r.dealId }, r.quoteId);
+      else setOpenId(r.dealId);
+    } catch (err) {
+      setStageError(`The repeat deal couldn't be created: ${friendlyError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const toQuoted = (p: any) => {
     if (!quotes.some(q => q.pipelineId === p.id)) return setStageError('Create the quotation for this deal first.');
     return writeStage(p, { stage: 'quoted', quotationSentDate: todayIso() }, 'Quotation sent');
@@ -657,6 +677,7 @@ export default function DealsBoard({
               skipReason={skipReason} setSkipReason={setSkipReason}
               skipNote={skipNote} setSkipNote={setSkipNote}
               onSkip={() => skipProposal(openDeal)}
+              onRepeat={() => repeat(openDeal)}
               onGapCancel={() => setGate(null)}
               onWonDone={(msg) => { setStagePanel(null); flash(msg); }}
               lostReason={lostReason} setLostReason={setLostReason}
@@ -873,6 +894,7 @@ function DealPanel(props: {
   alert: FollowUpAlert | null; onFollowUpDone: (msg: string) => void; deleteBlocker: () => string;
   gate: null | { step: GateStep; gaps: DealField[] }; clients: any[];
   skipReason: string; setSkipReason: (v: string) => void; skipNote: string; setSkipNote: (v: string) => void; onSkip: () => void;
+  onRepeat: () => void;
   onGapSaved: (updated: any) => void; onGapCancel: () => void; onWonDone: (msg: string) => void;
   lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
@@ -945,7 +967,8 @@ function DealPanel(props: {
     };
     if (st === 'won') return {
       title: `Won ${formatDate(dealWonDate(p))}: handed to admin`,
-      hint: pr ? `Admin checklist ${pr.done} of ${pr.total} done.` : 'Admin will start the checklist.',
+      hint: `${pr ? `Admin checklist ${pr.done} of ${pr.total} done.` : 'Admin will start the checklist.'} Same client and programme again? "Repeat this deal" starts a new deal with a copy of this quotation.`,
+      button: <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onRepeat}><Repeat2 className="h-4 w-4" /> Repeat this deal</button>,
     };
     return { title: `Lost on ${formatDate(p.lostDate) || 'an earlier date'}${p.lostReason ? `: ${p.lostReason}` : ''}`, hint: [p.lostNote, p.lostByName ? `Marked lost by ${p.lostByName}` : ''].filter(Boolean).join(' · ') || undefined };
   })();

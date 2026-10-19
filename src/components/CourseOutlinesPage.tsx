@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Search, Send, Trash2, Unlock, X,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { CourseOutline, CourseOutlineItem, Representative } from '../types';
+import { CourseOutline, CourseOutlineItem, QuoteSendEntry, Representative } from '../types';
 import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso } from '../lib/deals';
 import { GapsBox } from './DealGates';
 import { Programme } from '../lib/programmes';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
 import CourseOutlineDocument from './CourseOutlineDocument';
+import { OutlineSendDialog } from './QuoteSendDialog';
+import { downloadBlob, makeOutlinePdf, outlinePdfFileName } from '../lib/quotePdf';
 import { linkedOnly } from '../lib/linked';
 import ShareWithBox, { NewCount } from './ShareWithBox';
 import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
@@ -410,7 +412,10 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const [note, setNote] = useState('');
   const [gate, setGate] = useState<DealField[] | null>(null);   // the deal is missing details for "Proposal sent"
   const [dealWarn, setDealWarn] = useState('');                 // sent, but the deal couldn't be moved
-  const printAfterRender = useRef(false);
+  const [gapDeal, setGapDeal] = useState<any | null>(null);     // the deal right after the box saved its details
+  const [sending, setSending] = useState(false);
+  const [sentNow, setSentNow] = useState(false);                // sent in this visit: closing the Send window goes back to the deal
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const r = resolveOutline(o, sources);
   const shownO = r.o;                       // what prints
@@ -421,15 +426,6 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const nameOf = (id?: string) => reps.find(p => p.id === id)?.name || '';
   const items = o.items || [];
   const clientName = r.client?.companyName || '';
-
-  useEffect(() => {
-    if (preview && printAfterRender.current) {
-      printAfterRender.current = false;
-      const t = document.title;
-      document.title = o.refNumber || 'Course outline';
-      window.setTimeout(() => { window.print(); document.title = t; }, 200);
-    }
-  }, [preview]);
 
   const persist = async (out: CourseOutline, msg: string) => {
     setBusy(true);
@@ -458,38 +454,65 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   // same check as the deal's own button (programme from the list and the deal value; GapsBox asks for what's missing).
   // Only from New, so re-sending keeps the first date, and "Revise" never moves the deal back. Only the deal's
   // owner, Admin or Management may move it; anyone else still sends the outline and is told the deal stayed.
-  const markSent = async (dealNow?: any) => {
-    const deal = dealNow || r.deal;
-    const atNew = !!deal && ['lead', 'appointment'].includes(dealStage(deal));
-    const mayMove = atNew && canMoveDeal(deal, me);
-    if (!dealNow) {
+  // Send (2026-10-19, round 2): Email, WhatsApp or Download PDF + "Mark as sent", in the same window as quotations.
+  // Before it opens, a deal at New is checked like its "Proposal sent" button; the box asks for anything missing.
+  const deal = gapDeal || r.deal;
+  const dealAtNew = !!deal && ['lead', 'appointment'].includes(dealStage(deal));
+  // What prints now. After the box added details, it's read again with them; an outline with no title of its own
+  // then takes the programme just picked on the deal.
+  const sendO = gapDeal
+    ? resolveOutline(!o.courseTitle?.trim() && !o.programmeId ? { ...o, useProgrammeName: true } : o, { ...sources, deals: sources.deals.map(d => (d.id === gapDeal.id ? gapDeal : d)) }).o
+    : shownO;
+  const startSend = () => {
+    if (!locked) {
+      const mayMove = dealAtNew && canMoveDeal(deal, me);
       const gaps = mayMove ? dealGaps(deal, 'proposal', { clientIds: sources.clients.map(c => c.id), programmeIds: sources.programmes.map(x => x.id) }) : [];
-      // No title yet, and no programme coming from the box below either: check first.
-      if (!shownO.courseTitle?.trim() && !gaps.includes('programme') && !window.confirm('This outline has no course title. Mark as sent anyway?')) return;
+      // No title yet, and no programme coming from the box either: check first.
+      if (!sendO.courseTitle?.trim() && !gaps.includes('programme') && !window.confirm('This outline has no course title. Send it anyway?')) return;
       if (gaps.length) { setGate(gaps); return; }
     }
     setGate(null);
+    setSending(true);
+  };
+  const ensureSaved = async () => (dirty ? persist(o, 'Saved') : true);
+  // Sent by email, WhatsApp or by hand: lock a copy of what prints now and log how it went (a resend only logs).
+  const lockAsSent = async (entry: QuoteSendEntry) => {
+    const how = entry.channel === 'email' ? 'Emailed' : entry.channel === 'whatsapp' ? 'Sent by WhatsApp' : 'Marked as sent';
+    const sendLog = [...(o.sendLog || []), entry].slice(-30);
+    const out: CourseOutline = locked ? { ...o, sendLog } : { ...sendO, status: 'sent', sentAt: entry.at, sentById: me.id, sentByName: me.name, sendLog };
+    const ok = await persist(out, locked ? how : `${how} and locked`);
+    if (ok) setSentNow(true);
+    if (ok && !locked && dealAtNew) await toProposalSent(deal);
+    return ok;
+  };
+  // Sending the outline is sending the proposal (Joel, 2026-10-19): the deal moves from New to "Proposal sent". Only from
+  // New, so re-sending keeps the first date, and "Revise" never moves it back. Only the deal's owner, Admin or Management
+  // may move it; anyone else still sends the outline and is told the deal stayed.
+  const toProposalSent = async (d: any) => {
     setDealWarn('');
-    // Lock what prints now (read again with the details just added, if any).
-    // An outline with no title of its own takes the programme just picked on the deal.
-    const base = dealNow && !o.courseTitle?.trim() && !o.programmeId ? { ...o, useProgrammeName: true } : o;
-    const shown = dealNow ? resolveOutline(base, { ...sources, deals: sources.deals.map(d => (d.id === dealNow.id ? dealNow : d)) }).o : shownO;
-    const ok = await persist({ ...shown, status: 'sent', sentAt: new Date().toISOString(), sentById: me.id, sentByName: me.name }, 'Marked as sent and locked');
-    if (!ok || !atNew) return;
-    if (!mayMove) {
-      setDealWarn(`The deal is still at "New": only ${nameOf(dealOwnerId(deal)) || 'the deal owner'}, Admin or Management can move it to "Proposal sent". Ask them to open the deal and click "Proposal sent".`);
+    if (!canMoveDeal(d, me)) {
+      setDealWarn(`The deal is still at "New": only ${nameOf(dealOwnerId(d)) || 'the deal owner'}, Admin or Management can move it to "Proposal sent". Ask them to open the deal and click "Proposal sent".`);
       return;
     }
     try {
-      const sent = /^\d{4}-\d{2}-\d{2}/.test(deal.proposalSentDate || '') ? deal.proposalSentDate : todayIso();
-      await updateDoc(doc(db, 'pipelines', deal.id), {
+      const sent = /^\d{4}-\d{2}-\d{2}/.test(d.proposalSentDate || '') ? d.proposalSentDate : todayIso();
+      await updateDoc(doc(db, 'pipelines', d.id), {
         stage: 'proposal', status: statusForStage('proposal'), proposalSentDate: sent,
-        history: [...(deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Proposal sent: course outline ${o.refNumber || ''}`.trim() }].slice(-40),
+        history: [...(d.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Proposal sent: course outline ${o.refNumber || ''}`.trim() }].slice(-40),
       });
-      setNote('Sent and locked. The deal is now at "Proposal sent".');
-      if (backToDeal) backToDeal();
     } catch (e) {
       setDealWarn(`The outline is sent, but the deal couldn't be moved to "Proposal sent" (${friendlyError(e)}). Open the deal and click "Proposal sent".`);
+    }
+  };
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    setError('');
+    try {
+      downloadBlob(await makeOutlinePdf(shownO), outlinePdfFileName(shownO));
+    } catch (e: any) {
+      setError(`The PDF couldn't be made (${e?.message || e}). Open Preview and use Print → Save as PDF instead.`);
+    } finally {
+      setPdfBusy(false);
     }
   };
   const revise = () => {
@@ -498,7 +521,11 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   };
   const close = () => { if (!dirty || window.confirm('You have unsaved changes. Leave without saving?')) onClose(); };
   const goBackToDeal = () => { if (backToDeal && (!dirty || window.confirm('You have unsaved changes. Leave without saving?'))) backToDeal(); };
-  const downloadPdf = () => { if (preview) window.print(); else { printAfterRender.current = true; setPreview(true); } };
+  const printIt = () => {
+    const t = document.title;
+    document.title = o.refNumber || 'Course outline';
+    window.setTimeout(() => { window.print(); document.title = t; }, 100);
+  };
   const relink = (deal: any | null) => {
     set(deal
       ? { pipelineId: deal.id, clientId: deal.clientId || '', programmeId: o.programmeId || deal.programmeId || '', useProgrammeName: !!(o.programmeId || deal.programmeId) || !!dealProgrammeName(deal, sources.programmes) }
@@ -518,6 +545,15 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     return { ...x, items: list };
   });
 
+  const sendLabel = locked ? 'Send again' : dealAtNew ? 'Send proposal' : 'Send';
+  const sendDialog = sending ? (
+    <OutlineSendDialog
+      shownO={sendO} locked={locked} issues={[]} deal={deal} client={r.client} ownerId={r.ownerId} me={me}
+      ensureSaved={ensureSaved} onSent={lockAsSent}
+      onClose={() => { setSending(false); if (sentNow && backToDeal && !dealWarn) backToDeal(); }}
+    />
+  ) : null;
+
   if (preview) {
     return (
       <div className="space-y-4 font-sans text-ink">
@@ -526,13 +562,16 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
             {backToDeal && <button type="button" className={btnSecondary} onClick={goBackToDeal}><ArrowLeft className="h-4 w-4" /> Back to deal</button>}
             <button type="button" className={btnSecondary} onClick={() => setPreview(false)}>{backToDeal ? <Pencil className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />} Back to edit</button>
           </span>
-          <span className="flex items-center gap-2">
+          <span className="flex flex-wrap items-center gap-2">
             {dirty && <span className="text-sm text-attention">Not saved yet</span>}
-            <button type="button" className={btnPrimary} onClick={() => window.print()}><Download className="h-4 w-4" /> Download PDF</button>
+            <button type="button" className={btnSecondary} onClick={printIt}><Printer className="h-4 w-4" /> Print</button>
+            <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
+            <button type="button" className={btnPrimary} disabled={busy} onClick={startSend}><Send className="h-4 w-4" /> {sendLabel}</button>
           </span>
         </div>
-        <p className="no-print text-sm text-ink-soft">In the print window, choose "Save as PDF" as the printer.</p>
+        {error && <p role="alert" className="no-print rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
         <CourseOutlineDocument o={shownO} />
+        {sendDialog}
       </div>
     );
   }
@@ -556,7 +595,19 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
       {locked && (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-accent/30 bg-accent-soft p-4 text-accent">
           <Lock className="h-5 w-5" />
-          <p className="min-w-0 flex-1 text-[15px]"><strong>Sent {formatDate(o.sentAt || '')}</strong> by {o.sentByName}. This is the locked copy the client received.</p>
+          <div className="min-w-0 flex-1 text-[15px]">
+            <p><strong>Sent {formatDate(o.sentAt || '')}</strong> by {o.sentByName}. This is the locked copy the client received.</p>
+            {(o.sendLog || []).length > 0 && (
+              <ul className="mt-1 space-y-0.5 text-sm">
+                {(o.sendLog || []).slice().reverse().map((x, i) => (
+                  <li key={`${x.at}-${i}`}>
+                    {x.channel === 'email' ? 'Emailed' : x.channel === 'whatsapp' ? 'WhatsApp' : 'Marked as sent'}
+                    {x.to ? ` to ${x.to}` : ''}{x.cc ? ` (cc ${x.cc})` : ''} · {x.byName} · {formatDate(x.at)} {new Date(x.at).toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit' })}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
         </div>
       )}
@@ -712,7 +763,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       {gate && r.deal && (
         <GapsBox deal={r.deal} gaps={gate} step="Proposal sent" programmes={sources.programmes as Programme[]} clients={sources.clients} viewer={me}
-          onSaved={updated => markSent(updated)} onCancel={() => setGate(null)} />
+          onSaved={updated => { setGapDeal(updated); setGate(null); setSending(true); }} onCancel={() => setGate(null)} />
       )}
       {dealWarn && (
         <p role="alert" className="flex items-start gap-2 rounded-xl border border-attention/30 bg-attention-soft px-4 py-3 text-[15px] text-attention">
@@ -727,14 +778,13 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
           <span className={`text-sm ${dirty ? 'text-attention' : 'text-ink-soft'}`}>{note || (dirty ? 'Not saved yet' : locked ? 'Sent and locked' : 'All changes saved')}</span>
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
-            <button type="button" className={btnSecondary} onClick={downloadPdf}><Download className="h-4 w-4" /> Download PDF</button>
-            {!locked && <button type="button" className={btnSecondary} disabled={busy || !!gate} onClick={() => markSent()}>
-              <Send className="h-4 w-4" /> {r.deal && ['lead', 'appointment'].includes(dealStage(r.deal)) ? 'Mark as sent (proposal)' : 'Mark as sent'}
-            </button>}
+            <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
+            <button type="button" className={btnSecondary} disabled={busy || !!gate} onClick={startSend}><Send className="h-4 w-4" /> {sendLabel}</button>
             <button type="button" className={btnPrimary} disabled={busy || !dirty} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
           </span>
         </div>
       </div>
+      {sendDialog}
 
       {relinking && (
         <DealChooser deals={dealsForPicker} sources={sources} personName={nameOf} onPick={relink} onCancel={() => setRelinking(false)} allowGeneral title="Link this outline to a deal" />

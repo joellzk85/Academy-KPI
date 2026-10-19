@@ -2,15 +2,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { AlertTriangle, CheckCircle2, Download, FileText, Loader2, Mail, MessageCircle, Send, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
-import { Quotation, QuoteSendEntry } from '../types';
+import { CourseOutline, Quotation, QuoteSendEntry } from '../types';
 import { clientContacts, dealContact } from '../lib/contacts';
-import { blobToBase64, downloadBlob, makeQuotationPdf, pdfFileName } from '../lib/quotePdf';
+import { blobToBase64, downloadBlob, makeOutlinePdf, makeQuotationPdf, outlinePdfFileName, pdfFileName } from '../lib/quotePdf';
 import { waPhone, onPhone } from '../lib/whatsapp';
 
 // Send a quotation (2026-10-18): 1) Email from my own Outlook mailbox with the PDF attached (serverMail.ts),
 // 2) WhatsApp (phones: the share menu with the PDF; computers: the PDF downloads and the client's chat opens
 // with the message typed), 3) Download PDF (and "Mark as sent" when it was sent another way).
 // Email and WhatsApp mark the quotation sent and add a line to its sendLog.
+// Course outlines use the same window (2026-10-19): sending an outline is sending the proposal (CourseOutlinesPage.tsx).
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 type Channel = 'email' | 'whatsapp' | 'pdf';
@@ -25,15 +26,43 @@ const btnSecondary =
 
 const sizeText = (b: number) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 
-export default function QuoteSendDialog({ shownQ, locked, issues, deal, client, ownerId, me, ensureSaved, onSent, onClose }: {
-  shownQ: Quotation;                 // exactly what prints now
+type CommonProps = {
   locked: boolean;                   // already sent (this is a resend)
   issues: string[];                  // missing details
   deal: any; client: any; ownerId: string; me: Viewer;
   ensureSaved: () => Promise<boolean>;
   onSent: (entry: QuoteSendEntry) => Promise<boolean>;   // locks it as sent and logs the entry
   onClose: () => void;
-}) {
+};
+
+// What's being sent (exactly what prints now): a quotation, or a course outline (the proposal).
+type SendDoc = {
+  kind: 'quotation' | 'outline'; id: string; refNumber: string; company: string; attn: string;
+  programmes: string[]; fileName: string; makePdf: () => Promise<Blob>;
+};
+
+export default function QuoteSendDialog({ shownQ, ...rest }: CommonProps & { shownQ: Quotation }) {
+  const doc: SendDoc = {
+    kind: 'quotation', id: shownQ.id, refNumber: shownQ.refNumber, company: shownQ.company || '', attn: shownQ.attn || '',
+    programmes: (shownQ.items || []).filter(i => i.kind !== 'item').map(i => i.program).filter(Boolean),
+    fileName: pdfFileName(shownQ), makePdf: () => makeQuotationPdf(shownQ),
+  };
+  return <SendDocDialog doc={doc} {...rest} />;
+}
+
+export function OutlineSendDialog({ shownO, ...rest }: CommonProps & { shownO: CourseOutline }) {
+  const doc: SendDoc = {
+    kind: 'outline', id: shownO.id, refNumber: shownO.refNumber, company: shownO.preparedForCompany || '', attn: '',
+    programmes: shownO.courseTitle ? [shownO.courseTitle] : [],
+    fileName: outlinePdfFileName(shownO), makePdf: () => makeOutlinePdf(shownO),
+  };
+  return <SendDocDialog doc={doc} {...rest} />;
+}
+
+function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me, ensureSaved, onSent, onClose }: CommonProps & { doc: SendDoc }) {
+  const isQuote = shownQ.kind === 'quotation';
+  const noun = isQuote ? 'quotation' : 'course outline';
+  const Noun = isQuote ? 'Quotation' : 'Course outline';
   const [channel, setChannel] = useState<Channel>('email');
   const [pdf, setPdf] = useState<Blob | null>(null);
   const [pdfError, setPdfError] = useState('');
@@ -45,32 +74,35 @@ export default function QuoteSendDialog({ shownQ, locked, issues, deal, client, 
 
   const contact = dealContact(deal, client);
   const attn = shownQ.attn || contact?.name || '';
-  const programmes = (shownQ.items || []).filter(i => i.kind !== 'item').map(i => i.program).filter(Boolean);
+  const programmes = shownQ.programmes;
   const progText = !programmes.length ? 'the training programme'
     : programmes.length === 1 ? programmes[0]
     : programmes.length === 2 ? `${programmes[0]} and ${programmes[1]}`
     : `${programmes[0]} and ${programmes.length - 1} other programmes`;
-  const fileName = pdfFileName(shownQ);
+  const fileName = shownQ.fileName;
   const signOff = `${me.name}\nNEXT Academy`;
 
   // Email fields
   const contacts = clientContacts(client).filter(c => c.email);
   const [to, setTo] = useState(contact?.email || '');
   const [cc, setCc] = useState('');
-  const [subject, setSubject] = useState(`Quotation ${shownQ.refNumber}${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`);
-  const [body, setBody] = useState(
-    `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our quotation ${shownQ.refNumber} for your review.\n\nShould you have any questions, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`,
+  const [subject, setSubject] = useState(isQuote
+    ? `Quotation ${shownQ.refNumber}${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`
+    : `Training proposal${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`);
+  const [body, setBody] = useState(isQuote
+    ? `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our quotation ${shownQ.refNumber} for your review.\n\nShould you have any questions, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`
+    : `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our proposed course outline for your review.\n\nShould you have any questions, or would like any changes, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`,
   );
   // WhatsApp fields
   const [phone, setPhone] = useState(contact?.phone || '');
   const [waText, setWaText] = useState(
-    `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Attached is our quotation ${shownQ.refNumber} for your review. Please let me know if you have any questions.\n\n${me.name}, NEXT Academy`,
+    `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Attached is our ${isQuote ? `quotation ${shownQ.refNumber}` : 'proposed course outline'} for your review. Please let me know if you have any questions.\n\n${me.name}, NEXT Academy`,
   );
 
   // Make the PDF as soon as the window opens, so Send / WhatsApp work in one click.
   useEffect(() => {
     let live = true;
-    makeQuotationPdf(shownQ).then(b => { if (live) setPdf(b); }).catch(e => { if (live) setPdfError(String(e?.message || e)); });
+    shownQ.makePdf().then(b => { if (live) setPdf(b); }).catch(e => { if (live) setPdfError(String(e?.message || e)); });
     return () => { live = false; };
   }, []);
   useEffect(() => {
@@ -91,7 +123,7 @@ export default function QuoteSendDialog({ shownQ, locked, issues, deal, client, 
   const finish = async (entry: Omit<QuoteSendEntry, 'at' | 'byId' | 'byName'>, message: string) => {
     const ok = await onSent({ at: new Date().toISOString(), byId: me.id, byName: me.name, ...entry });
     if (ok) setDone(message);
-    else setError('It was sent, but the CRM could not mark the quotation as sent. Click "Mark as sent" on the quotation.');
+    else setError(`It was sent, but the CRM could not mark the ${noun} as sent. Use "Mark as sent" under Download PDF to try again.`);
   };
 
   const sendEmail = async () => {
@@ -100,9 +132,9 @@ export default function QuoteSendDialog({ shownQ, locked, issues, deal, client, 
     if (!pdf) return setError(pdfError || 'The PDF is still being made. Try again in a moment.');
     setBusy(true);
     try {
-      if (!(await ensureSaved())) { setBusy(false); return setError('Save the quotation first (see the message on the quotation).'); }
+      if (!(await ensureSaved())) { setBusy(false); return setError(`Save the ${noun} first (see the message on the ${noun}).`); }
       const r = await callServer<{ to: string[]; cc: string[] }>('/api/mail/send', {
-        quotationId: shownQ.id, to, cc, subject, body, fileName, pdfBase64: await blobToBase64(pdf),
+        [isQuote ? 'quotationId' : 'outlineId']: shownQ.id, to, cc, subject, body, fileName, pdfBase64: await blobToBase64(pdf),
       }, true);
       await finish({ channel: 'email', to: r.to.join(', '), cc: r.cc.join(', ') }, `Emailed to ${r.to.join(', ')}. It's in your Outlook Sent Items.`);
     } catch (e) {
@@ -123,7 +155,7 @@ export default function QuoteSendDialog({ shownQ, locked, issues, deal, client, 
     if (!pdf) return setError(pdfError || 'The PDF is still being made. Try again in a moment.');
     if (shareOnPhone) {
       try {
-        await navigator.share({ files: [new File([pdf], fileName, { type: 'application/pdf' })], text: waText, title: `Quotation ${shownQ.refNumber}` });
+        await navigator.share({ files: [new File([pdf], fileName, { type: 'application/pdf' })], text: waText, title: `${Noun} ${shownQ.refNumber}` });
       } catch (e: any) {
         if (e?.name === 'AbortError') return;   // closed the share menu
         return setError('Your phone could not open the share menu. Use Download PDF instead.');
@@ -161,7 +193,7 @@ export default function QuoteSendDialog({ shownQ, locked, issues, deal, client, 
       <div className="w-full max-w-xl rounded-2xl bg-white p-5 font-sans text-ink shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <h3 id="send-title" className="text-lg font-bold">{locked ? 'Send again' : 'Send quotation'}</h3>
+            <h3 id="send-title" className="text-lg font-bold">{locked ? 'Send again' : isQuote ? 'Send quotation' : 'Send course outline'}</h3>
             <p className="text-sm text-ink-soft">{shownQ.refNumber}{shownQ.company ? ` · ${shownQ.company}` : ''}</p>
           </div>
           <button type="button" onClick={onClose} disabled={busy} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
@@ -186,7 +218,7 @@ export default function QuoteSendDialog({ shownQ, locked, issues, deal, client, 
 
             {!locked && issues.length > 0 && (
               <div className="mb-4 rounded-xl bg-attention-soft px-4 py-3 text-sm text-attention">
-                <p className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" /> Some details are missing on the quotation:</p>
+                <p className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" /> Some details are missing on the {noun}:</p>
                 <ul className="mt-1 list-disc pl-6">{issues.map(i => <li key={i}>{i}</li>)}</ul>
               </div>
             )}
@@ -276,7 +308,7 @@ export default function QuoteSendDialog({ shownQ, locked, issues, deal, client, 
 
             {channel === 'pdf' && (
               <div className="space-y-3">
-                <p className="text-[15px] text-ink-soft">Download the PDF to send it yourself. When it's sent, click "Mark as sent" so the quotation is locked and the deal moves on.</p>
+                <p className="text-[15px] text-ink-soft">Download the PDF to send it yourself. When it's sent, click "Mark as sent" so the {noun} is locked and the deal moves on.</p>
                 <div className="flex flex-wrap justify-end gap-2">
                   {!locked && <button type="button" className={btnSecondary} disabled={busy} onClick={markSent}><Send className="h-4 w-4" /> Mark as sent</button>}
                   <button type="button" className={btnPrimary} disabled={!pdf} onClick={download}><Download className="h-4 w-4" /> Download PDF</button>

@@ -238,6 +238,7 @@ export interface CourseOutline {
   sentByName?: string;
   sharedWithIds?: string[];     // teammates who can open and edit this same outline
   sharedLog?: Record<string, { at: string; byId: string; byName: string }>;   // who shared it with each of them, and when (alerts)
+  sendLog?: QuoteSendEntry[];  // each time it was emailed, WhatsApped or marked sent (2026-10-19)
 }
 
 export interface Client {

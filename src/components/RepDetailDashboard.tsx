@@ -2076,6 +2076,7 @@ export default function RepDetailDashboard({
               openClientId={clientToOpen} onOpenClientHandled={() => setClientToOpen(null)}
               onOpenDeal={(id) => { setDealToOpen(id); setActiveSubTab('pipeline'); }}
               onOpenQuotation={(id) => { setQuoteFromDeal({ dealId: '', quoteId: id }); setActiveSubTab('quotation'); }}
+              onOpenQuoteFromDeal={openQuoteFromDeal}
               onOpenOutline={(id) => { setOutlineToOpen(id); setActiveSubTab('course_outline'); }}
               onOpenTask={(id) => { setTaskToOpen(id); setActiveSubTab('tasks'); }} />
           ) : activeSubTab === 'trainerList' ? (

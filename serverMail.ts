@@ -206,7 +206,7 @@ export function registerMailRoutes(app: Express) {
     return { email };
   }));
 
-  // Send a quotation from my own Outlook mailbox, with its PDF attached.
+  // Send a quotation or course outline from my own Outlook mailbox, with its PDF attached.
   app.post('/api/mail/send', express.json({ limit: '6mb' }), route(async req => {
     const caller = await callerFrom(req);
     const { db } = admin();
@@ -214,10 +214,13 @@ export function registerMailRoutes(app: Express) {
     const from = cleanEmail(mine.data()?.email);
     if (!from) throw new UserError(400, 'no-work-email', "Your work email isn't in the CRM yet. Ask Management to add it in Team.");
 
-    const quotationId = String(req.body?.quotationId || '');
-    const qSnap = quotationId ? await db.collection('quotations').doc(quotationId).get() : null;
-    if (!qSnap?.exists) throw new UserError(404, 'quotation-not-found', 'Save the quotation first, then send it.');
-    if (!canSendQuotation(qSnap.data(), caller)) throw new UserError(403, 'not-your-quotation', 'You can only send quotations you own or that are shared with you.');
+    // A quotation, or (2026-10-19) a course outline sent as the proposal. Same people may send either.
+    const outlineId = String(req.body?.outlineId || '');
+    const docId = outlineId || String(req.body?.quotationId || '');
+    const noun = outlineId ? 'course outline' : 'quotation';
+    const qSnap = docId ? await db.collection(outlineId ? 'course_outlines' : 'quotations').doc(docId).get() : null;
+    if (!qSnap?.exists) throw new UserError(404, outlineId ? 'outline-not-found' : 'quotation-not-found', `Save the ${noun} first, then send it.`);
+    if (!canSendQuotation(qSnap.data(), caller)) throw new UserError(403, outlineId ? 'not-your-outline' : 'not-your-quotation', `You can only send ${noun}s you own or that are shared with you.`);
 
     const to = recipientList(req.body?.to, 'To');
     const cc = recipientList(req.body?.cc, 'CC');
@@ -229,7 +232,7 @@ export function registerMailRoutes(app: Express) {
     const pdf = String(req.body?.pdfBase64 || '');
     const bytes = Math.floor((pdf.length * 3) / 4);
     if (!pdf || !/^[A-Za-z0-9+/=]+$/.test(pdf) || !Buffer.from(pdf.slice(0, 8), 'base64').toString('latin1').startsWith('%PDF')) {
-      throw new UserError(400, 'no-pdf', 'The quotation PDF is missing. Try again.');
+      throw new UserError(400, 'no-pdf', `The ${noun} PDF is missing. Try again.`);
     }
     if (bytes > MAX_PDF_BYTES) throw new UserError(400, 'pdf-too-large', 'The PDF is too large to email. Download it and send it from Outlook instead.');
 

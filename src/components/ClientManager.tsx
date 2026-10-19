@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  Building2, CheckCircle2, ChevronRight, Circle, Download, FileText, ListTodo, Loader2, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X,
+  Building2, CheckCircle2, ChevronRight, Circle, Download, FileText, ListTodo, Loader2, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, Repeat2, Search, Trash2, X,
 } from 'lucide-react';
 import { Representative, Client } from '../types';
 import { db, friendlyError } from '../lib/firebase';
-import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
+import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso } from '../lib/deals';
+import { lastWonDeal, repeatDeal, repeatOwner } from '../lib/repeatDeal';
 import { MoneyIn } from '../lib/money';
 import { linkedOnly } from '../lib/linked';
 import { Contact, clientContacts, mainContactFields, newContactId } from '../lib/contacts';
@@ -33,6 +34,7 @@ interface ClientManagerProps {
   viewer: Viewer;
   onOpenDeal?: (dealId: string) => void;
   onOpenQuotation?: (quoteId: string) => void;
+  onOpenQuoteFromDeal?: (dealId: string, quoteId: string) => void;   // "Repeat last deal": open the copied quotation, Back to deal
   onOpenOutline?: (outlineId: string) => void;
   onOpenTask?: (taskId: string) => void;
   openClientId?: string | null;          // open this client's page (from a To-do tag or My home)
@@ -78,7 +80,7 @@ const COLOURS: ContactColour[] = ['green', 'amber', 'red', 'never'];
 // "12 Oct 2026 by Alif (call)"
 const lastLine = (e: TimelineEntry) => `${formatDate(e.date)}${e.byName ? ` by ${e.byName}` : ''}${e.how ? ` (${e.how === 'WhatsApp' ? e.how : e.how.toLowerCase()})` : ''}`;
 
-export default function ClientManager({ rep, reps, viewer, onOpenDeal, onOpenQuotation, onOpenOutline, onOpenTask, openClientId, onOpenClientHandled }: ClientManagerProps) {
+export default function ClientManager({ rep, reps, viewer, onOpenDeal, onOpenQuotation, onOpenQuoteFromDeal, onOpenOutline, onOpenTask, openClientId, onOpenClientHandled }: ClientManagerProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
@@ -130,6 +132,28 @@ export default function ClientManager({ rep, reps, viewer, onOpenDeal, onOpenQuo
     onOpenClientHandled?.();
   }, [openClientId]);
 
+  // "Repeat last deal" (Joel, 2026-10-19): the client's most recently won deal again (lib/repeatDeal.ts).
+  const repeatLast = async (c: Client) => {
+    const src = lastWonDeal(deals, c.id);
+    if (!src) return;
+    const owner = repeatOwner(src, viewer, reps.map(r => ({ id: r.id, name: r.name })));
+    const prog = src.courseName || 'the same programme';
+    if (!window.confirm(`Start a new deal for ${c.companyName}: ${prog}${dealValue(src) ? `, ${formatRM(dealValue(src))}` : ''}, for ${owner.name}?
+
+It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Client approved" (no proposal needed) and opens a copy of its quotation with today's date.`)) return;
+    setBusy(true);
+    setPanelError('');
+    try {
+      const r = await repeatDeal(src, viewer, reps.map(x => ({ id: x.id, name: x.name })), quotes);
+      flash('Repeat deal created');
+      if (onOpenQuoteFromDeal) onOpenQuoteFromDeal(r.dealId, r.quoteId);
+      else onOpenDeal?.(r.dealId);
+    } catch (e) {
+      setPanelError(`The repeat deal couldn't be created: ${friendlyError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
   const personName = (id: string) => team.find(p => p.id === id)?.name || reps.find(r => r.id === id)?.name || (id === viewer.id ? viewer.name : 'Former team member');
   const today = todayIso();
@@ -384,6 +408,7 @@ export default function ClientManager({ rep, reps, viewer, onOpenDeal, onOpenQuo
               onClose={() => setOpenId(null)}
               onEdit={() => startEdit(openClient)}
               onDelete={() => remove(openClient)}
+              onRepeat={lastWonDeal(deals, openClient.id) ? () => repeatLast(openClient) : undefined}
               flash={flash}
               onOpenDeal={onOpenDeal}
               onOpenQuotation={onOpenQuotation}
@@ -479,6 +504,7 @@ function ClientPanel(props: {
   touchPoints: ClientTouchPoint[]; moneyIn: MoneyIn[]; team: { id: string; name: string }[]; personName: (id: string) => string;
   viewer: Viewer; today: string; canDelete: boolean; busy: boolean; error: string; key?: string;
   onClose: () => void; onEdit: () => void; onDelete: () => void; flash: (t: string) => void;
+  onRepeat?: () => void;   // the client has a won deal: "Repeat last deal"
   onOpenDeal?: (dealId: string) => void; onOpenQuotation?: (quoteId: string) => void; onOpenOutline?: (outlineId: string) => void; onOpenTask?: (taskId: string) => void;
 }) {
   const { client: c, deals, summary: s, today } = props;
@@ -519,6 +545,7 @@ function ClientPanel(props: {
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={() => setAdding(true)} className={btnPrimary}><Plus className="h-4 w-4" /> Add touch point</button>
         <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>
+        {props.onRepeat && <button type="button" disabled={props.busy} onClick={props.onRepeat} className={btnSecondary}><Repeat2 className="h-4 w-4" /> Repeat last deal</button>}
       </div>
 
       {adding && (
