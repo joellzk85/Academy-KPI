@@ -312,6 +312,13 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
+    // Client links for quotations and course outlines (2026-10-19): members see them (and how often the client
+    // opened them); only the server makes, stops and counts them (serverDocLinks.ts).
+    match /doc_links/{token} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+
     // All other CRM work data: team members only
     match /{coll}/{docId=**} {
       allow read, write: if isMember() && coll in [

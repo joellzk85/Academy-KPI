@@ -111,7 +111,7 @@ function recipientList(v: unknown, what: string): string[] {
   return out;
 }
 
-function canSendQuotation(q: any, caller: { memberId: string; role: string }) {
+export function canSendQuotation(q: any, caller: { memberId: string; role: string }) {
   if (caller.role !== 'rep') return true;
   const id = caller.memberId;
   return q.ownerId === id || q.creatorId === id || q.taggedRepId === id || (q.sharedWithIds || []).includes(id)

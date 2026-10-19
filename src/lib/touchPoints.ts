@@ -228,7 +228,7 @@ export function clientTimeline(s: TimelineSources): TimelineEntry[] {
     if (q.status === 'sent') {
       const log = Array.isArray(q.sendLog) ? q.sendLog : [];
       const last = log[log.length - 1];
-      const how = last?.channel === 'email' ? 'Email' : last?.channel === 'whatsapp' ? 'WhatsApp' : '';
+      const how = last?.channel === 'email' ? 'Email' : last?.channel === 'whatsapp' ? 'WhatsApp' : last?.channel === 'link' ? 'Client link' : '';
       out.push({
         key: `qs_${q.id}`, kind: 'quote_sent', date: ymd(q.sentAt) || ymd(q.date), at: q.sentAt, title: `Quotation ${ref} sent`,
         text: log.length > 1 ? `Sent ${log.length} times` : '', byId: q.sentById, byName: q.sentByName || '', how,

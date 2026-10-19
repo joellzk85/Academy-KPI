@@ -7,6 +7,7 @@ import { registerCalendarRoutes } from "./serverCalendar";
 import { registerBackupRoutes } from "./serverBackup";
 import { registerTrainerLinkRoutes } from "./serverTrainerLinks";
 import { registerMailRoutes } from "./serverMail";
+import { registerDocLinkRoutes } from "./serverDocLinks";
 
 // Load environment variables
 dotenv.config();
@@ -38,6 +39,9 @@ async function startServer() {
   // Trainer links: a trainer fills in a course outline or their profile without logging in
   registerTrainerLinkRoutes(app);
 
+  // Client links: a client opens a sent quotation or course outline as a web page, without logging in
+  registerDocLinkRoutes(app);
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", time: new Date().toISOString() });
@@ -55,6 +59,9 @@ async function startServer() {
     console.log("Starting in PRODUCTION mode...");
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
+    // An app file that no longer exists (a tab opened before an update asks for the old one) is "not found",
+    // never the CRM's home page, so the browser reports a clean failure instead of a confusing one.
+    app.use("/assets", (req, res) => { res.status(404).type("text/plain").send("Not found"); });
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });

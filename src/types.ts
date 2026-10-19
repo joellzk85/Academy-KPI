@@ -187,7 +187,7 @@ export interface QuoteSendEntry {
   at: string;
   byId: string;
   byName: string;
-  channel: 'email' | 'whatsapp' | 'manual';
+  channel: 'email' | 'whatsapp' | 'manual' | 'link';   // link: a private client link (2026-10-19)
   to?: string;
   cc?: string;
 }

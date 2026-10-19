@@ -7,7 +7,24 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { CourseOutline, Quotation } from '../types';
 import QuotationDocument from '../components/QuotationDocument';
+import { appUpdatedError, isOldTabError } from './oldTab';
 import CourseOutlineDocument, { PAGE_W as OUTLINE_PAGE_W } from '../components/CourseOutlineDocument';
+
+// The PDF libraries load only when a PDF is made. If this browser tab was opened before an update of the CRM,
+// their old files are gone (2026-10-19, Joel saw "Failed to fetch dynamically imported module"). Editors call
+// preloadPdfLibs() when they open, so a tab opened before an update still has them; otherwise the person is
+// told plainly to save and reload.
+let pdfLibs: Promise<[any, any]> | null = null;
+export function loadPdfLibs(): Promise<[any, any]> {
+  if (!pdfLibs) {
+    pdfLibs = Promise.all([import('html2canvas-pro'), import('jspdf')]).catch(e => {
+      pdfLibs = null;
+      throw isOldTabError(e) ? appUpdatedError() : e;
+    }) as Promise<[any, any]>;
+  }
+  return pdfLibs;
+}
+export const preloadPdfLibs = () => { loadPdfLibs().catch(() => {}); };
 
 const PAGE_W_PX = 900;          // drawn at the on-screen preview's width (so the table fits), then shrunk to A4
 const SCALE = 2;                // sharper text
@@ -58,7 +75,7 @@ export const outlinePdfFileName = (o: CourseOutline) =>
 
 // The outline is already laid out as A4 pages (2026-10-19 redesign), so each page becomes one PDF page.
 export async function makeOutlinePdf(o: CourseOutline): Promise<Blob> {
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas-pro'), import('jspdf')]);
+  const [{ default: html2canvas }, { jsPDF }] = await loadPdfLibs();
   const host = document.createElement('div');
   host.style.cssText = `position:fixed;left:-10000px;top:0;width:${OUTLINE_PAGE_W}px;background:#fff;z-index:-1;`;
   document.body.appendChild(host);
@@ -94,7 +111,7 @@ export function makeQuotationPdf(q: Quotation): Promise<Blob> {
 
 // Any printable document whose sheet has the class "print-paper" (quotations, payment requests).
 export async function makeDocumentPdf(element: React.ReactElement, title: string): Promise<Blob> {
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas-pro'), import('jspdf')]);
+  const [{ default: html2canvas }, { jsPDF }] = await loadPdfLibs();
 
   const host = document.createElement('div');
   host.style.cssText = `position:fixed;left:-10000px;top:0;width:${PAGE_W_PX}px;background:#fff;z-index:-1;`;

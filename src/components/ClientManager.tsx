@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Representative, Client } from '../types';
 import { db, friendlyError } from '../lib/firebase';
+import { pdfErrorText } from '../lib/oldTab';
 import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso } from '../lib/deals';
 import { lastWonDeal, repeatDeal, repeatOwner } from '../lib/repeatDeal';
 import { MoneyIn } from '../lib/money';
@@ -823,7 +824,7 @@ function Timeline(props: React.ComponentProps<typeof ClientPanel>) {
       const { makeQuotationPdf, pdfFileName, downloadBlob } = await import('../lib/quotePdf');
       downloadBlob(await makeQuotationPdf(q), pdfFileName(q));
     } catch (e) {
-      setErr(`The PDF couldn't be made: ${friendlyError(e)}`);
+      setErr(pdfErrorText(e));
     } finally {
       setBusyKey('');
     }

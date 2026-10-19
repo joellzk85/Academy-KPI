@@ -15,7 +15,9 @@ import { linkedOnly } from '../lib/linked';
 import ShareWithBox, { NewCount } from './ShareWithBox';
 import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import QuoteSendDialog from './QuoteSendDialog';
-import { downloadBlob, makeQuotationPdf, pdfFileName } from '../lib/quotePdf';
+import { downloadBlob, makeQuotationPdf, pdfFileName, preloadPdfLibs } from '../lib/quotePdf';
+import { pdfErrorText } from '../lib/oldTab';
+import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import { MarkWonBox } from './DealGates';
 import QuoteFixBox from './QuoteFixBox';
 
@@ -365,10 +367,12 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const [sentNow, setSentNow] = useState(false);     // sent in this visit: closing the Sent box goes back to the deal
   const [dealWarn, setDealWarn] = useState('');      // sent, but the deal couldn't be moved (stays on screen)
   const [markingWon, setMarkingWon] = useState(false);
+  useEffect(preloadPdfLibs, []);   // so Download PDF still works if the CRM is updated while this is open
 
   const r = resolveQuotation(q, sources);
   const shownQ = r.q;                       // what prints
   const locked = isSent(q);
+  const clientLink = openLinkOf(useDocLinks(q.id), 'quotation');   // the private client link, if one was made
   const dirty = JSON.stringify(q) !== saved;
   const set = (c: Partial<Quotation>) => setQ(x => ({ ...x, ...c }));
   const shared: string[] = q.sharedWithIds || [];
@@ -399,7 +403,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   // Sent (by email, WhatsApp or by hand): lock a copy of exactly what prints now, and log how it went.
   // Sending again after it's locked only adds to the log.
   const lockAsSent = async (entry: QuoteSendEntry) => {
-    const how = entry.channel === 'email' ? 'Emailed' : entry.channel === 'whatsapp' ? 'Sent by WhatsApp' : 'Marked as sent';
+    const how = entry.channel === 'email' ? 'Emailed' : entry.channel === 'whatsapp' ? 'Sent by WhatsApp' : entry.channel === 'link' ? 'Client link made' : 'Marked as sent';
     const sendLog = [...(q.sendLog || []), entry].slice(-30);
     const out: Quotation = locked
       ? { ...q, sendLog }
@@ -439,7 +443,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     try {
       downloadBlob(await makeQuotationPdf(shownQ), pdfFileName(shownQ));
     } catch (e: any) {
-      setError(`The PDF couldn't be made (${e?.message || e}). Open Preview and use Print → Save as PDF instead.`);
+      setError(pdfErrorText(e));
     } finally {
       setPdfBusy(false);
     }
@@ -535,12 +539,13 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
               <ul className="mt-1 space-y-0.5 text-sm">
                 {(q.sendLog || []).slice().reverse().map((x, i) => (
                   <li key={`${x.at}-${i}`}>
-                    {x.channel === 'email' ? 'Emailed' : x.channel === 'whatsapp' ? 'WhatsApp' : 'Marked as sent'}
+                    {x.channel === 'email' ? 'Emailed' : x.channel === 'whatsapp' ? 'WhatsApp' : x.channel === 'link' ? 'Client link made' : 'Marked as sent'}
                     {x.to ? ` to ${x.to}` : ''}{x.cc ? ` (cc ${x.cc})` : ''} · {x.byName} · {formatDate(x.at)} {new Date(x.at).toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit' })}
                   </li>
                 ))}
               </ul>
             )}
+            {clientLink && <div className="mt-3 text-ink"><DocLinkBox link={clientLink} compact /></div>}
           </div>
           <span className="flex flex-wrap gap-2">
             {canMarkWon && !markingWon && <button type="button" className={btnPrimary} onClick={() => setMarkingWon(true)}><Trophy className="h-4 w-4" /> Client signed: mark deal won</button>}

@@ -1,20 +1,28 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { AlertTriangle, CheckCircle2, Download, FileText, Loader2, Mail, MessageCircle, Send, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, FileText, Link2, Loader2, Mail, MessageCircle, Send, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
+import { pdfErrorText } from '../lib/oldTab';
 import { CourseOutline, Quotation, QuoteSendEntry } from '../types';
 import { clientContacts, dealContact } from '../lib/contacts';
 import { blobToBase64, downloadBlob, makeOutlinePdf, makeQuotationPdf, outlinePdfFileName, pdfFileName } from '../lib/quotePdf';
 import { waPhone, onPhone } from '../lib/whatsapp';
+import DocLinkBox, { MakeLinkButton, openLinkOf, useDocLinks } from './DocLinkBox';
 
 // Send a quotation (2026-10-18): 1) Email from my own Outlook mailbox with the PDF attached (serverMail.ts),
 // 2) WhatsApp (phones: the share menu with the PDF; computers: the PDF downloads and the client's chat opens
 // with the message typed), 3) Download PDF (and "Mark as sent" when it was sent another way).
 // Email and WhatsApp mark the quotation sent and add a line to its sendLog.
 // Course outlines use the same window (2026-10-19): sending an outline is sending the proposal (CourseOutlinesPage.tsx).
+// Since 2026-10-19 (Joel) the window shows only "Client link" (a private web page, DocLinkBox.tsx / serverDocLinks.ts)
+// and Download PDF; Email and WhatsApp are hidden by SHOW_EMAIL_WHATSAPP, their code kept for later.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
-type Channel = 'email' | 'whatsapp' | 'pdf';
+type Channel = 'link' | 'email' | 'whatsapp' | 'pdf';
+
+// Joel (2026-10-19): send by private client link or Download PDF only for now. Email (Outlook) and WhatsApp are
+// hidden, not removed: set this to true to bring their tabs back.
+const SHOW_EMAIL_WHATSAPP = false;
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -63,7 +71,7 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
   const isQuote = shownQ.kind === 'quotation';
   const noun = isQuote ? 'quotation' : 'course outline';
   const Noun = isQuote ? 'Quotation' : 'Course outline';
-  const [channel, setChannel] = useState<Channel>('email');
+  const [channel, setChannel] = useState<Channel>('link');
   const [pdf, setPdf] = useState<Blob | null>(null);
   const [pdfError, setPdfError] = useState('');
   const [mail, setMail] = useState<{ configured: boolean; myEmail: string } | null>(null);
@@ -99,10 +107,34 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
     `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Attached is our ${isQuote ? `quotation ${shownQ.refNumber}` : 'proposed course outline'} for your review. Please let me know if you have any questions.\n\n${me.name}, NEXT Academy`,
   );
 
+  // Client link (2026-10-19): a private web page of the sent copy. Making it locks the document and logs the send.
+  const links = useDocLinks(shownQ.id);
+  const [linkMade, setLinkMade] = useState('');   // the token just made (shown even before the live list has it)
+  const openLink = openLinkOf(links, shownQ.kind)
+    || (linkMade ? { token: linkMade, kind: shownQ.kind, docId: shownQ.id, dealId: '', refNumber: shownQ.refNumber, company: shownQ.company, status: 'open' as const, createdAt: Date.now(), byId: me.id, byName: me.name } : null);
+  const linkMsg = `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Please find our ${isQuote ? `quotation ${shownQ.refNumber}` : 'proposed course outline'} for your review at the link below. You can also download it as a PDF there. Please let me know if you have any questions.
+
+${me.name}, NEXT Academy`;
+  const makeLink = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      if (!(await ensureSaved())) return setError(`Save the ${noun} first (see the message on the ${noun}).`);
+      const r = await callServer<{ token: string }>('/api/doc-link/create', { kind: shownQ.kind, id: shownQ.id }, true);
+      const ok = await onSent({ at: new Date().toISOString(), byId: me.id, byName: me.name, channel: 'link' });
+      if (!ok) return setError(`The link was made, but the CRM could not mark the ${noun} as sent. Try again.`);
+      setLinkMade(r.token);
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // Make the PDF as soon as the window opens, so Send / WhatsApp work in one click.
   useEffect(() => {
     let live = true;
-    shownQ.makePdf().then(b => { if (live) setPdf(b); }).catch(e => { if (live) setPdfError(String(e?.message || e)); });
+    shownQ.makePdf().then(b => { if (live) setPdf(b); }).catch(e => { if (live) setPdfError(pdfErrorText(e)); });
     return () => { live = false; };
   }, []);
   useEffect(() => {
@@ -182,11 +214,12 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
     setBusy(false);
   };
 
-  const tabs: [Channel, string, React.ReactNode][] = [
+  const tabs: [Channel, string, React.ReactNode][] = ([
+    ['link', 'Client link', <Link2 className="h-4 w-4" />],
     ['email', 'Email', <Mail className="h-4 w-4" />],
     ['whatsapp', 'WhatsApp', <MessageCircle className="h-4 w-4" />],
     ['pdf', 'Download PDF', <Download className="h-4 w-4" />],
-  ];
+  ] as [Channel, string, React.ReactNode][]).filter(([k]) => SHOW_EMAIL_WHATSAPP || (k !== 'email' && k !== 'whatsapp'));
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-4 pt-10" role="dialog" aria-modal="true" aria-labelledby="send-title" onClick={() => !busy && onClose()}>
@@ -207,7 +240,7 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
           </div>
         ) : (
           <>
-            <div className="mb-4 grid grid-cols-3 gap-1 rounded-xl border border-line bg-surface p-1" role="tablist">
+            <div className="mb-4 grid gap-1 rounded-xl border border-line bg-surface p-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }} role="tablist">
               {tabs.map(([k, t, icon]) => (
                 <button key={k} type="button" role="tab" aria-selected={channel === k} onClick={() => { setChannel(k); setError(''); }}
                   className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-sm font-semibold ${channel === k ? 'bg-white text-ink shadow-sm' : 'text-ink-soft hover:text-ink'}`}>
@@ -223,14 +256,31 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
               </div>
             )}
 
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-sm">
+            {channel !== 'link' && <div className="mb-4 flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-sm">
               <FileText className="h-4 w-4 shrink-0 text-accent" />
               <span className="min-w-0 flex-1 truncate">{fileName}</span>
               {pdf ? <span className="text-ink-soft">{sizeText(pdf.size)}</span>
                 : pdfError ? <span className="text-danger">Couldn't make the PDF</span>
                 : <span className="flex items-center gap-1 text-ink-soft"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Making PDF…</span>}
-            </div>
-            {pdfError && <p className="mb-4 text-sm text-danger">The PDF couldn't be made ({pdfError}). Close this, open Preview, and use your browser's Print → Save as PDF.</p>}
+            </div>}
+            {pdfError && channel !== 'link' && <p className="mb-4 text-sm text-danger">{pdfError}</p>}
+
+            {channel === 'link' && (
+              <div className="space-y-3">
+                {openLink ? (
+                  <>
+                    {linkMade && <p role="status" className="flex items-start gap-2 rounded-xl bg-accent-soft px-4 py-3 text-[15px] text-accent"><CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />Link ready{locked ? '' : ` and the ${noun} is locked`}. Copy it and send it to the client (WhatsApp, email…).</p>}
+                    {!linkMade && <p className="text-[15px] text-ink-soft">This {noun} already has a client link. Send it again any way you like.</p>}
+                    <DocLinkBox link={openLink} message={linkMsg} />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[15px] text-ink-soft">Makes a private web page of this {noun} that the client opens in their browser, with no login, and can download as a PDF. Copy the link and send it any way you like. You'll see when the client opens it.{locked ? '' : ` Making it locks the ${noun}${deal ? ', and the deal moves on as with any send' : ''}.`}</p>
+                    <div className="flex justify-end"><MakeLinkButton busy={busy} onClick={makeLink} /></div>
+                  </>
+                )}
+              </div>
+            )}
 
             {channel === 'email' && (
               mail && !mail.configured ? (

@@ -12,7 +12,9 @@ import { Programme } from '../lib/programmes';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
 import CourseOutlineDocument from './CourseOutlineDocument';
 import { OutlineSendDialog } from './QuoteSendDialog';
-import { downloadBlob, makeOutlinePdf, outlinePdfFileName } from '../lib/quotePdf';
+import { downloadBlob, makeOutlinePdf, outlinePdfFileName, preloadPdfLibs } from '../lib/quotePdf';
+import { pdfErrorText } from '../lib/oldTab';
+import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import { linkedOnly } from '../lib/linked';
 import ShareWithBox, { NewCount } from './ShareWithBox';
 import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
@@ -428,6 +430,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const r = resolveOutline(o, sources);
   const shownO = r.o;                       // what prints
   const locked = outlineSent(o);
+  const clientLink = openLinkOf(useDocLinks(o.id), 'outline');   // the private client link, if one was made
   const dirty = JSON.stringify(o) !== saved;
   const set = (c: Partial<CourseOutline>) => setO(x => ({ ...x, ...c }));
   const shared: string[] = o.sharedWithIds || [];
@@ -488,7 +491,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const ensureSaved = async () => (dirty ? persist(o, 'Saved') : true);
   // Sent by email, WhatsApp or by hand: lock a copy of what prints now and log how it went (a resend only logs).
   const lockAsSent = async (entry: QuoteSendEntry) => {
-    const how = entry.channel === 'email' ? 'Emailed' : entry.channel === 'whatsapp' ? 'Sent by WhatsApp' : 'Marked as sent';
+    const how = entry.channel === 'email' ? 'Emailed' : entry.channel === 'whatsapp' ? 'Sent by WhatsApp' : entry.channel === 'link' ? 'Client link made' : 'Marked as sent';
     const sendLog = [...(o.sendLog || []), entry].slice(-30);
     const out: CourseOutline = locked ? { ...o, sendLog } : { ...sendO, status: 'sent', sentAt: entry.at, sentById: me.id, sentByName: me.name, sendLog };
     const ok = await persist(out, locked ? how : `${how} and locked`);
@@ -521,7 +524,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     try {
       downloadBlob(await makeOutlinePdf(shownO), outlinePdfFileName(shownO));
     } catch (e: any) {
-      setError(`The PDF couldn't be made (${e?.message || e}). Open Preview and use Print → Save as PDF instead.`);
+      setError(pdfErrorText(e));
     } finally {
       setPdfBusy(false);
     }
@@ -647,12 +650,13 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
               <ul className="mt-1 space-y-0.5 text-sm">
                 {(o.sendLog || []).slice().reverse().map((x, i) => (
                   <li key={`${x.at}-${i}`}>
-                    {x.channel === 'email' ? 'Emailed' : x.channel === 'whatsapp' ? 'WhatsApp' : 'Marked as sent'}
+                    {x.channel === 'email' ? 'Emailed' : x.channel === 'whatsapp' ? 'WhatsApp' : x.channel === 'link' ? 'Client link made' : 'Marked as sent'}
                     {x.to ? ` to ${x.to}` : ''}{x.cc ? ` (cc ${x.cc})` : ''} · {x.byName} · {formatDate(x.at)} {new Date(x.at).toLocaleTimeString('en-MY', { hour: 'numeric', minute: '2-digit' })}
                   </li>
                 ))}
               </ul>
             )}
+            {clientLink && <div className="mt-3 text-ink"><DocLinkBox link={clientLink} compact /></div>}
           </div>
           <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
         </div>

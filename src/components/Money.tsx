@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import { AlertTriangle, Check, Download, Loader2, MessageCircle, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
+import { pdfErrorText } from '../lib/oldTab';
 import { dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
   COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_CATEGORIES, OUT_STATUS_LABELS, OutStatus, OutTiming,
@@ -324,7 +325,7 @@ function PaymentShare({ o, forText }: { o: MoneyOut; forText: string }) {
   const download = async () => {
     setBusy('pdf'); setMsg(null);
     try { const { blob, name } = await paymentPdf(o, forText); await saveBlob(blob, name); }
-    catch (e) { setMsg({ ok: false, text: `The PDF could not be made: ${friendlyError(e)}` }); }
+    catch (e) { setMsg({ ok: false, text: pdfErrorText(e) }); }
     finally { setBusy(''); }
   };
 

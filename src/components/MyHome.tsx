@@ -28,6 +28,7 @@ import { SharedItem, SharedKind, useSharedInbox } from '../lib/sharedInbox';
 import { clientDeals, clientQuotes, clientTimeline, touchFollowUpOpen } from '../lib/touchPoints';
 import { useTouchPoints } from '../lib/useClientHistory';
 import { linkedOnly } from '../lib/linked';
+import { DocLink, openedText } from '../lib/docLinks';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -145,6 +146,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const [savedLayout, setSavedLayout] = useState<Cell[] | null>(null);
   const wide = useWide();
   const [teammate, setTeammate] = useState('');
+  const [docLinks, setDocLinks] = useState<DocLink[]>([]);   // client links, to say when a client opened one
 
   useEffect(() => {
     const subs = [
@@ -153,6 +155,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
       onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'doc_links')), s => setDocLinks(s.docs.map(d => ({ ...(d.data() as any), token: d.id }))), () => {}),
       onSnapshot(query(collection(db, 'quotations')), s => setQuotes(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => {}),
       onSnapshot(doc(db, 'user_prefs', viewer.id), s => {
         const c = s.data()?.homeCards, l = s.data()?.homeLayout, sc = s.data()?.homeShortcuts;
@@ -283,7 +286,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
 
   const ctx: CardCtx = {
     viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, programmes, representatives, venues,
-    checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
+    checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps, docLinks,
   };
 
   return (
@@ -725,6 +728,7 @@ type CardCtx = {
   openDeal: (p: any) => void; nav: MyHomeNav; mine: (p: any) => boolean; notices: React.ReactNode;
   shared: SharedItem[];
   clientFollowUps: { clientId: string; title: string; date: string; d: number }[];
+  docLinks: DocLink[];
 };
 
 type Item = { key: string; title: string; sub?: string; level?: 'danger' | 'attention'; onClick?: () => void };
@@ -843,8 +847,21 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         sub: x.d < 0 ? `Client follow-up overdue by ${-x.d} day${x.d === -1 ? '' : 's'}` : x.d === 0 ? 'Client follow-up today' : `Client follow-up ${formatDate(x.date)}`,
         level: x.d < 0 ? 'danger' as const : x.d === 0 ? 'attention' as const : undefined,
       }));
+      // A client opened a quotation or outline link in the last 7 days and nobody has logged a follow-up since
+      // (2026-10-19): a good moment to call.
+      const weekAgo = Date.now() - 7 * 864e5;
+      const opened: Item[] = c.docLinks
+        .filter(l => l.status === 'open' && l.views && (l.lastViewedAt || 0) > weekAgo)
+        .map(l => ({ l, p: c.deals.find(d => d.id === l.dealId) }))
+        .filter(({ l, p }) => p && c.mine(p) && OPEN_STAGES.includes(dealStage(p))
+          && !(p.followUps || []).some((n: any) => Date.parse(n.at || '') > (l.lastViewedAt || 0)))
+        .sort((a, b) => (b.l.lastViewedAt || 0) - (a.l.lastViewedAt || 0))
+        .map(({ l, p }) => ({
+          key: `open_${l.token}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'attention' as const,
+          sub: `Opened your ${l.kind === 'quotation' ? 'quotation' : 'course outline'} ${l.refNumber || ''}: ${openedText(l).replace(/^Opened /, '')}. A good time to follow up.`,
+        }));
       return {
-        items: [...alerts, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
+        items: [...alerts, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
           key: p.id, title: c.clientName(p), onClick: () => c.openDeal(p),
           sub: d < 0 ? `Overdue by ${-d} day${d === -1 ? '' : 's'} (${STAGE_LABELS[dealStage(p)]})` : d === 0 ? 'Follow up today' : `Follow up ${formatDate(ymd(p.followUpDate))}`,
           level: d < 0 ? 'danger' : d === 0 ? 'attention' : undefined,
