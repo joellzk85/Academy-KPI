@@ -826,8 +826,8 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
         </Card>
 
         {/* 5. Agenda */}
-        <Card title={`5. Course agenda (${agenda.filter(r => !r.isDay).length})`}>
-          <p className="mb-3 text-[15px] text-ink-soft">Time slots for the day, printed as a table on its own page. Leave it empty to leave the page out. "Module 1" at the start prints in bold.</p>
+        <Card title={`5. Course agenda (optional${agenda.length ? `, ${agenda.filter(r => !r.isDay).length} time slots` : ''})`}>
+          <p className="mb-3 text-[15px] text-ink-soft">Only some courses need an agenda. Leave this empty and the outline has no agenda page, just the modules. If you add time slots, they print as a table on their own page. "Module 1" at the start prints in bold.</p>
           {agenda.length > 0 && (
             <ol className="space-y-2">
               {agenda.map((row, i) => (
