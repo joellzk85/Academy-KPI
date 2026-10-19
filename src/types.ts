@@ -288,6 +288,7 @@ export interface Trainer {
   qualifications?: string;
   pastClients?: string;
   suggestedTopics?: string;     // topics they teach that aren't in the Programme list yet
+  photoUrl?: string;            // photo, shown on teambuilding proposals (2026-10-19)
   contact?: string;
   email?: string;
   rate: number;
@@ -308,7 +309,8 @@ export interface Venue {
   facilities?: string;
   contact?: string;
   remarks?: string;
-  pictures?: string;
+  pictures?: string;            // older: a typed link or note
+  photos?: string[];            // uploaded photos (2026-10-19); the first is the main one
   status: 'Available' | 'Booked' | 'Under Renovation';
   createdAt?: number;
   createdBy?: string;

@@ -92,16 +92,18 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
   };
 
   const restore = async (p: any) => {
-    if (!window.confirm(`Restore the deal for ${clientName(p)}? It comes back in ${nameOf(dealOwnerId(p))}'s Deals, with its draft quotations and course outlines.`)) return;
+    if (!window.confirm(`Restore the deal for ${clientName(p)}? It comes back in ${nameOf(dealOwnerId(p))}'s Deals, with its draft quotations, course outlines and teambuilding proposals.`)) return;
     setBusyId(p.id); setMsg(null);
     try {
-      const [qs, os] = await Promise.all([
+      const [qs, os, ts] = await Promise.all([
         getDocs(query(collection(db, 'quotations'), where('pipelineId', '==', p.id))),
         getDocs(query(collection(db, 'course_outlines'), where('pipelineId', '==', p.id))),
+        getDocs(query(collection(db, 'teambuilding_proposals'), where('pipelineId', '==', p.id))),
       ]);
       const batch = writeBatch(db);
       qs.docs.filter(d => d.data().dealDeleted === true).forEach(d => batch.update(d.ref, { dealDeleted: false }));
       os.docs.filter(d => d.data().dealDeleted === true).forEach(d => batch.update(d.ref, { dealDeleted: false }));
+      ts.docs.filter(d => d.data().dealDeleted === true).forEach(d => batch.update(d.ref, { dealDeleted: false }));
       batch.update(doc(db, 'pipelines', p.id), {
         deleted: false, restoredAt: new Date().toISOString(), restoredById: viewer.id, restoredByName: viewer.name,
         history: history(p, `Deal restored (was deleted by ${p.deletedByName || 'someone'}${p.deletedReason ? `: ${String(p.deletedReason).slice(0, 80)}` : ''})`),

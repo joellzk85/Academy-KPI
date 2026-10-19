@@ -8,6 +8,7 @@ import { clientContacts, dealContact } from '../lib/contacts';
 import { blobToBase64, downloadBlob, makeOutlinePdf, makeQuotationPdf, outlinePdfFileName, pdfFileName } from '../lib/quotePdf';
 import { waPhone, onPhone } from '../lib/whatsapp';
 import DocLinkBox, { MakeLinkButton, openLinkOf, useDocLinks } from './DocLinkBox';
+import { DocKind } from '../lib/docLinks';
 
 // Send a quotation (2026-10-18): 1) Email from my own Outlook mailbox with the PDF attached (serverMail.ts),
 // 2) WhatsApp (phones: the share menu with the PDF; computers: the PDF downloads and the client's chat opens
@@ -45,7 +46,7 @@ type CommonProps = {
 
 // What's being sent (exactly what prints now): a quotation, or a course outline (the proposal).
 type SendDoc = {
-  kind: 'quotation' | 'outline'; id: string; refNumber: string; company: string; attn: string;
+  kind: 'quotation' | 'outline' | 'teambuilding'; id: string; refNumber: string; company: string; attn: string;
   programmes: string[]; fileName: string; makePdf: () => Promise<Blob>;
 };
 
@@ -67,11 +68,17 @@ export function OutlineSendDialog({ shownO, ...rest }: CommonProps & { shownO: C
   return <SendDocDialog doc={doc} {...rest} />;
 }
 
+// Teambuilding proposals (2026-10-19) use the same window: sending one is sending the proposal (TeambuildingPage.tsx).
+export function TeambuildingSendDialog({ sendDoc, ...rest }: CommonProps & { sendDoc: Omit<SendDoc, 'kind'> }) {
+  return <SendDocDialog doc={{ ...sendDoc, kind: 'teambuilding' }} {...rest} />;
+}
+
 function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me, ensureSaved, onSent, onClose }: CommonProps & { doc: SendDoc }) {
   const isQuote = shownQ.kind === 'quotation';
-  const noun = isQuote ? 'quotation' : 'course outline';
-  const Noun = isQuote ? 'Quotation' : 'Course outline';
-  const [channel, setChannel] = useState<Channel>('link');
+  const isTb = shownQ.kind === 'teambuilding';
+  const noun = isQuote ? 'quotation' : isTb ? 'teambuilding proposal' : 'course outline';
+  const Noun = isQuote ? 'Quotation' : isTb ? 'Teambuilding proposal' : 'Course outline';
+  const [channel, setChannel] = useState<Channel>(isTb ? 'pdf' : 'link')   // teambuilding proposals have no client link yet;
   const [pdf, setPdf] = useState<Blob | null>(null);
   const [pdfError, setPdfError] = useState('');
   const [mail, setMail] = useState<{ configured: boolean; myEmail: string } | null>(null);
@@ -96,22 +103,24 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
   const [cc, setCc] = useState('');
   const [subject, setSubject] = useState(isQuote
     ? `Quotation ${shownQ.refNumber}${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`
+    : isTb ? `Teambuilding proposal${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`
     : `Training proposal${programmes[0] ? `: ${programmes[0]}` : ''}${shownQ.company ? ` for ${shownQ.company}` : ''}`);
   const [body, setBody] = useState(isQuote
     ? `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our quotation ${shownQ.refNumber} for your review.\n\nShould you have any questions, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`
-    : `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our proposed course outline for your review.\n\nShould you have any questions, or would like any changes, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`,
+    : `Dear ${attn || 'Sir/Madam'},\n\nThank you for your interest in ${progText}. Please find attached our proposed ${isTb ? 'teambuilding programme' : 'course outline'} for your review.\n\nShould you have any questions, or would like any changes, please feel free to contact me.\n\nThank you.\n\nBest regards,\n${signOff}`,
   );
   // WhatsApp fields
   const [phone, setPhone] = useState(contact?.phone || '');
   const [waText, setWaText] = useState(
-    `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Attached is our ${isQuote ? `quotation ${shownQ.refNumber}` : 'proposed course outline'} for your review. Please let me know if you have any questions.\n\n${me.name}, NEXT Academy`,
+    `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Attached is our ${isQuote ? `quotation ${shownQ.refNumber}` : isTb ? 'teambuilding proposal' : 'proposed course outline'} for your review. Please let me know if you have any questions.\n\n${me.name}, NEXT Academy`,
   );
 
   // Client link (2026-10-19): a private web page of the sent copy. Making it locks the document and logs the send.
-  const links = useDocLinks(shownQ.id);
+  const links = useDocLinks(isTb ? undefined : shownQ.id);
   const [linkMade, setLinkMade] = useState('');   // the token just made (shown even before the live list has it)
-  const openLink = openLinkOf(links, shownQ.kind)
-    || (linkMade ? { token: linkMade, kind: shownQ.kind, docId: shownQ.id, dealId: '', refNumber: shownQ.refNumber, company: shownQ.company, status: 'open' as const, createdAt: Date.now(), byId: me.id, byName: me.name } : null);
+  const docKind = shownQ.kind as DocKind;   // the client link is for quotations and course outlines
+  const openLink = openLinkOf(links, docKind)
+    || (linkMade ? { token: linkMade, kind: docKind, docId: shownQ.id, dealId: '', refNumber: shownQ.refNumber, company: shownQ.company, status: 'open' as const, createdAt: Date.now(), byId: me.id, byName: me.name } : null);
   const linkMsg = `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Please find our ${isQuote ? `quotation ${shownQ.refNumber}` : 'proposed course outline'} for your review at the link below. You can also download it as a PDF there. Please let me know if you have any questions.
 
 ${me.name}, NEXT Academy`;
@@ -120,7 +129,7 @@ ${me.name}, NEXT Academy`;
     setBusy(true);
     try {
       if (!(await ensureSaved())) return setError(`Save the ${noun} first (see the message on the ${noun}).`);
-      const r = await callServer<{ token: string }>('/api/doc-link/create', { kind: shownQ.kind, id: shownQ.id }, true);
+      const r = await callServer<{ token: string }>('/api/doc-link/create', { kind: docKind, id: shownQ.id }, true);
       const ok = await onSent({ at: new Date().toISOString(), byId: me.id, byName: me.name, channel: 'link' });
       if (!ok) return setError(`The link was made, but the CRM could not mark the ${noun} as sent. Try again.`);
       setLinkMade(r.token);
@@ -166,7 +175,7 @@ ${me.name}, NEXT Academy`;
     try {
       if (!(await ensureSaved())) { setBusy(false); return setError(`Save the ${noun} first (see the message on the ${noun}).`); }
       const r = await callServer<{ to: string[]; cc: string[] }>('/api/mail/send', {
-        [isQuote ? 'quotationId' : 'outlineId']: shownQ.id, to, cc, subject, body, fileName, pdfBase64: await blobToBase64(pdf),
+        [isQuote ? 'quotationId' : isTb ? 'tbProposalId' : 'outlineId']: shownQ.id, to, cc, subject, body, fileName, pdfBase64: await blobToBase64(pdf),
       }, true);
       await finish({ channel: 'email', to: r.to.join(', '), cc: r.cc.join(', ') }, `Emailed to ${r.to.join(', ')}. It's in your Outlook Sent Items.`);
     } catch (e) {
@@ -219,14 +228,14 @@ ${me.name}, NEXT Academy`;
     ['email', 'Email', <Mail className="h-4 w-4" />],
     ['whatsapp', 'WhatsApp', <MessageCircle className="h-4 w-4" />],
     ['pdf', 'Download PDF', <Download className="h-4 w-4" />],
-  ] as [Channel, string, React.ReactNode][]).filter(([k]) => SHOW_EMAIL_WHATSAPP || (k !== 'email' && k !== 'whatsapp'));
+  ] as [Channel, string, React.ReactNode][]).filter(([k]) => (SHOW_EMAIL_WHATSAPP || (k !== 'email' && k !== 'whatsapp')) && !(isTb && k === 'link'));
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-4 pt-10" role="dialog" aria-modal="true" aria-labelledby="send-title" onClick={() => !busy && onClose()}>
       <div className="w-full max-w-xl rounded-2xl bg-white p-5 font-sans text-ink shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <h3 id="send-title" className="text-lg font-bold">{locked ? 'Send again' : isQuote ? 'Send quotation' : 'Send course outline'}</h3>
+            <h3 id="send-title" className="text-lg font-bold">{locked ? 'Send again' : isQuote ? 'Send quotation' : isTb ? 'Send teambuilding proposal' : 'Send course outline'}</h3>
             <p className="text-sm text-ink-soft">{shownQ.refNumber}{shownQ.company ? ` · ${shownQ.company}` : ''}</p>
           </div>
           <button type="button" onClick={onClose} disabled={busy} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>

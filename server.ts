@@ -8,6 +8,7 @@ import { registerBackupRoutes } from "./serverBackup";
 import { registerTrainerLinkRoutes } from "./serverTrainerLinks";
 import { registerMailRoutes } from "./serverMail";
 import { registerDocLinkRoutes } from "./serverDocLinks";
+import { registerPhotoRoutes } from "./serverPhotos";
 
 // Load environment variables
 dotenv.config();
@@ -41,6 +42,9 @@ async function startServer() {
 
   // Client links: a client opens a sent quotation or course outline as a web page, without logging in
   registerDocLinkRoutes(app);
+
+  // Photos for the teambuilding proposal PDF (read by the server, so the PDF can include them)
+  registerPhotoRoutes(app);
 
   // API Routes
   app.get("/api/health", (req, res) => {

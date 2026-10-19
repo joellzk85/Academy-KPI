@@ -134,3 +134,22 @@ body {
 .home-grid.editing .react-resizable-handle-s { background: none; }
 .home-grid.editing .react-resizable-handle-e::after { content: ''; position: absolute; right: 3px; top: 50%; width: 4px; height: 36px; margin-top: -18px; border-radius: 4px; background: #0E6E62; opacity: 0.45; }
 .home-grid.editing .react-resizable-handle-s::after { content: ''; position: absolute; bottom: 3px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 4px; background: #0E6E62; opacity: 0.45; }
+
+/* Teambuilding proposal website (TeambuildingSite.tsx, 2026-10-19): gentle reveal as sections scroll in. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.tb-site.tb-animate .tb-reveal { opacity: 0; transform: translateY(22px); transition: opacity 700ms ease, transform 700ms cubic-bezier(.2,.7,.2,1); }
+.tb-site.tb-animate .tb-reveal.tb-in { opacity: 1; transform: none; }
+.tb-site .tb-rise { animation: tb-rise 900ms cubic-bezier(.2,.7,.2,1) both; }
+.tb-site .tb-hero-img { animation: tb-zoom 14s ease-out both; }
+.tb-site .tb-bob svg { animation: tb-bob 1.8s ease-in-out infinite; }
+.tb-site.tb-animate .tb-reveal .tb-bar { transform-origin: left; transform: scaleX(0); transition: transform 1100ms cubic-bezier(.2,.7,.2,1) 200ms; }
+.tb-site.tb-animate .tb-reveal.tb-in .tb-bar { transform: scaleX(1); }
+@keyframes tb-rise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes tb-zoom { from { transform: scale(1.08); } to { transform: scale(1); } }
+@keyframes tb-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .tb-site .tb-rise, .tb-site .tb-hero-img, .tb-site .tb-bob svg { animation: none; }
+  .tb-site.tb-animate .tb-reveal, .tb-site.tb-animate .tb-reveal .tb-bar { opacity: 1; transform: none; transition: none; }
+}
+.tb-site.tb-static .tb-rise, .tb-site.tb-static .tb-hero-img, .tb-site.tb-static .tb-bob svg { animation: none; }

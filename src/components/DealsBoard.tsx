@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2,
+  AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2, PartyPopper,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
@@ -41,6 +41,8 @@ interface DealsBoardProps {
   onOpenQuotation?: (deal: any, quoteId: string) => void;   // opens one of the deal's quotations in the editor
   onCreateOutline: (deal: any) => void;
   onOpenOutline?: (deal: any, outlineId: string) => void;   // opens one of the deal's outlines in the editor ("Back to deal")
+  onCreateTeambuilding?: (deal: any) => void;               // teambuilding proposal (2026-10-19)
+  onOpenTeambuilding?: (deal: any, id: string) => void;
   onOpenQuotations: () => void;
   onOpenOutlines: () => void;
   openDealId?: string | null;          // reopen this deal's panel (coming back from its quotation)
@@ -97,11 +99,13 @@ function historyEntry(viewer: Viewer, action: string) {
 
 export default function DealsBoard({
   owner, people, viewer, onCreateQuotation, onOpenQuotation, onCreateOutline, onOpenOutline, onOpenQuotations, onOpenOutlines, openDealId, onOpenDealHandled,
+  onCreateTeambuilding, onOpenTeambuilding,
 }: DealsBoardProps) {
   const [deals, setDeals] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [outlines, setOutlines] = useState<any[]>([]);
+  const [tbs, setTbs] = useState<any[]>([]);   // teambuilding proposals
   const [checklists, setChecklists] = useState<Record<string, any>>({});
   const [programmes, setProgrammes] = useState<Programme[]>([]);
   const [queries, setQueries] = useState<HrdcQuery[]>([]);
@@ -135,6 +139,7 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'quotations')), s => setQuotes(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
       onSnapshot(query(collection(db, 'course_outlines')), s => setOutlines(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
+      onSnapshot(query(collection(db, 'teambuilding_proposals')), s => setTbs(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => {}),
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
       onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
@@ -443,13 +448,13 @@ export default function DealsBoard({
   // quotations and course outlines are hidden with it. Management can restore it in Management → Lost and deleted.
   const dealDocs = (p: any) => {
     const dealQuotes = quotes.filter(q => q.pipelineId === p.id);
-    return { drafts: dealQuotes.filter(q => q.status !== 'sent'), sent: dealQuotes.filter(q => q.status === 'sent'), outlines: outlines.filter(o => o.pipelineId === p.id) };
+    return { drafts: dealQuotes.filter(q => q.status !== 'sent'), sent: dealQuotes.filter(q => q.status === 'sent'), outlines: outlines.filter(o => o.pipelineId === p.id), tbs: tbs.filter(t => t.pipelineId === p.id) };
   };
   const refs = (list: any[]) => list.map(q => q.refNumber || 'no reference').join(', ');
   const deleteBlocker = (p: any): string => {
     const linked: string[] = [];
     if (dealStage(p) === 'won') linked.push('it is won');
-    const { drafts, sent, outlines: outs } = dealDocs(p);
+    const { drafts, sent, outlines: outs, tbs: tbList } = dealDocs(p);
     if (sent.length) linked.push(`quotation ${refs(sent)} has been sent`);
     const nm = moneyIn.filter(m => m.dealId === p.id).length + moneyOut.filter(m => m.dealId === p.id).length;
     if (nm) linked.push(`${nm} money record${nm === 1 ? '' : 's'}`);
@@ -461,7 +466,7 @@ export default function DealsBoard({
     // Reps can only change their own (or shared) quotations and outlines (database rule), so someone else's must be dealt with first.
     if (viewer.role === 'rep') {
       const mine = (q: any) => q.ownerId === viewer.id || q.creatorId === viewer.id || (q.sharedWithIds || []).includes(viewer.id);
-      const notMine = [...drafts, ...outs].filter(q => !mine(q));
+      const notMine = [...drafts, ...outs, ...tbList].filter(q => !mine(q));
       if (notMine.length) return `${refs(notMine)} on this deal belong${notMine.length === 1 ? 's' : ''} to someone else. Ask them, Admin or Management to delete ${notMine.length === 1 ? 'it' : 'them'} first.`;
     }
     return '';
@@ -470,7 +475,7 @@ export default function DealsBoard({
     const blocked = deleteBlocker(p);
     if (blocked) { setStageError(blocked); return false; }
     if (viewer.role !== 'management' && reason.trim().length < 3) { setStageError('Say why the deal is being deleted.'); return false; }
-    const { drafts, outlines: outs } = dealDocs(p);
+    const { drafts, outlines: outs, tbs: tbList } = dealDocs(p);
     setBusy(true);
     setStageError('');
     try {
@@ -479,6 +484,7 @@ export default function DealsBoard({
       const batch = writeBatch(db);
       drafts.forEach(q => batch.update(doc(db, 'quotations', q.id), { dealDeleted: true }));
       outs.forEach(o => batch.update(doc(db, 'course_outlines', o.id), { dealDeleted: true }));
+      tbList.forEach(t => batch.update(doc(db, 'teambuilding_proposals', t.id), { dealDeleted: true }));
       batch.update(doc(db, 'pipelines', p.id), {
         deleted: true, deletedAt: at, deletedById: viewer.id, deletedByName: viewer.name, deletedReason: reason.trim().slice(0, 500),
         history: [...(p.history || []), historyEntry(viewer, `Deleted${reason.trim() ? `: ${reason.trim().slice(0, 120)}` : ''}`)].slice(-40),
@@ -658,6 +664,7 @@ export default function DealsBoard({
               viewer={viewer}
               quotes={quotes.filter(q => q.pipelineId === openDeal.id)}
               outlines={outlines.filter(o => o.pipelineId === openDeal.id)}
+              tbs={tbs.filter(t => t.pipelineId === openDeal.id)}
               checklist={checklists[openDeal.id] || null}
               venue={dealVenue(checklists[openDeal.id] || null, quotes.filter(q => q.pipelineId === openDeal.id), venues)}
               programme={programmeOf(openDeal)}
@@ -706,6 +713,8 @@ export default function DealsBoard({
               onOpenQuotation={onOpenQuotation ? (id: string) => onOpenQuotation(openDeal, id) : undefined}
               onCreateOutline={() => onCreateOutline(openDeal)}
               onOpenOutline={onOpenOutline ? (id: string) => onOpenOutline(openDeal, id) : undefined}
+              onCreateTeambuilding={onCreateTeambuilding ? () => onCreateTeambuilding(openDeal) : undefined}
+              onOpenTeambuilding={onOpenTeambuilding ? (id: string) => onOpenTeambuilding(openDeal, id) : undefined}
               onOpenQuotations={onOpenQuotations}
               onOpenOutlines={onOpenOutlines}
             />
@@ -886,7 +895,7 @@ function defaultSection(st: DealStage): SectionKey {
 function DealPanel(props: {
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
   clientBadge?: React.ReactNode;
-  editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; checklist: any | null; busy: boolean;
+  editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; tbs: any[]; checklist: any | null; busy: boolean;
   programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
   venue: Picked | null;
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; moneySettings: MoneySettings;
@@ -904,6 +913,7 @@ function DealPanel(props: {
   onLost: () => void; onReopen: () => void;
   canManage: boolean; onDelete: (reason: string) => Promise<boolean>;
   onCreateQuotation: () => void; onOpenQuotation?: (quoteId: string) => void; onCreateOutline: () => void; onOpenOutline?: (outlineId: string) => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
+  onCreateTeambuilding?: () => void; onOpenTeambuilding?: (id: string) => void;
 }) {
   const p = props.deal;
   const st = dealStage(p);
@@ -921,6 +931,10 @@ function DealPanel(props: {
   const outlinesNewest = [...props.outlines].sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)));
   const draftOutline = outlinesNewest.find(o => o.status !== 'sent');
   const openOutline = (o: any) => (props.onOpenOutline ? props.onOpenOutline(o.id) : props.onOpenOutlines());
+  // Teambuilding proposals (2026-10-19): the same, in their own list.
+  const tbsNewest = [...props.tbs].sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)));
+  const draftTb = tbsNewest.find(t => t.status !== 'sent');
+  const openTb = (t: any) => props.onOpenTeambuilding?.(t.id);
   const skipped = !!p.proposalSkipped && !stageDate(p, 'proposal');
   const pr = props.checklist ? progress(props.checklist.tasks, p.fundingType) : null;
   const ap = apptOf(p);
@@ -940,13 +954,18 @@ function DealPanel(props: {
   const next: { title: string; hint?: string; button?: React.ReactNode } = (() => {
     if (st === 'lead' || st === 'appointment') return {
       title: 'Next step: send the proposal',
-      hint: 'Send the course outline (marking it sent moves the deal on), drop the proposal file below, or click "Proposal sent" if it went another way. Meeting the client first is optional.',
+      hint: 'Send the course outline or teambuilding proposal (sending it moves the deal on), drop the proposal file below, or click "Proposal sent" if it went another way. Meeting the client first is optional.',
       button: (
         <>
           <button type="button" disabled={props.busy} className={main} onClick={props.onProposal}>Proposal sent</button>
           <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => (draftOutline ? openOutline(draftOutline) : props.onCreateOutline())}>
             <ClipboardList className="h-4 w-4" /> {draftOutline ? 'Open course outline' : 'Create course outline'}
           </button>
+          {props.onCreateTeambuilding && (
+            <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => (draftTb ? openTb(draftTb) : props.onCreateTeambuilding!())}>
+              <PartyPopper className="h-4 w-4" /> {draftTb ? 'Open teambuilding proposal' : 'Create teambuilding proposal'}
+            </button>
+          )}
         </>
       ),
     };
@@ -1150,6 +1169,7 @@ function DealPanel(props: {
         <Fold title="Documents and proposal files" hint={[
           `${props.quotes.length} quotation${props.quotes.length === 1 ? '' : 's'}`,
           `${props.outlines.length} course outline${props.outlines.length === 1 ? '' : 's'}`,
+          ...(props.tbs.length ? [`${props.tbs.length} teambuilding proposal${props.tbs.length === 1 ? '' : 's'}`] : []),
           `${props.proposalFiles.length} proposal file${props.proposalFiles.length === 1 ? '' : 's'}`,
         ].join(' · ')} defaultOpen={def === 'documents'} id={p.id}>
           <div className="space-y-2">
@@ -1157,6 +1177,10 @@ function DealPanel(props: {
               onOpen={() => { const q = sentQuote || draftQuote; if (q) openQuote(q); }} onCreate={props.editable && canQuote(p) && !draftQuote ? props.onCreateQuotation : undefined} createLabel="Create quotation" />
             {!canQuote(p) && st !== 'lost' && <p className="text-sm text-ink-soft">A quotation can be made once the client approves the proposal.</p>}
             <OutlineRows outlines={outlinesNewest} onOpen={openOutline} onCreate={props.editable && !draftOutline ? props.onCreateOutline : undefined} />
+            {(props.tbs.length > 0 || props.onCreateTeambuilding) && (
+              <OutlineRows outlines={tbsNewest.map(t => ({ ...t, courseTitle: t.title }))} onOpen={openTb} onCreate={props.editable && !draftTb && props.onCreateTeambuilding ? props.onCreateTeambuilding : undefined}
+                heading="Teambuilding proposals" createLabel="Create teambuilding proposal" icon={<PartyPopper className="h-4 w-4" />} />
+            )}
             <ProposalFilesList dealId={p.id} files={props.proposalFiles} viewer={props.viewer} editable={props.editable} onUploaded={props.onProposalUploaded} />
           </div>
         </Fold>
@@ -1284,12 +1308,14 @@ function DocRow({ icon, name, items, onOpen, onCreate, createLabel }: { icon: Re
 
 // The deal's course outlines, each with Draft or "Sent <date> (proposal)", opening straight in the editor.
 // "Create outline" shows only while there's no draft, so a second click never makes a duplicate.
-function OutlineRows({ outlines, onOpen, onCreate }: { outlines: any[]; onOpen: (o: any) => void; onCreate?: () => void }) {
+function OutlineRows({ outlines, onOpen, onCreate, heading = 'Course outlines', createLabel = 'Create outline', icon }: {
+  outlines: any[]; onOpen: (o: any) => void; onCreate?: () => void; heading?: string; createLabel?: string; icon?: React.ReactNode;
+}) {
   return (
     <div className="rounded-lg border border-line px-3.5 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-sm font-semibold"><span className="text-accent"><ClipboardList className="h-4 w-4" /></span>Course outlines ({outlines.length})</span>
-        {onCreate && <button type="button" className={btnSecondary} onClick={onCreate}><Plus className="h-3.5 w-3.5" /> Create outline</button>}
+        <span className="flex items-center gap-2 text-sm font-semibold"><span className="text-accent">{icon || <ClipboardList className="h-4 w-4" />}</span>{heading} ({outlines.length})</span>
+        {onCreate && <button type="button" className={btnSecondary} onClick={onCreate}><Plus className="h-3.5 w-3.5" /> {createLabel}</button>}
       </div>
       {outlines.length > 0 && (
         <ul className="mt-2 divide-y divide-line">

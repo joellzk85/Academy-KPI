@@ -9,6 +9,7 @@ import { Booking, trainerBookings } from '../lib/trainers';
 import { linkedOnly } from '../lib/linked';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
 import { ProfileSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
+import PhotoPicker from './PhotoPicker';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -32,7 +33,7 @@ const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
 const emptyForm = () => ({ name: '', specialization: '', programmeIds: [] as string[], contact: '', email: '', rate: '', onLeave: false, notes: '',
-  bio: '', experienceYears: '', qualifications: '', pastClients: '', suggestedTopics: '' });
+  bio: '', experienceYears: '', qualifications: '', pastClients: '', suggestedTopics: '', photoUrl: '' });
 type Form = ReturnType<typeof emptyForm>;
 
 const norm = (s?: string) => (s || '').trim().toLowerCase();
@@ -158,7 +159,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const startNew = () => { setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
   const startEdit = (t: Trainer) => {
     setForm({ name: t.name || '', specialization: t.specialization || '', programmeIds: (t.programmeIds || []).filter(id => programmes.some(p => p.id === id)), contact: t.contact || '', email: t.email || '', rate: t.rate ? String(t.rate) : '', onLeave: t.status === 'On Leave', notes: t.notes || '',
-      bio: t.bio || '', experienceYears: t.experienceYears ? String(t.experienceYears) : '', qualifications: t.qualifications || '', pastClients: t.pastClients || '', suggestedTopics: t.suggestedTopics || '' });
+      bio: t.bio || '', experienceYears: t.experienceYears ? String(t.experienceYears) : '', qualifications: t.qualifications || '', pastClients: t.pastClients || '', suggestedTopics: t.suggestedTopics || '', photoUrl: t.photoUrl || '' });
     setProgSearch('');
     setFormError(''); setDupId(null); setEditing(t.id);
   };
@@ -181,6 +182,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       notes: form.notes.trim(),
       bio: form.bio.trim(), experienceYears: parseFloat(form.experienceYears.replace(/[^0-9.]/g, '')) || 0,
       qualifications: form.qualifications.trim(), pastClients: form.pastClients.trim(), suggestedTopics: form.suggestedTopics.trim(),
+      photoUrl: form.photoUrl,
     };
     setBusy(true);
     try {
@@ -466,6 +468,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                   <input id="t-other" value={form.suggestedTopics} onChange={e => set({ suggestedTopics: e.target.value })} className={input} />
                 </div>
               </div>
+              <PhotoPicker photos={form.photoUrl ? [form.photoUrl] : []} onChange={ph => set({ photoUrl: ph[0] || '' })} folder="trainers" me={viewer} single label="Photo (shown on teambuilding proposals)" />
               <div>
                 <label className={label} htmlFor="t-bio">Short bio</label>
                 <textarea id="t-bio" value={form.bio} onChange={e => set({ bio: e.target.value })} rows={3} className={`${input} resize-y`} />
@@ -531,7 +534,8 @@ function TrainerPanel(props: {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+        {t.photoUrl && <img src={t.photoUrl} alt={t.name} className="h-16 w-16 shrink-0 rounded-xl object-cover" />}
+        <div className="min-w-0 flex-1">
           <h3 className="flex items-center gap-2 text-lg font-bold"><GraduationCap className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{t.name}</span></h3>
           <p className="mt-0.5 text-[15px] text-ink-soft">{t.status === 'On Leave' ? 'On leave' : 'Available'}</p>
         </div>

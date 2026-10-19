@@ -5,6 +5,7 @@ import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
 import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent, Sparkles, Clock, FileText, Trash2, Briefcase, TrendingUp, CheckCircle, XCircle, AlertCircle, Users, MapPin, Building2, GraduationCap, Eye, EyeOff, Tag, RotateCcw, Lock, Shield, History, MessageSquare, Send, CornerDownRight, Check, Printer, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronUp, PieChart, Edit3, CheckSquare, Square, FolderCheck, Search, Layers, CheckCheck } from 'lucide-react';
 import QuotationsPage from './QuotationsPage';
 import CourseOutlinesPage from './CourseOutlinesPage';
+import TeambuildingPage from './TeambuildingPage';
 import TasksPage from './TasksPage';
 import { needsDoingNow } from '../lib/tasks';
 import ClientManager from './ClientManager';
@@ -37,7 +38,7 @@ interface RepDetailDashboardProps {
   onOpenDealHandled?: () => void;
 }
 
-type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'admin_record' | 'appointments' | 'client_payments';
+type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
 
 
 // Tombstone list of pipeline IDs the user has deleted, so other views
@@ -1222,6 +1223,7 @@ export default function RepDetailDashboard({
   useEffect(() => {
     if (!openFile) return;
     if (openFile.kind === 'quotation') { setQuoteFromDeal({ dealId: '', quoteId: openFile.id }); handleSubTabChange('quotation'); }
+    else if (openFile.kind === 'teambuilding') { setTbToOpen(openFile.id); handleSubTabChange('teambuilding'); }
     else { setOutlineToOpen(openFile.id); handleSubTabChange('course_outline'); }
     onOpenFileHandled?.();
   }, [openFile]);
@@ -1253,6 +1255,13 @@ export default function RepDetailDashboard({
     setOutlineFromDeal(p.id);
     setActiveSubTab('course_outline');
   };
+
+  // Teambuilding proposals (2026-10-19): like outlines, opened from a deal with "Back to deal"; a deal's draft opens instead of a second.
+  const [tbStartDeal, setTbStartDeal] = useState<any | null>(null);
+  const [tbToOpen, setTbToOpen] = useState<string | null>(null);
+  const [tbFromDeal, setTbFromDeal] = useState<string | null>(null);
+  const handleCreateTbForPipeline = (p: any) => { setTbStartDeal(p); setTbFromDeal(p.id); setActiveSubTab('teambuilding'); };
+  const openTbFromDeal = (p: any, id: string) => { setTbToOpen(id); setTbFromDeal(p.id); setActiveSubTab('teambuilding'); };
 
   // Real-time Firestore sync for pipelines
   useEffect(() => {
@@ -2024,6 +2033,7 @@ export default function RepDetailDashboard({
       alert: inbox.quotations ? `${inbox.quotations} shared with you` : hasTaggedQuotations ? 'Tagged quotation' : undefined },
     { key: 'course_outline', label: MENU_LABELS.course_outline, count: inbox.outlines,
       alert: inbox.outlines ? `${inbox.outlines} shared with you` : hasTaggedCourseOutlines ? 'Tagged outline' : undefined },
+    { key: 'teambuilding', label: MENU_LABELS.teambuilding, count: inbox.teambuilding, alert: inbox.teambuilding ? `${inbox.teambuilding} shared with you` : undefined },
     { key: 'client', label: MENU_LABELS.client },
     { key: 'trainerList', label: MENU_LABELS.trainerList },
     { key: 'venue', label: MENU_LABELS.venue },
@@ -2055,7 +2065,7 @@ export default function RepDetailDashboard({
           onSelect={(k) => {
             if (k === 'admin_work') return onOpenAdminWork?.();
             // A red count on Quotations / Course outlines: open the list on "Shared with me".
-            setSharedFirst((k === 'quotation' && inbox.quotations) || (k === 'course_outline' && inbox.outlines) ? k : null);
+            setSharedFirst((k === 'quotation' && inbox.quotations) || (k === 'course_outline' && inbox.outlines) || (k === 'teambuilding' && inbox.teambuilding) ? k : null);
             handleSubTabChange(k as SubTab);
           }} prefsId={viewer?.id || rep.id}
           ownerLabel={viewer && viewer.id !== rep.id ? `${rep.name}'s workspace` : undefined} />
@@ -2071,6 +2081,10 @@ export default function RepDetailDashboard({
             <CourseOutlinesPage key={`${rep.id}-${sharedFirst === 'course_outline'}`} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => { setOutlineStartDeal(null); setOutlineFromDeal(null); }} onOpenTab={(t) => handleSubTabChange(t as SubTab)}
               openId={outlineToOpen} onOpenHandled={() => { setOutlineToOpen(null); setOutlineFromDeal(null); }} startOnShared={sharedFirst === 'course_outline'}
               fromDealId={outlineFromDeal} onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} />
+          ) : activeSubTab === 'teambuilding' ? (
+            <TeambuildingPage key={`${rep.id}-${sharedFirst === 'teambuilding'}`} rep={rep} reps={reps} viewer={viewer} startDeal={tbStartDeal} onStartHandled={() => { setTbStartDeal(null); setTbFromDeal(null); }}
+              openId={tbToOpen} onOpenHandled={() => { setTbToOpen(null); setTbFromDeal(null); }} startOnShared={sharedFirst === 'teambuilding'}
+              fromDealId={tbFromDeal} onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} onOpenDeals={() => handleSubTabChange('pipeline')} />
           ) : activeSubTab === 'client' ? (
             <ClientManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }}
               openClientId={clientToOpen} onOpenClientHandled={() => setClientToOpen(null)}
@@ -2096,6 +2110,8 @@ export default function RepDetailDashboard({
               onOpenDealHandled={() => setDealToOpen(null)}
               onCreateOutline={handleCreateOutlineForPipeline}
               onOpenOutline={openOutlineFromDeal}
+              onCreateTeambuilding={handleCreateTbForPipeline}
+              onOpenTeambuilding={openTbFromDeal}
               onOpenQuotations={() => setActiveSubTab('quotation')}
               onOpenOutlines={() => setActiveSubTab('course_outline')}
             />
