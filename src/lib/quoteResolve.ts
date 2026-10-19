@@ -10,7 +10,7 @@
 // and to hold the locked copy once it is marked as sent.
 
 import { Quotation, QuotationItem } from '../types';
-import { dealOwnerId, formatDate } from './deals';
+import { daysText, dealOwnerId, formatDate, trainingDateText, trainingDays } from './deals';
 import { dealContact } from './contacts';
 
 // Standard terms and conditions printed on every quotation unless edited.
@@ -51,7 +51,7 @@ export interface Resolved {
 }
 
 // What a missing detail is, so the "Fix these at the source" box can offer the right field (2026-10-18).
-export type QuoteFixKind = 'client_address' | 'client_contact' | 'no_client' | 'programme_gone' | 'deal_date';
+export type QuoteFixKind = 'client_address' | 'client_contact' | 'no_client' | 'programme_gone' | 'deal_date' | 'days_mismatch';
 export interface QuoteFix { kind: QuoteFixKind; text: string }
 
 export function isSent(q: Quotation): boolean {
@@ -108,8 +108,11 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
     const trainer = it.trainerId ? s.trainers.find(t => t.id === it.trainerId) : null;
     if (trainer) line.trainer = trainer.name || '';
     if (it.useDealDate && deal) {
-      line.date = deal.trainingDate ? formatDate(deal.trainingDate) : '';
-      if (!deal.trainingDate) issues.push('The linked deal has no training date yet.', 'deal_date');
+      // A training of several days prints its dates as a range, e.g. "21 – 22 Oct 2026".
+      line.date = trainingDateText(deal);
+      if (!line.date) issues.push('The linked deal has no training date yet.', 'deal_date');
+      const n = trainingDays(deal);
+      if (n !== 1 && (Number(it.days) || 0) !== n) issues.push(`The deal is a ${daysText(n)} training, but this programme line says ${daysText(Number(it.days) || 0)}.`, 'days_mismatch');
     }
     line.totalFee = (Number(line.feePerDay) || 0) * (Number(line.days) || 0);
     return line;

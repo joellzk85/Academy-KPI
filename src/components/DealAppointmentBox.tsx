@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { AlertTriangle, CalendarClock, CalendarPlus, Loader2, NotebookPen, Pencil, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { FUNDING_LABELS, FundingType, dealStage, dealValue, formatDate, statusForStage, todayIso } from '../lib/deals';
+import { FUNDING_LABELS, FundingType, dealStage, dealValue, formatDate, statusForStage, todayIso, trainingDays } from '../lib/deals';
 import { ApptMode, DealAppointment, MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import { ProgrammePicker } from './Programmes';
 import { dealContact } from '../lib/contacts';
@@ -76,6 +76,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
         followUpDate: v.followUpDate,
         ...(prog ? { programmeId: prog.id, courseName: prog.name } : {}),
         ...(v.trainingDate ? { trainingDate: v.trainingDate } : {}),
+        ...(Number(v.trainingDays) > 0 ? { trainingDays: Number(v.trainingDays) } : {}),
         ...(v.participants ? { participants: v.participants } : {}),
         ...(v.value ? { proposalValue: Number(v.value) } : {}),
         ...(v.fundingType ? { fundingType: v.fundingType } : {}),
@@ -187,6 +188,7 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
     metWith: held?.metWith || dealContact(deal, client)?.name || '',
     programmeId: deal.programmeId || '',
     trainingDate: /^\d{4}-\d{2}-\d{2}/.test(deal.trainingDate || '') ? deal.trainingDate.slice(0, 10) : '',
+    trainingDays: trainingDays(deal) !== 1 ? String(trainingDays(deal)) : '',
     participants: deal.participants ? String(deal.participants) : '',
     value: dealValue(deal) ? String(dealValue(deal)) : '',
     fundingType: (deal.fundingType || '') as FundingType | '',
@@ -223,8 +225,9 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
             <span className={label}>Programme</span>
             <ProgrammePicker programmes={programmes} value={v.programmeId} legacyName={!v.programmeId ? deal.courseName : ''} viewer={viewer} onChange={pg => set({ programmeId: pg.id })} />
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div><label className={label} htmlFor="lg-td">Preferred training date</label><input id="lg-td" type="date" value={v.trainingDate} onChange={e => set({ trainingDate: e.target.value })} className={input} /></div>
+            <div><label className={label} htmlFor="lg-dy">Training days</label><input id="lg-dy" inputMode="decimal" value={v.trainingDays} onChange={e => set({ trainingDays: e.target.value.replace(/[^0-9.]/g, '') })} className={input} placeholder="1" /></div>
             <div><label className={label} htmlFor="lg-px">Participants</label><input id="lg-px" inputMode="numeric" value={v.participants} onChange={e => set({ participants: e.target.value.replace(/[^0-9]/g, '') })} className={input} placeholder="e.g. 20" /></div>
             <div><label className={label} htmlFor="lg-v">Estimated value (RM)</label><input id="lg-v" inputMode="decimal" value={v.value} onChange={e => set({ value: e.target.value.replace(/[^0-9.]/g, '') })} className={input} /></div>
           </div>

@@ -8,7 +8,7 @@
 // Automatic SST = the SST part of the income when the deal's quotation adds SST (its rate, normally 8%);
 // Management can type the amount instead, saved in project_pl/{dealId}.sstAmount. SST comes off profit.
 
-import { dealOwnerId, dealStage, dealValue, todayIso } from './deals';
+import { dealOwnerId, dealStage, dealValue, todayIso, trainingEndDate } from './deals';
 import { MoneyIn, MoneyOut, MoneySettings, dealPL, moneySettled } from './money';
 import { mainQuote } from './checklist';
 
@@ -67,7 +67,8 @@ export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], s:
   const outs = allOuts.filter(o => o.dealId === deal.id);
   const pl = dealPL(ins, outs, s);
   const trainingDate = isoDate(deal?.trainingDate);
-  const training: TrainingStatus = !trainingDate ? 'no_date' : trainingDate < today ? 'done' : trainingDate === today ? 'today' : 'upcoming';
+  const lastDay = trainingEndDate(deal) || trainingDate;   // a training of several days is done after its last day
+  const training: TrainingStatus = !trainingDate ? 'no_date' : lastDay < today ? 'done' : trainingDate <= today ? 'today' : 'upcoming';
 
   const sstRate = quoteSstRate(x.quotes.filter(q => q.pipelineId === deal.id));
   const typed = x.plDocs[deal.id]?.sstAmount;

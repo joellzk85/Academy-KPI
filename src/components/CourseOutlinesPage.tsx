@@ -6,7 +6,7 @@ import {
 import { db, friendlyError } from '../lib/firebase';
 import { CourseOutline, CourseOutlineItem, OutlineAgendaRow, QuoteSendEntry, Representative } from '../types';
 import { BLOOM_LEVELS, DEFAULT_OUTLINE_TERMS, DIFFICULTIES, durationText } from '../lib/outlineContent';
-import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso } from '../lib/deals';
+import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso, trainingDays } from '../lib/deals';
 import { GapsBox } from './DealGates';
 import { Programme } from '../lib/programmes';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
@@ -121,7 +121,8 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       difficulty: base.difficulty || '', evaluation: base.evaluation || [], bloomLevel: base.bloomLevel || 0,
       nextTraining: base.nextTraining || [], designedBy: base.designedBy || '', terms: base.terms, hideTerms: !!base.hideTerms,
     }) : {
-      courseTitle: '', durationDays: 1, totalHours: 8, category: '', level: 'Beginner' as const, audience: '', prerequisites: '', overview: '',
+      // A blank outline for a deal starts at the deal's training days (8 hours a day).
+      courseTitle: '', durationDays: deal ? trainingDays(deal) : 1, totalHours: 8 * (deal ? trainingDays(deal) : 1), category: '', level: 'Beginner' as const, audience: '', prerequisites: '', overview: '',
       outcomes: [], items: [newModule()], kind: 'training' as const, methods: [], agenda: [],
     };
     const o: CourseOutline = {

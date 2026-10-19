@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2, PartyPopper,
+  AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2, PartyPopper, Copy,
 } from 'lucide-react';
 import ProposalTracking from './ProposalTracking';
 import { useProposalAlerts } from '../lib/useProposalLinks';
@@ -11,6 +11,7 @@ import { Representative } from '../types';
 import {
   DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention, stageDate,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM, dealGaps, dealAskedFor, DealField, lostNoteProblem, reachedStage, SKIP_REASONS,
+  trainingDays, trainingDateText,
 } from '../lib/deals';
 import { FollowUpAlert, alertText, followUpAlert, followUpNotes } from '../lib/followUps';
 import { AlertLine, FollowUpForm, FollowUpList, followUpCountText } from './FollowUps';
@@ -31,7 +32,7 @@ import PickOrType from './PickOrType';
 import { ProposalDrop, ProposalFilesList } from './ProposalFiles';
 import { ProposalFile } from '../lib/proposals';
 import { ClientLastTouch } from './ClientContactDot';
-import { repeatDeal, repeatOwner } from '../lib/repeatDeal';
+import { DuplicateStart, duplicateDeal, repeatDeal, repeatOwner } from '../lib/repeatDeal';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -52,7 +53,8 @@ interface DealsBoardProps {
 }
 
 type Filter = 'open' | DealStage | 'tagged';
-type StagePanel = null | 'won' | 'lost' | 'followup' | 'skip';
+type StagePanel = null | 'won' | 'lost' | 'followup' | 'skip' | 'duplicate';
+type DuplicateOptions = { client: { id: string; companyName: string }; trainingDate: string; trainingDays: number; start: DuplicateStart };
 type GateStep = 'proposal' | 'quote' | 'skip';
 const GATE_STEP_LABELS: Record<GateStep, string> = { proposal: 'Proposal sent', quote: 'Client approved: create quotation', skip: 'No proposal needed' };
 
@@ -88,6 +90,7 @@ const emptyForm = () => ({
   proposalValue: '',
   requestDate: todayIso(),
   trainingDate: '',
+  trainingDays: '',       // blank = 1 day
   followUpDate: '',
   ownerId: '',
   taggedRepIds: [] as string[],
@@ -257,6 +260,7 @@ export default function DealsBoard({
       proposalValue: dealValue(p) ? String(dealValue(p)) : '',
       requestDate: (p.requestDate || todayIso()).slice(0, 10),
       trainingDate: /^\d{4}-\d{2}-\d{2}/.test(p.trainingDate || '') ? p.trainingDate.slice(0, 10) : '',
+      trainingDays: trainingDays(p) !== 1 ? String(trainingDays(p)) : '',
       followUpDate: /^\d{4}-\d{2}-\d{2}/.test(p.followUpDate || '') ? p.followUpDate.slice(0, 10) : '',
       ownerId: dealOwnerId(p) || owner.id,
       taggedRepIds: p.taggedRepIds || [],
@@ -281,6 +285,8 @@ export default function DealsBoard({
     const value = form.proposalValue.trim() === '' ? 0 : Number(form.proposalValue);
     if (!Number.isFinite(value) || value < 0) return setFormError('Enter the deal value as a number, for example 15000.');
     if (!form.requestDate) return setFormError('Enter the date the client asked.');
+    const days = form.trainingDays.trim() === '' ? 1 : Number(form.trainingDays);
+    if (!Number.isFinite(days) || days <= 0 || days > 60 || (days * 2) % 1 !== 0) return setFormError('Enter the training days as a number, for example 2 (or 0.5 for half a day).');
     const newOwner = people.find(r => r.id === form.ownerId) || owner;
     if (viewer.role === 'rep' && newOwner.id !== viewer.id && editing === 'new') {
       return setFormError('You can only create deals for yourself.');
@@ -321,6 +327,7 @@ export default function DealsBoard({
         proposalValue: value,
         requestDate: form.requestDate,
         trainingDate: form.trainingDate || '',
+        trainingDays: days,
         followUpDate: form.followUpDate || 'TBD',
         ownerId: newOwner.id,
         ownerName: newOwner.name,
@@ -422,6 +429,23 @@ export default function DealsBoard({
       else setOpenId(r.dealId);
     } catch (err) {
       setStageError(`The repeat deal couldn't be created: ${friendlyError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // "Duplicate deal" (Joel, 2026-10-19): same programme again, only the date, venue and trainer change (lib/repeatDeal.ts).
+  const duplicate = async (p: any, opt: DuplicateOptions) => {
+    setBusy(true);
+    setStageError('');
+    try {
+      const r = await duplicateDeal(p, viewer, people.map(x => ({ id: x.id, name: x.name })), quotes, outlines, opt);
+      setStagePanel(null);
+      flash('Copy of the deal created');
+      if (r.quoteId && onOpenQuotation) onOpenQuotation({ id: r.dealId }, r.quoteId);
+      else setOpenId(r.dealId);
+    } catch (err) {
+      setStageError(`The copy couldn't be created: ${friendlyError(err)}`);
     } finally {
       setBusy(false);
     }
@@ -695,6 +719,7 @@ export default function DealsBoard({
               skipNote={skipNote} setSkipNote={setSkipNote}
               onSkip={() => skipProposal(openDeal)}
               onRepeat={() => repeat(openDeal)}
+              onDuplicate={(opt) => duplicate(openDeal, opt)}
               onGapCancel={() => setGate(null)}
               onWonDone={(msg) => { setStagePanel(null); flash(msg); }}
               lostReason={lostReason} setLostReason={setLostReason}
@@ -817,7 +842,7 @@ export default function DealsBoard({
                   ))}
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <label htmlFor="d-req" className={label}>Client asked on</label>
                   <input id="d-req" type="date" value={form.requestDate} onChange={e => setForm(f => ({ ...f, requestDate: e.target.value }))} className={input} />
@@ -825,6 +850,11 @@ export default function DealsBoard({
                 <div>
                   <label htmlFor="d-train" className={label}>Training date</label>
                   <input id="d-train" type="date" value={form.trainingDate} onChange={e => setForm(f => ({ ...f, trainingDate: e.target.value }))} className={input} />
+                </div>
+                <div>
+                  <label htmlFor="d-days" className={label}>Training days</label>
+                  <input id="d-days" type="number" inputMode="decimal" min="0.5" step="0.5" placeholder="1" value={form.trainingDays} onChange={e => setForm(f => ({ ...f, trainingDays: e.target.value }))} className={input} />
+                  {form.trainingDate && Number(form.trainingDays) > 1 && <p className="mt-1 text-sm text-ink-soft">{trainingDateText({ trainingDate: form.trainingDate, trainingDays: Number(form.trainingDays) })}</p>}
                 </div>
                 <div>
                   <label htmlFor="d-fu" className={label}>Next follow-up</label>
@@ -915,6 +945,7 @@ function DealPanel(props: {
   gate: null | { step: GateStep; gaps: DealField[] }; clients: any[];
   skipReason: string; setSkipReason: (v: string) => void; skipNote: string; setSkipNote: (v: string) => void; onSkip: () => void;
   onRepeat: () => void;
+  onDuplicate: (opt: DuplicateOptions) => void;
   onGapSaved: (updated: any) => void; onGapCancel: () => void; onWonDone: (msg: string) => void;
   lostReason: string; setLostReason: (v: string) => void;
   lostNote: string; setLostNote: (v: string) => void;
@@ -1047,7 +1078,12 @@ function DealPanel(props: {
               <FollowUpForm deal={p} viewer={props.viewer} alert={props.alert} onDone={props.onFollowUpDone}
                 onCancel={() => props.setStagePanel(null)} onMarkLost={() => props.setStagePanel('lost')} />
             )}
-            {next.button && props.stagePanel !== 'won' && props.stagePanel !== 'followup' && props.stagePanel !== 'skip' && !props.gate && (
+            {props.stagePanel === 'duplicate' && (
+              <DuplicateBox deal={p} clients={props.clients} viewer={props.viewer} busy={props.busy}
+                nQuotes={props.quotes.length} nOutlines={props.outlines.length}
+                onCreate={props.onDuplicate} onCancel={() => props.setStagePanel(null)} />
+            )}
+            {next.button && props.stagePanel !== 'won' && props.stagePanel !== 'followup' && props.stagePanel !== 'skip' && props.stagePanel !== 'duplicate' && !props.gate && (
               <div className="flex flex-wrap items-center gap-2">
                 {next.button}
                 {st === 'agreed' && hasQuote && <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onQuoted}>Quotation sent another way</button>}
@@ -1116,6 +1152,7 @@ function DealPanel(props: {
               {OPEN_STAGES.includes(st) && props.stagePanel !== 'lost' && props.stagePanel !== 'followup' && !props.alert?.decision && <button type="button" className={`${smallLink} text-danger`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-3.5 w-3.5" /> Mark lost</button>}
               {st === 'lost' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Reopen deal</button>}
               {st === 'won' && canUndoWin && <button type="button" disabled={props.busy} className={`${smallLink} text-ink-soft`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Undo win</button>}
+              {props.stagePanel !== 'duplicate' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('duplicate')}><Copy className="h-3.5 w-3.5" /> Duplicate deal</button>}
             </div>
           </div>
         ) : (
@@ -1147,7 +1184,7 @@ function DealPanel(props: {
               <Detail term="Owner" value={props.ownerName} />
               <Detail term="Type" value={p.type || '—'} />
               <Detail term="Client asked on" value={formatDate(p.requestDate) || '—'} />
-              <Detail term="Training date" value={formatDate(p.trainingDate) || 'Not set'} />
+              <Detail term="Training date" value={trainingDateText(p, true) || 'Not set'} />
               <div><dt className="text-sm text-ink-soft">Training time</dt><dd className="font-semibold"><TrainingTimeBox key={p.id} deal={p} quotes={props.quotes} viewer={props.viewer} editable={props.editable} /></dd></div>
               <Detail term="Venue" value={props.venue ? `${props.venue.name}${props.venue.from === 'quotation' ? ' (from quotation)' : ''}` : 'Not set'} />
               <Detail term="Proposal sent" value={skipped ? `Skipped: ${p.proposalSkipReason || 'no proposal needed'}` : formatDate(p.proposalSentDate) || 'Not yet'} />
@@ -1360,6 +1397,83 @@ function OutlineRows({ outlines, onOpen, onCreate, heading = 'Course outlines', 
 }
 
 // ---------- Client picker with quick add ----------
+// "Duplicate deal" box (Joel, 2026-10-19): the same programme again, for this client or another, with a new date.
+// Starts at Client approved (quotation copied) for the same client once the deal got that far, else at New.
+function DuplicateBox({ deal, clients, viewer, busy, nQuotes, nOutlines, onCreate, onCancel }: {
+  deal: any; clients: any[]; viewer: Viewer; busy: boolean; nQuotes: number; nOutlines: number;
+  onCreate: (opt: DuplicateOptions) => void; onCancel: () => void;
+}) {
+  const reachedApproved = STAGE_ORDER_FOR_COPY.includes(reachedStage(deal));
+  const [clientId, setClientId] = useState(clients.some(c => c.id === deal.clientId) ? deal.clientId : '');
+  const [date, setDate] = useState('');
+  const [days, setDays] = useState(String(trainingDays(deal)));
+  const [start, setStart] = useState<DuplicateStart>(reachedApproved ? 'agreed' : 'lead');
+  const [err, setErr] = useState('');
+  const sameClient = clientId === deal.clientId;
+  const pickClient = (id: string) => {
+    setClientId(id);
+    // Another client usually needs the proposal first; the same client can go straight to the quotation.
+    setStart(id === deal.clientId && reachedApproved ? 'agreed' : 'lead');
+  };
+  const submit = () => {
+    const client = clients.find(c => c.id === clientId);
+    if (!client) return setErr('Choose the client from the client list.');
+    const n = days.trim() === '' ? 1 : Number(days);
+    if (!Number.isFinite(n) || n <= 0 || n > 60 || (n * 2) % 1 !== 0) return setErr('Enter the training days as a number, for example 2 (or 0.5 for half a day).');
+    setErr('');
+    onCreate({ client: { id: client.id, companyName: client.companyName || '' }, trainingDate: date, trainingDays: n, start });
+  };
+  const copied = [
+    'programme', 'value', 'funding type', 'participants', 'training days',
+    nOutlines ? 'course outline' : '',
+    start === 'agreed' ? (nQuotes ? 'quotation (with its venue, trainer and fees, to change)' : 'a new quotation') : '',
+  ].filter(Boolean);
+  const choice = (v: DuplicateStart, title: string, sub: string) => (
+    <button type="button" onClick={() => setStart(v)} aria-pressed={start === v}
+      className={`flex-1 rounded-xl border px-3 py-2 text-left text-sm ${start === v ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface'}`}>
+      <span className={`block font-semibold ${start === v ? 'text-accent' : ''}`}>{title}</span>
+      <span className="block text-ink-soft">{sub}</span>
+    </button>
+  );
+  return (
+    <div className="space-y-3 rounded-xl border border-line bg-white p-4">
+      <p className="font-semibold">Duplicate this deal</p>
+      <div>
+        <span className={label}>Client</span>
+        <ClientPicker clients={clients} value={clientId} viewer={viewer} onChange={pickClient} />
+        {sameClient && <p className="mt-1 text-sm text-ink-soft">Same client. Pick another to copy it for a different company.</p>}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label htmlFor="dup-date" className={label}>New training date <span className="font-normal text-ink-soft">(optional)</span></label>
+          <input id="dup-date" type="date" value={date} onChange={e => setDate(e.target.value)} className={input} />
+        </div>
+        <div>
+          <label htmlFor="dup-days" className={label}>Training days</label>
+          <input id="dup-days" type="number" inputMode="decimal" min="0.5" step="0.5" value={days} onChange={e => setDays(e.target.value)} className={input} />
+        </div>
+      </div>
+      <div>
+        <span className={label}>The new deal starts at</span>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {choice('lead', 'New', 'A proposal still has to be sent.')}
+          {choice('agreed', 'Client approved', 'No proposal needed; the quotation opens.')}
+        </div>
+      </div>
+      <p className="text-sm text-ink-soft">Copied: {copied.join(', ')}. Not copied: appointment, follow-ups, checklist, money and files.</p>
+      {err && <p role="alert" className="text-sm text-danger">{err}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={btnSecondary} onClick={onCancel}>Cancel</button>
+        <button type="button" disabled={busy} onClick={submit}
+          className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0B5A50] disabled:opacity-60">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />} Create the copy
+        </button>
+      </div>
+    </div>
+  );
+}
+const STAGE_ORDER_FOR_COPY: DealStage[] = ['agreed', 'quoted', 'won'];
+
 function ClientPicker({ clients, value, legacyName, viewer, onChange }: {
   clients: any[]; value: string; legacyName?: string; viewer: Viewer; onChange: (id: string) => void;
 }) {

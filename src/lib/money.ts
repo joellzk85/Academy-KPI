@@ -5,7 +5,7 @@
 // - config/money_settings: HRDC deduction %, days before a payment counts as overdue,
 //   and the HRDC claim deadline (blank until Joel confirms HRD Corp's current rule).
 
-import { todayIso } from './deals';
+import { todayIso, trainingEndDate } from './deals';
 import { daysUntil, Flag } from './checklist';
 
 export type InSource = 'hrdc' | 'client';
@@ -152,7 +152,10 @@ export function moneyFlags(deal: any, ins: MoneyIn[], outs: MoneyOut[], s: Money
   const flags: Flag[] = [];
   const hrdc = deal?.fundingType === 'hrdc' || deal?.fundingType === 'hrdc_topup';
   const client = deal?.fundingType === 'direct' || deal?.fundingType === 'hrdc_topup';
-  const days = daysUntil(deal?.trainingDate, today);   // negative = training has passed
+  const start = daysUntil(deal?.trainingDate, today);
+  const end = daysUntil(trainingEndDate(deal), today);
+  // negative = training has passed (after its last day); while a training of several days is on, it counts as today
+  const days = start === null ? null : end !== null && end < 0 ? end : Math.max(start, 0);
 
   if (hrdc && !ins.some(m => m.source === 'hrdc') && days !== null && days < 0) {
     const since = -days;

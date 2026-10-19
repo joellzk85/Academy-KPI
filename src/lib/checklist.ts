@@ -7,7 +7,7 @@
 // - Whether a task applies (e.g. "Apply grant" only for HRDC deals) is worked
 //   out from the deal's current funding type, so changing it later just works.
 
-import { FundingType } from './deals';
+import { FundingType, trainingEndDate } from './deals';
 
 export type TaskKind = 'grant' | 'quotation' | 'venue' | 'trainer' | 'basic';
 export type AppliesTo = 'all' | 'hrdc';
@@ -225,7 +225,8 @@ export function grantNotAppliedFlag(deal: any, tasks: ChecklistTask[] | undefine
   const since = -(daysUntil(wonDate, today) ?? 0);
   if (since < settings.grantDays) return null;
   const train = daysUntil(deal?.trainingDate, today);
-  if (train !== null && train < 0) return null;
+  const trainEnd = daysUntil(trainingEndDate(deal), today);
+  if (trainEnd !== null && trainEnd < 0) return null;
   const red = since >= settings.grantDays * 2 || (train !== null && train <= settings.flagDays);
   return { level: red ? 'danger' : 'attention', text: `Won ${since} day${since === 1 ? '' : 's'} ago, grant not applied`, grant: true };
 }
@@ -245,9 +246,12 @@ function trainingFlags(deal: any, tasks: ChecklistTask[] | undefined, settings: 
   const open = openAll.filter(t => !t.after);          // must be done before training day
   const openAfter = openAll.filter(t => t.after);      // post-training documents
   const s = (n: number) => (n === 1 ? '' : 's');
-  const days = daysUntil(deal?.trainingDate, today);
-  if (days === null) return [{ level: 'attention', text: 'No training date yet' }];
-  if (days < 0) {
+  const start = daysUntil(deal?.trainingDate, today);
+  if (start === null) return [{ level: 'attention', text: 'No training date yet' }];
+  // A training of several days has "passed" only after its last day; while it's on, it counts as today.
+  const end = daysUntil(trainingEndDate(deal), today) ?? start;
+  const days = start < 0 && end >= 0 ? 0 : start;
+  if (end < 0) {
     const flags: Flag[] = [];
     if (open.length) flags.push({ level: 'danger', text: `Training date has passed with ${open.length} step${s(open.length)} open` });
     if (openAfter.length) flags.push({ level: 'attention', text: `After training: ${openAfter.map(t => t.label).join(', ')} still to do` });

@@ -2,10 +2,11 @@
 // Pure functions (no network), used by the server (serverCalendar.ts) and tested on their own.
 //   - CRM calendar events            (events/{id})
 //   - deal appointments              (pipelines[].appointment)
-//   - training dates of won deals    (pipelines[].trainingDate), at the training time (quotation or deal), else all day
+//   - training dates of won deals    (pipelines[].trainingDate), at the training time (quotation or deal), else all day;
+//     a training of several days (pipelines[].trainingDays) gets one event per day ("train:<id>", "train:<id>:d2", …)
 // Each item has a fixed Google event id made from its CRM key, so syncing twice never makes duplicates.
 
-import { dealOwnerId, dealStage } from './deals';
+import { addDays, dealOwnerId, dealStage, trainingDays } from './deals';
 import { dealContact } from './contacts';
 import { MODE_LABELS } from './appointments';
 import { ChecklistTask, dealVenue, effectiveTrainer } from './checklist';
@@ -130,9 +131,12 @@ export function buildDesired(s: SyncData): GoogleItem[] {
       // The time comes from the quotation, or the deal if it was changed there; unreadable = all day.
       const time = trainingTimeOf(d, quotes);
       const range = parseTimeRange(time?.text);
+      const count = Math.max(1, Math.ceil(trainingDays(d)));
+      for (let i = 0; i < count; i++) {
+      const day = addDays(d.trainingDate, i);
       out.push({
-        key: `train:${d.id}`,
-        summary: `Training: ${clientName(d)}${prog ? ` – ${prog}` : ''}`,
+        key: i === 0 ? `train:${d.id}` : `train:${d.id}:d${i + 1}`,
+        summary: `Training: ${clientName(d)}${prog ? ` – ${prog}` : ''}${count > 1 ? ` (day ${i + 1} of ${count})` : ''}`,
         description: lines(
           prog && `Programme: ${prog}`,
           time && `Time: ${time.text}`,
@@ -143,8 +147,9 @@ export function buildDesired(s: SyncData): GoogleItem[] {
           footer,
         ),
         location: venue?.name || undefined,
-        ...(range ? rangeOn(d.trainingDate, range.start, range.end) : whenFor(d.trainingDate)),
+        ...(range ? rangeOn(day, range.start, range.end) : whenFor(day)),
       });
+      }
     }
   });
   return out;

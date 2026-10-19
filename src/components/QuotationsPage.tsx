@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../types';
-import { STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
+import { STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso, trainingDateText } from '../lib/deals';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
 import QuotationDocument from './QuotationDocument';
@@ -594,7 +594,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
             <div className="mb-3 rounded-xl bg-surface px-4 py-3">
               <p className="text-sm text-ink-soft">Deal</p>
               <p className="font-semibold">{sources.programmes.find(p => p.id === r.deal.programmeId)?.name || r.deal.courseName || 'No programme'} · {STAGE_LABELS[dealStage(r.deal)]}</p>
-              <p className="text-sm text-ink-soft">Training {r.deal.trainingDate ? formatDate(r.deal.trainingDate) : 'date not set'} · value {formatRM(dealValue(r.deal))} · {nameOf(dealOwnerId(r.deal))} {goto('pipeline', '· Edit deal')}</p>
+              <p className="text-sm text-ink-soft">Training {trainingDateText(r.deal, true) || 'date not set'} · value {formatRM(dealValue(r.deal))} · {nameOf(dealOwnerId(r.deal))} {goto('pipeline', '· Edit deal')}</p>
             </div>
           )}
           {r.client ? (

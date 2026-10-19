@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { FUNDING_LABELS, FundingType, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso } from '../lib/deals';
+import { FUNDING_LABELS, FundingType, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso, trainingDateText, trainingDays, trainingEndDate } from '../lib/deals';
 import {
   APPLIES_LABELS, AppliesTo, ChecklistSettings, KIND_LABELS, RETIRED_BUILTINS, TaskTemplate, checklistFlags, daysUntil, grantNotAppliedFlag, newTaskId, progress,
 } from '../lib/checklist';
@@ -177,8 +177,10 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
   const whenText = (p: any) => {
     const d = daysUntil(p.trainingDate, today);
     if (d === null) return 'No training date';
-    const date = formatDate(p.trainingDate);
-    if (d === 0) return `${date} (today)`;
+    const date = trainingDateText(p, true);
+    const end = daysUntil(trainingEndDate(p), today) ?? d;
+    if (d < 0 && end >= 0) return `${date} (on now)`;
+    if (d === 0) return `${date} (${end > 0 ? 'starts today' : 'today'})`;
     if (d === 1) return `${date} (tomorrow)`;
     if (d > 1 && d <= 30) return `${date} (in ${d} days)`;
     return date;
@@ -493,13 +495,17 @@ function TrainingDate({ deal, viewer, label }: { deal: any; viewer: Viewer; labe
   const iso = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : '');
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(iso(deal.trainingDate));
+  const [days, setDays] = useState(String(trainingDays(deal)));
   const [error, setError] = useState('');
   const save = async () => {
     setError('');
+    const n = days.trim() === '' ? 1 : Number(days);
+    if (!Number.isFinite(n) || n <= 0 || n > 60 || (n * 2) % 1 !== 0) return setError('Training days: a number such as 2, or 0.5 for half a day.');
     try {
       await updateDoc(doc(db, 'pipelines', deal.id), {
         trainingDate: value,
-        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Training date set to ${formatDate(value) || 'none'}` }].slice(-40),
+        trainingDays: n,
+        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Training date set to ${trainingDateText({ trainingDate: value, trainingDays: n }, true) || 'none'}` }].slice(-40),
       });
       setEditing(false);
     } catch (e) {
@@ -512,6 +518,7 @@ function TrainingDate({ deal, viewer, label }: { deal: any; viewer: Viewer; labe
   return (
     <span className="flex flex-wrap items-center gap-2">
       <input type="date" value={value} onChange={e => setValue(e.target.value)} className="rounded-lg border border-line px-2 py-1 text-[15px] font-normal" aria-label="Training date" />
+      <label className="flex items-center gap-1 text-sm font-normal text-ink-soft"><input type="number" min="0.5" step="0.5" value={days} onChange={e => setDays(e.target.value)} className="w-16 rounded-lg border border-line px-2 py-1 text-[15px] text-ink" aria-label="Training days" /> day(s)</label>
       <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={save}>Save</button>
       <button type="button" className="text-sm font-normal text-ink-soft hover:underline" onClick={() => setEditing(false)}>Cancel</button>
       {error && <span className="text-sm text-danger">{error}</span>}

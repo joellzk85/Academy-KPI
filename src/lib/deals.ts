@@ -196,6 +196,51 @@ export function formatDate(iso: string): string {
   return new Date(y, m - 1, day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// Training length (Joel, 2026-10-19): some trainings run over several days, back to back from the training date.
+// `trainingDays` on the deal (blank = 1; 0.5 = half a day). The last day is what "training has passed" counts from.
+export function trainingDays(p: any): number {
+  const n = Number(p?.trainingDays);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+export function addDays(iso: string, n: number): string {
+  const d = validDate(iso);
+  if (!d) return '';
+  const [y, m, day] = d.split('-').map(Number);
+  const t = new Date(y, m - 1, day + n);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+
+export function trainingEndDate(p: any): string {
+  const start = validDate(p?.trainingDate);
+  return start ? addDays(start, Math.max(1, Math.ceil(trainingDays(p))) - 1) : '';
+}
+
+// "21 Oct 2026", "21 – 22 Oct 2026", "30 Oct – 2 Nov 2026", "30 Dec 2026 – 2 Jan 2027".
+export function formatDateRange(start: string, end: string): string {
+  const a = validDate(start), b = validDate(end);
+  if (!a) return '';
+  if (!b || b <= a) return formatDate(a);
+  const [ay, am] = a.split('-').map(Number);
+  const [by, bm] = b.split('-').map(Number);
+  const dm = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+  if (ay !== by) return `${formatDate(a)} – ${formatDate(b)}`;
+  if (am !== bm) return `${dm(a)} – ${formatDate(b)}`;
+  return `${Number(a.slice(8, 10))} – ${formatDate(b)}`;
+}
+
+export function daysText(n: number): string {
+  return n === 0.5 ? 'half day' : `${n} day${n === 1 ? '' : 's'}`;
+}
+
+// The deal's training dates as printed: "21 – 22 Oct 2026". With `withDays`, " (2 days)" is added when it isn't 1 day.
+export function trainingDateText(p: any, withDays = false): string {
+  const range = formatDateRange(p?.trainingDate, trainingEndDate(p));
+  if (!range) return '';
+  const n = trainingDays(p);
+  return withDays && n !== 1 ? `${range} (${daysText(n)})` : range;
+}
+
 export function formatRM(n: number): string {
   return 'RM ' + Math.round(n).toLocaleString('en-MY');
 }
