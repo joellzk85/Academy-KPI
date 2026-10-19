@@ -7,3 +7,7 @@ export const COMPANY = {
   email: 'info@nextacademy.my',
 };
 export const COMPANY_ADDRESS = COMPANY.addressLines.join(', ');
+
+// Who signs every quotation for NEXT Academy (Joel, 2026-10-19). The signature is her name in a handwriting font.
+export const QUOTE_SIGNATORY = { name: 'Xin Ying', title: 'Manager' };
+export const SIGNATURE_FONT = '"Great Vibes", cursive';

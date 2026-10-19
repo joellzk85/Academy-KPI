@@ -1,7 +1,7 @@
 import React from 'react';
 import { Quotation } from '../types';
 import Logo from './Logo';
-import { COMPANY, COMPANY_ADDRESS } from '../lib/company';
+import { COMPANY, COMPANY_ADDRESS, QUOTE_SIGNATORY, SIGNATURE_FONT } from '../lib/company';
 import { quoteSst } from '../lib/quoteSst';
 import { isItemsOnly } from '../lib/dealQuotes';
 
@@ -116,19 +116,14 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
         </div>
 
         {/* Right Column: Quotation identifiers */}
-        <div className="space-y-2 md:pl-6 md:border-l border-slate-100 font-mono">
-          <div className="flex">
-            <span className="font-extrabold text-slate-500 uppercase tracking-wider w-32">Ref. Number:</span>
-            <span className="font-extrabold text-blue-700">{refNumber || 'N/A'}</span>
-          </div>
-          <div className="flex">
-            <span className="font-extrabold text-slate-500 uppercase tracking-wider w-32">Date:</span>
-            <span className="font-bold text-slate-700">{date || 'N/A'}</span>
-          </div>
-          <div className="flex">
-            <span className="font-extrabold text-slate-500 uppercase tracking-wider w-44">Quotation Prepared by:</span>
-            <span className="text-slate-600 font-semibold">{trainingProvider || 'N/A'}</span>
-          </div>
+        {/* One label column, so the three values line up (Joel, 2026-10-19). */}
+        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 content-start md:pl-6 md:border-l border-slate-100 font-mono">
+          <span className="font-extrabold text-slate-500 uppercase tracking-wider whitespace-nowrap">Ref. Number:</span>
+          <span className="font-extrabold text-blue-700 break-all">{refNumber || 'N/A'}</span>
+          <span className="font-extrabold text-slate-500 uppercase tracking-wider whitespace-nowrap">Date:</span>
+          <span className="font-bold text-slate-700">{date || 'N/A'}</span>
+          <span className="font-extrabold text-slate-500 uppercase tracking-wider whitespace-nowrap">Prepared by:</span>
+          <span className="text-slate-600 font-semibold">{trainingProvider || 'N/A'}</span>
         </div>
 
       </div>
@@ -361,11 +356,22 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       </div>
       )}
 
-      {/* Bottom corporate signature area - Accepted By only */}
-      <div className="pt-12 flex justify-end text-sm font-sans">
-        <div className="space-y-12 text-right flex flex-col items-end">
-          <p className="font-bold text-slate-500 text-left w-48">Accepted By:</p>
-          <div className="border-t border-slate-300 pt-1.5 w-48 text-left">
+      {/* Signatures: NEXT Academy's signatory on the left (QUOTE_SIGNATORY), the client's on the right. */}
+      <div className="pt-12 flex justify-between items-end gap-8 text-sm font-sans">
+        <div className="w-56">
+          <p className="font-bold text-slate-500">Prepared By:</p>
+          <p className="h-16 flex items-end pl-2 pb-1 text-[40px] leading-none text-[#1e3a8a] -rotate-3 origin-bottom-left" style={{ fontFamily: SIGNATURE_FONT }}>
+            {QUOTE_SIGNATORY.name}
+          </p>
+          <div className="border-t border-slate-300 pt-1.5">
+            <p className="font-extrabold text-slate-800">{QUOTE_SIGNATORY.name}</p>
+            <p className="text-xs text-slate-400 font-mono font-semibold">{QUOTE_SIGNATORY.title}, NEXT Academy</p>
+          </div>
+        </div>
+        <div className="w-56">
+          <p className="font-bold text-slate-500">Accepted By:</p>
+          <div className="h-16" />
+          <div className="border-t border-slate-300 pt-1.5">
             <p className="font-extrabold text-slate-800">Authorized Signatory</p>
             <p className="text-xs text-slate-400 font-mono font-semibold">Designation & Stamp</p>
           </div>

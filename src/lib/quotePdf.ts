@@ -126,6 +126,8 @@ export async function makeDocumentPdf(element: React.ReactElement, title: string
     Object.assign(paper.style, { border: 'none', boxShadow: 'none', borderRadius: '0', minWidth: '0', maxWidth: 'none', width: `${PAGE_W_PX}px`, margin: '0', padding: '48px' });
     await inlineImages(paper);
     await waitForImages(paper);
+    // The quotation's signature font downloads only when first used, so ask for it before taking the picture.
+    try { await (document as any).fonts?.load?.('48px "Great Vibes"'); } catch { /* signature falls back to a plain script font */ }
     if ((document as any).fonts?.ready) await (document as any).fonts.ready;
 
     // Good places to start a new page: the bottom of each table row, paragraph, list item or heading.
