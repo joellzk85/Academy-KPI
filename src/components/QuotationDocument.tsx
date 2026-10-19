@@ -9,7 +9,8 @@ import { isItemsOnly } from '../lib/dealQuotes';
 // Print with window.print(): the styles below hide everything except .print-paper.
 export default function QuotationDocument({ q }: { q: Quotation }) {
   const { refNumber, date, attn, company, address, venue, time, participants, trainingProvider } = q;
-  const items = q.items || [];
+  // Only lines with details are printed (Joel, 2026-10-19): a line with no name and RM 0.00 is left out, and lines are numbered as printed.
+  const items = (q.items || []).filter(it => (it.program || '').trim() || Number(it.totalFee) !== 0).map((it, i) => ({ ...it, no: i + 1 }));
   const remarks = q.remarks || [];
   const terms = q.terms || [];
   const { mode: sstMode, rate: sstRate, subtotal: grandTotal, sst: sstAmount, total: finalTotal } = quoteSst(q);
@@ -182,14 +183,6 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
                 <td className="p-3.5 text-right font-mono font-black text-slate-900">
                   RM {item.totalFee.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </td>
-              </tr>
-            ))}
-
-            {/* Empty Spacer Rows to simulate spreadsheet looks exactly as shown in screenshot */}
-            {items.length < 3 && Array.from({ length: 3 - items.length }).map((_, spacerIdx) => (
-              <tr key={`spacer_${spacerIdx}`} className="h-12">
-                {Array.from({ length: lead + 1 }).map((_, c) => <td key={c} className="p-3.5 border-r border-slate-200"></td>)}
-                <td className="p-3.5"></td>
               </tr>
             ))}
 
