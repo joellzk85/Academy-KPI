@@ -18,6 +18,7 @@ export interface TaskTemplate {
   kind: TaskKind;
   appliesTo: AppliesTo;
   after?: boolean;        // done after training day (post-training documents)
+  files?: boolean;        // has a file drop box; uploading ticks it, and it can't be ticked without a file
   retired?: boolean;      // hidden from new checklists, kept for the record
 }
 
@@ -28,6 +29,7 @@ export interface ChecklistTask {
   appliesTo: AppliesTo;
   after?: boolean;        // done after training day
   oneOff?: boolean;       // added for this deal only
+  files?: boolean;        // has a file drop box (lib/checklistFiles.ts)
   done: boolean;
   doneAt?: string;
   doneById?: string;
@@ -82,19 +84,35 @@ export const DEFAULT_SETTINGS: ChecklistSettings = {
     { id: 'materials', label: 'Prepare materials', kind: 'basic', appliesTo: 'all' },
     { id: 'trainer', label: 'Confirm trainer', kind: 'trainer', appliesTo: 'all' },
     // After training day
-    { id: 'jd14', label: 'JD14', kind: 'basic', appliesTo: 'hrdc', after: true },
+    { id: 'jd14', label: 'JD14', kind: 'basic', appliesTo: 'hrdc', after: true, files: true },
+    { id: 't3', label: 'Verify T3 attendance', kind: 'basic', appliesTo: 'hrdc', after: true, files: true },
     { id: 'certificates', label: 'Certificates', kind: 'basic', appliesTo: 'all', after: true },
     { id: 'training_report', label: 'Training report', kind: 'basic', appliesTo: 'all', after: true },
-    { id: 'output_assessment', label: 'Output assessment', kind: 'basic', appliesTo: 'all', after: true },
+    { id: 'output_assessment', label: 'Output assessment', kind: 'basic', appliesTo: 'all', after: true, files: true },
   ],
 };
 
+// Built-in steps that have a file drop box unless switched off. Older saved lists and checklists
+// don't have the "files" setting yet, so this decides for them (Joel, 2026-10-19).
+const FILE_BUILTINS = DEFAULT_SETTINGS.tasks.filter(t => t.files).map(t => t.id);
+export const hasFiles = (t: { id?: string; kind?: string; files?: boolean }) =>
+  t.kind === 'basic' && (t.files ?? FILE_BUILTINS.includes(t.id || ''));
+
 export function readSettings(data: any): ChecklistSettings {
   const saved: TaskTemplate[] = Array.isArray(data?.tasks) && data.tasks.length ? data.tasks : [];
-  // Built-in tasks added in later updates appear even if the list was saved before.
+  // Built-in tasks added in later updates appear even if the list was saved before, placed after
+  // the built-in step that comes before them (e.g. T3 after JD14).
   // Ones Joel stopped using stay in the saved list as "retired", so they never come back.
-  const merged = saved.length ? [...saved, ...DEFAULT_SETTINGS.tasks.filter(d => !saved.some(t => t.id === d.id))] : DEFAULT_SETTINGS.tasks;
-  const tasks = merged.map(t => (isRetiredStep(t) ? { ...t, retired: true } : t));
+  let merged: TaskTemplate[] = DEFAULT_SETTINGS.tasks;
+  if (saved.length) {
+    merged = [...saved];
+    DEFAULT_SETTINGS.tasks.forEach((d, i) => {
+      if (merged.some(t => t.id === d.id)) return;
+      const before = DEFAULT_SETTINGS.tasks.slice(0, i).reverse().find(p => merged.some(t => t.id === p.id));
+      merged.splice(before ? merged.findIndex(t => t.id === before.id) + 1 : merged.length, 0, d);
+    });
+  }
+  const tasks = merged.map(t => ({ ...t, files: hasFiles(t), ...(isRetiredStep(t) ? { retired: true } : {}) }));
   const num = (v: any, fallback: number) => (Number.isFinite(Number(v)) && v !== '' && v !== null && Number(v) >= 0 ? Number(v) : fallback);
   return { tasks, flagDays: num(data?.flagDays, DEFAULT_SETTINGS.flagDays), grantDays: num(data?.grantDays, DEFAULT_SETTINGS.grantDays) };
 }
@@ -111,7 +129,7 @@ export function isHrdc(fundingType?: string): boolean {
 export function buildChecklist(settings: ChecklistSettings): ChecklistTask[] {
   return settings.tasks
     .filter(t => !t.retired)
-    .map(t => ({ id: t.id, label: t.label, kind: t.kind, appliesTo: t.appliesTo, after: !!t.after, done: false }));
+    .map(t => ({ id: t.id, label: t.label, kind: t.kind, appliesTo: t.appliesTo, after: !!t.after, files: hasFiles(t), done: false }));
 }
 
 // Tasks that apply to this deal, in the checklist's own order.
@@ -173,7 +191,9 @@ export function dealVenue(checklist: any | null, quotes: any[], venues: any[]): 
 
 // What still has to be filled in before a task can be ticked. Empty = ready.
 // hasVenue / hasTrainer: a venue or trainer is chosen on the checklist or comes from the quotation.
-export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = '', hasVenue = !!t.venueId, hasTrainer = !!t.trainerId): string {
+// fileCount: files uploaded on this step (only matters for steps with a file drop box).
+export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = '', hasVenue = !!t.venueId, hasTrainer = !!t.trainerId, fileCount = 0): string {
+  if (hasFiles(t) && fileCount === 0) return `Upload the ${t.label} file first (drop it in the box).`;
   if (t.kind === 'grant' && grantBlock) return grantBlock;
   if (t.kind === 'grant' && !(t.grantNumber || '').trim()) return 'Enter the grant number once HRDC approves it.';
   if (t.kind === 'venue' && !hasVenue) return 'Choose or type the venue first.';

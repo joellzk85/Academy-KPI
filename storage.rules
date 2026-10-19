@@ -5,6 +5,7 @@ rules_version = '2';
 // - Only logged-in, active team members (checked against the database's auth_map) can read or add.
 // - Up to 20 MB; PDF, Word or PowerPoint; the uploader is recorded and can't be faked.
 // - Only the uploader or Management can delete. Files are never changed after upload.
+// - Files on admin checklist steps (2026-10-19): checklist_files/{dealId}/{fileId}_{name}, Admin and Management upload.
 // - Everything else in storage is closed.
 service firebase.storage {
   match /b/{bucket}/o {
@@ -17,6 +18,9 @@ service firebase.storage {
     function isManagement() {
       return isMember() && firestore.get(link()).data.role == 'management';
     }
+    function isStaff() {
+      return isMember() && firestore.get(link()).data.role in ['admin', 'management'];
+    }
 
     match /proposals/{dealId}/{fileName} {
       allow read: if isMember();
@@ -26,6 +30,18 @@ service firebase.storage {
         && request.resource.metadata.uploadedBy == request.auth.uid;
       allow update: if false;
       allow delete: if isMember() && (resource.metadata.uploadedBy == request.auth.uid || isManagement());
+    }
+
+    // Files on admin checklist steps (JD14, T3, Output assessment; 2026-10-19): checklist_files/{dealId}/{fileId}_{name}.
+    // Admin and Management upload; up to 20 MB; PDF, Word, Excel, JPG or PNG. Records are in Firestore checklist_files.
+    match /checklist_files/{dealId}/{fileName} {
+      allow read: if isMember();
+      allow create: if isStaff()
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('application/(pdf|msword|vnd[.]ms-excel|vnd[.]openxmlformats-officedocument[.](wordprocessingml[.]document|spreadsheetml[.]sheet))|image/(jpeg|png)')
+        && request.resource.metadata.uploadedBy == request.auth.uid;
+      allow update: if false;
+      allow delete: if isStaff() && (resource.metadata.uploadedBy == request.auth.uid || isManagement());
     }
 
     match /{allPaths=**} {

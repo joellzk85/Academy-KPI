@@ -340,6 +340,7 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
   const [newLabel, setNewLabel] = useState('');
   const [newApplies, setNewApplies] = useState<AppliesTo>('all');
   const [newAfter, setNewAfter] = useState(false);
+  const [newFiles, setNewFiles] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -359,10 +360,11 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
     e.preventDefault();
     const label = newLabel.trim();
     if (!label) return;
-    setTasks([...s.tasks, { id: newTaskId(), label, kind: 'basic', appliesTo: newApplies, after: newAfter }]);
+    setTasks([...s.tasks, { id: newTaskId(), label, kind: 'basic', appliesTo: newApplies, after: newAfter, files: newFiles }]);
     setNewLabel('');
     setNewApplies('all');
     setNewAfter(false);
+    setNewFiles(false);
   };
 
   const save = async () => {
@@ -409,6 +411,12 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
                 <option value="before">Before training</option>
                 <option value="after">After training</option>
               </select>
+              <label className={`flex items-center gap-1.5 text-sm ${t.retired || t.kind !== 'basic' ? 'opacity-40' : ''}`}
+                title="Admin drops the file (e.g. the signed JD14) on the step. Uploading ticks the step, and it can't be ticked without a file.">
+                <input type="checkbox" checked={!!t.files && t.kind === 'basic'} disabled={t.retired || t.kind !== 'basic'}
+                  onChange={e => update(t.id, { files: e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
+                Has a file upload
+              </label>
               <span className="w-24 text-center">
                 {t.kind !== 'basic' && <span className="rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent" title="This step has its own fields">{KIND_LABELS[t.kind]}</span>}
               </span>
@@ -435,6 +443,10 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
             <option value="before">Before training</option>
             <option value="after">After training</option>
           </select>
+          <label className="flex items-center gap-1.5 text-sm">
+            <input type="checkbox" checked={newFiles} onChange={e => setNewFiles(e.target.checked)} className="h-4 w-4 accent-[#0E6E62]" />
+            Has a file upload
+          </label>
           <button type="submit" disabled={!newLabel.trim()} className={btnSecondary}><Plus className="h-4 w-4" /> Add task</button>
         </form>
       </div>

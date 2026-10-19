@@ -53,7 +53,7 @@ export default function BackupPanel() {
     return r.skipped === 'running' ? 'A backup is already running. Check again in a minute.' : `Backed up: ${r.summary}.`;
   });
   const download = () => act('download', async () => { await downloadBackup(); return 'The Excel file is downloading. Keep it somewhere safe, it holds all client and money details.'; });
-  const downloadZip = () => act('zip', async () => { await downloadProposals(); return 'The ZIP of all proposal files is downloading (one folder per deal). Keep it somewhere safe.'; });
+  const downloadZip = () => act('zip', async () => { await downloadProposals(); return 'The ZIP of all proposal and checklist files (JD14, T3 and others) is downloading, one folder per deal. Keep it somewhere safe.'; });
   const save = () => act('save', async () => {
     const r = await saveBackupSheet(sheet.trim());
     if (!r.configured) return 'Google Sheet disconnected. The daily backup is off.';
@@ -114,7 +114,7 @@ export default function BackupPanel() {
             {busy === 'download' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download Excel file
           </button>
           <button type="button" className={btnSecondary} disabled={!!busy} onClick={downloadZip}>
-            {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all proposals (ZIP)
+            {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all proposals and checklist files (ZIP)
           </button>
           <button type="button" className={btnSecondary} onClick={() => setSetupOpen(v => !v)}>
             <Settings2 className="h-4 w-4" /> {setupOpen ? 'Close setup' : connected ? 'Change Google Sheet' : 'Set up'}

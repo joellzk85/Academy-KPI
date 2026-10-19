@@ -26,7 +26,7 @@ export const runBackup = (force = false) =>
 export const downloadBackup = () => downloadFrom('/api/backup/download', 'NEXT-Academy-CRM-backup.xlsx', 'The backup file could not be made. Try again in a minute.');
 
 // Downloads every proposal file as one ZIP (2026-10-18).
-export const downloadProposals = () => downloadFrom('/api/backup/proposals', 'NEXT-Academy-proposals.zip', "The ZIP file couldn't be made. Try again in a minute.");
+export const downloadProposals = () => downloadFrom('/api/backup/proposals', 'NEXT-Academy-files.zip', "The ZIP file couldn't be made. Try again in a minute.");
 
 async function downloadFrom(path: string, fallbackName: string, failMessage: string): Promise<void> {
   const user = auth.currentUser;

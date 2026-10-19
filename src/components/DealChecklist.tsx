@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { collection, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, FileText, ListChecks, Loader2, Plus, Trash2, Undo2 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
 import {
   ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, Picked, applicableTasks, buildChecklist, effectiveTrainer, effectiveVenue,
-  isHrdc, newTaskId, progress, readSettings, taskGate,
+  hasFiles, isHrdc, newTaskId, progress, readSettings, taskGate,
 } from '../lib/checklist';
+import { ChecklistFile } from '../lib/checklistFiles';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
+import StepFiles from './ChecklistFiles';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -82,6 +84,12 @@ export default function DealChecklist({
     return () => subs.forEach(u => u());
   }, []);
 
+  // Files uploaded on this deal's steps (JD14, T3, Output assessment, ...).
+  const [files, setFiles] = useState<ChecklistFile[]>([]);
+  useEffect(() => onSnapshot(query(collection(db, 'checklist_files'), where('dealId', '==', deal.id)),
+    s => setFiles(s.docs.map(d => ({ ...(d.data() as ChecklistFile), id: d.id }))), () => setFiles([])), [deal.id]);
+  const filesOf = (t: ChecklistTask) => files.filter(f => f.taskId === t.id);
+
   const allTasks: ChecklistTask[] = checklist?.tasks || [];
   const tasks = applicableTasks(allTasks, deal.fundingType);
   const { done, total } = progress(allTasks, deal.fundingType);
@@ -108,7 +116,7 @@ export default function DealChecklist({
   const markDone = (t: ChecklistTask) => {
     const venue = t.kind === 'venue' ? effectiveVenue(t, quotes, venues) : null;
     const trainer = t.kind === 'trainer' ? effectiveTrainer(t, quotes, trainers) : null;
-    const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer);
+    const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer, filesOf(t).length);
     if (gate) return setError(gate);
     // A venue or trainer still coming from the quotation is saved on the checklist when ticked,
     // so later changes to the quotation don't change what Admin confirmed.
@@ -118,6 +126,20 @@ export default function DealChecklist({
     return patch(t.id, { ...keep, done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name }, `${t.label}: done`);
   };
   const undo = (t: ChecklistTask) => patch(t.id, { done: false, doneAt: '', doneById: '', doneByName: '' }, `${t.label}: reopened`);
+
+  // Uploading a file on a step with a drop box ticks it (Joel, 2026-10-19); deleting its last file reopens it.
+  const fileUploaded = (t: ChecklistTask, added: ChecklistFile[]) => {
+    const what = added.length === 1 ? `"${added[0].name}" uploaded` : `${added.length} files uploaded`;
+    const now = allTasks.find(x => x.id === t.id);
+    if (!now) return;
+    if (now.done) return save(allTasks, `${t.label}: ${what}`);
+    return patch(t.id, { done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name }, `${t.label}: ${what}, done`);
+  };
+  const lastFileRemoved = (t: ChecklistTask) => {
+    const now = allTasks.find(x => x.id === t.id);
+    if (now?.done) return patch(t.id, { done: false, doneAt: '', doneById: '', doneByName: '' }, `${t.label}: last file deleted, reopened`);
+    return save(allTasks, `${t.label}: file deleted`);
+  };
 
   const move = (t: ChecklistTask, dir: -1 | 1) => {
     // Move among the tasks shown, keeping hidden (not applicable) ones in place.
@@ -147,7 +169,7 @@ export default function DealChecklist({
 
   const missing = settings.tasks.filter(m => !m.retired && !allTasks.some(t => t.id === m.id));
   const addMissing = () =>
-    save([...allTasks, ...missing.map(m => ({ id: m.id, label: m.label, kind: m.kind, appliesTo: m.appliesTo, after: !!m.after, done: false }))], `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
+    save([...allTasks, ...missing.map(m => ({ id: m.id, label: m.label, kind: m.kind, appliesTo: m.appliesTo, after: !!m.after, files: hasFiles(m), done: false }))], `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
 
   const begin = async () => {
     setBusy(true);
@@ -204,9 +226,15 @@ export default function DealChecklist({
               ) : editable && (
                 t.done
                   ? <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => undo(t)}><Undo2 className="h-3.5 w-3.5" /> Undo</button>
-                  : <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => markDone(t)}><Check className="h-3.5 w-3.5" /> Done</button>
+                  : !(hasFiles(t) && !filesOf(t).length) && <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => markDone(t)}><Check className="h-3.5 w-3.5" /> Done</button>
               )}
             </div>
+            {hasFiles(t) && !arranging && (
+              <div className="pl-8">
+                <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable}
+                  onUploaded={added => fileUploaded(t, added)} onLastRemoved={() => lastFileRemoved(t)} />
+              </div>
+            )}
             {editable && !t.done && !arranging && (
               <TaskFields t={t} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
                 onPatch={(c, a) => patch(t.id, c, a)} onCreateQuotation={onCreateQuotation} onOpenQuotations={onOpenQuotations} />

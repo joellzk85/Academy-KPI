@@ -10,7 +10,8 @@
 // - Excel download: the same tables as an .xlsx file, built here and sent straight to the browser.
 // - Settings and the last result are in config/backup_settings, which only the server writes.
 // - Proposal files (2026-10-18): the file records are a normal list ("Proposal files" tab); the files themselves
-//   download as one ZIP (/api/backup/proposals), one folder per deal.
+//   download as one ZIP (/api/backup/proposals), one folder per deal. Since 2026-10-19 the ZIP also has the checklist
+//   step files (checklist_files: JD14, T3, ...), in a sub-folder per step.
 
 import type { Express, Request, Response as ExpressResponse } from 'express';
 import ExcelJS from 'exceljs';
@@ -276,14 +277,19 @@ export function registerBackupRoutes(app: Express) {
     }
   }));
 
-  // Every proposal file as one ZIP, one folder per deal ("Client - Programme").
+  // Every proposal file and checklist step file (JD14, T3, ...) as one ZIP, one folder per deal ("Client - Programme").
+  // Proposals sit in the deal's folder; checklist files in a sub-folder named after the step.
   app.post('/api/backup/proposals', async (req: Request, res: ExpressResponse) => {
     try {
       await staffFrom(req);
       const { db } = admin();
       const all = async (name: string) => (await db.collection(name).get()).docs.map(d => ({ ...d.data(), id: d.id }) as any);
-      const [files, deals, clients, programmes] = await Promise.all([all('proposal_files'), all('pipelines'), all('clients'), all('programmes')]);
-      if (!files.length) throw new UserError(404, 'no-proposals', 'There are no proposal files yet.');
+      const [proposals, stepFiles, deals, clients, programmes] = await Promise.all([all('proposal_files'), all('checklist_files'), all('pipelines'), all('clients'), all('programmes')]);
+      const files = [
+        ...proposals.map((f: any) => ({ ...f, what: 'Proposal', sub: '' })),
+        ...stepFiles.map((f: any) => ({ ...f, what: f.taskLabel || 'Checklist', sub: `${safeFileName(f.taskLabel || 'Checklist', 60)}/` })),
+      ];
+      if (!files.length) throw new UserError(404, 'no-proposals', 'There are no proposal or checklist files yet.');
       const bucket = getStorage(getApps()[0]).bucket((firebaseConfig as any).storageBucket);
       try {
         await bucket.file(files[0].path).getMetadata();
@@ -311,7 +317,7 @@ export function registerBackupRoutes(app: Express) {
       };
       const stamp = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 16).replace('T', '_').replace(':', '');
       res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename="NEXT-Academy-proposals-${stamp}.zip"`);
+      res.setHeader('Content-Disposition', `attachment; filename="NEXT-Academy-files-${stamp}.zip"`);
       const zip = archiver('zip', { zlib: { level: 6 } });
       zip.on('warning', (w: any) => console.warn('[backup] zip warning:', w?.message || w));
       zip.on('error', (e: any) => { console.error('[backup] zip failed:', e); res.end(); });
@@ -321,16 +327,16 @@ export function registerBackupRoutes(app: Express) {
       for (const f of files.sort((a: any, b: any) => String(a.at).localeCompare(String(b.at)))) {
         const file = bucket.file(String(f.path || ''));
         const [exists] = await file.exists().catch(() => [false]);
-        if (!exists) { missing.push(`${folder(f.dealId)}/${f.name}`); continue; }
-        let name = `${folder(f.dealId)}/${String(f.at || '').slice(0, 10)} ${safeFileName(f.name)}`;
+        if (!exists) { missing.push(`${folder(f.dealId)}/${f.sub}${f.name}`); continue; }
+        let name = `${folder(f.dealId)}/${f.sub}${String(f.at || '').slice(0, 10)} ${safeFileName(f.name)}`;
         if (usedNames.has(name.toLowerCase())) name = name.replace(/(\.[^.\/]+)?$/, ` (${f.id.slice(-4)})$1`);
         usedNames.add(name.toLowerCase());
         zip.append(file.createReadStream(), { name, date: f.at ? new Date(f.at) : new Date() });
       }
-      const rows = files.map((f: any) => [String(f.at || '').slice(0, 10), folder(f.dealId), f.name, f.byName || ''].join('\t'));
+      const rows = files.map((f: any) => [String(f.at || '').slice(0, 10), folder(f.dealId), f.what, f.name, f.byName || ''].join('\t'));
       const list = [
-        `NEXT Academy CRM: proposal files, downloaded ${new Date().toISOString()}`, '',
-        ['Date', 'Deal', 'File', 'Uploaded by'].join('\t'), ...rows,
+        `NEXT Academy CRM: proposal and checklist files, downloaded ${new Date().toISOString()}`, '',
+        ['Date', 'Deal', 'What', 'File', 'Uploaded by'].join('\t'), ...rows,
         ...(missing.length ? ['', 'Missing from storage:', ...missing] : []),
       ].join('\r\n');
       zip.append(list, { name: 'List of files.txt' });

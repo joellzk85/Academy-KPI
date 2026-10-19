@@ -200,6 +200,16 @@ service cloud.firestore {
       allow delete: if isManagement() || (isMember() && resource.data.byId == request.auth.uid);
     }
 
+    // Files on admin checklist steps (JD14, T3, Output assessment; 2026-10-19). The files are in Storage.
+    // Everyone reads; Admin and Management upload as themselves; the uploader or Management deletes.
+    match /checklist_files/{fileId} {
+      allow read: if isMember();
+      allow create: if isStaff() && request.resource.data.byId == request.auth.uid
+                    && request.resource.data.dealId is string && request.resource.data.taskId is string;
+      allow update: if false;
+      allow delete: if isManagement() || (isStaff() && resource.data.byId == request.auth.uid);
+    }
+
     // What the CRM has sent to the shared Google Calendar: only the CRM server uses this.
     match /calendar_sync/{id} {
       allow read, write: if false;
