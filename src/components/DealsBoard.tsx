@@ -11,8 +11,9 @@ import { Representative } from '../types';
 import {
   DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention, stageDate,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM, dealGaps, dealAskedFor, DealField, lostNoteProblem, reachedStage, SKIP_REASONS,
-  trainingDays, trainingDateText, parseTrainingDays, TRAINING_DAYS_PROBLEM,
+  trainingDays, trainingDateText, parseTrainingDays, TRAINING_DAYS_PROBLEM, canMoveDeal,
 } from '../lib/deals';
+import { countedIds, countedTotal, isItemsOnly, quoteDealAmount } from '../lib/dealQuotes';
 import TrainingDaysPicker from './TrainingDaysPicker';
 import { FollowUpAlert, alertText, followUpAlert, followUpNotes } from '../lib/followUps';
 import { AlertLine, FollowUpForm, FollowUpList, followUpCountText } from './FollowUps';
@@ -41,7 +42,7 @@ interface DealsBoardProps {
   owner: Representative;          // whose workspace this is
   people: Representative[];       // active reps and admins (possible deal owners)
   viewer: Viewer;                 // who is logged in
-  onCreateQuotation: (deal: any) => void;   // opens the deal's draft quotation in the editor (or makes one)
+  onCreateQuotation: (deal: any, extra?: boolean) => void;   // opens the deal's draft quotation in the editor (or makes one); extra = always a new one
   onOpenQuotation?: (deal: any, quoteId: string) => void;   // opens one of the deal's quotations in the editor
   onCreateOutline: (deal: any) => void;
   onOpenOutline?: (deal: any, outlineId: string) => void;   // opens one of the deal's outlines in the editor ("Back to deal")
@@ -746,6 +747,7 @@ export default function DealsBoard({
               alert={followUpAlert(openDeal, todayIso())}
               onFollowUpDone={(msg: string) => { setStagePanel(null); flash(msg); }}
               onCreateQuotation={() => onCreateQuotation(openDeal)}
+              onAddQuotation={() => onCreateQuotation(openDeal, true)}
               onOpenQuotation={onOpenQuotation ? (id: string) => onOpenQuotation(openDeal, id) : undefined}
               onCreateOutline={() => onCreateOutline(openDeal)}
               onOpenOutline={onOpenOutline ? (id: string) => onOpenOutline(openDeal, id) : undefined}
@@ -956,7 +958,7 @@ function DealPanel(props: {
   programmes: Programme[]; onApptDone: (msg: string) => void;
   onLost: () => void; onReopen: () => void;
   canManage: boolean; onDelete: (reason: string) => Promise<boolean>;
-  onCreateQuotation: () => void; onOpenQuotation?: (quoteId: string) => void; onCreateOutline: () => void; onOpenOutline?: (outlineId: string) => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
+  onCreateQuotation: () => void; onAddQuotation: () => void; onOpenQuotation?: (quoteId: string) => void; onCreateOutline: () => void; onOpenOutline?: (outlineId: string) => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
   onCreateTeambuilding?: () => void; onOpenTeambuilding?: (id: string) => void;
 }) {
   const p = props.deal;
@@ -1223,8 +1225,9 @@ function DealPanel(props: {
           `${props.proposalFiles.length} proposal file${props.proposalFiles.length === 1 ? '' : 's'}`,
         ].join(' · ')} defaultOpen={def === 'documents'} id={p.id}>
           <div className="space-y-2">
-            <DocRow icon={<FileText className="h-4 w-4" />} name="Quotations" items={props.quotes.map(q => `${q.refNumber || q.id}${q.status === 'sent' ? ' (sent)' : ''}`)}
-              onOpen={() => { const q = sentQuote || draftQuote; if (q) openQuote(q); }} onCreate={props.editable && canQuote(p) && !draftQuote ? props.onCreateQuotation : undefined} createLabel="Create quotation" />
+            <QuoteRows deal={p} quotes={props.quotes} viewer={props.viewer} canTick={props.editable && canMoveDeal(p, props.viewer)} onOpen={openQuote}
+              onCreate={props.editable && canQuote(p) && !hasQuote ? props.onCreateQuotation : undefined}
+              onAdd={props.editable && canQuote(p) && hasQuote ? props.onAddQuotation : undefined} />
             {!canQuote(p) && st !== 'lost' && <p className="text-sm text-ink-soft">A quotation can be made once the client approves the proposal.</p>}
             <OutlineRows outlines={outlinesNewest} onOpen={openOutline} onCreate={props.editable && !draftOutline ? props.onCreateOutline : undefined} />
             {(props.tbs.length > 0 || props.onCreateTeambuilding) && (
@@ -1350,20 +1353,100 @@ function Detail({ term, value }: { term: string; value: string }) {
   );
 }
 
-function DocRow({ icon, name, items, onOpen, onCreate, createLabel }: { icon: React.ReactNode; name: string; items: string[]; onOpen: () => void; onCreate?: () => void; createLabel: string }) {
+// The deal's quotations (2026-10-19: a deal can have several, e.g. the training plus bus or T-shirts).
+// Each opens straight in the editor. The owner, Admin or Management tick which ones count in the deal total:
+// ticking sets the deal value (Closing RM) to their total, with a History line. Nothing ticked = the typed value.
+function QuoteRows({ deal, quotes, viewer, canTick, onOpen, onCreate, onAdd }: {
+  deal: any; quotes: any[]; viewer: Viewer; canTick: boolean; onOpen: (q: any) => void; onCreate?: () => void; onAdd?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const list = [...quotes].sort((a, b) => String(a.date || a.id).localeCompare(String(b.date || b.id)));
+  const ids = countedIds(deal).filter(id => quotes.some(q => q.id === id));
+  const total = countedTotal(deal, quotes);
+  const value = dealValue(deal);
+  const differs = ids.length > 0 && Math.abs(total - value) >= 0.01;
+  const what = (q: any) => {
+    const items = q.items || [];
+    if (isItemsOnly(q)) {
+      const names = items.map((i: any) => String(i.program || '').trim()).filter(Boolean);
+      return names.length ? `${names[0]}${names.length > 1 ? ` +${names.length - 1} more` : ''}` : 'Other items';
+    }
+    const extras = items.filter((i: any) => i.kind === 'item').length;
+    return `Training${extras ? ` + ${extras} other item${extras === 1 ? '' : 's'}` : ''}`;
+  };
+  const save = async (next: string[]) => {
+    setBusy(true);
+    setErr('');
+    const keep = list.filter(q => next.includes(q.id));
+    const sum = Math.round(keep.reduce((t, q) => t + quoteDealAmount(q), 0) * 100) / 100;
+    const action = keep.length
+      ? `Deal value ${formatRM(sum)} from quotation${keep.length === 1 ? '' : 's'} ${keep.map(q => q.refNumber || q.id).join(' + ')}${Math.abs(sum - value) >= 0.01 ? ` (was ${formatRM(value)})` : ''}`
+      : `No quotations counted in the deal total; the deal value stays ${formatRM(value)}`;
+    try {
+      await updateDoc(doc(db, 'pipelines', deal.id), {
+        valueQuoteIds: keep.map(q => q.id),
+        ...(keep.length ? { proposalValue: sum } : {}),
+        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-40),
+      });
+    } catch (e) {
+      setErr(`Couldn't change the deal total: ${friendlyError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = (id: string) => save(ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3.5 py-2.5">
-      <span className="flex min-w-0 items-center gap-2">
-        <span className="text-accent">{icon}</span>
-        <span className="min-w-0">
-          <span className="block text-sm font-semibold">{name} ({items.length})</span>
-          {items.length > 0 && <span className="block truncate text-sm text-ink-soft">{items.join(', ')}</span>}
+    <div className="rounded-lg border border-line px-3.5 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-semibold"><span className="text-accent"><FileText className="h-4 w-4" /></span>Quotations ({quotes.length})</span>
+        <span className="flex flex-wrap gap-2">
+          {onCreate && <button type="button" className={btnSecondary} onClick={onCreate}><Plus className="h-3.5 w-3.5" /> Create quotation</button>}
+          {onAdd && <button type="button" className={btnSecondary} onClick={onAdd}><Plus className="h-3.5 w-3.5" /> Add another quotation</button>}
         </span>
-      </span>
-      <span className="flex gap-2">
-        {items.length > 0 && <button type="button" className={btnSecondary} onClick={onOpen}>Open</button>}
-        {onCreate && <button type="button" className={btnSecondary} onClick={onCreate}><Plus className="h-3.5 w-3.5" /> {createLabel}</button>}
-      </span>
+      </div>
+      {list.length > 0 && (
+        <>
+          <ul className="mt-2 divide-y divide-line">
+            {list.map(q => (
+              <li key={q.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+                <label className={`flex shrink-0 items-center gap-1.5 text-xs font-semibold ${canTick ? 'text-ink' : 'text-ink-soft'}`} title="Count in the deal total">
+                  <input type="checkbox" checked={ids.includes(q.id)} disabled={!canTick || busy} onChange={() => toggle(q.id)} className="h-4 w-4 accent-[#0E6E62]"
+                    aria-label={`Count ${q.refNumber || 'this quotation'} in the deal total`} />
+                </label>
+                <button type="button" onClick={() => onOpen(q)} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 text-left text-sm hover:underline">
+                  <span className="font-semibold">{q.refNumber || 'No reference'}</span>
+                  <span className="min-w-0 truncate text-ink-soft">{what(q)}</span>
+                  {q.status === 'sent'
+                    ? <span className="rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Sent {formatDate(q.sentAt || '')}</span>
+                    : <span className="rounded bg-surface px-1.5 text-xs font-semibold text-ink-soft">Draft</span>}
+                </button>
+                <span className="text-sm font-semibold tabular-nums">{formatRM(quoteDealAmount(q))}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 border-t border-line pt-2 text-sm text-ink-soft">
+            {ids.length === 0 ? (
+              <p>
+                Deal value <strong className="text-ink">{formatRM(value)}</strong> (typed).{' '}
+                {canTick ? 'Tick the quotations that make up the final total, and the deal value will follow them.' : 'The deal owner, Admin or Management can tick the quotations that make up the final total.'}
+              </p>
+            ) : (
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>Ticked quotations: <strong className="text-ink">{formatRM(total)}</strong>.</span>
+                {differs
+                  ? <>
+                    <span className="text-attention">The deal value is {formatRM(value)}.</span>
+                    {canTick && <button type="button" disabled={busy} className="font-semibold text-accent hover:underline" onClick={() => save(ids)}>Update the deal value to {formatRM(total)}</button>}
+                  </>
+                  : <span>This is the deal value.</span>}
+              </p>
+            )}
+            {err && <p role="alert" className="mt-1 text-danger">{err}</p>}
+          </div>
+        </>
+      )}
     </div>
   );
 }

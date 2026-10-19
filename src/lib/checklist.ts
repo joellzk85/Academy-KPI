@@ -8,6 +8,7 @@
 //   out from the deal's current funding type, so changing it later just works.
 
 import { FundingType, trainingEndDate } from './deals';
+import { isItemsOnly } from './dealQuotes';
 
 export type TaskKind = 'grant' | 'quotation' | 'venue' | 'trainer' | 'basic';
 export type AppliesTo = 'all' | 'hrdc';
@@ -150,7 +151,11 @@ export function progress(tasks: ChecklistTask[] | undefined, fundingType?: strin
 
 export interface Picked { id: string; name: string; from: 'checklist' | 'quotation' }
 
-export function mainQuote(quotes: any[]): any | null {
+// A deal can have several quotations (2026-10-19): the training one (with programme lines) wins over
+// add-on quotations for other items only (bus, T-shirts...).
+export function mainQuote(allQuotes: any[]): any | null {
+  const training = allQuotes.filter(q => !isItemsOnly(q));
+  const quotes = training.length ? training : allQuotes;
   const sent = quotes.filter(q => q.status === 'sent').sort((a, b) => String(b.sentAt || '').localeCompare(String(a.sentAt || '')));
   if (sent.length) return sent[0];
   const drafts = [...quotes].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id).localeCompare(String(a.id)));

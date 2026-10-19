@@ -21,6 +21,7 @@ import { pdfErrorText } from '../lib/oldTab';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import { MarkWonBox } from './DealGates';
 import QuoteFixBox from './QuoteFixBox';
+import { isItemsOnly } from '../lib/dealQuotes';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
 // A quotation is made for a deal (or a client). While it's a draft, the client's details, programme,
@@ -117,9 +118,13 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromD
       q = buildQuotationForDeal(pick.deal, { id: me.id, name: me.name }, { id: ownerId, name: personName(ownerId) || rep.name }, null, 0) as Quotation;
       q.refNumber = nextRef(quotes, date);
     } else {
+      // Other items for a client, not a training (2026-10-19): a document only, starting with one item line
+      // and no training terms (the standard terms are one click away).
       q = {
         id: `q_${Date.now()}`, refNumber: nextRef(quotes, date), date, attn: '', company: '', address: '', venue: '', time: '', participants: '',
-        trainingProvider: 'NEXT Academy', items: [], remarks: [], terms: DEFAULT_TERMS, applySST: false, sstIncluded: false, sstRate: 8, status: 'draft',
+        trainingProvider: 'NEXT Academy',
+        items: [{ id: `item_${Date.now()}`, no: 1, kind: 'item', program: '', code: '', date: '', trainer: '', programmeId: '', useDealDate: false, feePerDay: 0, days: 1, totalFee: 0 }],
+        remarks: [], terms: [], applySST: false, sstIncluded: false, sstRate: 8, status: 'draft',
         preparedBy: me.name, creatorId: me.id, ownerId: rep.id, ownerName: rep.name, clientId: pick.clientId || '', pipelineId: '', sharedWithIds: [], isHidden: false,
       };
     }
@@ -187,7 +192,7 @@ function Chooser({ deals, clients, sources, personName, onPick, onCancel, title 
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-4 pt-16" role="dialog" aria-modal="true" onClick={onCancel}>
       <div className="w-full max-w-2xl rounded-2xl bg-white p-5 font-sans text-ink shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
-          <h3 className="text-lg font-bold">{title}</h3>
+          <h3 className="text-lg font-bold">{clientOnly ? 'Which client are these items for?' : title}</h3>
           <button type="button" onClick={onCancel} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
         </div>
         {!clientOnly ? (
@@ -211,15 +216,20 @@ function Chooser({ deals, clients, sources, personName, onPick, onCancel, title 
               ))}
             </ul>
             <p className="mt-3 text-sm text-ink-soft">Only deals where the client has approved the proposal are listed. On the deal, click "Client approved" first.</p>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-surface px-4 py-3">
+              <span className="text-[15px]"><strong>Not for a training?</strong> <span className="text-ink-soft">Quote other items for a client.</span></span>
+              <button type="button" className={btnSecondary} onClick={() => setClientOnly(true)}><Plus className="h-4 w-4" /> Other items (not for a training)</button>
+            </div>
           </>
         ) : (
           <div className="space-y-3">
+            <p className="text-[15px] text-ink-soft">A quotation for other items, not tied to a training. It doesn't count in KPIs or Project P&amp;L.</p>
             <label className={label} htmlFor="ch-client">Client</label>
             <select id="ch-client" value={clientId} onChange={e => setClientId(e.target.value)} className={input}>
               <option value="">Choose from the client list…</option>
               {[...clients].sort((a, b) => String(a.companyName).localeCompare(String(b.companyName))).map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
             </select>
-            <p className="text-sm text-ink-soft">Tip: it's better to create the deal first (in Deals) so the programme, date and value fill in by themselves.</p>
+            <p className="text-sm text-ink-soft">Not in the list? Add the client in Clients first. For a training, create the deal first (in Deals) so the programme, date and value fill in by themselves.</p>
             <div className="flex justify-between gap-2">
               <button type="button" className={linkBtn} onClick={() => setClientOnly(false)}>Back to deals</button>
               <button type="button" className={btnPrimary} disabled={!clientId} onClick={() => onPick({ clientId })}>Continue</button>
@@ -316,7 +326,9 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
                         {q.isHidden && <span className="text-xs">hidden</span>}
                       </span>
                     </span>
-                    <span className="min-w-0 truncate text-[15px] text-ink-soft">{progs.length ? `${progs[0]}${progs.length > 1 ? ` +${progs.length - 1} more` : ''}` : 'No programme yet'}</span>
+                    <span className="min-w-0 truncate text-[15px] text-ink-soft">
+                      {!q.pipelineId && q.clientId && <span className="mr-1.5 rounded bg-surface px-1.5 text-xs font-semibold text-ink">No deal</span>}
+                      {progs.length ? `${progs[0]}${progs.length > 1 ? ` +${progs.length - 1} more` : ''}` : isItemsOnly(q) ? 'No items yet' : 'No programme yet'}</span>
                     <span className="text-[15px] font-semibold tabular-nums sm:text-right">{formatRM(totalOf(r.q))}</span>
                     <span className="text-sm text-ink-soft sm:text-right">
                       {formatDate(q.date) || '—'}
@@ -640,7 +652,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
         </Card>
 
         {/* 2. Training details */}
-        <Card title="2. Training details">
+        <Card title={isItemsOnly(q) ? '2. Venue, time and participants (optional)' : '2. Training details'}>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className={label} htmlFor="q-venue">Venue</label>
@@ -655,7 +667,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
         </Card>
 
         {/* 3. Programmes */}
-        <Card id="q-programmes" title="3. Programmes and other items">
+        <Card id="q-programmes" title={isItemsOnly(q) ? '3. Items' : '3. Programmes and other items'}>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[800px] text-[15px]">
               <thead>

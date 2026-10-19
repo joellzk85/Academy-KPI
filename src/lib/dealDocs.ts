@@ -8,7 +8,9 @@ type Person = { id: string; name: string };
 // the training date and the owner are read live from the deal and the lists (see lib/quoteResolve.ts).
 // "preparedBy" is whoever made it; "owner" is the person whose quotation library it belongs to.
 // A training of several days starts with that many days and the deal value spread over them, so the total stays the deal value.
-export function buildQuotationForDeal(p: any, preparedBy: Person, owner: Person, _client: any, existingCount: number) {
+// extra (2026-10-19): another quotation on the same deal (bus, T-shirts...): one blank "other item" line and
+// no training terms (the standard terms are one click away in the editor).
+export function buildQuotationForDeal(p: any, preparedBy: Person, owner: Person, _client: any, existingCount: number, extra = false) {
   const now = new Date();
   const days = trainingDays(p);
   const value = Number(p.proposalValue) || 0;
@@ -19,13 +21,15 @@ export function buildQuotationForDeal(p: any, preparedBy: Person, owner: Person,
     date: now.toISOString().substring(0, 10),
     attn: '', company: '', address: '', venue: '', time: '', participants: '',
     trainingProvider: 'NEXT Academy',
-    items: [{
-      id: `item_${Date.now()}`, no: 1, program: '', code: '', date: '', trainer: '',
-      programmeId: p.programmeId || '', useDealDate: true,
-      feePerDay: Math.round((value / days) * 100) / 100, days, totalFee: value,
-    }],
+    items: extra
+      ? [{ id: `item_${Date.now()}`, no: 1, kind: 'item' as const, program: '', code: '', date: '', trainer: '', programmeId: '', useDealDate: false, feePerDay: 0, days: 1, totalFee: 0 }]
+      : [{
+        id: `item_${Date.now()}`, no: 1, program: '', code: '', date: '', trainer: '',
+        programmeId: p.programmeId || '', useDealDate: true,
+        feePerDay: Math.round((value / days) * 100) / 100, days, totalFee: value,
+      }],
     remarks: [],
-    terms: DEFAULT_TERMS,
+    terms: extra ? [] : DEFAULT_TERMS,
     status: 'draft' as const,
     preparedBy: preparedBy.name,
     creatorId: preparedBy.id,

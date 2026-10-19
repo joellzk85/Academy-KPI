@@ -3,6 +3,7 @@ import { Quotation } from '../types';
 import Logo from './Logo';
 import { COMPANY, COMPANY_ADDRESS } from '../lib/company';
 import { quoteSst } from '../lib/quoteSst';
+import { isItemsOnly } from '../lib/dealQuotes';
 
 // The printable quotation (A4). Taken unchanged from the old quotation screen so PDFs look the same.
 // Print with window.print(): the styles below hide everything except .print-paper.
@@ -13,6 +14,9 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
   const terms = q.terms || [];
   const { mode: sstMode, rate: sstRate, subtotal: grandTotal, sst: sstAmount, total: finalTotal } = quoteSst(q);
   const applySST = sstMode === 'added';
+  // Other items only (bus, T-shirts...; 2026-10-19): no training columns or wording, venue/time only when filled in.
+  const itemsOnly = isItemsOnly(q);
+  const lead = itemsOnly ? 3 : 6;
   const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
@@ -129,7 +133,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       </div>
 
       {/* Quotation Logistics details bar */}
-      <div className="bg-slate-50/50 border border-slate-200/80 rounded-lg p-5 grid grid-cols-1 md:grid-cols-3 gap-5 text-sm font-sans shadow-2xs">
+      {(!itemsOnly || venue || time) && <div className="bg-slate-50/50 border border-slate-200/80 rounded-lg p-5 grid grid-cols-1 md:grid-cols-3 gap-5 text-sm font-sans shadow-2xs">
         <div>
           <span className="block text-[11px] font-black text-slate-400 uppercase tracking-widest font-mono">Venue Selected</span>
           <span className="font-extrabold text-slate-800 mt-1.5 block">{venue || 'N/A'}</span>
@@ -142,7 +146,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
           <span className="block text-[11px] font-black text-slate-400 uppercase tracking-widest font-mono">Participants Count</span>
           <span className="font-bold text-blue-600 mt-1.5 block">{participants || 'N/A'}</span>
         </div>
-      </div>
+      </div>}
 
       {/* Main Spreadsheet grid table for Training Courses */}
       <div className="overflow-x-auto pt-2">
@@ -150,13 +154,15 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
           <thead>
             <tr className="bg-slate-100 border-b border-slate-300 text-[11px] font-black text-slate-500 uppercase tracking-widest font-mono">
               <th className="p-3.5 w-12 text-center border-r border-slate-300">No.</th>
-              <th className="p-3.5 border-r border-slate-300">Training Program</th>
-              <th className="p-3.5 w-32 border-r border-slate-300">Programme Code</th>
-              <th className="p-3.5 w-40 border-r border-slate-300">Training Date</th>
-              <th className="p-3.5 border-r border-slate-300">Trainer</th>
-              <th className="p-3.5 w-20 text-center border-r border-slate-300">Days / Qty</th>
-              <th className="p-3.5 w-32 text-right border-r border-slate-300">Rate</th>
-              <th className="p-3.5 w-32 text-right">Total Fee</th>
+              <th className="p-3.5 border-r border-slate-300">{itemsOnly ? 'Item' : 'Training Program'}</th>
+              {!itemsOnly && <>
+                <th className="p-3.5 w-32 border-r border-slate-300">Programme Code</th>
+                <th className="p-3.5 w-40 border-r border-slate-300">Training Date</th>
+                <th className="p-3.5 border-r border-slate-300">Trainer</th>
+              </>}
+              <th className="p-3.5 w-20 text-center border-r border-slate-300">{itemsOnly ? 'Qty' : 'Days / Qty'}</th>
+              <th className="p-3.5 w-32 text-right border-r border-slate-300">{itemsOnly ? 'Price' : 'Rate'}</th>
+              <th className="p-3.5 w-32 text-right">{itemsOnly ? 'Total' : 'Total Fee'}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-250 text-slate-800 font-sans">
@@ -164,9 +170,11 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
               <tr key={item.id} className="hover:bg-slate-50/40">
                 <td className="p-3.5 text-center font-mono font-bold border-r border-slate-200">{item.no}</td>
                 <td className="p-3.5 font-extrabold text-slate-900 border-r border-slate-200 leading-normal">{item.program}</td>
-                <td className="p-3.5 font-mono font-semibold text-slate-600 border-r border-slate-200 text-xs">{item.code}</td>
-                <td className="p-3.5 text-slate-600 font-medium border-r border-slate-200 leading-normal">{item.date}</td>
-                <td className="p-3.5 font-semibold text-slate-700 border-r border-slate-200 leading-normal">{item.trainer}</td>
+                {!itemsOnly && <>
+                  <td className="p-3.5 font-mono font-semibold text-slate-600 border-r border-slate-200 text-xs">{item.code}</td>
+                  <td className="p-3.5 text-slate-600 font-medium border-r border-slate-200 leading-normal">{item.date}</td>
+                  <td className="p-3.5 font-semibold text-slate-700 border-r border-slate-200 leading-normal">{item.trainer}</td>
+                </>}
                 <td className="p-3.5 text-center font-mono font-semibold text-slate-600 border-r border-slate-200">{item.days}</td>
                 <td className="p-3.5 text-right font-mono font-bold text-slate-600 border-r border-slate-200">
                   RM {item.feePerDay.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -180,13 +188,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
             {/* Empty Spacer Rows to simulate spreadsheet looks exactly as shown in screenshot */}
             {items.length < 3 && Array.from({ length: 3 - items.length }).map((_, spacerIdx) => (
               <tr key={`spacer_${spacerIdx}`} className="h-12">
-                <td className="p-3.5 border-r border-slate-200"></td>
-                <td className="p-3.5 border-r border-slate-200"></td>
-                <td className="p-3.5 border-r border-slate-200"></td>
-                <td className="p-3.5 border-r border-slate-200"></td>
-                <td className="p-3.5 border-r border-slate-200"></td>
-                <td className="p-3.5 border-r border-slate-200"></td>
-                <td className="p-3.5 border-r border-slate-200"></td>
+                {Array.from({ length: lead + 1 }).map((_, c) => <td key={c} className="p-3.5 border-r border-slate-200"></td>)}
                 <td className="p-3.5"></td>
               </tr>
             ))}
@@ -195,15 +197,15 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
             {applySST && (
               <>
                 <tr className="bg-slate-50/40 border-t border-slate-200 font-bold text-slate-600">
-                  <td colSpan={6} className="p-3.5 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
-                    SUB-TOTAL COURSE FEES
+                  <td colSpan={lead} className="p-3.5 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
+                    {itemsOnly ? 'SUB-TOTAL' : 'SUB-TOTAL COURSE FEES'}
                   </td>
                   <td colSpan={2} className="p-3.5 text-right text-sm font-mono font-bold text-slate-700 bg-slate-50/20">
                     RM {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="bg-slate-50/40 border-t border-slate-200 font-bold text-slate-600">
-                  <td colSpan={6} className="p-3.5 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
+                  <td colSpan={lead} className="p-3.5 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
                     ADD SST ({sstRate}%)
                   </td>
                   <td colSpan={2} className="p-3.5 text-right text-sm font-mono font-bold text-slate-700 bg-slate-50/20">
@@ -215,8 +217,8 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
 
             {/* Grand Total Row */}
             <tr className="bg-slate-55/60 border-t border-slate-300 font-black">
-              <td colSpan={6} className="p-4 border-r border-slate-200 text-right uppercase tracking-wider text-xs text-slate-500 font-mono">
-                GRAND TOTAL COURSE FEES CLAIMABLE
+              <td colSpan={lead} className="p-4 border-r border-slate-200 text-right uppercase tracking-wider text-xs text-slate-500 font-mono">
+                {itemsOnly ? 'GRAND TOTAL' : 'GRAND TOTAL COURSE FEES CLAIMABLE'}
                 {sstMode === 'included' && <span className="block pt-1 text-[11px] normal-case tracking-normal">(inclusive of {sstRate}% SST)</span>}
                 {sstMode === 'none' && <span className="block pt-1 text-[11px] normal-case tracking-normal">(SST not included)</span>}
               </td>
@@ -226,7 +228,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
             </tr>
             {sstMode === 'included' && (
               <tr className="border-t border-slate-200 text-slate-500">
-                <td colSpan={6} className="p-3 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
+                <td colSpan={lead} className="p-3 border-r border-slate-200 text-right uppercase tracking-wider text-xs font-mono">
                   SST INCLUDED ABOVE ({sstRate}%)
                 </td>
                 <td colSpan={2} className="p-3 text-right text-sm font-mono">
@@ -257,6 +259,16 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       <div className="page-break" />
 
       {/* Terms and Conditions Section */}
+      {itemsOnly ? (terms.some(t => t.trim()) && (
+        <div className="space-y-3 pt-4 border-t border-slate-200">
+          <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest font-mono border-b border-slate-100 pb-1">TERMS AND CONDITIONS</h3>
+          <ul className="space-y-1 list-none pl-2 text-[11px] md:text-xs text-slate-600 leading-relaxed font-medium">
+            {terms.filter(t => t.trim()).map((t, idx) => (
+              <li key={idx} className="flex items-start gap-1"><span className="font-extrabold text-slate-400 pr-1">-</span><span>{t}</span></li>
+            ))}
+          </ul>
+        </div>
+      )) : (
       <div className="space-y-4 pt-4 border-t border-slate-200">
         <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest font-mono border-b border-slate-100 pb-1">
           TERMS AND CONDITIONS
@@ -354,6 +366,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
 
         </div>
       </div>
+      )}
 
       {/* Bottom corporate signature area - Accepted By only */}
       <div className="pt-12 flex justify-end text-sm font-sans">
