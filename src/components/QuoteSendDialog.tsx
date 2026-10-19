@@ -7,7 +7,8 @@ import { CourseOutline, Quotation, QuoteSendEntry } from '../types';
 import { clientContacts, dealContact } from '../lib/contacts';
 import { blobToBase64, downloadBlob, makeOutlinePdf, makeQuotationPdf, outlinePdfFileName, pdfFileName } from '../lib/quotePdf';
 import { waPhone, onPhone } from '../lib/whatsapp';
-import DocLinkBox, { ExpiryPicker, MakeLinkButton, openLinkOf, useDocLinks } from './DocLinkBox';
+import DocLinkBox, { LimitsPicker, MakeLinkButton, openLinkOf, useDocLinks, useLinkSettings } from './DocLinkBox';
+import { defaultExpiry, opensProblem } from '../lib/linkLimits';
 import { canSeeTracking, expiryProblem, plusDaysMY } from '../lib/proposalTracking';
 import { useProposalSettings } from '../lib/useProposalSettings';
 import { DocKind } from '../lib/docLinks';
@@ -81,8 +82,11 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
   const noun = isQuote ? 'quotation' : isTb ? 'teambuilding proposal' : 'course outline';
   const Noun = isQuote ? 'Quotation' : isTb ? 'Teambuilding proposal' : 'Course outline';
   const [channel, setChannel] = useState<Channel>('link');
-  // Teambuilding proposals (push B): the link needs an expiry date, chosen by the person who makes it.
-  const [expires, setExpires] = useState(plusDaysMY(14));
+  // Every link's limits (2026-10-19): how long it works and how many opens, starting from Management's defaults.
+  const linkSettings = useLinkSettings();
+  const [expires, setExpires] = useState('');
+  const [opens, setOpens] = useState('');
+  useEffect(() => { setExpires(defaultExpiry(linkSettings)); setOpens(String(linkSettings.opens)); }, [linkSettings.days, linkSettings.opens]);
   const proposalSettings = useProposalSettings();
   const [pdf, setPdf] = useState<Blob | null>(null);
   const [pdfError, setPdfError] = useState('');
@@ -134,8 +138,9 @@ ${me.name}, NEXT Academy`;
     setBusy(true);
     try {
       if (!(await ensureSaved())) return setError(`Save the ${noun} first (see the message on the ${noun}).`);
-      if (isTb) { const problem = expiryProblem(expires); if (problem) return setError(problem); }
-      const r = await callServer<{ token: string }>('/api/doc-link/create', { kind: docKind, id: shownQ.id, ...(isTb ? { expires } : {}) }, true);
+      const problem = expiryProblem(expires) || opensProblem(Number(opens));
+      if (problem) return setError(problem);
+      const r = await callServer<{ token: string }>('/api/doc-link/create', { kind: docKind, id: shownQ.id, expires, opens: Number(opens) }, true);
       const ok = await onSent({ at: new Date().toISOString(), byId: me.id, byName: me.name, channel: 'link' });
       if (!ok) return setError(`The link was made, but the CRM could not mark the ${noun} as sent. Try again.`);
       setLinkMade(r.token);
@@ -293,7 +298,7 @@ ${me.name}, NEXT Academy`;
                     <p className="text-[15px] text-ink-soft">{isTb
                       ? 'Makes the private website of this proposal that the client opens in their browser, with no login. They can change the number of participants, compare the packages and accept it there. It always shows the latest saved version. Copy the link and send it any way you like.'
                       : `Makes a private web page of this ${noun} that the client opens in their browser, with no login, and can download as a PDF. Copy the link and send it any way you like. You'll see when the client opens it.`}{locked ? '' : ` Making it locks the ${noun}${deal ? ', and the deal moves on as with any send' : ''}.`}</p>
-                    {isTb && <ExpiryPicker value={expires} onChange={setExpires} label="The link works until" />}
+                    <div className="rounded-xl bg-surface p-3"><LimitsPicker date={expires} onDate={setExpires} opens={opens} onOpens={setOpens} settings={linkSettings} /></div>
                     <div className="flex justify-end"><MakeLinkButton busy={busy} onClick={makeLink} /></div>
                   </>
                 )}

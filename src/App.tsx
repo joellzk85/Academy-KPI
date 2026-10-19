@@ -41,6 +41,7 @@ const DataTools = React.lazy(() => import('./components/DataTools'));
 const FollowUpRulesPage = React.lazy(() => import('./components/FollowUpRulesPage'));
 const TeamFollowUpsPage = React.lazy(() => import('./components/TeamFollowUps'));
 const LostDeletedPage = React.lazy(() => import('./components/LostDeletedPage'));
+const ClientLinksPage = React.lazy(() => import('./components/ClientLinksPage'));
 const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
 const MyHome = React.lazy(() => import('./components/MyHome'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
@@ -223,7 +224,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
   useFollowUpRules();
-  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'links' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
   const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks' | 'backup'>('queue');
 
@@ -768,7 +769,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
-    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'followups' | 'lost' | 'team' | 'data') => {
+    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'links' | 'followups' | 'lost' | 'team' | 'data') => {
       if (!isManagement) return;
       if (view) setManagementView(view);
       handleSwitchTab('management');
@@ -936,7 +937,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['pl', 'Project P&L'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['pl', 'Project P&L'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -952,6 +953,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               </div>
               {managementView === 'team_followups' ? (
                 <TeamFollowUpsPage key={teamFollowUpPerson} initialPerson={teamFollowUpPerson} onOpenClient={homeNav.openClient} onOpenDeal={(d) => homeNav.openDeal(pipelinesSync.find((p: any) => p.id === d.id) || d)} />
+              ) : managementView === 'links' ? (
+                <ClientLinksPage people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'followups' ? (
                 <FollowUpRulesPage viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'lost' ? (

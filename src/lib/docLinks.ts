@@ -24,7 +24,13 @@ export interface DocLink {
   views?: number;           // times the client opened it (team opens from the CRM aren't counted)
   firstViewedAt?: number;
   lastViewedAt?: number;
-  // Teambuilding proposals only
+  // Limits on every link (2026-10-19, lib/linkLimits.ts)
+  maxOpens?: number;        // the client can open it this many times in total (views); then it's "expired"
+  lastVisit?: string;       // the last counted visitor's id (a refresh within 30 minutes isn't counted again)
+  reopenRequest?: { name: string; note?: string; at: number; reason: 'expired' | 'limit' } | null;   // the client asked for access again
+  reopenedAt?: number;
+  reopenedByName?: string;
+  // Teambuilding proposals first; since 2026-10-19 every link
   expiresAt?: number;       // end of this day (Malaysia), set by the person who made the link
   extendedAt?: number;
   extendedByName?: string;

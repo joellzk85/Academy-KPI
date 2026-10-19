@@ -7,6 +7,7 @@ import { pdfErrorText } from '../lib/oldTab';
 import QuotationDocument from './QuotationDocument';
 import CourseOutlineDocument from './CourseOutlineDocument';
 import logoUrl from '../assets/outline/next-logo.png';
+import RequestAccess, { linkVisitId } from './RequestAccess';
 
 // What a client sees when they open a quotation or course outline link (/q/<token> or /o/<token>, 2026-10-19).
 // No login: the page asks serverDocLinks.ts for the sent copy and shows it as a web page, with Download PDF and Print.
@@ -23,18 +24,23 @@ async function post(path: string, body: any) {
   return data;
 }
 
+type Gone = { code: string; message: string; canRequest?: boolean; requested?: boolean; contact?: { name: string; phone: string; email: string } };
+
 const btn = 'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors disabled:opacity-60';
 
 export default function DocLinkPage({ token }: { token: string }) {
   const [data, setData] = useState<{ kind: DocKind; doc: any } | null>(null);
   const [error, setError] = useState('');
+  const [gone, setGone] = useState<Gone | null>(null);   // expired, out of opens, or stopped (2026-10-19)
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState('');
 
   useEffect(() => {
     // The CRM's own "Open" button adds ?team=1 so the team's look isn't counted as the client opening it.
     const team = new URLSearchParams(window.location.search).get('team') === '1';
-    post('/api/doc-link/get', { token, team }).then(d => setData({ kind: d.kind, doc: d.doc })).catch(e => setError(e.message));
+    post('/api/doc-link/get', { token, team, visit: team ? '' : linkVisitId(token) })
+      .then(d => (d.gone ? setGone(d.gone) : setData({ kind: d.kind, doc: d.doc })))
+      .catch(e => setError(e.message));
   }, [token]);
 
   const isQuote = data?.kind === 'quotation';
@@ -82,7 +88,19 @@ export default function DocLinkPage({ token }: { token: string }) {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-6">
-        {error ? (
+        {gone ? (
+          <div className="mx-auto max-w-md rounded-2xl border border-line bg-white p-6 text-center">
+            <img src={logoUrl} alt="NEXT Academy" className="mx-auto mb-4 h-12 w-auto" />
+            <h1 className="text-xl font-bold">{gone.code === 'link-stopped' ? 'This link is no longer active' : 'This link has expired'}</h1>
+            <p className="mt-2 text-[15px] text-ink-soft">
+              {gone.code === 'link-stopped'
+                ? `Please contact ${gone.contact?.name || 'NEXT Academy'} for the latest version.`
+                : 'For your security, links to our documents work for a limited time and number of opens.'}
+            </p>
+            {gone.contact && <p className="mt-3 text-sm text-ink-soft">{gone.contact.name ? `${gone.contact.name}, NEXT Academy · ` : ''}{gone.contact.phone} · {gone.contact.email}</p>}
+            {gone.canRequest && <RequestAccess token={token} requested={gone.requested} contactName={gone.contact?.name} />}
+          </div>
+        ) : error ? (
           <div className="mx-auto max-w-lg rounded-2xl border border-line bg-white p-6 text-center">
             <img src={logoUrl} alt="NEXT Academy" className="mx-auto mb-4 h-12 w-auto" />
             <p className="text-[15px]">{error}</p>

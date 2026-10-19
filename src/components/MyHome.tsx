@@ -889,8 +889,19 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           key: `open_${l.token}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'attention' as const,
           sub: `Opened your ${l.kind === 'quotation' ? 'quotation' : l.kind === 'teambuilding' ? 'teambuilding proposal' : 'course outline'} ${l.refNumber || ''}: ${openedText(l).replace(/^Opened /, '')}. A good time to follow up.`,
         }));
+      // A client asked to open an expired link again (2026-10-19): only the team can reopen it.
+      const docNoun = (k: string) => (k === 'quotation' ? 'quotation' : k === 'teambuilding' ? 'teambuilding proposal' : 'course outline');
+      const reopen: Item[] = c.docLinks
+        .filter(l => l.status === 'open' && l.reopenRequest)
+        .map(l => ({ l, p: c.deals.find(d => d.id === l.dealId) }))
+        .filter(({ l, p }) => (p ? c.mine(p) : l.ownerId === c.viewer.id || l.byId === c.viewer.id))
+        .sort((a, b) => (b.l.reopenRequest?.at || 0) - (a.l.reopenRequest?.at || 0))
+        .map(({ l, p }) => ({
+          key: `reopen_${l.token}`, title: p ? c.clientName(p) : l.company || 'Client', onClick: p ? () => c.openDeal(p) : undefined, level: 'danger' as const,
+          sub: `${l.reopenRequest!.name} asked to open your ${docNoun(l.kind)} ${l.refNumber || ''} again${l.reopenRequest!.note ? `: "${l.reopenRequest!.note}"` : ''}. Reopen it from the ${docNoun(l.kind)}.`,
+        }));
       return {
-        items: [...alerts, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
+        items: [...alerts, ...reopen, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
           key: p.id, title: c.clientName(p), onClick: () => c.openDeal(p),
           sub: d < 0 ? `Overdue by ${-d} day${d === -1 ? '' : 's'} (${STAGE_LABELS[dealStage(p)]})` : d === 0 ? 'Follow up today' : `Follow up ${formatDate(ymd(p.followUpDate))}`,
           level: d < 0 ? 'danger' : d === 0 ? 'attention' : undefined,

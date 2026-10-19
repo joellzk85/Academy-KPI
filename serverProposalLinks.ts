@@ -8,6 +8,7 @@ import type { Express, Request } from 'express';
 import { FieldValue, Firestore } from 'firebase-admin/firestore';
 import { admin, UserError, route } from './serverAuth';
 import { isLinkToken } from './src/lib/docLinks';
+import { admitOpen } from './serverDocLinks';
 import { COMPANY } from './src/lib/company';
 import { statusForStage } from './src/lib/deals';
 import { EVENT_LABELS, cleanVisitUpdate, isExpired, plusDaysMY } from './src/lib/proposalTracking';
@@ -106,13 +107,12 @@ export function registerProposalLinkRoutes(app: Express) {
     slowDown(req);
     const { db } = admin();
     try {
-      const { ref, link } = await openLink(db, req.body?.token);
+      // Time and open limits, shared with quotation and outline links (2026-10-19, serverDocLinks.ts admitOpen).
+      const { ref, link } = await openLink(db, req.body?.token, { allowExpired: true });
       const { r, dealId } = await loadProposal(db, link);
-      if (!req.body?.team) {
-        const now = Date.now();
-        await ref.update({ views: FieldValue.increment(1), lastViewedAt: now, ...(link.firstViewedAt ? {} : { firstViewedAt: now }) });
-        if (!link.firstViewedAt) await addDealHistory(db, dealId || link.dealId, `Client opened the teambuilding proposal${link.refNumber ? ` ${link.refNumber}` : ''} (link)`);
-      }
+      const { blocked, first } = await admitOpen(db, ref, link, { visit: req.body?.visit, team: !!req.body?.team });
+      if (blocked) return { gone: { ...blocked, canRequest: true, requested: !!link.reopenRequest, contact: await contactOf(db, link) } };
+      if (first) await addDealHistory(db, dealId || link.dealId, `Client opened the teambuilding proposal${link.refNumber ? ` ${link.refNumber}` : ''} (link)`);
       return { proposal: publicProposal(r), accepted: link.accepted || null, expiresAt: link.expiresAt || 0 };
     } catch (e: any) {
       if (e?.extra) return { gone: { code: e.code, message: e.message, ...e.extra } };

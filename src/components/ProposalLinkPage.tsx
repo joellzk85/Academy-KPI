@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, Phone, Mail } from 'lucide-react';
 import logoUrl from '../assets/outline/next-logo.png';
+import RequestAccess, { linkVisitId } from './RequestAccess';
 import TeambuildingSite, { TB } from './TeambuildingSite';
 import { formatPrice, priceFor, ResolvedTb } from '../lib/teambuilding';
 import { EventType, VisitEvent, browserOf, deviceOf } from '../lib/proposalTracking';
@@ -15,7 +16,7 @@ import { EventType, VisitEvent, browserOf, deviceOf } from '../lib/proposalTrack
 //   about every 15 seconds and when the page closes, plus "possible" screenshot / print / copy / right-click attempts.
 //   Not tracked when someone from NEXT Academy opens it (the CRM's Open button, or a browser logged in to the CRM).
 
-type Gone = { code: string; message: string; contact?: { name: string; phone: string; email: string } };
+type Gone = { code: string; message: string; canRequest?: boolean; requested?: boolean; contact?: { name: string; phone: string; email: string } };
 type Accepted = { name: string; position: string; note?: string; packageName?: string; pax?: number; price?: number | null; at: number };
 
 async function post<T>(path: string, body: any): Promise<T> {
@@ -64,7 +65,7 @@ export default function ProposalLinkPage({ token }: { token: string }) {
       if (!live) return;
       setTeam(t);
       try {
-        const d = await post<any>('/api/proposal-link/get', { token, team: t });
+        const d = await post<any>('/api/proposal-link/get', { token, team: t, visit: t ? '' : linkVisitId(token) });
         if (!live) return;
         if (d.gone) { setState({ gone: d.gone }); return; }
         const p = d.proposal;
@@ -85,7 +86,7 @@ export default function ProposalLinkPage({ token }: { token: string }) {
   if ('loading' in state) {
     return <div className="flex min-h-screen items-center justify-center bg-white" style={{ fontFamily: "'Poppins', sans-serif" }}><Loader2 className="h-8 w-8 animate-spin" style={{ color: TB.teal }} /></div>;
   }
-  if ('gone' in state) return <GonePage g={state.gone} />;
+  if ('gone' in state) return <GonePage g={state.gone} token={token} />;
 
   const { r, accepted } = state;
   return (
@@ -186,12 +187,12 @@ export function AcceptBlock({ token, r, pax, chosen, accepted, onAccepted, previ
   );
 }
 
-function GonePage({ g }: { g: Gone }) {
+function GonePage({ g, token }: { g: Gone; token: string }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f1f8f5] px-4" style={{ fontFamily: "'Poppins', sans-serif" }}>
       <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-xl">
         <img src={logoUrl} alt="NEXT Academy" className="mx-auto h-12 w-auto" />
-        <h1 className="mt-6 text-2xl font-bold text-[#1e2d29]">{g.code === 'link-expired' ? 'This proposal has expired' : g.code === 'link-stopped' ? 'This proposal is no longer active' : 'Proposal not available'}</h1>
+        <h1 className="mt-6 text-2xl font-bold text-[#1e2d29]">{g.code === 'link-expired' || g.code === 'link-limit' ? 'This proposal has expired' : g.code === 'link-stopped' ? 'This proposal is no longer active' : 'Proposal not available'}</h1>
         <p className="mt-2 text-[15px] leading-relaxed text-[#3c4c47]">
           {g.contact ? `Please contact ${g.contact.name || 'NEXT Academy'} for the latest version. We'll be happy to help.` : g.message}
         </p>
@@ -202,6 +203,7 @@ function GonePage({ g }: { g: Gone }) {
             <a href={`mailto:${g.contact.email}`} className="flex items-center justify-center gap-2" style={{ color: TB.tealDark }}><Mail className="h-4 w-4" />{g.contact.email}</a>
           </div>
         )}
+        {g.canRequest && <RequestAccess token={token} requested={g.requested} contactName={g.contact?.name} color={TB.tealDark} />}
         <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-[#5b6b66]">Private &amp; Confidential</p>
       </div>
     </div>
