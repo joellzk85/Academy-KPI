@@ -9,9 +9,12 @@ import { FieldValue, Firestore } from 'firebase-admin/firestore';
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import { canSendQuotation } from './serverMail';
 import { DocKind, isLinkToken, publicDocFields } from './src/lib/docLinks';
+import { endOfDayMY, expiryProblem } from './src/lib/proposalTracking';
 
-const COLLECTION: Record<DocKind, string> = { quotation: 'quotations', outline: 'course_outlines' };
-const NOUN: Record<DocKind, string> = { quotation: 'quotation', outline: 'course outline' };
+// Teambuilding proposals (push B, 2026-10-19) share this list and these routes for make / stop / extend; their client
+// page has its own routes (serverProposalLinks.ts). Their links need an expiry date.
+const COLLECTION: Record<DocKind, string> = { quotation: 'quotations', outline: 'course_outlines', teambuilding: 'teambuilding_proposals' };
+const NOUN: Record<DocKind, string> = { quotation: 'quotation', outline: 'course outline', teambuilding: 'teambuilding proposal' };
 
 // Light protection against someone hammering the links: 60 requests a minute per address.
 const hits = new Map<string, { n: number; since: number }>();
@@ -24,7 +27,7 @@ function slowDown(req: Request) {
 }
 
 const kindOf = (v: any): DocKind => {
-  if (v === 'quotation' || v === 'outline') return v;
+  if (v === 'quotation' || v === 'outline' || v === 'teambuilding') return v;
   throw new UserError(400, 'bad-kind', 'Unknown document.');
 };
 
@@ -46,11 +49,24 @@ export function registerDocLinkRoutes(app: Express) {
     const existing = await db.collection('doc_links').where('docId', '==', docId).get();
     const open = existing.docs.find(x => x.data().kind === kind && x.data().status === 'open');
     if (open) return { token: open.id };
+    // A teambuilding proposal's link needs an expiry date (set by the person who makes it), and keeps the deal owner
+    // and client name for alerts and the CRM lists.
+    let extra: Record<string, any> = {};
+    let company = String(d.company || d.preparedForCompany || '');
+    if (kind === 'teambuilding') {
+      const expires = String(req.body?.expires || '');
+      const problem = expiryProblem(expires);
+      if (problem) throw new UserError(400, 'bad-expiry', problem);
+      const deal: any = d.pipelineId ? (await db.collection('pipelines').doc(d.pipelineId).get()).data() : null;
+      const clientId = deal?.clientId || d.clientId || '';
+      if (!company && clientId) company = String((await db.collection('clients').doc(clientId).get()).data()?.companyName || '');
+      extra = { expiresAt: endOfDayMY(expires), ownerId: String(deal?.ownerId || deal?.creatorId || d.ownerId || d.creatorId || ''), totalSeconds: 0 };
+    }
     const token = crypto.randomBytes(16).toString('hex');
     await db.collection('doc_links').doc(token).set({
       kind, docId, dealId: String(d.pipelineId || ''), refNumber: String(d.refNumber || ''),
-      company: String(d.company || d.preparedForCompany || ''), status: 'open',
-      createdAt: Date.now(), byId: caller.memberId, byName: await memberName(db, caller.memberId), views: 0,
+      company, status: 'open',
+      createdAt: Date.now(), byId: caller.memberId, byName: await memberName(db, caller.memberId), views: 0, ...extra,
     });
     return { token };
   }));
@@ -70,6 +86,25 @@ export function registerDocLinkRoutes(app: Express) {
     return {};
   }));
 
+  // A new expiry date for a teambuilding proposal's link (Extend). A stopped (revoked) link can't be reopened.
+  app.post('/api/doc-link/extend', route(async req => {
+    const caller = await callerFrom(req);
+    const token = String(req.body?.token || '');
+    if (!isLinkToken(token)) throw new UserError(404, 'link-not-found', 'That link was not found.');
+    const expires = String(req.body?.expires || '');
+    const problem = expiryProblem(expires);
+    if (problem) throw new UserError(400, 'bad-expiry', problem);
+    const { db } = admin();
+    const ref = db.collection('doc_links').doc(token);
+    const link: any = (await ref.get()).data();
+    if (!link) throw new UserError(404, 'link-not-found', 'That link was not found.');
+    if (link.status !== 'open') throw new UserError(409, 'link-stopped', 'This link was revoked. Make a new link instead.');
+    const d: any = (await db.collection(COLLECTION[kindOf(link.kind)]).doc(link.docId).get()).data() || {};
+    if (!canSendQuotation(d, caller)) throw new UserError(403, 'not-yours', 'Only the owner, people it is shared with, Admin or Management can change this link.');
+    await ref.update({ expiresAt: endOfDayMY(expires), extendedAt: Date.now(), extendedByName: await memberName(db, caller.memberId) });
+    return {};
+  }));
+
   // What the client's page shows. `team: true` comes from the CRM's own "Open" button and isn't counted.
   app.post('/api/doc-link/get', route(async req => {
     slowDown(req);
@@ -81,6 +116,7 @@ export function registerDocLinkRoutes(app: Express) {
     const link: any = (await ref.get()).data();
     if (!link) throw new UserError(404, 'link-not-found', gone);
     const kind = kindOf(link.kind);
+    if (kind === 'teambuilding') throw new UserError(404, 'link-not-found', gone);   // opened at /p/ (serverProposalLinks.ts)
     if (link.status !== 'open') throw new UserError(410, 'link-stopped', `This ${NOUN[kind]} link is no longer active. Please contact NEXT Academy for the latest version.`);
     const d: any = (await db.collection(COLLECTION[kind]).doc(link.docId).get()).data();
     if (!d || d.dealDeleted) throw new UserError(404, 'doc-gone', gone);

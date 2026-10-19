@@ -20,6 +20,9 @@ import {
 import { daysBetween } from '../lib/followUps';
 import { useContactLimits, useTeamList, useTouchPoints } from '../lib/useClientHistory';
 import { ContactBadge, ContactDot } from './ClientContactDot';
+import { useTbLinks } from '../lib/useProposalLinks';
+import { useProposalSettings } from '../lib/useProposalSettings';
+import { canSeeTracking } from '../lib/proposalTracking';
 
 // Clients (redesigned 2026-10-17): one shared list, the same details as before.
 // Anyone can add and edit; only Management can delete, and only a client no deal or quotation uses.
@@ -160,12 +163,15 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
   const today = todayIso();
   const staff = viewer.role !== 'rep';
 
+  // Teambuilding proposal links: "Client opened the proposal" on the timeline, for people allowed to see tracking.
+  const tbLinks = useTbLinks();
+  const seeTracking = canSeeTracking(viewer.role, useProposalSettings());
   const summaries = useMemo(() => {
     const out: Record<string, ClientSummary> = {};
-    const all = { deals, quotes, outlines, files, touchPoints, tasks };
+    const all = { deals, quotes, outlines, files, touchPoints, tasks, links: seeTracking ? tbLinks : [] };
     clients.forEach(c => { out[c.id] = summariseClient(c, all, personName, today, limits); });
     return out;
-  }, [clients, deals, quotes, outlines, files, touchPoints, tasks, limits, team, today]);
+  }, [clients, deals, quotes, outlines, files, touchPoints, tasks, limits, team, today, tbLinks, seeTracking]);
 
   const dealCount = (c: Client) => clientDeals(c, deals).length;
 
@@ -904,7 +910,7 @@ function Timeline(props: React.ComponentProps<typeof ClientPanel>) {
       {shownEntries.length > limit && (
         <button type="button" className="mt-2 text-sm font-semibold text-accent hover:underline" onClick={() => setLimit(l => l + 50)}>Show {Math.min(50, shownEntries.length - limit)} more</button>
       )}
-      <p className="mt-2 text-sm text-ink-soft">Solid entries count as contact with the client; dashed ones (drafts, booked appointments, To-dos, lost deals) don't.</p>
+      <p className="mt-2 text-sm text-ink-soft">Solid entries count as contact with the client; dashed ones (drafts, booked appointments, To-dos, lost deals, proposals opened by the client) don't.</p>
     </section>
   );
 }

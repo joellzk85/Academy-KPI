@@ -17,12 +17,14 @@ import {
 
 export const TB = { teal: '#50a88b', tealDark: '#2f7d66', chevron: '#5bc09f', mint: '#b6dccf', mintLight: '#e6f3ee', ink: '#1e2d29', soft: '#5b6b66' };
 
-type Mode = 'preview' | 'pdf';
+type Mode = 'preview' | 'pdf' | 'client';   // client = the client's private link (ProposalLinkPage.tsx)
 
-export default function TeambuildingSite({ r, mode = 'preview', pax: paxIn, onPax, watermark }: {
+export default function TeambuildingSite({ r, mode = 'preview', pax: paxIn, onPax, watermark, chosen, onChosen, endSlot }: {
   r: ResolvedTb; mode?: Mode;
   pax?: number; onPax?: (n: number) => void;   // group size (the editor keeps it in step)
-  watermark?: string;                           // faint repeating text (PDF: the client's name)
+  watermark?: string;                           // faint repeating text (the client's link: company name and date)
+  chosen?: string; onChosen?: (colId: string) => void;   // the package the client picked (Accept records it)
+  endSlot?: React.ReactNode;                    // shown after the last section (the client's link: Accept proposal)
 }) {
   const p = r.p;
   const pdf = mode === 'pdf';
@@ -113,7 +115,7 @@ export default function TeambuildingSite({ r, mode = 'preview', pax: paxIn, onPa
               </div>
             </Section>
           );
-          case 'packages': return <Section key={s.key} id={s.key} tone="mint">{head}<Packages r={r} pax={pax} setPax={setPax} pdf={pdf} /></Section>;
+          case 'packages': return <Section key={s.key} id={s.key} tone="mint">{head}<Packages r={r} pax={pax} setPax={setPax} pdf={pdf} chosenIn={chosen} onChosen={onChosen} /></Section>;
           case 'takeaways': return (
             <Section key={s.key} id={s.key} tone="white">
               {head}
@@ -153,6 +155,7 @@ export default function TeambuildingSite({ r, mode = 'preview', pax: paxIn, onPa
         }
       })}
 
+      {endSlot}
       <Footer r={r} />
     </div>
   );
@@ -206,7 +209,7 @@ function Hero({ r, pax, pdf, onGo }: { r: ResolvedTb; pax: number; pdf: boolean;
     pax > 0 && { icon: <Users className="h-4 w-4" />, text: `${pax} participants` },
   ].filter(Boolean) as { icon: React.ReactNode; text: string }[];
   return (
-    <header className={`relative flex items-end overflow-hidden ${pdf ? '' : 'min-h-[calc(100svh-52px)]'}`} style={pdf ? { minHeight: Math.round(1100 * 297 / 210) } : undefined} data-pdf-block>
+    <header id="tb-cover" className={`relative flex items-end overflow-hidden ${pdf ? '' : 'min-h-[calc(100svh-52px)]'}`} style={pdf ? { minHeight: Math.round(1100 * 297 / 210) } : undefined} data-pdf-block>
       {p.coverPhoto ? (
         <>
           <img src={p.coverPhoto} alt="" className="tb-hero-img absolute inset-0 h-full w-full object-cover" />
@@ -413,11 +416,14 @@ function ListBlock({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function Packages({ r, pax, setPax, pdf }: { r: ResolvedTb; pax: number; setPax: (n: number) => void; pdf: boolean }) {
+function Packages({ r, pax, setPax, pdf, chosenIn, onChosen }: { r: ResolvedTb; pax: number; setPax: (n: number) => void; pdf: boolean; chosenIn?: string; onChosen?: (id: string) => void }) {
   const pk = r.p.packages;
   const cols = pk.cols;
   const first = cols.find(c => c.id === r.p.chosenPackage) || cols.find(c => c.highlight) || cols[0];
-  const [chosen, setChosen] = useState(first?.id || '');
+  const [chosenOwn, setChosenOwn] = useState(first?.id || '');
+  const chosen = chosenIn || chosenOwn;
+  const setChosen = (id: string) => { setChosenOwn(id); onChosen?.(id); };
+  useEffect(() => { if (!chosenIn && first?.id) onChosen?.(first.id); }, []);
   const bands = sortedBands(pk);
   const prices = useMemo(() => Object.fromEntries(cols.map(c => [c.id, priceFor(pk, c.id, pax)])), [pk, pax]);
   const any = prices[chosen] || priceFor(pk, chosen, pax);

@@ -4,6 +4,8 @@ import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writ
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2, PartyPopper,
 } from 'lucide-react';
+import ProposalTracking from './ProposalTracking';
+import { useProposalAlerts } from '../lib/useProposalLinks';
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import {
@@ -201,6 +203,9 @@ export default function DealsBoard({
   }, [filter, myDeals, taggedDeals, search, clients, programmes]);
 
   const openDeal = deals.find(p => p.id === openId) || null;
+  // Teambuilding proposal links (push B): red dot for the owner when the client opens or accepts; cleared on opening the deal.
+  const proposalAlerts = useProposalAlerts(viewer, deals);
+  useEffect(() => { if (openId && proposalAlerts.alerts[openId]) proposalAlerts.markSeen(openId); }, [openId, proposalAlerts.alerts]);
 
   // ---------- Next step hint shown on each row ----------
   const nextStep = (p: any): { text: string; urgent: boolean } => {
@@ -626,6 +631,9 @@ export default function DealsBoard({
                     <span className={`flex items-center gap-1 text-sm sm:w-52 sm:justify-end ${step.urgent ? 'font-semibold text-danger' : 'text-ink-soft'}`}>
                       {step.urgent && <AlertTriangle className="h-3.5 w-3.5" />}{step.text}
                     </span>
+                    {proposalAlerts.alerts[p.id] && (
+                      <span className="flex items-center gap-1.5 text-sm font-semibold text-danger sm:w-52 sm:justify-end"><span className="h-2 w-2 rounded-full bg-danger" />{proposalAlerts.alerts[p.id]}</span>
+                    )}
                   </button>
                   {/* Mark won without opening the panel (Joel, 2026-10-18) */}
                   {st === 'quoted' && canEdit(p) && listWonId !== p.id && (
@@ -665,6 +673,8 @@ export default function DealsBoard({
               quotes={quotes.filter(q => q.pipelineId === openDeal.id)}
               outlines={outlines.filter(o => o.pipelineId === openDeal.id)}
               tbs={tbs.filter(t => t.pipelineId === openDeal.id)}
+              tbLinks={proposalAlerts.links.filter(l => l.dealId === openDeal.id)}
+              canSeeTracking={proposalAlerts.canSee}
               checklist={checklists[openDeal.id] || null}
               venue={dealVenue(checklists[openDeal.id] || null, quotes.filter(q => q.pipelineId === openDeal.id), venues)}
               programme={programmeOf(openDeal)}
@@ -896,6 +906,7 @@ function DealPanel(props: {
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
   clientBadge?: React.ReactNode;
   editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; tbs: any[]; checklist: any | null; busy: boolean;
+  tbLinks: any[]; canSeeTracking: boolean;
   programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
   venue: Picked | null;
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; moneySettings: MoneySettings;
@@ -1184,6 +1195,18 @@ function DealPanel(props: {
             <ProposalFilesList dealId={p.id} files={props.proposalFiles} viewer={props.viewer} editable={props.editable} onUploaded={props.onProposalUploaded} />
           </div>
         </Fold>
+
+        {/* Teambuilding proposal link and how the client used it (push B) */}
+        {props.tbLinks.length > 0 && (
+          <Fold title="Proposal link" hint={(() => {
+            const l = props.tbLinks.find(x => x.status === 'open') || props.tbLinks[0];
+            if (l.accepted) return 'Accepted online';
+            if (l.status !== 'open') return 'Revoked';
+            return props.canSeeTracking ? (l.views ? `Viewed ${l.views} time${l.views === 1 ? '' : 's'}` : 'Not opened yet') : 'Live';
+          })()} defaultOpen={props.tbLinks.some(l => l.accepted || l.views)} id={p.id}>
+            <ProposalTracking dealId={p.id} links={props.tbLinks} proposals={props.tbs} canSee={props.canSeeTracking} />
+          </Fold>
+        )}
 
         {/* Admin checklist (after the deal is won) */}
         {st === 'won' && (

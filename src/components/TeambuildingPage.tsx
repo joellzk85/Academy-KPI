@@ -23,6 +23,10 @@ import ShareWithBox, { NewCount } from './ShareWithBox';
 import { TeambuildingSendDialog } from './QuoteSendDialog';
 import TeambuildingSite from './TeambuildingSite';
 import PhotoPicker from './PhotoPicker';
+import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
+import { AcceptBlock } from './ProposalLinkPage';
+import { canSeeTracking } from '../lib/proposalTracking';
+import { useProposalSettings } from '../lib/useProposalSettings';
 import { ActivityLibrary, PackageTemplate, cleanActivity, useActivities, usePackageTemplate } from './TeambuildingLibrary';
 import { ActivityForm, Card, NumberBox, PackageEditor, UpDown, btnPrimary, btnSecondary, iconBtn, input, label, linkBtn, move } from './TeambuildingParts';
 
@@ -406,6 +410,8 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   const srcNow = gapDeal ? { ...sources, deals: sources.deals.map(d => (d.id === gapDeal.id ? gapDeal : d)) } : sources;
   const r = resolveTb(p, srcNow);
   const locked = tbSent(p);
+  const clientLink = openLinkOf(useDocLinks(p.id), 'teambuilding');   // the client's private link, if one was made
+  const proposalSettings = useProposalSettings();
   const dirty = JSON.stringify(p) !== saved;
   const nameOf = (id?: string) => reps.find(x => x.id === id)?.name || '';
   const deal = r.deal;
@@ -442,7 +448,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
     setSending(true);
   };
   const lockAsSent = async (entry: QuoteSendEntry) => {
-    const how = entry.channel === 'email' ? 'Emailed' : entry.channel === 'whatsapp' ? 'Sent by WhatsApp' : 'Marked as sent';
+    const how = entry.channel === 'email' ? 'Emailed' : entry.channel === 'whatsapp' ? 'Sent by WhatsApp' : entry.channel === 'link' ? 'Client link made' : 'Marked as sent';
     const sendLog = [...(p.sendLog || []), entry].slice(-30);
     const out: TbProposal = locked ? { ...p, sendLog } : { ...lockedCopy({ ...r, pax }), status: 'sent', sentAt: entry.at, sentById: me.id, sentByName: me.name, sendLog };
     const ok = await persist(out, locked ? how : `${how} and locked`);
@@ -556,7 +562,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
             {(p.sendLog || []).length > 0 && (
               <ul className="mt-1 space-y-0.5 text-sm">
                 {(p.sendLog || []).slice().reverse().map((x, i) => (
-                  <li key={`${x.at}-${i}`}>{x.channel === 'email' ? 'Emailed' : x.channel === 'whatsapp' ? 'WhatsApp' : 'Marked as sent'}{x.to ? ` to ${x.to}` : ''}{x.cc ? ` (cc ${x.cc})` : ''} · {x.byName} · {formatDate(x.at)}</li>
+                  <li key={`${x.at}-${i}`}>{x.channel === 'email' ? 'Emailed' : x.channel === 'whatsapp' ? 'WhatsApp' : x.channel === 'link' ? 'Client link made' : 'Marked as sent'}{x.to ? ` to ${x.to}` : ''}{x.cc ? ` (cc ${x.cc})` : ''} · {x.byName} · {formatDate(x.at)}</li>
                 ))}
               </ul>
             )}
@@ -614,6 +620,12 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
         {sections.map(s => editCard(s.key))}
       </fieldset>
 
+      <Card title="Client link" hint={clientLink ? 'The client always sees the latest saved version on this link.' : undefined}>
+        {clientLink
+          ? <DocLinkBox link={clientLink} showViews={canSeeTracking(me.role, proposalSettings)} />
+          : <p className="text-[15px] text-ink-soft">No client link yet. Use {locked ? 'Send again' : 'Send'} → Client link to make one: a private website of this proposal the client opens without logging in.</p>}
+      </Card>
+
       <Card title="Share with teammates">
         <p className="mb-2 text-[15px] text-ink-soft">People you add can open and edit this same proposal. It appears in their list under "Shared with me".</p>
         <ShareWithBox people={reps.map(x => ({ id: x.id, name: x.name, role: x.role }))} ownerId={r.ownerId} shared={p.sharedWithIds || []} log={p.sharedLog} me={me} onChange={c => set(c)} />
@@ -651,6 +663,9 @@ function Preview({ r, pax, onPax, onBack, dirty, pdfBusy, onPdf, onSend, sendLab
   onSend: () => void; sendLabel: string; busy: boolean; error: string; sendDialog: React.ReactNode;
 }) {
   const [phone, setPhone] = useState(false);
+  const [chosen, setChosen] = useState('');
+  // What the client sees at the end of their link; here it does nothing.
+  const accept = <AcceptBlock token="" r={r} pax={pax} chosen={chosen} accepted={null} onAccepted={() => {}} preview />;
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -675,11 +690,11 @@ function Preview({ r, pax, onPax, onBack, dirty, pdfBusy, onPdf, onSend, sendLab
       <div className="flex-1 overflow-hidden p-0 sm:p-4">
         {phone ? (
           <div className="mx-auto h-full w-[410px] max-w-full overflow-hidden rounded-[2rem] border-[10px] border-ink bg-white shadow-xl">
-            <PhoneFrame><TeambuildingSite r={r} pax={pax} onPax={onPax} /></PhoneFrame>
+            <PhoneFrame><TeambuildingSite r={r} pax={pax} onPax={onPax} chosen={chosen} onChosen={setChosen} endSlot={accept} /></PhoneFrame>
           </div>
         ) : (
           <div className="mx-auto h-full max-w-[1400px] overflow-y-auto bg-white shadow-xl sm:rounded-xl">
-            <TeambuildingSite r={r} pax={pax} onPax={onPax} />
+            <TeambuildingSite r={r} pax={pax} onPax={onPax} chosen={chosen} onChosen={setChosen} endSlot={accept} />
           </div>
         )}
       </div>

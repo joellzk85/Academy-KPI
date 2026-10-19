@@ -9,6 +9,7 @@ import { registerTrainerLinkRoutes } from "./serverTrainerLinks";
 import { registerMailRoutes } from "./serverMail";
 import { registerDocLinkRoutes } from "./serverDocLinks";
 import { registerPhotoRoutes } from "./serverPhotos";
+import { registerProposalLinkRoutes } from "./serverProposalLinks";
 
 // Load environment variables
 dotenv.config();
@@ -42,6 +43,9 @@ async function startServer() {
 
   // Client links: a client opens a sent quotation or course outline as a web page, without logging in
   registerDocLinkRoutes(app);
+
+  // Teambuilding proposal links: the client's page (/p/<token>), visit tracking and "Accept proposal"
+  registerProposalLinkRoutes(app);
 
   // Photos for the teambuilding proposal PDF (read by the server, so the PDF can include them)
   registerPhotoRoutes(app);

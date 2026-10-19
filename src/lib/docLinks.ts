@@ -4,7 +4,9 @@
 // revised the page says so. The server (serverDocLinks.ts) is the only way in and records when the client opens it.
 // Shared by the browser and the server, so no database code here.
 
-export type DocKind = 'quotation' | 'outline';
+// Teambuilding proposals (push B, 2026-10-19) use the same list, opened at /p/<token>, with an expiry date set by the
+// person who makes the link, the live (latest saved) version, tracking and Accept (serverProposalLinks.ts).
+export type DocKind = 'quotation' | 'outline' | 'teambuilding';
 
 export interface DocLink {
   token: string;            // the document id in doc_links (32 random hex characters)
@@ -22,11 +24,18 @@ export interface DocLink {
   views?: number;           // times the client opened it (team opens from the CRM aren't counted)
   firstViewedAt?: number;
   lastViewedAt?: number;
+  // Teambuilding proposals only
+  expiresAt?: number;       // end of this day (Malaysia), set by the person who made the link
+  extendedAt?: number;
+  extendedByName?: string;
+  totalSeconds?: number;    // time the client spent on the page, all visits
+  accepted?: { name: string; position: string; note?: string; packageName?: string; pax?: number; price?: number | null; at: number };
+  ownerId?: string;         // the deal owner when the link was made (alerts)
 }
 
 export const isLinkToken = (t: unknown) => typeof t === 'string' && /^[a-f0-9]{32}$/.test(t);
 
-export const docLinkPath = (kind: DocKind, token: string) => `/${kind === 'quotation' ? 'q' : 'o'}/${token}`;
+export const docLinkPath = (kind: DocKind, token: string) => `/${kind === 'quotation' ? 'q' : kind === 'teambuilding' ? 'p' : 'o'}/${token}`;
 
 // /q/<token> or /o/<token> → the token, else ''.
 export function tokenFromPath(path: string): string {

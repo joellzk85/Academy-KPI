@@ -10,11 +10,16 @@ const trainerToken = window.location.pathname.match(/^\/t\/([a-f0-9]{32})\/?$/)?
 // A client's quotation or course outline link (/q/<token>, /o/<token>) opens it as a web page (DocLinkPage.tsx).
 const DocLinkPage = lazy(() => import('./components/DocLinkPage'));
 const docToken = tokenFromPath(window.location.pathname);
+// A client's teambuilding proposal link (/p/<token>) opens the proposal website (ProposalLinkPage.tsx, push B).
+const ProposalLinkPage = lazy(() => import('./components/ProposalLinkPage'));
+const proposalToken = window.location.pathname.match(/^\/p\/([a-f0-9]{32})\/?$/)?.[1];
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {trainerToken ? (
       <Suspense fallback={null}><TrainerLinkPage token={trainerToken} /></Suspense>
+    ) : proposalToken ? (
+      <Suspense fallback={null}><ProposalLinkPage token={proposalToken} /></Suspense>
     ) : docToken ? (
       <Suspense fallback={null}><DocLinkPage token={docToken} /></Suspense>
     ) : (

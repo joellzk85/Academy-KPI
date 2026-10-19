@@ -29,6 +29,9 @@ import { clientDeals, clientQuotes, clientTimeline, touchFollowUpOpen } from '..
 import { useTouchPoints } from '../lib/useClientHistory';
 import { linkedOnly } from '../lib/linked';
 import { DocLink, openedText } from '../lib/docLinks';
+import ProposalActivity from './ProposalActivity';
+import { useProposalSettings } from '../lib/useProposalSettings';
+import { canSeeTracking } from '../lib/proposalTracking';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -38,7 +41,7 @@ type Viewer = { id: string; name: string; role: Role };
 type CardId =
   | 'follow_up_alerts' | 'team_follow_ups'
   | 'follow_ups' | 'my_kpi' | 'my_won' | 'next14' | 'new_won' | 'due_now' | 'money_jobs'
-  | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments' | 'shared_with_me';
+  | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments' | 'shared_with_me' | 'proposal_activity';
 
 const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'follow_ups', title: 'My follow-ups', roles: ['rep', 'admin', 'management'] },
@@ -55,15 +58,16 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'team_follow_ups', title: 'Team follow-ups', roles: ['management'] },
   { id: 'team_appointments', title: 'Team appointments this week', roles: ['admin', 'management'] },
   { id: 'shared_with_me', title: 'Shared with me', roles: ['rep', 'admin', 'management'] },   // needs a workspace (where the files open)
+  { id: 'proposal_activity', title: 'Proposal activity', roles: ['rep', 'admin', 'management'] },   // teambuilding proposal links (push B)
   { id: 'programmes_waiting', title: 'Programmes waiting on HRDC', roles: ['admin', 'management'] },
   { id: 'notices', title: 'Notices', roles: ['rep', 'admin', 'management'] },
 ];
 
 // Notices are off by default (Joel removed the newsfeed); anyone can switch the card back on.
 const DEFAULT_CARDS: Record<Role, CardId[]> = {
-  rep: ['follow_ups', 'my_kpi', 'next14', 'my_won'],
-  admin: ['shared_with_me', 'new_won', 'due_now', 'money_jobs', 'next14'],
-  management: ['team_follow_ups', 'approvals', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
+  rep: ['follow_ups', 'proposal_activity', 'my_kpi', 'next14', 'my_won'],
+  admin: ['shared_with_me', 'proposal_activity', 'new_won', 'due_now', 'money_jobs', 'next14'],
+  management: ['team_follow_ups', 'approvals', 'proposal_activity', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
 };
 
 // ---------- Shortcut library (Joel, 2026-10-17) ----------
@@ -148,6 +152,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
   const wide = useWide();
   const [teammate, setTeammate] = useState('');
   const [docLinks, setDocLinks] = useState<DocLink[]>([]);   // client links, to say when a client opened one
+  const seeTbTracking = canSeeTracking(viewer.role, useProposalSettings());   // teambuilding opens: reps only if Management allows
 
   useEffect(() => {
     const subs = [
@@ -184,6 +189,17 @@ export default function MyHome({ viewer, people, representatives, deals, events,
           const cells = (Array.isArray(l) ? l : []).map((x: Cell) => ({ ...x, y: (Number(x.y) || 0) + DEFAULT_H }));
           setDoc(doc(db, 'user_prefs', viewer.id), {
             homeCards: ['team_follow_ups', ...c], homeLayout: [{ i: 'team_follow_ups', x: 0, y: 0, w: COLS / 2, h: DEFAULT_H }, ...cells], teamFollowUpsCardAdded: true,
+          }, { merge: true }).catch(() => { /* tried again next time */ });
+        }
+        // Everyone who arranged their own cards before "Proposal activity" existed gets it once, at the top (push B,
+        // 2026-10-19). It waits for the one-time cards above, so two writes never overwrite each other.
+        const othersDone = viewer.role === 'admin' ? (c || []).includes('shared_with_me') || !!s.data()?.sharedCardAdded
+          : viewer.role === 'management' ? ((c || []).includes('team_follow_ups') || !!s.data()?.teamFollowUpsCardAdded) && ((c || []).includes('follow_up_alerts') || !!s.data()?.followUpCardAdded)
+          : true;
+        if (Array.isArray(c) && !c.includes('proposal_activity') && !s.data()?.proposalCardAdded && othersDone) {
+          const cells = (Array.isArray(l) ? l : []).map((x: Cell) => ({ ...x, y: (Number(x.y) || 0) + DEFAULT_H }));
+          setDoc(doc(db, 'user_prefs', viewer.id), {
+            homeCards: ['proposal_activity', ...c], homeLayout: [{ i: 'proposal_activity', x: 0, y: 0, w: COLS / 2, h: DEFAULT_H }, ...cells], proposalCardAdded: true,
           }, { merge: true }).catch(() => { /* tried again next time */ });
         }
         setSavedCards(Array.isArray(c) ? c : null);
@@ -287,7 +303,8 @@ export default function MyHome({ viewer, people, representatives, deals, events,
 
   const ctx: CardCtx = {
     viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, programmes, representatives, venues,
-    checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps, docLinks,
+    checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
+    docLinks: seeTbTracking ? docLinks : docLinks.filter(l => l.kind !== 'teambuilding'),
   };
 
   return (
@@ -764,6 +781,17 @@ function Card({ id, ctx, editing, onRemove, stacked }: { id: CardId; ctx: CardCt
       </div>
     );
   }
+  if (id === 'proposal_activity') {
+    return (
+      <div className={shell}>
+        {titleBar()}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-2">
+          <ProposalActivity viewer={ctx.viewer} deals={ctx.deals} people={ctx.representatives.map(r => ({ id: r.id, name: r.name }))} nameOf={ctx.nameOf}
+            clientName={ctx.clientName} onOpen={editing ? undefined : ctx.openDeal} />
+        </div>
+      </div>
+    );
+  }
   if (id === 'team_follow_ups') {
     return (
       <div className={shell}>
@@ -859,7 +887,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         .sort((a, b) => (b.l.lastViewedAt || 0) - (a.l.lastViewedAt || 0))
         .map(({ l, p }) => ({
           key: `open_${l.token}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'attention' as const,
-          sub: `Opened your ${l.kind === 'quotation' ? 'quotation' : 'course outline'} ${l.refNumber || ''}: ${openedText(l).replace(/^Opened /, '')}. A good time to follow up.`,
+          sub: `Opened your ${l.kind === 'quotation' ? 'quotation' : l.kind === 'teambuilding' ? 'teambuilding proposal' : 'course outline'} ${l.refNumber || ''}: ${openedText(l).replace(/^Opened /, '')}. A good time to follow up.`,
         }));
       return {
         items: [...alerts, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({

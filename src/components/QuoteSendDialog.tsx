@@ -7,7 +7,9 @@ import { CourseOutline, Quotation, QuoteSendEntry } from '../types';
 import { clientContacts, dealContact } from '../lib/contacts';
 import { blobToBase64, downloadBlob, makeOutlinePdf, makeQuotationPdf, outlinePdfFileName, pdfFileName } from '../lib/quotePdf';
 import { waPhone, onPhone } from '../lib/whatsapp';
-import DocLinkBox, { MakeLinkButton, openLinkOf, useDocLinks } from './DocLinkBox';
+import DocLinkBox, { ExpiryPicker, MakeLinkButton, openLinkOf, useDocLinks } from './DocLinkBox';
+import { canSeeTracking, expiryProblem, plusDaysMY } from '../lib/proposalTracking';
+import { useProposalSettings } from '../lib/useProposalSettings';
 import { DocKind } from '../lib/docLinks';
 
 // Send a quotation (2026-10-18): 1) Email from my own Outlook mailbox with the PDF attached (serverMail.ts),
@@ -78,7 +80,10 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
   const isTb = shownQ.kind === 'teambuilding';
   const noun = isQuote ? 'quotation' : isTb ? 'teambuilding proposal' : 'course outline';
   const Noun = isQuote ? 'Quotation' : isTb ? 'Teambuilding proposal' : 'Course outline';
-  const [channel, setChannel] = useState<Channel>(isTb ? 'pdf' : 'link')   // teambuilding proposals have no client link yet;
+  const [channel, setChannel] = useState<Channel>('link');
+  // Teambuilding proposals (push B): the link needs an expiry date, chosen by the person who makes it.
+  const [expires, setExpires] = useState(plusDaysMY(14));
+  const proposalSettings = useProposalSettings();
   const [pdf, setPdf] = useState<Blob | null>(null);
   const [pdfError, setPdfError] = useState('');
   const [mail, setMail] = useState<{ configured: boolean; myEmail: string } | null>(null);
@@ -116,12 +121,12 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
   );
 
   // Client link (2026-10-19): a private web page of the sent copy. Making it locks the document and logs the send.
-  const links = useDocLinks(isTb ? undefined : shownQ.id);
+  const links = useDocLinks(shownQ.id);
   const [linkMade, setLinkMade] = useState('');   // the token just made (shown even before the live list has it)
-  const docKind = shownQ.kind as DocKind;   // the client link is for quotations and course outlines
+  const docKind = shownQ.kind as DocKind;
   const openLink = openLinkOf(links, docKind)
     || (linkMade ? { token: linkMade, kind: docKind, docId: shownQ.id, dealId: '', refNumber: shownQ.refNumber, company: shownQ.company, status: 'open' as const, createdAt: Date.now(), byId: me.id, byName: me.name } : null);
-  const linkMsg = `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Please find our ${isQuote ? `quotation ${shownQ.refNumber}` : 'proposed course outline'} for your review at the link below. You can also download it as a PDF there. Please let me know if you have any questions.
+  const linkMsg = isTb ? `Dear ${attn || 'Sir/Madam'}, thank you for your interest in our teambuilding programme. We've prepared a proposal especially for ${shownQ.company || 'your team'}: the programme, activities, venue options and packages. You can view it at the link below. Please let me know if you have any questions.` : `Dear ${attn || 'Sir/Madam'}, thank you for your interest in ${progText}. Please find our ${isQuote ? `quotation ${shownQ.refNumber}` : 'proposed course outline'} for your review at the link below. You can also download it as a PDF there. Please let me know if you have any questions.
 
 ${me.name}, NEXT Academy`;
   const makeLink = async () => {
@@ -129,7 +134,8 @@ ${me.name}, NEXT Academy`;
     setBusy(true);
     try {
       if (!(await ensureSaved())) return setError(`Save the ${noun} first (see the message on the ${noun}).`);
-      const r = await callServer<{ token: string }>('/api/doc-link/create', { kind: docKind, id: shownQ.id }, true);
+      if (isTb) { const problem = expiryProblem(expires); if (problem) return setError(problem); }
+      const r = await callServer<{ token: string }>('/api/doc-link/create', { kind: docKind, id: shownQ.id, ...(isTb ? { expires } : {}) }, true);
       const ok = await onSent({ at: new Date().toISOString(), byId: me.id, byName: me.name, channel: 'link' });
       if (!ok) return setError(`The link was made, but the CRM could not mark the ${noun} as sent. Try again.`);
       setLinkMade(r.token);
@@ -228,7 +234,7 @@ ${me.name}, NEXT Academy`;
     ['email', 'Email', <Mail className="h-4 w-4" />],
     ['whatsapp', 'WhatsApp', <MessageCircle className="h-4 w-4" />],
     ['pdf', 'Download PDF', <Download className="h-4 w-4" />],
-  ] as [Channel, string, React.ReactNode][]).filter(([k]) => (SHOW_EMAIL_WHATSAPP || (k !== 'email' && k !== 'whatsapp')) && !(isTb && k === 'link'));
+  ] as [Channel, string, React.ReactNode][]).filter(([k]) => (SHOW_EMAIL_WHATSAPP || (k !== 'email' && k !== 'whatsapp')));
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-4 pt-10" role="dialog" aria-modal="true" aria-labelledby="send-title" onClick={() => !busy && onClose()}>
@@ -280,11 +286,14 @@ ${me.name}, NEXT Academy`;
                   <>
                     {linkMade && <p role="status" className="flex items-start gap-2 rounded-xl bg-accent-soft px-4 py-3 text-[15px] text-accent"><CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />Link ready{locked ? '' : ` and the ${noun} is locked`}. Copy it and send it to the client (WhatsApp, email…).</p>}
                     {!linkMade && <p className="text-[15px] text-ink-soft">This {noun} already has a client link. Send it again any way you like.</p>}
-                    <DocLinkBox link={openLink} message={linkMsg} />
+                    <DocLinkBox link={openLink} message={linkMsg} showViews={!isTb || canSeeTracking(me.role, proposalSettings)} />
                   </>
                 ) : (
                   <>
-                    <p className="text-[15px] text-ink-soft">Makes a private web page of this {noun} that the client opens in their browser, with no login, and can download as a PDF. Copy the link and send it any way you like. You'll see when the client opens it.{locked ? '' : ` Making it locks the ${noun}${deal ? ', and the deal moves on as with any send' : ''}.`}</p>
+                    <p className="text-[15px] text-ink-soft">{isTb
+                      ? 'Makes the private website of this proposal that the client opens in their browser, with no login. They can change the number of participants, compare the packages and accept it there. It always shows the latest saved version. Copy the link and send it any way you like.'
+                      : `Makes a private web page of this ${noun} that the client opens in their browser, with no login, and can download as a PDF. Copy the link and send it any way you like. You'll see when the client opens it.`}{locked ? '' : ` Making it locks the ${noun}${deal ? ', and the deal moves on as with any send' : ''}.`}</p>
+                    {isTb && <ExpiryPicker value={expires} onChange={setExpires} label="The link works until" />}
                     <div className="flex justify-end"><MakeLinkButton busy={busy} onClick={makeLink} /></div>
                   </>
                 )}

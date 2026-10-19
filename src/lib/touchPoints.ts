@@ -93,14 +93,14 @@ export function agoText(lastDate: string, today: string): string {
 // ---------- Timeline ----------
 export type EntryKind =
   | 'touch' | 'followup' | 'appt_booked' | 'appt_held' | 'proposal' | 'quote_draft' | 'quote_sent'
-  | 'deal_created' | 'deal_won' | 'deal_lost' | 'outline' | 'todo';
+  | 'deal_created' | 'deal_won' | 'deal_lost' | 'outline' | 'todo' | 'proposal_open';
 export type TimelineFilter = 'all' | 'touch' | 'docs' | 'deals' | 'todos';
 export const FILTER_LABELS: Record<TimelineFilter, string> = {
   all: 'All', touch: 'Touch points and follow-ups', docs: 'Proposals and quotations', deals: 'Deals', todos: 'To-dos',
 };
 const KIND_FILTER: Record<EntryKind, TimelineFilter> = {
   touch: 'touch', followup: 'touch', appt_booked: 'touch', appt_held: 'touch',
-  proposal: 'docs', quote_draft: 'docs', quote_sent: 'docs', outline: 'docs',
+  proposal: 'docs', quote_draft: 'docs', quote_sent: 'docs', outline: 'docs', proposal_open: 'docs',
   deal_created: 'deals', deal_won: 'deals', deal_lost: 'deals', todo: 'todos',
 };
 export const entryInFilter = (e: TimelineEntry, f: TimelineFilter) => f === 'all' || KIND_FILTER[e.kind] === f;
@@ -137,6 +137,7 @@ export interface TimelineSources {
   touchPoints: ClientTouchPoint[];   // this client's
   tasks: any[];              // To-dos tagged with this client
   nameOf: (id: string) => string;
+  links?: any[];             // teambuilding proposal links (doc_links), only for people allowed to see tracking
 }
 
 // Who did a deal step: from the deal's History line, else the deal owner.
@@ -256,6 +257,19 @@ export function clientTimeline(s: TimelineSources): TimelineEntry[] {
     });
   });
 
+  // The client opened a teambuilding proposal link (push B): shown dashed, it doesn't count as contact (Joel).
+  const dealIds = new Set(s.deals.map(d => d.id));
+  (s.links || []).filter(l => l.kind === 'teambuilding' && l.views && dealIds.has(l.dealId)).forEach(l => {
+    const at = new Date(l.lastViewedAt || l.firstViewedAt || 0);
+    if (!+at) return;
+    out.push({
+      key: `po_${l.token}`, kind: 'proposal_open', date: new Date(+at + 8 * 3600_000).toISOString().slice(0, 10), at: at.toISOString(),
+      title: `Client opened the teambuilding proposal${l.refNumber ? ` ${l.refNumber}` : ''}`,
+      text: `${l.views === 1 ? 'Once' : `${l.views} times`}${l.accepted ? `; accepted online by ${l.accepted.name} (${l.accepted.position})` : ''}`,
+      dealId: l.dealId || undefined, counts: false,
+    });
+  });
+
   s.touchPoints.forEach(t => {
     if (!ymd(t.date)) return;
     out.push({
@@ -347,13 +361,13 @@ export interface ClientSummary {
 }
 
 export function summariseClient(client: any, all: {
-  deals: any[]; quotes: any[]; outlines: any[]; files: TimelineSources['files']; touchPoints: ClientTouchPoint[]; tasks: any[];
+  deals: any[]; quotes: any[]; outlines: any[]; files: TimelineSources['files']; touchPoints: ClientTouchPoint[]; tasks: any[]; links?: any[];
 }, nameOf: (id: string) => string, today: string, limits: ContactLimits): ClientSummary {
   const deals = clientDeals(client, all.deals);
   const touchPoints = all.touchPoints.filter(t => t.clientId === client.id);
   const entries = clientTimeline({
     deals, quotes: clientQuotes(client, all.quotes, all.deals), outlines: clientOutlines(client, all.outlines, all.deals),
-    files: all.files, touchPoints, tasks: all.tasks.filter(t => taskClientIds(t).includes(client.id)), nameOf,
+    files: all.files, touchPoints, tasks: all.tasks.filter(t => taskClientIds(t).includes(client.id)), nameOf, links: all.links,
   });
   const last = lastTouch(entries, today);
   const followUps = clientFollowUps(deals, touchPoints, entries, nameOf);

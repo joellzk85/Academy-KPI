@@ -59,11 +59,11 @@ service cloud.firestore {
     // and last result) and outlook (the Microsoft 365 app's IDs) are written only by the CRM server.
     match /config/{docId} {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings']))
                             || (docId in ['checklist_tasks', 'money_settings'] && isStaff())
-                            || (docId in ['sales_target', 'follow_up_rules', 'client_contact_colours'] && isManagement());
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours']));
+                            || (docId in ['sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings'] && isManagement());
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -347,6 +347,15 @@ service cloud.firestore {
     // opened them); only the server makes, stops and counts them (serverDocLinks.ts).
     match /doc_links/{token} {
       allow read: if isMember();
+      allow write: if false;
+    }
+
+    // Teambuilding proposal visits (push B, 2026-10-19): written only by the server. Admin and Management read them;
+    // reps only when Management has switched on "Reps can see proposal tracking" (config/proposal_settings).
+    match /proposal_views/{visitId} {
+      allow read: if isStaff()
+        || (isMember() && exists(/databases/$(database)/documents/config/proposal_settings)
+            && get(/databases/$(database)/documents/config/proposal_settings).data.get('repsSeeTracking', false) == true);
       allow write: if false;
     }
 

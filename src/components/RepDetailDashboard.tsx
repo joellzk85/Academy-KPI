@@ -6,6 +6,7 @@ import { ArrowLeft, Save, Link2, Plus, Calendar, DollarSign, Calculator, Percent
 import QuotationsPage from './QuotationsPage';
 import CourseOutlinesPage from './CourseOutlinesPage';
 import TeambuildingPage from './TeambuildingPage';
+import { useProposalAlerts } from '../lib/useProposalLinks';
 import TasksPage from './TasksPage';
 import { needsDoingNow } from '../lib/tasks';
 import ClientManager from './ClientManager';
@@ -2022,7 +2023,11 @@ export default function RepDetailDashboard({
   // Selected Section Header Title
   const kpiAsksOpen = asksFor(rep, reps).filter(a => !a.done).length;
   // Same as the Deals screen: only this person's own deals, or a teammate's deal they've been asked to help on.
-  const dealsAlert = pipelines.some(p => dealOwnerId(p) === rep.id && dealNeedsAttention(p)) ? 'Deal needs attention'
+  // Teambuilding proposal links (push B): the client opened or accepted a proposal (own workspace only).
+  const proposalAlerts = useProposalAlerts({ id: viewer && viewer.id !== rep.id ? '' : rep.id, role: viewer?.role || rep.role || 'rep' }, pipelines);
+  const proposalAlert = Object.values(proposalAlerts.alerts)[0];
+  const dealsAlert = proposalAlert ? proposalAlert
+    : pipelines.some(p => dealOwnerId(p) === rep.id && dealNeedsAttention(p)) ? 'Deal needs attention'
     : pipelines.some(p => dealOwnerId(p) !== rep.id && p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id)) ? 'Help asked' : undefined;
   // Files shared with this person that they haven't opened (only in their own workspace: the alerts are theirs).
   const inbox = useSharedInbox(viewer && viewer.id !== rep.id ? undefined : rep.id);
