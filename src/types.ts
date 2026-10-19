@@ -145,6 +145,7 @@ export interface QuotationItem {
 export interface Quotation {
   id: string;
   refNumber: string;
+  refAuto?: boolean;       // numbered by the CRM (lib/docRefs.ts): the client's code is put in while it's a draft
   date: string;
   attn: string;
   attnOverride?: string;   // a different PIC for this quotation only (else the client's contact person)
@@ -214,6 +215,7 @@ export interface OutlineAgendaRow {
 export interface CourseOutline {
   id: string;
   refNumber: string;
+  refAuto?: boolean;       // numbered by the CRM (lib/docRefs.ts): the client's code is put in while it's a draft
   date: string;
   courseTitle: string;
   durationDays: number;
@@ -266,6 +268,7 @@ export interface CourseOutline {
 export interface Client {
   id: string;
   companyName: string;
+  code?: string;         // customer code, e.g. HKL (2026-10-19): starts quotation and proposal numbers (lib/docRefs.ts)
   employerName?: string; // optional, e.g. the employer registered with HRD Corp; shown in Project P&L; a quotation can be addressed to it
   contactName: string;
   designation?: string;

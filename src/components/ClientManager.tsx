@@ -10,6 +10,7 @@ import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, dealWonDate, formatDat
 import { lastWonDeal, repeatDeal, repeatOwner } from '../lib/repeatDeal';
 import { MoneyIn } from '../lib/money';
 import { linkedOnly } from '../lib/linked';
+import { CODE_PROBLEM, cleanCode, clientCode, codeOk, codeTakenBy, suggestCode } from '../lib/docRefs';
 import { Contact, clientContacts, mainContactFields, newContactId } from '../lib/contacts';
 import { ProposalFile } from '../lib/proposals';
 import { openProposalFile } from './ProposalFiles';
@@ -57,7 +58,7 @@ const select = 'rounded-lg border border-line bg-white px-3 py-2 text-sm text-in
 // Contact persons (PICs): a client can have several (Joel, 2026-10-17). The first is the main one.
 const emptyContact = (): Contact => ({ id: newContactId(), name: '', designation: '', phone: '', email: '' });
 const emptyForm = () => ({
-  companyName: '', employerName: '', industry: '', address: '', hrdcRegistered: true,
+  companyName: '', code: '', employerName: '', industry: '', address: '', hrdcRegistered: true,
   contacts: [emptyContact()] as Contact[],
 });
 type Form = ReturnType<typeof emptyForm>;
@@ -181,7 +182,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
     return clients.filter(c => {
       const s = summaries[c.id];
       if (!s) return false;
-      if (q && ![c.companyName, c.employerName, c.industry, ...clientContacts(c).flatMap(p => [p.name, p.phone, p.email])].some(v => norm(v).includes(q))) return false;
+      if (q && ![c.companyName, c.code, c.employerName, c.industry, ...clientContacts(c).flatMap(p => [p.name, p.phone, p.email])].some(v => norm(v).includes(q))) return false;
       if (whose && !s.people.has(whose)) return false;
       if (followUpBy && !s.followUps.some(f => f.byId === followUpBy)) return false;
       if (quietDays && s.last && daysBetween(s.last.date, today) <= quietDays) return false;
@@ -219,12 +220,13 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
   };
   const startEdit = (c: Client) => {
     setForm({
-      companyName: c.companyName || '', employerName: c.employerName || '', industry: c.industry || '', address: c.address || '', hrdcRegistered: !!c.hrdcRegistered,
+      companyName: c.companyName || '', code: c.code || '', employerName: c.employerName || '', industry: c.industry || '', address: c.address || '', hrdcRegistered: !!c.hrdcRegistered,
       contacts: clientContacts(c).length ? clientContacts(c) : [emptyContact()],
     });
     setFormError(''); setDupId(null); setEditing(c.id);
   };
   const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
+  const codeHint = editing ? suggestCode(form.companyName, clients, editing === 'new' ? undefined : editing) : '';
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -233,6 +235,12 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
     if (!name) return setFormError('Enter the company name.');
     const dup = clients.find(c => c.id !== editing && norm(c.companyName) === norm(name));
     if (dup) { setDupId(dup.id); return setFormError(`"${dup.companyName}" is already in the client list.`); }
+    // Customer code (2026-10-19): starts quotation and proposal numbers. Left blank = the suggestion.
+    const selfId = editing === 'new' ? undefined : editing || undefined;
+    const code = cleanCode(form.code) || suggestCode(name, clients, selfId);
+    if (code && !codeOk(code)) return setFormError(CODE_PROBLEM);
+    const codeDup = code ? codeTakenBy(code, clients, selfId) : null;
+    if (codeDup) return setFormError(`The customer code ${code} is already used by ${codeDup.companyName}. Choose another.`);
     const contacts = form.contacts
       .map(p => ({ id: p.id || newContactId(), name: (p.name || '').trim(), designation: (p.designation || '').trim(), phone: (p.phone || '').trim(), email: (p.email || '').trim() }))
       .filter(p => p.name || p.phone || p.email);
@@ -242,7 +250,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
 
     // Notes have their own box on the client page (with who changed them last), so the form leaves them alone.
     const details = {
-      companyName: name, employerName: form.employerName.trim(), industry: form.industry.trim(), address: form.address.trim(), hrdcRegistered: form.hrdcRegistered,
+      companyName: name, code, employerName: form.employerName.trim(), industry: form.industry.trim(), address: form.address.trim(), hrdcRegistered: form.hrdcRegistered,
       contacts, ...mainContactFields(contacts),
     };
     setBusy(true);
@@ -369,6 +377,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
                       <span className="min-w-0">
                         <span className="flex items-center gap-2">
                           <span className="truncate font-semibold">{c.companyName}</span>
+                          {clientCode(c) && <span className="shrink-0 rounded-md border border-line px-1.5 py-0.5 text-xs font-semibold text-ink-soft">{c.code}</span>}
                           {c.hrdcRegistered && <span className="hidden shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent sm:inline">HRDC</span>}
                         </span>
                         {shown(c.employerName) && <span className="block truncate text-sm text-ink-soft">Employer: {c.employerName}</span>}
@@ -441,6 +450,12 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
                 <div>
                   <label className={label} htmlFor="c-name">Company name</label>
                   <input id="c-name" value={form.companyName} onChange={e => set({ companyName: e.target.value })} placeholder="e.g. ABC Manufacturing Sdn Bhd" className={input} autoFocus />
+                </div>
+                <div>
+                  <label className={label} htmlFor="c-code">Customer code <span className="font-normal text-ink-soft">(2 to 6 letters, e.g. HKL for Hilton KL)</span></label>
+                  <input id="c-code" value={form.code} onChange={e => set({ code: cleanCode(e.target.value).slice(0, 6) })}
+                    placeholder={codeHint || 'e.g. HKL'} className={`${input} sm:max-w-[12rem]`} />
+                  <p className="mt-1 text-sm text-ink-soft">Starts this client's quotation and proposal numbers, e.g. {cleanCode(form.code) || codeHint || 'HKL'}/NA/{today.replace(/-/g, '')}/01.{!form.code && codeHint ? ` Left blank, ${codeHint} is used.` : ''}</p>
                 </div>
                 <div>
                   <label className={label} htmlFor="c-employer">Employer name <span className="font-normal text-ink-soft">(optional, e.g. the name registered with HRD Corp if it differs)</span></label>
@@ -538,6 +553,7 @@ function ClientPanel(props: {
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-lg font-bold"><Building2 className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{c.companyName}</span></h3>
           {shown(c.employerName) && <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">Employer name:</span> {c.employerName}</p>}
+          <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">Customer code:</span> {clientCode(c) || 'not set yet (Edit to add one)'}</p>
           <p className="mt-0.5 text-[15px] text-ink-soft">{[shown(c.industry), c.hrdcRegistered ? 'HRDC registered' : 'Not HRDC registered'].filter(Boolean).join(' · ')}</p>
         </div>
         <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>

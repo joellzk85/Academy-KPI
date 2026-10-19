@@ -13,6 +13,7 @@
 // "Mark as sent" (or Email / WhatsApp) writes the resolved text into the proposal and locks it; "Revise" unlocks it.
 
 import { dealOwnerId } from './deals';
+import { nextDocRef } from './docRefs';
 import { DEFAULT_OUTLINE_TERMS } from './outlineContent';
 import type { QuoteSendEntry } from '../types';
 
@@ -225,6 +226,7 @@ export interface TbProposal {
   id: string;
   kind: 'teambuilding';
   refNumber: string;
+  refAuto?: boolean;       // numbered by the CRM (lib/docRefs.ts): the client's code is put in while it's a draft
   date: string;
   title: string;
   subtitle: string;
@@ -316,12 +318,10 @@ export function copyContent(base: TbProposal): Partial<TbProposal> {
   };
 }
 
-// TB/YYYYMMDD/NN, the next free number for the day.
-export function nextTbRef(list: { refNumber?: string }[], dateIso: string): string {
-  const day = dateIso.replace(/-/g, '');
-  const prefix = `TB/${day}/`;
-  const used = list.map(p => String(p.refNumber || '')).filter(r => r.startsWith(prefix)).map(r => parseInt(r.slice(prefix.length), 10) || 0);
-  return `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
+// HKL/NA/TB/YYYYMMDD/NN (2026-10-19): the client's code, then the next number for the day across all teambuilding
+// proposals (older TB/ numbers count too). See lib/docRefs.ts.
+export function nextTbRef(list: { refNumber?: string }[], dateIso: string, code = ''): string {
+  return nextDocRef('teambuilding', list, dateIso, code);
 }
 
 export const tbSent = (p: { status?: string }) => p.status === 'sent';

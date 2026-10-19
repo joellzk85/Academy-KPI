@@ -8,11 +8,12 @@
 // "Duplicate deal" (Joel, 2026-10-19: "some programmes are literally the same, just need to change date, venue,
 // trainer"): any deal, any stage, for the same or another client. See duplicateDeal below.
 
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { buildQuotationForDeal } from './dealDocs';
 import { dealOwnerId, dealStage, dealWonDate, formatDate, todayIso, trainingDateText, trainingDays } from './deals';
 import { nextOutlineRef } from './outlineResolve';
+import { clientCode } from './docRefs';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 type Person = { id: string; name: string };
@@ -20,19 +21,17 @@ type Person = { id: string; name: string };
 export const REPEAT_REASON = 'Repeat client, same programme';
 
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+// The client's customer code, for the new documents' numbers (blank if none yet: the editor adds it later).
+async function codeOfClient(clientId: string): Promise<string> {
+  if (!clientId) return '';
+  try { const s = await getDoc(doc(db, 'clients', clientId)); return s.exists() ? clientCode(s.data()) : ''; } catch { return ''; }
+}
 const newest = (list: any[]) => [...list].sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)))[0];
 
 // The won deal to repeat for a client: the most recently won one.
 export function lastWonDeal(deals: any[], clientId: string): any | null {
   const won = deals.filter(p => p.clientId === clientId && dealStage(p) === 'won' && !p.deleted);
   return won.sort((a, b) => String(dealWonDate(b)).localeCompare(String(dealWonDate(a))))[0] || null;
-}
-
-// The next free quotation reference for today (same numbering as "New quotation" and "Create quotation").
-function nextQuoteRef(base: string, quotes: any[]): string {
-  const prefix = base.slice(0, base.lastIndexOf('/') + 1);
-  const used = quotes.map(q => String(q.refNumber || '')).filter(r => r.startsWith(prefix)).map(r => parseInt(r.slice(prefix.length), 10) || 0);
-  return `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
 }
 
 // Reps can only own deals they create (database rule); Admin and Management keep the old deal's owner if they're
@@ -67,7 +66,7 @@ export async function repeatDeal(src: any, viewer: Viewer, people: Person[], all
     ],
   });
 
-  const quote = copyQuotation(src, deal, viewer, owner, allQuotes, true);
+  const quote = copyQuotation(src, deal, viewer, owner, allQuotes, true, await codeOfClient(deal.clientId));
   await setDoc(doc(db, 'pipelines', id), deal);
   await setDoc(doc(db, 'quotations', quote.id), quote);
   return { dealId: id, quoteId: quote.id };
@@ -75,14 +74,14 @@ export async function repeatDeal(src: any, viewer: Viewer, people: Person[], all
 
 // A draft copy of the old deal's quotation (the sent one, else the newest draft) for the new deal, or a fresh one.
 // Lines read the new deal's training date; the venue, trainer, fees and terms stay as they were, to change if needed.
-function copyQuotation(src: any, deal: any, viewer: Viewer, owner: Person, allQuotes: any[], sameClient: boolean): any {
+function copyQuotation(src: any, deal: any, viewer: Viewer, owner: Person, allQuotes: any[], sameClient: boolean, code: string): any {
   const oldQuotes = allQuotes.filter(q => q.pipelineId === src.id && !q.dealDeleted);
   const base = newest(oldQuotes.filter(q => q.status === 'sent')) || newest(oldQuotes);
-  const fresh: any = buildQuotationForDeal(deal, { id: viewer.id, name: viewer.name }, owner, null, 0);
+  const fresh: any = buildQuotationForDeal(deal, { id: viewer.id, name: viewer.name }, owner, { code }, allQuotes);
   const quote: any = base
     ? clean({
         ...base,
-        id: fresh.id, refNumber: fresh.refNumber, date: fresh.date,
+        id: fresh.id, refNumber: fresh.refNumber, refAuto: true, date: fresh.date,
         status: 'draft', sentAt: '', sentById: '', sentByName: '', sendLog: [],
         preparedBy: viewer.name, creatorId: viewer.id, ownerId: owner.id, ownerName: owner.name,
         pipelineId: deal.id, clientId: deal.clientId,
@@ -94,7 +93,6 @@ function copyQuotation(src: any, deal: any, viewer: Viewer, owner: Person, allQu
         items: (base.items || []).map((it: any) => (it.kind === 'item' ? it : { ...it, date: '', useDealDate: true })),
       })
     : fresh;
-  quote.refNumber = nextQuoteRef(fresh.refNumber, allQuotes);
   return quote;
 }
 
@@ -139,13 +137,14 @@ export async function duplicateDeal(src: any, viewer: Viewer, people: Person[], 
   });
 
   // Quotations come after the client approves, so only a deal starting at Client approved gets one.
-  const quote = opt.start === 'agreed' ? copyQuotation(src, deal, viewer, owner, allQuotes, sameClient) : null;
+  const code = await codeOfClient(deal.clientId);
+  const quote = opt.start === 'agreed' ? copyQuotation(src, deal, viewer, owner, allQuotes, sameClient, code) : null;
 
   const oldOutlines = allOutlines.filter(o => o.pipelineId === src.id && !o.dealDeleted);
   const baseOutline = newest(oldOutlines.filter(o => o.status === 'sent')) || newest(oldOutlines);
   const outline: any = baseOutline ? clean({
     ...baseOutline,
-    id: `outline_${Date.now()}`, refNumber: nextOutlineRef(allOutlines, today), date: today,
+    id: `outline_${Date.now()}`, refNumber: nextOutlineRef(allOutlines, today, code), refAuto: true, date: today,
     status: 'draft', sentAt: '', sentById: '', sentByName: '', sendLog: [],
     preparedBy: viewer.name, creatorId: viewer.id, ownerId: owner.id, ownerName: owner.name,
     pipelineId: id, clientId: deal.clientId, preparedForCompany: '',

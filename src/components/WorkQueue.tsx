@@ -166,7 +166,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
 
   const createQuotation = async (p: any) => {
     const owner = { id: dealOwnerId(p) || viewer.id, name: personName(dealOwnerId(p)) };
-    const q = buildQuotationForDeal(p, viewer, owner, clients.find(c => c.id === p.clientId), quotes.length);
+    const q = buildQuotationForDeal(p, viewer, owner, clients.find(c => c.id === p.clientId), quotes);
     try {
       await setDoc(doc(db, 'quotations', q.id), q);
       onOpenQuotations(owner.id);

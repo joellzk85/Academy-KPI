@@ -24,6 +24,8 @@ import { TeambuildingSendDialog } from './QuoteSendDialog';
 import TeambuildingSite from './TeambuildingSite';
 import PhotoPicker from './PhotoPicker';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
+import CustomerCodeBox from './CustomerCodeBox';
+import { clientCode, refWithCode } from '../lib/docRefs';
 import { AcceptBlock } from './ProposalLinkPage';
 import { canSeeTracking } from '../lib/proposalTracking';
 import { useProposalSettings } from '../lib/useProposalSettings';
@@ -116,7 +118,7 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
     const content = base ? { ...blankProposalContent(template.pk), ...copyContent(base) } : blankProposalContent(template.pk);
     const p: TbProposal = {
       ...content,
-      id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date), date,
+      id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date, clientCode(clients.find(c => c.id === deal?.clientId))), refAuto: true, date,
       preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
       clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
       title: content.title || (deal ? dealProgrammeName(deal, programmes) : ''),
@@ -132,7 +134,7 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
   const duplicate = async (p: TbProposal) => {
     const date = todayIso();
     const copy: TbProposal = JSON.parse(JSON.stringify({
-      ...p, id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date), date, preparedBy: me.name, creatorId: me.id,
+      ...p, id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date, clientCode(resolveTb(p, sources).client)), refAuto: true, date, preparedBy: me.name, creatorId: me.id,
       status: 'draft', sentAt: '', sentById: '', sentByName: '', sendLog: [], sharedWithIds: [], sharedLog: {}, isHidden: false,
     }));
     await setDoc(doc(db, 'teambuilding_proposals', copy.id), copy);
@@ -410,6 +412,9 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   const srcNow = gapDeal ? { ...sources, deals: sources.deals.map(d => (d.id === gapDeal.id ? gapDeal : d)) } : sources;
   const r = resolveTb(p, srcNow);
   const locked = tbSent(p);
+  // A draft numbered by the CRM takes its client's customer code (added, or swapped when the client changes).
+  const wantRef = !locked && p.refAuto ? refWithCode(p.refNumber, clientCode(r.client)) : p.refNumber;
+  useEffect(() => { if (wantRef !== p.refNumber) set({ refNumber: wantRef }); }, [wantRef]);
   const clientLink = openLinkOf(useDocLinks(p.id), 'teambuilding');   // the client's private link, if one was made
   const proposalSettings = useProposalSettings();
   const dirty = JSON.stringify(p) !== saved;
@@ -569,6 +574,11 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
           </div>
           <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
         </div>
+      )}
+
+      {!locked && p.refAuto && (
+        <CustomerCodeBox client={r.client} clients={sources.clients} refNumber={p.refNumber}
+          onSaved={msg => { setNote(msg); window.setTimeout(() => setNote(''), 3000); }} />
       )}
 
       <fieldset disabled={locked} className="min-w-0 space-y-4">

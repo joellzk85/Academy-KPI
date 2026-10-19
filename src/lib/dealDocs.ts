@@ -1,6 +1,7 @@
 // Documents created from a deal, so nothing is retyped.
 import { DEFAULT_TERMS } from './quoteResolve';
-import { trainingDays } from './deals';
+import { todayIso, trainingDays } from './deals';
+import { clientCode, nextDocRef } from './docRefs';
 
 type Person = { id: string; name: string };
 
@@ -10,15 +11,16 @@ type Person = { id: string; name: string };
 // A training of several days starts with that many days and the deal value spread over them, so the total stays the deal value.
 // extra (2026-10-19): another quotation on the same deal (bus, T-shirts...): one blank "other item" line and
 // no training terms (the standard terms are one click away in the editor).
-export function buildQuotationForDeal(p: any, preparedBy: Person, owner: Person, _client: any, existingCount: number, extra = false) {
-  const now = new Date();
+// The reference is the next number for today across all quotations, starting with the client's code (lib/docRefs.ts).
+export function buildQuotationForDeal(p: any, preparedBy: Person, owner: Person, client: any, allQuotes: { refNumber?: string }[], extra = false) {
+  const date = todayIso();
   const days = trainingDays(p);
   const value = Number(p.proposalValue) || 0;
-  const stamp = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
   return {
     id: `q_${Date.now()}`,
-    refNumber: `1G/NA/${stamp}/${(existingCount + 1).toString().padStart(2, '0')}`,
-    date: now.toISOString().substring(0, 10),
+    refNumber: nextDocRef('quotation', allQuotes, date, clientCode(client)),
+    refAuto: true,
+    date,
     attn: '', company: '', address: '', venue: '', time: '', participants: '',
     trainingProvider: 'NEXT Academy',
     items: extra

@@ -9,6 +9,7 @@
 import { CourseOutline } from '../types';
 import { dealOwnerId } from './deals';
 import { DEFAULT_OUTLINE_TERMS } from './outlineContent';
+import { nextDocRef } from './docRefs';
 
 export interface OutlineSources {
   clients: any[];
@@ -62,9 +63,8 @@ export function resolveOutline(o: CourseOutline, s: OutlineSources): ResolvedOut
   return { o: out, deal, client, ownerId, programmeName, programmeId };
 }
 
-// Reference numbers: CO/YYYYMMDD/NN, counting that day's outlines.
-export function nextOutlineRef(all: CourseOutline[], dateIso: string): string {
-  const prefix = `CO/${dateIso.replace(/-/g, '')}/`;
-  const used = all.map(o => o.refNumber || '').filter(r => r.startsWith(prefix)).map(r => parseInt(r.slice(prefix.length), 10) || 0);
-  return `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
+// Reference numbers (2026-10-19): HKL/NA/PRO/YYYYMMDD/NN, the client's code then the next number for the day across
+// all course outlines (older CO/ numbers count too). See lib/docRefs.ts.
+export function nextOutlineRef(all: { refNumber?: string }[], dateIso: string, code = ''): string {
+  return nextDocRef('outline', all, dateIso, code);
 }

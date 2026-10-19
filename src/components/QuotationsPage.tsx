@@ -21,6 +21,8 @@ import { pdfErrorText } from '../lib/oldTab';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import { MarkWonBox } from './DealGates';
 import QuoteFixBox from './QuoteFixBox';
+import CustomerCodeBox from './CustomerCodeBox';
+import { clientCode, nextDocRef, refWithCode } from '../lib/docRefs';
 import { isItemsOnly } from '../lib/dealQuotes';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
@@ -57,11 +59,8 @@ const linkBtn = 'text-sm font-semibold text-accent hover:underline';
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const totalOf = (q: Quotation) => quoteSst(q).total;
 
-function nextRef(all: Quotation[], dateIso: string) {
-  const prefix = `1G/NA/${dateIso.replace(/-/g, '')}/`;
-  const used = all.map(q => q.refNumber || '').filter(r => r.startsWith(prefix)).map(r => parseInt(r.slice(prefix.length), 10) || 0);
-  return `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
-}
+// HKL/NA/YYYYMMDD/NN: the client's code, then the next number for the day across all quotations (lib/docRefs.ts).
+const nextRef = (all: Quotation[], dateIso: string, client?: any) => nextDocRef('quotation', all, dateIso, clientCode(client));
 
 export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromDeal, onOpenFromDealHandled, onBackToDeal, startOnShared }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
@@ -115,13 +114,13 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromD
     let q: Quotation;
     if (pick.deal) {
       const ownerId = dealOwnerId(pick.deal) || rep.id;
-      q = buildQuotationForDeal(pick.deal, { id: me.id, name: me.name }, { id: ownerId, name: personName(ownerId) || rep.name }, null, 0) as Quotation;
-      q.refNumber = nextRef(quotes, date);
+      q = buildQuotationForDeal(pick.deal, { id: me.id, name: me.name }, { id: ownerId, name: personName(ownerId) || rep.name },
+        clients.find(c => c.id === pick.deal.clientId), quotes) as Quotation;
     } else {
       // Other items for a client, not a training (2026-10-19): a document only, starting with one item line
       // and no training terms (the standard terms are one click away).
       q = {
-        id: `q_${Date.now()}`, refNumber: nextRef(quotes, date), date, attn: '', company: '', address: '', venue: '', time: '', participants: '',
+        id: `q_${Date.now()}`, refNumber: nextRef(quotes, date, clients.find(c => c.id === pick.clientId)), refAuto: true, date, attn: '', company: '', address: '', venue: '', time: '', participants: '',
         trainingProvider: 'NEXT Academy',
         items: [{ id: `item_${Date.now()}`, no: 1, kind: 'item', program: '', code: '', date: '', trainer: '', programmeId: '', useDealDate: false, feePerDay: 0, days: 1, totalFee: 0 }],
         remarks: [], terms: [], applySST: false, sstIncluded: false, sstRate: 8, status: 'draft',
@@ -138,7 +137,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromD
   const duplicate = async (q: Quotation) => {
     const date = todayIso();
     const copy: Quotation = clean({
-      ...q, id: `q_${Date.now()}`, refNumber: nextRef(quotes, date), date, preparedBy: me.name, creatorId: me.id,
+      ...q, id: `q_${Date.now()}`, refNumber: nextRef(quotes, date, resolveQuotation(q, sources).client), refAuto: true, date, preparedBy: me.name, creatorId: me.id,
       status: 'draft', sentAt: '', sentById: '', sentByName: '', sendLog: [], sharedWithIds: [], isHidden: false,
       taggedRepId: '', taggedRepName: '', taggedBy: '', tagNote: '', isCompleted: false,
     } as Quotation);
@@ -396,6 +395,9 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   const clientLink = openLinkOf(useDocLinks(q.id), 'quotation');   // the private client link, if one was made
   const dirty = JSON.stringify(q) !== saved;
   const set = (c: Partial<Quotation>) => setQ(x => ({ ...x, ...c }));
+  // A draft numbered by the CRM takes its client's customer code (added, or swapped when the client changes).
+  const wantRef = !locked && q.refAuto ? refWithCode(q.refNumber, clientCode(r.client)) : q.refNumber;
+  useEffect(() => { if (wantRef !== q.refNumber) set({ refNumber: wantRef }); }, [wantRef]);
   const shared: string[] = q.sharedWithIds || [];
   const nameOf = (id?: string) => reps.find(p => p.id === id)?.name || '';
   const sub = (shownQ.items || []).reduce((t, i) => t + (Number(i.totalFee) || 0), 0);
@@ -589,7 +591,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
 
       {!locked && editMeta && (
         <div className="grid gap-3 rounded-2xl border border-line bg-white p-4 sm:grid-cols-3">
-          <div><label className={label} htmlFor="q-ref">Reference number</label><input id="q-ref" value={q.refNumber} onChange={e => set({ refNumber: e.target.value })} className={input} /></div>
+          <div><label className={label} htmlFor="q-ref">Reference number</label><input id="q-ref" value={q.refNumber} onChange={e => set({ refNumber: e.target.value, refAuto: false })} className={input} /></div>
           <div><label className={label} htmlFor="q-date">Date</label><input id="q-date" type="date" value={q.date} onChange={e => set({ date: e.target.value })} className={input} /></div>
           {staff && !r.deal && (
             <div>
@@ -600,6 +602,11 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
             </div>
           )}
         </div>
+      )}
+
+      {!locked && q.refAuto && (
+        <CustomerCodeBox client={r.client} clients={sources.clients} refNumber={q.refNumber}
+          onSaved={msg => { setNote(msg); window.setTimeout(() => setNote(''), 3000); }} />
       )}
 
       {!locked && r.fixes.length > 0 && (

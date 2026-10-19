@@ -21,6 +21,8 @@ import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
 import { OutlineSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
 import { trainerOptions } from './PickOrType';
+import CustomerCodeBox from './CustomerCodeBox';
+import { clientCode, refWithCode } from '../lib/docRefs';
 
 // Course outlines (redesigned 2026-10-17, like quotations).
 // An outline is made for a deal (or as a general outline with no client), starting blank or from a copy
@@ -127,7 +129,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
     };
     const o: CourseOutline = {
       ...content,
-      id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date), date,
+      id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date, clientCode(clients.find(c => c.id === deal?.clientId))), refAuto: true, date,
       preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
       clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
       programmeId: deal?.programmeId || base?.programmeId || '',
@@ -152,7 +154,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
   const duplicate = async (o: CourseOutline) => {
     const date = todayIso();
     const copy: CourseOutline = clean({
-      ...o, id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date), date, preparedBy: me.name, creatorId: me.id,
+      ...o, id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date, clientCode(resolveOutline(o, sources).client)), refAuto: true, date, preparedBy: me.name, creatorId: me.id,
       status: 'draft', sentAt: '', sentById: '', sentByName: '', sharedWithIds: [], isHidden: false,
       taggedRepId: '', taggedRepName: '', taggedBy: '', tagNote: '', isCompleted: false,
     } as CourseOutline);
@@ -434,6 +436,9 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const clientLink = openLinkOf(useDocLinks(o.id), 'outline');   // the private client link, if one was made
   const dirty = JSON.stringify(o) !== saved;
   const set = (c: Partial<CourseOutline>) => setO(x => ({ ...x, ...c }));
+  // A draft numbered by the CRM takes its client's customer code (added, or swapped when the client changes).
+  const wantRef = !locked && o.refAuto ? refWithCode(o.refNumber, clientCode(r.client)) : o.refNumber;
+  useEffect(() => { if (wantRef !== o.refNumber) set({ refNumber: wantRef }); }, [wantRef]);
   const shared: string[] = o.sharedWithIds || [];
   const nameOf = (id?: string) => reps.find(p => p.id === id)?.name || '';
   const items = o.items || [];
@@ -665,7 +670,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
 
       {!locked && editMeta && (
         <div className="grid gap-3 rounded-2xl border border-line bg-white p-4 sm:grid-cols-3">
-          <div><label className={label} htmlFor="o-ref">Reference number</label><input id="o-ref" value={o.refNumber} onChange={e => set({ refNumber: e.target.value })} className={input} /></div>
+          <div><label className={label} htmlFor="o-ref">Reference number</label><input id="o-ref" value={o.refNumber} onChange={e => set({ refNumber: e.target.value, refAuto: false })} className={input} /></div>
           <div><label className={label} htmlFor="o-date">Date</label><input id="o-date" type="date" value={o.date} onChange={e => set({ date: e.target.value })} className={input} /></div>
           {staff && !r.deal && (
             <div>
@@ -676,6 +681,11 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
             </div>
           )}
         </div>
+      )}
+
+      {!locked && o.refAuto && (
+        <CustomerCodeBox client={r.client} clients={sources.clients} refNumber={o.refNumber}
+          onSaved={msg => { setNote(msg); window.setTimeout(() => setNote(''), 3000); }} />
       )}
 
       {!locked && (

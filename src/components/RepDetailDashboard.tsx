@@ -1203,11 +1203,8 @@ export default function RepDetailDashboard({
     const ownerId = p.ownerId || p.creatorId || rep.id;
     const owner = { id: ownerId, name: reps.find(r => r.id === ownerId)?.name || p.ownerName || rep.name };
     const me = viewer ? { id: viewer.id, name: viewer.name } : { id: rep.id, name: rep.name };
-    const cleanQuote: any = buildQuotationForDeal(p, me, owner, linkedClient, quotationsForPipelines.length, extra);
-    // Same reference numbering as "New quotation": the next free number for today.
-    const prefix = cleanQuote.refNumber.slice(0, cleanQuote.refNumber.lastIndexOf('/') + 1);
-    const used = quotationsForPipelines.map(q => String(q.refNumber || '')).filter(r => r.startsWith(prefix)).map(r => parseInt(r.slice(prefix.length), 10) || 0);
-    cleanQuote.refNumber = `${prefix}${String((used.length ? Math.max(...used) : 0) + 1).padStart(2, '0')}`;
+    // Same reference numbering as "New quotation": the next number for today, with the client's code.
+    const cleanQuote: any = buildQuotationForDeal(p, me, owner, linkedClient, quotationsForPipelines, extra);
     try {
       await setDoc(doc(db, 'quotations', cleanQuote.id), cleanQuote);
       openQuoteFromDeal(p.id, cleanQuote.id);
