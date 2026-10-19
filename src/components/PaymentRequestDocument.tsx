@@ -4,6 +4,7 @@
 
 import React from 'react';
 import Logo from './Logo';
+import { COMPANY_ADDRESS } from '../lib/company';
 import { MoneyOut, OUT_STATUS_LABELS, isCompanyPayment } from '../lib/money';
 import { formatDate } from '../lib/deals';
 
@@ -45,7 +46,7 @@ export default function PaymentRequestDocument({ o, forText }: { o: MoneyOut; fo
         <div className="space-y-1 text-right font-mono text-xs text-slate-500">
           <p className="font-bold text-slate-800">NEXT ACADEMY SDN BHD</p>
           <p>(Company No. 202401030750)</p>
-          <p>10, Jalan SS 5B/4, Ss 5, 47301 Petaling Jaya, Selangor</p>
+          <p>{COMPANY_ADDRESS}</p>
         </div>
       </div>
 

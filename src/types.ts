@@ -199,6 +199,14 @@ export interface CourseOutlineItem {
   topics: string;
   duration: string;
   methodology: string;
+  day?: number;                 // which training day it's on (multi-day outlines; 2026-10-19)
+}
+
+export interface OutlineAgendaRow {
+  id: string;
+  time: string;                 // e.g. 9:00 AM – 9:35 AM
+  text: string;                 // e.g. Module 1: Ice breaker ("Module N" prints in bold)
+  isDay?: boolean;              // a day heading row ("Day 1") instead of a time slot
 }
 
 export interface CourseOutline {
@@ -239,6 +247,18 @@ export interface CourseOutline {
   sharedWithIds?: string[];     // teammates who can open and edit this same outline
   sharedLog?: Record<string, { at: string; byId: string; byName: string }>;   // who shared it with each of them, and when (alerts)
   sendLog?: QuoteSendEntry[];  // each time it was emailed, WhatsApped or marked sent (2026-10-19)
+  // New look and details (Joel, 2026-10-19, following his "Discover Your Office Persona" outline). All optional.
+  kind?: 'training';            // outline type; team building will be a second type later
+  methods?: string[];           // learning methods
+  dayTitles?: string[];         // "Day 1: <title>" headings on the modules page
+  agenda?: OutlineAgendaRow[];  // course agenda page (only printed when it has rows)
+  terms?: string;               // terms and conditions (undefined = the standard terms)
+  hideTerms?: boolean;          // leave out the Administrative details page
+  difficulty?: string;          // optional extras, printed only when filled in
+  evaluation?: string[];
+  bloomLevel?: number;          // 1-6
+  nextTraining?: string[];
+  designedBy?: string;
 }
 
 export interface Client {

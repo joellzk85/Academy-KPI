@@ -4,7 +4,8 @@ import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { CourseOutline, CourseOutlineItem, QuoteSendEntry, Representative } from '../types';
+import { CourseOutline, CourseOutlineItem, OutlineAgendaRow, QuoteSendEntry, Representative } from '../types';
+import { BLOOM_LEVELS, DEFAULT_OUTLINE_TERMS, DIFFICULTIES, durationText } from '../lib/outlineContent';
 import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso } from '../lib/deals';
 import { GapsBox } from './DealGates';
 import { Programme } from '../lib/programmes';
@@ -38,10 +39,12 @@ const btnSecondary =
 const linkBtn = 'text-sm font-semibold text-accent hover:underline';
 const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink disabled:opacity-30';
 
-const LEVELS: CourseOutline['level'][] = ['Beginner', 'Intermediate', 'Advanced'];
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
-const newModule = (): CourseOutlineItem => ({ id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, no: 0, moduleTitle: '', topics: '', duration: '', methodology: '' });
-const summary = (o: CourseOutline) => `${o.durationDays || 0} day${o.durationDays === 1 ? '' : 's'} · ${(o.items || []).length} module${(o.items || []).length === 1 ? '' : 's'}`;
+const newId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+const newModule = (): CourseOutlineItem => ({ id: newId('m'), no: 0, moduleTitle: '', topics: '', duration: '', methodology: '' });
+const newRow = (isDay = false): OutlineAgendaRow => ({ id: newId('a'), time: '', text: '', ...(isDay ? { isDay: true } : {}) });
+const summary = (o: CourseOutline) => `${durationText(o.durationDays) || '0 days'} · ${(o.items || []).length} module${(o.items || []).length === 1 ? '' : 's'}`;
+const trimList = (v?: string[]) => (v || []).map(x => x.trim()).filter(Boolean);
 
 export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onStartHandled, onOpenTab, openId, onOpenHandled, startOnShared, fromDealId, onBackToDeal }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
@@ -110,9 +113,14 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       courseTitle: base.courseTitle, durationDays: base.durationDays, totalHours: base.totalHours, category: base.category, level: base.level,
       audience: base.audience, prerequisites: base.prerequisites, overview: base.overview, outcomes: base.outcomes || [],
       items: (base.items || []).map(m => ({ ...m, id: newModule().id })),
+      // The new details (2026-10-19) come along too; the terms only when the earlier outline had its own.
+      kind: 'training' as const, methods: base.methods || [], dayTitles: base.dayTitles || [],
+      agenda: (base.agenda || []).map(r => ({ ...r, id: newRow().id })),
+      difficulty: base.difficulty || '', evaluation: base.evaluation || [], bloomLevel: base.bloomLevel || 0,
+      nextTraining: base.nextTraining || [], designedBy: base.designedBy || '', terms: base.terms, hideTerms: !!base.hideTerms,
     }) : {
       courseTitle: '', durationDays: 1, totalHours: 8, category: '', level: 'Beginner' as const, audience: '', prerequisites: '', overview: '',
-      outcomes: [], items: [newModule()],
+      outcomes: [], items: [newModule()], kind: 'training' as const, methods: [], agenda: [],
     };
     const o: CourseOutline = {
       ...content,
@@ -433,8 +441,11 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     try {
       const final = clean({
         ...out,
-        outcomes: (out.outcomes || []).map(x => x.trim()).filter(Boolean),
+        outcomes: trimList(out.outcomes),
         items: (out.items || []).map((m, i) => ({ ...m, no: i + 1 })),
+        ...(out.methods ? { methods: trimList(out.methods) } : {}),
+        ...(out.evaluation ? { evaluation: trimList(out.evaluation) } : {}),
+        ...(out.nextTraining ? { nextTraining: trimList(out.nextTraining) } : {}),
       });
       await setDoc(doc(db, 'course_outlines', final.id), final);
       setO(final);
@@ -544,6 +555,41 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     [list[i], list[j]] = [list[j], list[i]];
     return { ...x, items: list };
   });
+  // Training days (multi-day outlines): each module can be put on a day; "Day N: title" prints above them.
+  const dayCount = Math.max(1, Math.ceil(o.durationDays || 0));
+  const setDayTitle = (d: number, v: string) => setO(x => {
+    const t = [...(x.dayTitles || [])];
+    while (t.length < d) t.push('');
+    t[d - 1] = v;
+    return { ...x, dayTitles: t };
+  });
+
+  // Agenda rows
+  const agenda = o.agenda || [];
+  const setRow = (i: number, c: Partial<OutlineAgendaRow>) => setO(x => ({ ...x, agenda: (x.agenda || []).map((r, k) => (k === i ? { ...r, ...c } : r)) }));
+  const addRow = (isDay = false) => setO(x => ({ ...x, agenda: [...(x.agenda || []), newRow(isDay)] }));
+  const removeRow = (i: number) => setO(x => ({ ...x, agenda: (x.agenda || []).filter((_, k) => k !== i) }));
+  const moveRow = (i: number, dir: -1 | 1) => setO(x => {
+    const list = [...(x.agenda || [])];
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return x;
+    [list[i], list[j]] = [list[j], list[i]];
+    return { ...x, agenda: list };
+  });
+  // A start: one row per module (and day headings), times left for the person to type.
+  const agendaFromModules = () => setO(x => {
+    const mods = (x.items || []).filter(m => (m.moduleTitle || '').trim());
+    const byDay = dayCount > 1 && mods.some(m => m.day);
+    const rows: OutlineAgendaRow[] = [];
+    let last = 0;
+    mods.forEach((m, i) => {
+      const d = m.day || 1;
+      if (byDay && d !== last) { rows.push({ ...newRow(true), text: `Day ${d}` }); last = d; }
+      rows.push({ ...newRow(), text: `Module ${i + 1}: ${m.moduleTitle.trim()}` });
+    });
+    return { ...x, agenda: rows };
+  });
+  const termsText = o.terms === undefined ? DEFAULT_OUTLINE_TERMS : o.terms;
 
   const sendLabel = locked ? 'Send again' : dealAtNew ? 'Send proposal' : 'Send';
   const sendDialog = sending ? (
@@ -634,7 +680,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
             const hasContent = !!(o.overview || '').trim() || (o.items || []).some(m => (m.moduleTitle || m.topics || '').trim());
             if (hasContent && !window.confirm("Replace this outline's overview, outcomes and modules with what the trainer submitted?")) return false;
             set({
-              durationDays: s.durationDays, totalHours: s.totalHours, level: s.level, audience: s.audience, prerequisites: s.prerequisites,
+              durationDays: s.durationDays, totalHours: s.totalHours, audience: s.audience, prerequisites: s.prerequisites,
               overview: s.overview, outcomes: s.outcomes, items: s.items.map(m => ({ ...newModule(), ...m })),
             });
             setNote("Filled in from the trainer's submission. Check it, then click Save.");
@@ -691,20 +737,26 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
                 </>
               )}
             </div>
-            <div className="grid gap-3 sm:grid-cols-4">
-              <div><label className={label} htmlFor="o-days">Days</label><input id="o-days" inputMode="decimal" value={o.durationDays ? String(o.durationDays) : ''} onChange={e => set({ durationDays: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className={input} /></div>
-              <div><label className={label} htmlFor="o-hours">Total hours</label><input id="o-hours" inputMode="decimal" value={o.totalHours ? String(o.totalHours) : ''} onChange={e => set({ totalHours: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 })} className={input} /></div>
-              <div>
-                <label className={label} htmlFor="o-level">Level</label>
-                <select id="o-level" value={o.level || 'Beginner'} onChange={e => set({ level: e.target.value as CourseOutline['level'] })} className={input}>
-                  {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </div>
-              <div><label className={label} htmlFor="o-cat">Category</label><input id="o-cat" value={o.category || ''} onChange={e => set({ category: e.target.value })} className={input} placeholder="e.g. Leadership" /></div>
-            </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <div><label className={label} htmlFor="o-aud">Who it's for</label><input id="o-aud" value={o.audience || ''} onChange={e => set({ audience: e.target.value })} className={input} placeholder="e.g. Supervisors and team leaders" /></div>
-              <div><label className={label} htmlFor="o-pre">Prerequisites</label><input id="o-pre" value={o.prerequisites || ''} onChange={e => set({ prerequisites: e.target.value })} className={input} placeholder="e.g. None" /></div>
+              <div>
+                <label className={label} htmlFor="o-days">Course duration (days)</label>
+                <DecimalInput id="o-days" value={o.durationDays} onChange={v => set({ durationDays: v })} placeholder="e.g. 0.5 for half a day" />
+              </div>
+              <div>
+                <label className={label} htmlFor="o-hours">Total hours <span className="font-normal text-ink-soft">(optional)</span></label>
+                <DecimalInput id="o-hours" value={o.totalHours} onChange={v => set({ totalHours: v })} placeholder="e.g. 4" />
+              </div>
+            </div>
+            <p className="-mt-1 text-sm text-ink-soft">Prints as "{durationText(o.durationDays, o.totalHours) || '…'}".</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className={label} htmlFor="o-aud">Target audience <span className="font-normal text-ink-soft">(one per line)</span></label>
+                <textarea id="o-aud" value={o.audience || ''} onChange={e => set({ audience: e.target.value })} className={`${input} min-h-[76px]`} placeholder="e.g. All employees across departments and levels" />
+              </div>
+              <div>
+                <label className={label} htmlFor="o-pre">Pre-requisites</label>
+                <textarea id="o-pre" value={o.prerequisites || ''} onChange={e => set({ prerequisites: e.target.value })} className={`${input} min-h-[76px]`} placeholder="e.g. None" />
+              </div>
             </div>
           </div>
         </Card>
@@ -718,25 +770,46 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
             </div>
             <div>
               <label className={label} htmlFor="o-out">Learning outcomes (one per line)</label>
-              <textarea id="o-out" value={(o.outcomes || []).join('\n')} onChange={e => set({ outcomes: e.target.value.split('\n') })} className={`${input} min-h-[110px]`} placeholder={'Participants will be able to…\n…'} />
+              <p className="mb-1 text-sm text-ink-soft">Printed under "Upon completion of this program, the participants should be able to:"</p>
+              <textarea id="o-out" value={(o.outcomes || []).join('\n')} onChange={e => set({ outcomes: e.target.value.split('\n') })} className={`${input} min-h-[110px]`} placeholder={'Understand their own and others\' personality styles\nCommunicate more effectively across differences'} />
+            </div>
+            <div>
+              <label className={label} htmlFor="o-methods">Learning methods (one per line)</label>
+              <textarea id="o-methods" value={(o.methods || []).join('\n')} onChange={e => set({ methods: e.target.value.split('\n') })} className={`${input} min-h-[90px]`} placeholder={'Interactive lecture & guided discussion\nRole-play simulations\nCase studies'} />
             </div>
           </div>
         </Card>
 
         {/* 4. Modules */}
         <Card title={`4. Modules (${items.length})`}>
+          {dayCount > 1 && (
+            <div className="mb-3 space-y-2 rounded-xl bg-surface p-3">
+              <p className="text-sm text-ink-soft">This is a {dayCount}-day course: pick each module's day below. Day titles are optional (e.g. "Sales Planning Foundations").</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {Array.from({ length: dayCount }, (_, k) => (
+                  <div key={k}>
+                    <label className={label} htmlFor={`o-day-${k}`}>Day {k + 1} title</label>
+                    <input id={`o-day-${k}`} value={o.dayTitles?.[k] || ''} onChange={e => setDayTitle(k + 1, e.target.value)} className={input} placeholder="Optional" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <ol className="space-y-3">
             {items.map((m, i) => (
               <li key={m.id} className="rounded-xl border border-line p-3.5">
                 <div className="flex items-start gap-3">
                   <span className="mt-2 w-6 shrink-0 text-center font-bold text-ink-soft">{i + 1}</span>
                   <div className="min-w-0 flex-1 space-y-2">
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,2fr)_8rem_minmax(0,1fr)]">
+                    <div className={dayCount > 1 ? 'grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem]' : ''}>
                       <input value={m.moduleTitle} onChange={e => setItem(i, { moduleTitle: e.target.value })} className={input} placeholder="Module title" aria-label={`Module ${i + 1} title`} />
-                      <input value={m.duration} onChange={e => setItem(i, { duration: e.target.value })} className={input} placeholder="e.g. 3 hours" aria-label={`Module ${i + 1} duration`} />
-                      <input value={m.methodology} onChange={e => setItem(i, { methodology: e.target.value })} className={input} placeholder="Method, e.g. Lecture & role play" aria-label={`Module ${i + 1} method`} />
+                      {dayCount > 1 && (
+                        <select value={m.day || 1} onChange={e => setItem(i, { day: Number(e.target.value) })} className={input} aria-label={`Module ${i + 1} day`}>
+                          {Array.from({ length: dayCount }, (_, k) => <option key={k} value={k + 1}>Day {k + 1}</option>)}
+                        </select>
+                      )}
                     </div>
-                    <textarea value={m.topics} onChange={e => setItem(i, { topics: e.target.value })} className={`${input} min-h-[80px]`} placeholder={'Topics, one per line\n• …'} aria-label={`Module ${i + 1} topics`} />
+                    <textarea value={m.topics} onChange={e => setItem(i, { topics: e.target.value })} className={`${input} min-h-[80px]`} placeholder={'Topics, one per line\nIcebreakers to create engagement and trust\nSetting the tone for collaboration'} aria-label={`Module ${i + 1} topics`} />
                   </div>
                   {!locked && (
                     <span className="flex shrink-0 flex-col">
@@ -751,10 +824,101 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
           </ol>
           {!locked && <button type="button" className={`${btnSecondary} mt-3`} onClick={addItem}><Plus className="h-4 w-4" /> Add module</button>}
         </Card>
+
+        {/* 5. Agenda */}
+        <Card title={`5. Course agenda (${agenda.filter(r => !r.isDay).length})`}>
+          <p className="mb-3 text-[15px] text-ink-soft">Time slots for the day, printed as a table on its own page. Leave it empty to leave the page out. "Module 1" at the start prints in bold.</p>
+          {agenda.length > 0 && (
+            <ol className="space-y-2">
+              {agenda.map((row, i) => (
+                <li key={row.id} className={`flex items-start gap-2 rounded-xl border border-line p-2.5 ${row.isDay ? 'bg-surface' : ''}`}>
+                  <div className={`min-w-0 flex-1 ${row.isDay ? '' : 'grid gap-2 sm:grid-cols-[13rem_minmax(0,1fr)]'}`}>
+                    {!row.isDay && <input value={row.time} onChange={e => setRow(i, { time: e.target.value })} className={input} placeholder="9:00 AM – 9:35 AM" aria-label={`Agenda row ${i + 1} time`} />}
+                    <input value={row.text} onChange={e => setRow(i, { text: e.target.value })} className={`${input} ${row.isDay ? 'font-semibold' : ''}`}
+                      placeholder={row.isDay ? 'Day 1' : 'Module 1: Ice breaker & team warm-up'} aria-label={row.isDay ? `Day heading ${i + 1}` : `Agenda row ${i + 1}`} />
+                  </div>
+                  {!locked && (
+                    <span className="flex shrink-0 items-center">
+                      <button type="button" className={iconBtn} disabled={i === 0} onClick={() => moveRow(i, -1)} aria-label={`Move agenda row ${i + 1} up`}><ArrowUp className="h-4 w-4" /></button>
+                      <button type="button" className={iconBtn} disabled={i === agenda.length - 1} onClick={() => moveRow(i, 1)} aria-label={`Move agenda row ${i + 1} down`}><ArrowDown className="h-4 w-4" /></button>
+                      <button type="button" className={`${iconBtn} hover:text-danger`} onClick={() => removeRow(i)} aria-label={`Remove agenda row ${i + 1}`}><X className="h-4 w-4" /></button>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+          {!locked && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" className={btnSecondary} onClick={() => addRow()}><Plus className="h-4 w-4" /> Add time slot</button>
+              {dayCount > 1 && <button type="button" className={btnSecondary} onClick={() => addRow(true)}><Plus className="h-4 w-4" /> Add day heading</button>}
+              {items.some(m => (m.moduleTitle || '').trim()) && (
+                <button type="button" className={btnSecondary}
+                  onClick={() => { if (!agenda.length || window.confirm('Replace the agenda with one row per module?')) agendaFromModules(); }}>
+                  Fill in from the modules
+                </button>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* 6. Optional extras */}
+        <Card title="6. Optional extras">
+          <p className="mb-3 text-[15px] text-ink-soft">Printed on the overview page only when filled in.</p>
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className={label} htmlFor="o-diff">Difficulty</label>
+                <select id="o-diff" value={o.difficulty || ''} onChange={e => set({ difficulty: e.target.value })} className={input}>
+                  <option value="">Don't show</option>
+                  {DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={label} htmlFor="o-bloom">Bloom's taxonomy level</label>
+                <select id="o-bloom" value={o.bloomLevel || 0} onChange={e => set({ bloomLevel: Number(e.target.value) })} className={input}>
+                  <option value={0}>Don't show</option>
+                  {BLOOM_LEVELS.map((b, k) => <option key={b} value={k + 1}>Level {k + 1}: {b}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={label} htmlFor="o-by">Designed by</label>
+                <input id="o-by" value={o.designedBy || ''} onChange={e => set({ designedBy: e.target.value })} className={input} placeholder="e.g. the trainer's name" />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className={label} htmlFor="o-eval">Evaluation method (one per line)</label>
+                <textarea id="o-eval" value={(o.evaluation || []).join('\n')} onChange={e => set({ evaluation: e.target.value.split('\n') })} className={`${input} min-h-[76px]`} placeholder={'Quiz\nGroup presentation'} />
+              </div>
+              <div>
+                <label className={label} htmlFor="o-next">Recommended next training (one per line)</label>
+                <textarea id="o-next" value={(o.nextTraining || []).join('\n')} onChange={e => set({ nextTraining: e.target.value.split('\n') })} className={`${input} min-h-[76px]`} placeholder={'Emotional Quotient - Level 1'} />
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* 7. Terms */}
+        <Card title="7. Terms and conditions"
+          action={!locked && !o.hideTerms && o.terms !== undefined && o.terms !== DEFAULT_OUTLINE_TERMS && (
+            <button type="button" className={linkBtn} onClick={() => { if (window.confirm('Go back to the standard terms? Your changes to the terms will be lost.')) setO(x => { const { terms: _t, ...rest } = x; return rest as CourseOutline; }); }}>Use the standard terms</button>
+          )}>
+          <label className="mb-3 flex items-center gap-2 text-[15px]">
+            <input type="checkbox" checked={!o.hideTerms} onChange={e => set({ hideTerms: !e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
+            Include the "Administrative details" page (terms and HRD Corp badges)
+          </label>
+          {!o.hideTerms && (
+            <>
+              <textarea value={termsText} onChange={e => set({ terms: e.target.value })} className={`${input} min-h-[220px] text-sm`} aria-label="Terms and conditions" />
+              <p className="mt-1 text-sm text-ink-soft">"1. …" lines are headings, "- …" lines are bullet points, and "Label: …" prints the label in bold.{o.terms === undefined || o.terms === DEFAULT_OUTLINE_TERMS ? ' These are the standard terms.' : ' Changed for this outline only.'}</p>
+            </>
+          )}
+        </Card>
       </fieldset>
 
-      {/* 5. Sharing (allowed even when sent) */}
-      <Card title="5. Share with teammates">
+      {/* 8. Sharing (allowed even when sent) */}
+      <Card title="8. Share with teammates">
         <p className="mb-2 text-[15px] text-ink-soft">People you add can open and edit this same outline. It appears in their list under "Shared with me".</p>
         <ShareWithBox people={reps.map(p => ({ id: p.id, name: p.name, role: p.role }))} ownerId={r.ownerId} shared={shared} log={o.sharedLog} me={me}
           onChange={c => set(c)} />
@@ -844,6 +1008,16 @@ function TrainerCard({ o, r, me, trainers, links, saved, onTrainer, onAccept }: 
       )}
       {error && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
     </section>
+  );
+}
+
+// A number box that lets "0." be typed on the way to "0.5".
+function DecimalInput({ id, value, onChange, placeholder }: { id: string; value?: number; onChange: (v: number) => void; placeholder?: string }) {
+  const [text, setText] = useState(value ? String(value) : '');
+  useEffect(() => { if ((Number(text) || 0) !== (value || 0)) setText(value ? String(value) : ''); }, [value]);
+  return (
+    <input id={id} inputMode="decimal" value={text} placeholder={placeholder} className={input}
+      onChange={e => { const t = e.target.value.replace(/[^0-9.]/g, ''); setText(t); onChange(Number(t) || 0); }} />
   );
 }
 

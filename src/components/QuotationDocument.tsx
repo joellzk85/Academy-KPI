@@ -1,6 +1,7 @@
 import React from 'react';
 import { Quotation } from '../types';
 import Logo from './Logo';
+import { COMPANY, COMPANY_ADDRESS } from '../lib/company';
 
 // The printable quotation (A4). Taken unchanged from the old quotation screen so PDFs look the same.
 // Print with window.print(): the styles below hide everything except .print-paper.
@@ -76,8 +77,8 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
         <div className="text-right text-[11px] md:text-xs text-slate-500 font-mono space-y-1">
           <p className="font-bold text-slate-800">NEXT ACADEMY SDN BHD</p>
           <p>(Company No. 202401030750)</p>
-          <p>10, Jalan SS 5B/4, Ss 5, 47301 Petaling Jaya, Selangor</p>
-          <p>Tel: +6018-363 4888 | Email: info@nextacademy.my</p>
+          <p>{COMPANY_ADDRESS}</p>
+          <p>Tel: {COMPANY.phone} | Email: {COMPANY.email}</p>
         </div>
       </div>
 

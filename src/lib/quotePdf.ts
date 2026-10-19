@@ -7,7 +7,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { CourseOutline, Quotation } from '../types';
 import QuotationDocument from '../components/QuotationDocument';
-import CourseOutlineDocument from '../components/CourseOutlineDocument';
+import CourseOutlineDocument, { PAGE_W as OUTLINE_PAGE_W } from '../components/CourseOutlineDocument';
 
 const PAGE_W_PX = 900;          // drawn at the on-screen preview's width (so the table fits), then shrunk to A4
 const SCALE = 2;                // sharper text
@@ -56,8 +56,36 @@ function lastBlankRow(ctx: CanvasRenderingContext2D, from: number, to: number, w
 export const outlinePdfFileName = (o: CourseOutline) =>
   `Course outline ${String(o.refNumber || o.id).replace(/[\\/:*?"<>|]+/g, '-')}${o.courseTitle ? ` - ${o.courseTitle.replace(/[\\/:*?"<>|]+/g, '').slice(0, 60)}` : ''}${o.preparedForCompany ? ` - ${o.preparedForCompany.replace(/[\\/:*?"<>|]+/g, '').slice(0, 40)}` : ''}.pdf`;
 
-export function makeOutlinePdf(o: CourseOutline): Promise<Blob> {
-  return makeDocumentPdf(React.createElement(CourseOutlineDocument, { o }), `Course outline ${o.refNumber || ''}`.trim());
+// The outline is already laid out as A4 pages (2026-10-19 redesign), so each page becomes one PDF page.
+export async function makeOutlinePdf(o: CourseOutline): Promise<Blob> {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas-pro'), import('jspdf')]);
+  const host = document.createElement('div');
+  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${OUTLINE_PAGE_W}px;background:#fff;z-index:-1;`;
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    root.render(React.createElement(CourseOutlineDocument, { o, forPdf: true }));
+    // Wait until the pages are measured and laid out (fonts loaded).
+    const start = Date.now();
+    while (!host.querySelector('[data-ready="1"]') && Date.now() - start < 8000) await new Promise(r => window.setTimeout(r, 50));
+    await waitForImages(host);
+    await new Promise(r => window.setTimeout(r, 120));
+    const pages = Array.from(host.querySelectorAll('.outline-page')) as HTMLElement[];
+    if (!pages.length) throw new Error('The outline could not be drawn.');
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+    for (let i = 0; i < pages.length; i++) {
+      pages[i].style.boxShadow = 'none';
+      pages[i].style.margin = '0';
+      const canvas = await html2canvas(pages[i], { scale: SCALE, useCORS: true, backgroundColor: '#ffffff', logging: false, windowWidth: OUTLINE_PAGE_W });
+      if (i) pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, A4_W_MM, A4_H_MM);
+    }
+    pdf.setProperties({ title: `Course outline ${o.refNumber || ''}`.trim(), author: 'NEXT Academy' });
+    return pdf.output('blob');
+  } finally {
+    root.unmount();
+    host.remove();
+  }
 }
 
 export function makeQuotationPdf(q: Quotation): Promise<Blob> {

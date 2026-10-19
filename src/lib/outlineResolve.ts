@@ -8,6 +8,7 @@
 
 import { CourseOutline } from '../types';
 import { dealOwnerId } from './deals';
+import { DEFAULT_OUTLINE_TERMS } from './outlineContent';
 
 export interface OutlineSources {
   clients: any[];
@@ -56,6 +57,8 @@ export function resolveOutline(o: CourseOutline, s: OutlineSources): ResolvedOut
   const owner = s.people.find(p => p.id === ownerId);
   if (owner) { out.ownerId = owner.id; out.ownerName = owner.name; }
   out.items = (o.items || []).map((m, i) => ({ ...m, no: i + 1 }));
+  // No terms of its own yet: the standard terms (written into the outline when it's sent, so they stay as sent).
+  if (o.terms === undefined) out.terms = DEFAULT_OUTLINE_TERMS;
   return { o: out, deal, client, ownerId, programmeName, programmeId };
 }
 
