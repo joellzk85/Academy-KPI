@@ -26,7 +26,7 @@ export interface ChecklistFile {
   byName: string;
 }
 
-export const MAX_CHECKLIST_FILE_BYTES = 20 * 1024 * 1024;
+export const MAX_CHECKLIST_FILE_BYTES = 100 * 1024 * 1024;
 
 // Signed JD14s and attendance lists are often scans or phone photos, so pictures are allowed too.
 const TYPES: Record<string, string> = {
@@ -45,7 +45,7 @@ export const CHECKLIST_FILE_KINDS = 'PDF, Word, Excel or a photo (JPG, PNG)';
 // Why this file can't be uploaded, or '' if it's fine.
 export function checklistFileProblem(name: string, size: number): string {
   if (!TYPES[extOf(name)]) return `"${name}" isn't a ${CHECKLIST_FILE_KINDS}.`;
-  if (size > MAX_CHECKLIST_FILE_BYTES) return `"${name}" is ${(size / 1024 / 1024).toFixed(1)} MB. Files can be up to 20 MB.`;
+  if (size > MAX_CHECKLIST_FILE_BYTES) return `"${name}" is ${(size / 1024 / 1024).toFixed(1)} MB. Files can be up to 100 MB.`;
   if (size === 0) return `"${name}" is empty.`;
   return '';
 }

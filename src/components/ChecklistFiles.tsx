@@ -144,7 +144,7 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
             ) : (
               <>
                 <span className="flex items-center gap-2 text-[15px] font-semibold text-ink"><Upload className="h-4 w-4 text-accent" /> Drop the {task.label} file here, or click to choose</span>
-                <span className="text-sm text-ink-soft">{CHECKLIST_FILE_KINDS}, up to 20 MB. Uploading marks this step done.</span>
+                <span className="text-sm text-ink-soft">{CHECKLIST_FILE_KINDS}, up to 100 MB. Uploading marks this step done.</span>
               </>
             )}
           </div>

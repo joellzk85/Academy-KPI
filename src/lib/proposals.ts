@@ -17,7 +17,7 @@ export interface ProposalFile {
   byName: string;
 }
 
-export const MAX_PROPOSAL_BYTES = 20 * 1024 * 1024;
+export const MAX_PROPOSAL_BYTES = 100 * 1024 * 1024;
 
 // Allowed files by extension, with the type stored (browsers sometimes leave the type blank).
 const TYPES: Record<string, string> = {
@@ -34,7 +34,7 @@ export const extOf = (name: string) => (name.split('.').pop() || '').toLowerCase
 // Why this file can't be uploaded, or '' if it's fine.
 export function proposalFileProblem(name: string, size: number): string {
   if (!TYPES[extOf(name)]) return `"${name}" isn't a PDF, Word or PowerPoint file.`;
-  if (size > MAX_PROPOSAL_BYTES) return `"${name}" is ${(size / 1024 / 1024).toFixed(1)} MB. Files can be up to 20 MB.`;
+  if (size > MAX_PROPOSAL_BYTES) return `"${name}" is ${(size / 1024 / 1024).toFixed(1)} MB. Files can be up to 100 MB.`;
   if (size === 0) return `"${name}" is empty.`;
   return '';
 }

@@ -92,7 +92,7 @@ export function ProposalDrop({ dealId, viewer, disabled, onUploaded }: {
         ) : (
           <>
             <span className="flex items-center gap-2 text-[15px] font-semibold text-ink"><Upload className="h-4 w-4 text-accent" /> Drop the proposal here, or click to choose</span>
-            <span className="text-sm text-ink-soft">PDF, Word or PowerPoint, up to 20 MB. A copy is kept on the deal, and it's marked "Proposal sent".</span>
+            <span className="text-sm text-ink-soft">PDF, Word or PowerPoint, up to 100 MB. A copy is kept on the deal, and it's marked "Proposal sent".</span>
           </>
         )}
       </div>
