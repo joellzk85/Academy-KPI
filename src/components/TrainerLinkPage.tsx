@@ -4,6 +4,8 @@ import Logo from './Logo';
 import {
   OutlineSubmission, ProfileSubmission, cleanOutline, cleanProfile, outlineProblem, profileProblem,
 } from '../lib/trainerLinks';
+import { PROFILE_PARTS, emptyExtras, profileGaps } from '../lib/trainerProfile';
+import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
 
 // The page a trainer opens from a private link (/t/<token>), without logging in (Joel, 2026-10-17).
 // It talks only to the CRM server (serverTrainerLinks.ts), never to the database.
@@ -42,7 +44,7 @@ export default function TrainerLinkPage({ token }: { token: string }) {
   });
   const [outcomesText, setOutcomesText] = useState('');
   const [profile, setProfile] = useState<ProfileSubmission>({
-    name: '', contact: '', email: '', bio: '', experienceYears: 0, qualifications: '', pastClients: '', programmeIds: [], suggestedTopics: '', rate: 0,
+    ...emptyExtras(), name: '', contact: '', email: '', bio: '', experienceYears: 0, qualifications: '', pastClients: '', programmeIds: [], suggestedTopics: '', rate: 0,
   });
 
   useEffect(() => {
@@ -54,16 +56,23 @@ export default function TrainerLinkPage({ token }: { token: string }) {
         setOutline({ ...o, items: o.items.length ? o.items : [emptyModule()] });
         setOutcomesText(o.outcomes.join('\n'));
       }
-      if (d.kind === 'profile' && d.prefill) setProfile(cleanProfile(d.prefill, (d.programmes || []).map((p: any) => p.id)));
+      if (d.kind === 'profile' && d.prefill) setProfile(cleanProfile(d.prefill, (d.programmes || []).map((p: any) => p.id), token));
     }).catch(e => setError(e.message));
   }, [token]);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Nothing is compulsory (Joel, 2026-10-20). Submitting with gaps first lists them once, with "Submit anyway".
+  const [nudge, setNudge] = useState<string[] | null>(null);
+  const submit = async (e?: React.FormEvent, anyway = false) => {
+    e?.preventDefault();
     setProblem('');
+    if (info.kind === 'profile' && !anyway) {
+      const gaps = profileGaps(profile);
+      if (gaps.length) { setNudge(gaps); return; }
+    }
+    setNudge(null);
     const data = info.kind === 'outline'
       ? cleanOutline({ ...outline, outcomes: outcomesText.split('\n') })
-      : cleanProfile(profile, (info.programmes || []).map((p: any) => p.id));
+      : cleanProfile(profile, (info.programmes || []).map((p: any) => p.id), token);
     const p = info.kind === 'outline' ? outlineProblem(data as OutlineSubmission) : profileProblem(data as ProfileSubmission);
     if (p) return setProblem(p);
     setBusy(true);
@@ -103,6 +112,21 @@ export default function TrainerLinkPage({ token }: { token: string }) {
     return { ...o, items };
   });
 
+  // The extra details (gender, languages, uploads…). Files go to this link's own folder (storage.rules).
+  const extrasProps = {
+    value: profile,
+    onChange: (p: any) => setProfile(cur => ({ ...cur, ...(typeof p === 'function' ? p(cur) : p) })),
+    uploader: { prefix: `trainer_uploads/${token}/`, byName: profile.name.trim() || info.trainerName || 'Trainer' },
+    onFile: info.onFile,
+    idPrefix: 'p',
+    wrap: (title: string, children: React.ReactNode, hint?: string) => (
+      <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
+        <div><h2 className="font-bold">{title}</h2>{hint && <p className="text-sm text-ink-soft">{hint}</p>}</div>
+        {children}
+      </section>
+    ),
+  };
+
   return shell(
     <form onSubmit={submit} className="space-y-5">
       <div>
@@ -115,6 +139,16 @@ export default function TrainerLinkPage({ token }: { token: string }) {
           {' '}Your answers go to the NEXT Academy team for review.
         </p>
         {info.status === 'submitted' && <p className="mt-2 rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">You've already submitted this. You can correct it and submit again.</p>}
+        {info.kind === 'profile' && (() => {
+          const pct = Math.round(((PROFILE_PARTS - profileGaps(profile).length) / PROFILE_PARTS) * 100);
+          return (
+            <div className="mt-3 rounded-xl border border-line bg-white p-4">
+              <p className="flex items-center justify-between text-sm font-semibold"><span>Your profile is {pct}% complete</span><span className="text-ink-soft">{pct === 100 ? 'All done, thank you!' : ''}</span></p>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${pct}%` }} /></div>
+              <p className="mt-2 text-sm text-ink-soft">Nothing is compulsory, but please fill in as much as you can. A complete profile helps us match you with the right trainings and present you well to clients.</p>
+            </div>
+          );
+        })()}
       </div>
 
       {info.kind === 'outline' ? (
@@ -169,6 +203,8 @@ export default function TrainerLinkPage({ token }: { token: string }) {
             </div>
           </section>
 
+          <TrainerExtrasFields {...extrasProps} only={['about', 'emergency', 'languages']} />
+
           <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
             <h2 className="font-bold">What you teach</h2>
             {(info.programmes || []).length > 0 && (
@@ -185,7 +221,11 @@ export default function TrainerLinkPage({ token }: { token: string }) {
                 </div>
               </div>
             )}
-            <div><label className={label} htmlFor="p-topics">Other topics you teach <span className="font-normal text-ink-soft">(not in the list above)</span></label><textarea id="p-topics" rows={3} value={profile.suggestedTopics} onChange={e => setProfile(p => ({ ...p, suggestedTopics: e.target.value }))} className={`${input} resize-y`} /></div>
+            <div>
+              <span className={label}>{(info.programmes || []).length > 0 ? 'Other topics you teach (not in the list above)' : 'Topics you teach'}</span>
+              <p className="mb-2 text-sm text-ink-soft">One topic per box. Add as many as you like.</p>
+              <TopicList value={profile.suggestedTopics} onChange={t => setProfile(p => ({ ...p, suggestedTopics: t }))} idPrefix="p-topic" />
+            </div>
           </section>
 
           <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
@@ -195,16 +235,31 @@ export default function TrainerLinkPage({ token }: { token: string }) {
               <div><label className={label} htmlFor="p-rate">Your daily rate (RM)</label><input id="p-rate" inputMode="decimal" value={profile.rate || ''} onChange={e => setProfile(p => ({ ...p, rate: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 }))} className={input} /></div>
             </div>
             <div><label className={label} htmlFor="p-bio">Short bio</label><textarea id="p-bio" rows={4} value={profile.bio} onChange={e => setProfile(p => ({ ...p, bio: e.target.value }))} className={`${input} resize-y`} /></div>
-            <div><label className={label} htmlFor="p-qual">Qualifications and certifications</label><textarea id="p-qual" rows={3} value={profile.qualifications} onChange={e => setProfile(p => ({ ...p, qualifications: e.target.value }))} className={`${input} resize-y`} placeholder="e.g. HRDC TTT certified, degree, professional certificates" /></div>
+            <div><label className={label} htmlFor="p-qual">Qualifications</label><textarea id="p-qual" rows={3} value={profile.qualifications} onChange={e => setProfile(p => ({ ...p, qualifications: e.target.value }))} className={`${input} resize-y`} placeholder="e.g. Degree, master's, HRD Corp TTT" /></div>
+            <div><label className={label} htmlFor="p-certs">Other certificates</label><textarea id="p-certs" rows={3} value={profile.otherCerts} onChange={e => setProfile(p => ({ ...p, otherCerts: e.target.value }))} className={`${input} resize-y`} placeholder="e.g. DISC, MBTI, NLP, ICF coaching" /></div>
             <div><label className={label} htmlFor="p-clients">Past clients <span className="font-normal text-ink-soft">(optional)</span></label><textarea id="p-clients" rows={3} value={profile.pastClients} onChange={e => setProfile(p => ({ ...p, pastClients: e.target.value }))} className={`${input} resize-y`} /></div>
           </section>
+
+          <TrainerExtrasFields {...extrasProps} only={['online', 'uploads']} />
         </>
       )}
 
       {problem && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{problem}</p>}
-      <div className="flex justify-end pb-10">
-        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Submit</button>
-      </div>
+      {nudge ? (
+        <div role="alert" className="mb-10 space-y-3 rounded-2xl border border-attention/40 bg-attention-soft/40 p-5">
+          <p className="font-bold">Almost there. Could you add a few more details?</p>
+          <p className="text-[15px]">Still empty: {nudge.join(', ')}.</p>
+          <p className="text-sm text-ink-soft">Nothing is compulsory. The more you fill in, the better we can match you with trainings. You can also submit now and add the rest later from this same link.</p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" className={btnSecondary} onClick={() => setNudge(null)}>Keep filling in</button>
+            <button type="button" disabled={busy} className={btnPrimary} onClick={() => submit(undefined, true)}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Submit anyway</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex justify-end pb-10">
+          <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Submit</button>
+        </div>
+      )}
     </form>
   );
 }

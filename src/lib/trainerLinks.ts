@@ -6,7 +6,9 @@
 // trainer_links/{token}: { kind, token, status, createdAt, expiresAt, requestedById, requestedByName,
 //   outlineId?, trainerId?, trainerName?, title?, submission?, submittedAt?, decidedById?, decidedByName?, decidedAt? }
 
-export type LinkKind = 'outline' | 'profile';
+import { TrainerExtras, cleanExtras } from './trainerProfile';
+
+export type LinkKind ='outline' | 'profile';
 export type LinkStatus = 'open' | 'submitted' | 'accepted' | 'cancelled';
 export const LINK_DAYS = 14;
 
@@ -16,7 +18,7 @@ export interface OutlineSubmission {
   items: { moduleTitle: string; duration: string; methodology: string; topics: string }[];
 }
 
-export interface ProfileSubmission {
+export interface ProfileSubmission extends TrainerExtras {
   name: string; contact: string; email: string; bio: string; experienceYears: number;
   qualifications: string; pastClients: string; programmeIds: string[]; suggestedTopics: string; rate: number;
 }
@@ -67,19 +69,20 @@ export function outlineProblem(s: OutlineSubmission): string {
   return '';
 }
 
-export function cleanProfile(d: any, programmeIds: string[]): ProfileSubmission {
+// `token`: the link's own token; files must be in that link's upload folder (trainer_uploads/<token>/).
+export function cleanProfile(d: any, programmeIds: string[], token: string): ProfileSubmission {
   return {
+    ...cleanExtras(d, [`trainer_uploads/${token}/`]),
     name: str(d?.name, 100), contact: str(d?.contact, 40), email: str(d?.email, 120),
     bio: str(d?.bio, 3000), experienceYears: num(d?.experienceYears, 0, 80),
     qualifications: str(d?.qualifications, 1500), pastClients: str(d?.pastClients, 1500),
     programmeIds: (Array.isArray(d?.programmeIds) ? d.programmeIds : []).map((x: any) => String(x)).filter((x: string) => programmeIds.includes(x)).slice(0, 100),
-    suggestedTopics: str(d?.suggestedTopics, 1000), rate: num(d?.rate, 0, 100000),
+    suggestedTopics: str(d?.suggestedTopics, 3000), rate: num(d?.rate, 0, 100000),
   };
 }
 
+// Nothing is compulsory (Joel, 2026-10-20); only a mistyped email is pointed out.
 export function profileProblem(s: ProfileSubmission): string {
-  if (!s.name) return 'Enter your name.';
-  if (!s.contact && !s.email) return 'Enter a phone number or email so we can reach you.';
   if (s.email && !/^\S+@\S+\.\S+$/.test(s.email)) return "That email address doesn't look right.";
   return '';
 }

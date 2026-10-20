@@ -48,13 +48,18 @@ export function registerTrainerLinkRoutes(app: Express) {
     if (link.kind === 'profile') {
       const progs = await db.collection('programmes').get();
       out.programmes = progs.docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name));
+      const t: any = link.trainerId ? (await db.collection('trainers_directory').doc(link.trainerId).get()).data() || {} : null;
+      // Files and photo already on their record: the form says so (a new upload replaces them). Links aren't sent.
+      if (t) out.onFile = { photo: !!t.photoUrl, docs: Object.keys(t.docs || {}).filter(k => t.docs[k]) };
       if (link.submission) out.prefill = link.submission;
-      else if (link.trainerId) {
-        const t = (await db.collection('trainers_directory').doc(link.trainerId).get()).data() || {};
+      else if (t) {
         out.prefill = {
           name: t.name || '', contact: t.contact || '', email: t.email || '', bio: t.bio || '', experienceYears: t.experienceYears || 0,
           qualifications: t.qualifications || '', pastClients: t.pastClients || '', programmeIds: t.programmeIds || [],
           suggestedTopics: t.suggestedTopics || '', rate: t.rate || 0,
+          gender: t.gender || '', address: t.address || '', emergencyContact: t.emergencyContact || {}, languages: t.languages || [],
+          languagesOther: t.languagesOther || '', trainingTypes: t.trainingTypes || [], otherCerts: t.otherCerts || '',
+          linkedin: t.linkedin || '', youtube: t.youtube || '', otherSocial: t.otherSocial || '',
         };
       }
     } else {
@@ -80,7 +85,7 @@ export function registerTrainerLinkRoutes(app: Express) {
     let submission: any;
     if (link.kind === 'profile') {
       const ids = (await db.collection('programmes').get()).docs.map(d => d.id);
-      submission = cleanProfile(req.body?.data, ids);
+      submission = cleanProfile(req.body?.data, ids, ref.id);
       const problem = profileProblem(submission);
       if (problem) throw new UserError(400, 'invalid', problem);
     } else {

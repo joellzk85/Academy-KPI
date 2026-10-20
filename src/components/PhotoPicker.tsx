@@ -19,7 +19,7 @@ const MAX_SIDE = 1600;
 const MAX_INPUT = 25 * 1024 * 1024;
 const NOT_PHOTO = 'isn\'t a photo or screenshot (JPG, PNG, WebP, GIF or BMP).';
 
-async function shrink(file: File): Promise<Blob> {
+export async function shrink(file: File): Promise<Blob> {
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`"${file.name}" couldn't be read as a photo.`)); i.src = url; });

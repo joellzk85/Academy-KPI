@@ -16,7 +16,8 @@ export function photoPath(url: string): string {
   const m = String(url || '').match(/^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/([^/]+)\/o\/([^?]+)/);
   if (!m || m[1] !== BUCKET) return '';
   const path = decodeURIComponent(m[2]);
-  return /^photos\/(activities|trainers|venues|covers)\/[A-Za-z0-9_.-]+$/.test(path) ? path : '';
+  // Also a trainer's photo uploaded from their own profile link (2026-10-20).
+  return /^photos\/(activities|trainers|venues|covers)\/[A-Za-z0-9_.-]+$/.test(path) || /^trainer_uploads\/[a-f0-9]{32}\/photo_[0-9]+\.jpg$/.test(path) ? path : '';
 }
 
 export function registerPhotoRoutes(app: Express) {

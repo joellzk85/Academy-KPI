@@ -1,3 +1,5 @@
+import type { DocKind, EmergencyContact, Gender, TrainerFile, TrainingType } from './lib/trainerProfile';
+
 export interface Student {
   id: string;
   name: string;
@@ -294,8 +296,20 @@ export interface Trainer {
   experienceYears?: number;
   qualifications?: string;
   pastClients?: string;
-  suggestedTopics?: string;     // topics they teach that aren't in the Programme list yet
+  suggestedTopics?: string;     // topics they teach that aren't in the Programme list yet (one per line)
   photoUrl?: string;            // photo, shown on teambuilding proposals (2026-10-19)
+  // More details (2026-10-20, lib/trainerProfile.ts): all optional.
+  gender?: Gender;
+  address?: string;
+  emergencyContact?: EmergencyContact;
+  languages?: string[];
+  languagesOther?: string;
+  trainingTypes?: TrainingType[];
+  otherCerts?: string;
+  linkedin?: string;
+  youtube?: string;
+  otherSocial?: string;
+  docs?: Partial<Record<DocKind, TrainerFile>>;   // Accredited TTT form, biodata, trainer profile (latest of each)
   contact?: string;
   email?: string;
   rate: number;

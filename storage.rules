@@ -57,6 +57,33 @@ service firebase.storage {
       allow update, delete: if false;
     }
 
+    // Trainer files (2026-10-20): Accredited TTT form, biodata, trainer profile, professional photo.
+    // From a trainer's private profile link (no login): trainer_uploads/{token}/{kind}_{time}_{name}. Allowed only while
+    // that link (Firestore trainer_links/{token}) is a live profile link; the 32-character token is the key.
+    // Up to 20 MB; PDF, Word, JPG or PNG. The team reads them; never changed or deleted.
+    function liveTrainerLink(token) {
+      let l = /databases/(default)/documents/trainer_links/$(token);
+      return firestore.exists(l)
+        && firestore.get(l).data.kind == 'profile'
+        && firestore.get(l).data.status in ['open', 'submitted']
+        && firestore.get(l).data.expiresAt > request.time.toMillis();
+    }
+    function trainerFileOk() {
+      return request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('application/(pdf|msword|vnd[.]openxmlformats-officedocument[.]wordprocessingml[.]document)|image/(jpeg|png)');
+    }
+    match /trainer_uploads/{token}/{fileName} {
+      allow read: if isMember() || liveTrainerLink(token);
+      allow create: if liveTrainerLink(token) && trainerFileOk();
+      allow update, delete: if false;
+    }
+    // From the team (Trainers → Edit): trainer_files/{trainerId}/{kind}_{time}_{name}. Any member uploads as themselves.
+    match /trainer_files/{trainerId}/{fileName} {
+      allow read: if isMember();
+      allow create: if isMember() && trainerFileOk() && request.resource.metadata.uploadedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
-import { GraduationCap, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
+import { FileText, GraduationCap, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Trainer } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealStage, formatDate, formatRM, todayIso } from '../lib/deals';
@@ -13,6 +13,8 @@ import { ProfileSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
+import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
+import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, extrasFrom, extrasToSave, languagesText, linkHref, topicList, trainingTypeLabel } from '../lib/trainerProfile';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -35,11 +37,13 @@ const btnPrimary =
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
-const emptyForm = () => ({ name: '', specialization: '', programmeIds: [] as string[], contact: '', email: '', rate: '', onLeave: false, notes: '',
+const emptyForm = () => ({ ...emptyExtras(), name: '', specialization: '', programmeIds: [] as string[], contact: '', email: '', rate: '', onLeave: false, notes: '',
   bio: '', experienceYears: '', qualifications: '', pastClients: '', suggestedTopics: '', photoUrl: '' });
 type Form = ReturnType<typeof emptyForm>;
 
 const norm = (s?: string) => (s || '').trim().toLowerCase();
+const ecText = (e?: { name?: string; relationship?: string; phone?: string }) =>
+  e ? [e.name, e.relationship ? `(${e.relationship})` : '', e.phone].filter(Boolean).join(' ') : '';
 
 // Malaysian numbers: 012-345 6789 -> 60123456789 for WhatsApp.
 function whatsappLink(phone: string): string {
@@ -67,6 +71,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const waiting = links.filter(l => l.kind === 'profile' && l.status === 'submitted' && isLive(l)).sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
 
   const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<TrainingType | ''>('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm());
@@ -106,21 +111,28 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   // Accept a submitted profile: update that trainer, or add the invited one (or update a trainer with the same name).
   const acceptProfile = async (l: TrainerLink) => {
     const s = l.submission as ProfileSubmission;
-    const details = {
-      name: s.name, contact: s.contact, email: s.email, bio: s.bio, experienceYears: s.experienceYears, qualifications: s.qualifications,
-      pastClients: s.pastClients, programmeIds: s.programmeIds, suggestedTopics: s.suggestedTopics, rate: s.rate,
-    };
     let targetId = l.trainerId || '';
-    if (!targetId) {
+    if (!targetId && s.name) {
       const same = trainers.find(t => norm(t.name) === norm(s.name));
       if (same && window.confirm(`"${same.name}" is already in the trainer list. Update that trainer with these details? (Cancel to add a separate trainer.)`)) targetId = same.id;
     }
+    const cur = targetId ? trainers.find(t => t.id === targetId) : undefined;
+    const x = extrasToSave({ ...emptyExtras(), ...s });
+    // Nothing on the form is compulsory (2026-10-20): a blank name keeps the old one (or "New trainer"); a new upload
+    // replaces that kind of file, and files or a photo they didn't upload again are kept.
+    const details = {
+      name: s.name || cur?.name || l.trainerName || `New trainer ${formatDate(todayIso())}`,
+      contact: s.contact, email: s.email, bio: s.bio, experienceYears: s.experienceYears, qualifications: s.qualifications,
+      pastClients: s.pastClients, programmeIds: s.programmeIds, suggestedTopics: s.suggestedTopics, rate: s.rate,
+      ...x, docs: { ...(cur?.docs || {}), ...x.docs },
+      ...(s.photoUrl ? { photoUrl: s.photoUrl } : {}),
+    };
     setBusy(true);
     try {
       if (targetId) await setDoc(doc(db, 'trainers_directory', targetId), details, { merge: true });
       else {
         targetId = `trainer_${Date.now()}`;
-        await setDoc(doc(db, 'trainers_directory', targetId), { id: targetId, ...details, specialization: '', status: 'Available', notes: '', createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+        await setDoc(doc(db, 'trainers_directory', targetId), { id: targetId, ...details, photoUrl: s.photoUrl || '', specialization: '', status: 'Available', notes: '', createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
       }
       await closeTrainerLink(l, 'accepted', viewer);
       setReviewId(null);
@@ -154,16 +166,19 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
 
   const visible = useMemo(() => {
     const q = norm(search);
-    const list = q ? trainers.filter(t => [t.name, t.specialization, t.contact, t.email, teaches(t).join(' ')].some(v => norm(v).includes(q))) : trainers;
+    const byType = typeFilter ? trainers.filter(t => (t.trainingTypes || []).includes(typeFilter)) : trainers;
+    const list = q ? byType.filter(t => [t.name, t.specialization, t.suggestedTopics, t.contact, t.email, teaches(t).join(' '), languagesText(t)].some(v => norm(v).includes(q))) : byType;
     return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }));
-  }, [trainers, search, programmes]);
+  }, [trainers, search, programmes, typeFilter]);
 
   const openTrainer = trainers.find(t => t.id === openId) || null;
 
   // ---------- Add / edit ----------
-  const startNew = () => { setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
+  // A new trainer's id is chosen when the form opens, so files can be uploaded before it's saved.
+  const [newId, setNewId] = useState('');
+  const startNew = () => { setNewId(`trainer_${Date.now()}`); setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
   const startEdit = (t: Trainer) => {
-    setForm({ name: t.name || '', specialization: t.specialization || '', programmeIds: (t.programmeIds || []).filter(id => programmes.some(p => p.id === id)), contact: t.contact || '', email: t.email || '', rate: t.rate ? String(t.rate) : '', onLeave: t.status === 'On Leave', notes: t.notes || '',
+    setForm({ ...extrasFrom(t), name: t.name || '', specialization: t.specialization || '', programmeIds: (t.programmeIds || []).filter(id => programmes.some(p => p.id === id)), contact: t.contact || '', email: t.email || '', rate: t.rate ? String(t.rate) : '', onLeave: t.status === 'On Leave', notes: t.notes || '',
       bio: t.bio || '', experienceYears: t.experienceYears ? String(t.experienceYears) : '', qualifications: t.qualifications || '', pastClients: t.pastClients || '', suggestedTopics: t.suggestedTopics || '', photoUrl: t.photoUrl || '' });
     setProgSearch('');
     setFormError(''); setDupId(null); setEditing(t.id);
@@ -188,16 +203,18 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       bio: form.bio.trim(), experienceYears: parseFloat(form.experienceYears.replace(/[^0-9.]/g, '')) || 0,
       qualifications: form.qualifications.trim(), pastClients: form.pastClients.trim(), suggestedTopics: form.suggestedTopics.trim(),
       photoUrl: form.photoUrl,
+      ...extrasToSave(form),
     };
     setBusy(true);
     try {
       if (editing === 'new') {
-        const id = `trainer_${Date.now()}`;
+        const id = newId || `trainer_${Date.now()}`;
         await setDoc(doc(db, 'trainers_directory', id), { id, ...details, createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
         setOpenId(id);
         flash('Trainer added');
       } else if (editing) {
-        await setDoc(doc(db, 'trainers_directory', editing), details, { merge: true });
+        // Each field is replaced as a whole, so a file removed on the form comes off the record.
+        await setDoc(doc(db, 'trainers_directory', editing), details, { mergeFields: Object.keys(details) });
         flash('Trainer saved');
       }
       formDraft.clear();
@@ -232,6 +249,21 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     } finally {
       setBusy(false);
     }
+  };
+
+  // The extra details on the Add / Edit form (shared with the trainer's own link page). Files go to trainer_files/<id>/.
+  const teamExtras = {
+    value: form,
+    onChange: (p: any) => setForm(f => ({ ...f, ...(typeof p === 'function' ? p(f) : p) })),
+    uploader: { prefix: `trainer_files/${editing === 'new' ? newId : editing}/`, byName: viewer.name, uploadedBy: viewer.id },
+    idPrefix: 't',
+    photoSlot: <div className="rounded-xl border border-line p-3"><PhotoPicker photos={form.photoUrl ? [form.photoUrl] : []} onChange={ph => set({ photoUrl: ph[0] || '' })} folder="trainers" me={viewer} single label="Professional photo (shown on teambuilding proposals)" /></div>,
+    wrap: (title: string, children: React.ReactNode) => (
+      <section className="space-y-3 border-t border-line pt-4">
+        <h4 className="text-[15px] font-bold">{title}</h4>
+        {children}
+      </section>
+    ),
   };
 
   return (
@@ -270,7 +302,15 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, topic, phone or email" className={`${input} pl-9`} aria-label="Search trainers" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, topic, language, phone or email" className={`${input} pl-9`} aria-label="Search trainers" />
+      </div>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Type of training">
+        {[{ id: '' as const, label: 'All trainers', n: trainers.length }, ...TRAINING_TYPES.map(t => ({ ...t, n: trainers.filter(x => (x.trainingTypes || []).includes(t.id)).length }))].map(t => (
+          <button key={t.id || 'all'} type="button" aria-pressed={typeFilter === t.id} onClick={() => setTypeFilter(t.id)}
+            className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${typeFilter === t.id ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>
+            {t.label} <span className="font-normal text-ink-soft">{t.n}</span>
+          </button>
+        ))}
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-line bg-white">
@@ -278,7 +318,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
           <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading trainers…</p>
         ) : visible.length === 0 ? (
           <div className="p-8 text-center">
-            <p className="font-semibold">{trainers.length === 0 ? 'No trainers yet' : `No trainer matches "${search.trim()}"`}</p>
+            <p className="font-semibold">{trainers.length === 0 ? 'No trainers yet' : search.trim() ? `No trainer matches "${search.trim()}"` : 'No trainers of this type yet'}</p>
             <p className="mt-1 text-[15px] text-ink-soft">{trainers.length === 0 ? 'Add your first trainer.' : 'Check the spelling, or add them as a new trainer.'}</p>
             {trainers.length > 0 && <button type="button" onClick={startNew} className={`${btnSecondary} mt-3`}><Plus className="h-4 w-4" /> Add "{search.trim()}"</button>}
           </div>
@@ -296,6 +336,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                       <span className="flex items-center gap-2">
                         <span className="truncate font-semibold">{t.name}</span>
                         {t.status === 'On Leave' && <span className="shrink-0 rounded-md bg-attention-soft px-2 py-0.5 text-xs font-semibold text-attention">On leave</span>}
+                        {(t.trainingTypes || []).map(x => <span key={x} className="hidden shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent sm:inline">{trainingTypeLabel(x)}</span>)}
                       </span>
                       <span className="block truncate text-sm text-ink-soft">{sub || 'No programmes or phone yet'}</span>
                     </span>
@@ -385,7 +426,31 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                 {row('Bio', s.bio, cur?.bio)}
                 {row('Qualifications', s.qualifications, cur?.qualifications)}
                 {row('Past clients', s.pastClients, cur?.pastClients)}
+                {row('Gender', s.gender || '', cur?.gender)}
+                {row('Address', s.address || '', cur?.address)}
+                {row('Emergency contact', ecText(s.emergencyContact), ecText(cur?.emergencyContact))}
+                {row('Languages', languagesText(s), cur ? languagesText(cur) : '')}
+                {row('Type of training', (s.trainingTypes || []).map(trainingTypeLabel).join(', '), (cur?.trainingTypes || []).map(trainingTypeLabel).join(', '))}
+                {row('Other certificates', s.otherCerts || '', cur?.otherCerts)}
+                {row('LinkedIn', s.linkedin || '', cur?.linkedin)}
+                {row('YouTube', s.youtube || '', cur?.youtube)}
+                {row('Other social media', s.otherSocial || '', cur?.otherSocial)}
               </dl>
+              <h4 className="mt-5 text-sm font-semibold text-ink-soft">Uploads</h4>
+              <ul className="mt-1 divide-y divide-line text-[15px]">
+                <li className="flex items-center justify-between gap-3 py-2">
+                  <span className="text-sm text-ink-soft">Professional photo</span>
+                  {s.photoUrl ? <a href={s.photoUrl} target="_blank" rel="noreferrer"><img src={s.photoUrl} alt="Photo they uploaded" className="h-14 w-14 rounded-lg object-cover" /></a>
+                    : <span className="text-sm text-ink-soft">{cur?.photoUrl ? 'Not sent; their current photo is kept' : 'Not uploaded'}</span>}
+                </li>
+                {DOC_KINDS.map(k => (
+                  <li key={k.id} className="flex items-center justify-between gap-3 py-2">
+                    <span className="text-sm text-ink-soft">{k.label}</span>
+                    {s.docs?.[k.id] ? <a href={s.docs[k.id]!.url} target="_blank" rel="noreferrer" className="truncate font-semibold text-accent hover:underline">{s.docs[k.id]!.name}</a>
+                      : <span className="text-sm text-ink-soft">{cur?.docs?.[k.id] ? 'Not sent; the current file is kept' : 'Not uploaded'}</span>}
+                  </li>
+                ))}
+              </ul>
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 <button type="button" className={btnSecondary} onClick={() => discardProfile(l)}>Discard</button>
                 <button type="button" className={btnPrimary} disabled={busy} onClick={() => acceptProfile(l)}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{cur ? 'Accept changes' : 'Add this trainer'}</button>
@@ -469,12 +534,12 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                   <label className={label} htmlFor="t-years">Years of experience</label>
                   <input id="t-years" inputMode="numeric" value={form.experienceYears} onChange={e => set({ experienceYears: e.target.value })} className={input} />
                 </div>
-                <div>
-                  <label className={label} htmlFor="t-other">Other topics <span className="font-normal text-ink-soft">(not in the list yet)</span></label>
-                  <input id="t-other" value={form.suggestedTopics} onChange={e => set({ suggestedTopics: e.target.value })} className={input} />
-                </div>
               </div>
-              <PhotoPicker photos={form.photoUrl ? [form.photoUrl] : []} onChange={ph => set({ photoUrl: ph[0] || '' })} folder="trainers" me={viewer} single label="Photo (shown on teambuilding proposals)" />
+              <div>
+                <span className={label}>Other topics they teach <span className="font-normal text-ink-soft">(not in the Programme list yet; one per box)</span></span>
+                <TopicList value={form.suggestedTopics} onChange={t => set({ suggestedTopics: t })} idPrefix="t-topic" />
+              </div>
+              <TrainerExtrasFields {...teamExtras} only={['about', 'emergency', 'languages']} />
               <div>
                 <label className={label} htmlFor="t-bio">Short bio</label>
                 <textarea id="t-bio" value={form.bio} onChange={e => set({ bio: e.target.value })} rows={3} className={`${input} resize-y`} />
@@ -485,10 +550,15 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                   <textarea id="t-qual" value={form.qualifications} onChange={e => set({ qualifications: e.target.value })} rows={3} className={`${input} resize-y`} />
                 </div>
                 <div>
-                  <label className={label} htmlFor="t-past">Past clients</label>
-                  <textarea id="t-past" value={form.pastClients} onChange={e => set({ pastClients: e.target.value })} rows={3} className={`${input} resize-y`} />
+                  <label className={label} htmlFor="t-certs">Other certificates</label>
+                  <textarea id="t-certs" value={form.otherCerts} onChange={e => set({ otherCerts: e.target.value })} rows={3} className={`${input} resize-y`} />
                 </div>
               </div>
+              <div>
+                <label className={label} htmlFor="t-past">Past clients</label>
+                <textarea id="t-past" value={form.pastClients} onChange={e => set({ pastClients: e.target.value })} rows={3} className={`${input} resize-y`} />
+              </div>
+              <TrainerExtrasFields {...teamExtras} only={['online', 'uploads']} />
               <div>
                 <label className={label} htmlFor="t-notes">Notes <span className="font-normal text-ink-soft">(optional)</span></label>
                 <textarea id="t-notes" value={form.notes} onChange={e => set({ notes: e.target.value })} rows={3} placeholder="Anything the team should know about this trainer" className={`${input} resize-y`} />
@@ -575,7 +645,40 @@ function TrainerPanel(props: {
         <div><dt className="text-sm text-ink-soft">Daily rate</dt><dd className="font-semibold">{t.rate ? formatRM(t.rate) : 'Not set'}</dd></div>
         <div><dt className="text-sm text-ink-soft">Status</dt><dd className="font-semibold">{t.status === 'On Leave' ? 'On leave' : 'Available'}</dd></div>
         {!!t.experienceYears && <div><dt className="text-sm text-ink-soft">Experience</dt><dd className="font-semibold">{t.experienceYears} year{t.experienceYears === 1 ? '' : 's'}</dd></div>}
-        {t.suggestedTopics && <div className="col-span-2"><dt className="text-sm text-ink-soft">Other topics (not in the Programme list yet)</dt><dd className="whitespace-pre-line">{t.suggestedTopics}</dd></div>}
+        {!!(t.trainingTypes || []).length && <div><dt className="text-sm text-ink-soft">Type of training</dt><dd className="font-semibold">{(t.trainingTypes || []).map(trainingTypeLabel).join(', ')}</dd></div>}
+        {languagesText(t) && <div><dt className="text-sm text-ink-soft">Languages</dt><dd className="font-semibold">{languagesText(t)}</dd></div>}
+        {t.gender && <div><dt className="text-sm text-ink-soft">Gender</dt><dd className="font-semibold">{t.gender}</dd></div>}
+        {topicList(t.suggestedTopics).length > 0 && (
+          <div className="col-span-2"><dt className="text-sm text-ink-soft">Other topics (not in the Programme list yet)</dt>
+            <dd className="mt-1 flex flex-wrap gap-1.5">{topicList(t.suggestedTopics).map(x => <span key={x} className="rounded-full bg-surface px-2.5 py-1 text-sm">{x}</span>)}</dd></div>
+        )}
+        {t.address && <div className="col-span-2"><dt className="text-sm text-ink-soft">Address</dt><dd className="whitespace-pre-line">{t.address}</dd></div>}
+        {(t.emergencyContact?.name || t.emergencyContact?.phone) && (
+          <div className="col-span-2"><dt className="text-sm text-ink-soft">Emergency contact</dt>
+            <dd>{ecText(t.emergencyContact)}{t.emergencyContact?.phone && <a href={`tel:${t.emergencyContact.phone.replace(/\s/g, '')}`} className="ml-2 text-sm font-semibold text-accent hover:underline">Call</a>}</dd></div>
+        )}
+        {t.otherCerts && <div className="col-span-2"><dt className="text-sm text-ink-soft">Other certificates</dt><dd className="whitespace-pre-line">{t.otherCerts}</dd></div>}
+        {(t.linkedin || t.youtube || t.otherSocial) && (
+          <div className="col-span-2"><dt className="text-sm text-ink-soft">Online</dt>
+            <dd className="space-y-0.5">
+              {t.linkedin && <a href={linkHref(t.linkedin)} target="_blank" rel="noreferrer" className="block truncate font-semibold text-accent hover:underline">LinkedIn: {t.linkedin}</a>}
+              {t.youtube && <a href={linkHref(t.youtube)} target="_blank" rel="noreferrer" className="block truncate font-semibold text-accent hover:underline">YouTube: {t.youtube}</a>}
+              {t.otherSocial && <span className="block whitespace-pre-line">{t.otherSocial}</span>}
+            </dd></div>
+        )}
+        <div className="col-span-2"><dt className="text-sm text-ink-soft">Files</dt>
+          <dd className="mt-1 divide-y divide-line rounded-xl border border-line">
+            {DOC_KINDS.map(k => {
+              const f = t.docs?.[k.id];
+              return (
+                <div key={k.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="text-sm">{k.label}</span>
+                  {f ? <a href={f.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold text-accent hover:underline"><FileText className="h-4 w-4 shrink-0" /><span className="truncate">{f.name}</span></a>
+                    : <span className="text-sm text-ink-soft">Not uploaded</span>}
+                </div>
+              );
+            })}
+          </dd></div>
         {t.bio && <div className="col-span-2"><dt className="text-sm text-ink-soft">Bio</dt><dd className="whitespace-pre-line">{t.bio}</dd></div>}
         {t.qualifications && <div className="col-span-2"><dt className="text-sm text-ink-soft">Qualifications</dt><dd className="whitespace-pre-line">{t.qualifications}</dd></div>}
         {t.pastClients && <div className="col-span-2"><dt className="text-sm text-ink-soft">Past clients</dt><dd className="whitespace-pre-line">{t.pastClients}</dd></div>}
