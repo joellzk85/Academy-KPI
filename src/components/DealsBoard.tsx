@@ -29,7 +29,7 @@ import MoneyPanel, { RepMoneyStatus, useMoneySettings } from './Money';
 import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
 import { HrdcQuery, Programme, grantBlockReason } from '../lib/programmes';
-import { linkedOnly } from '../lib/linked';
+import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { clientContacts, dealContact, mainContactFields, newContactId } from '../lib/contacts';
 import PickOrType from './PickOrType';
 import { ProposalDrop, ProposalFilesList } from './ProposalFiles';
@@ -152,14 +152,14 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'teambuilding_proposals')), s => setTbs(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => {}),
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
-      onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
-      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
+      onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(withoutDeleted(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id }))))),
+      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id }))))),
       onSnapshot(query(collection(db, 'proposal_files')), s => setProposalFiles(s.docs.map(d => ({ ...(d.data() as ProposalFile), id: d.id }))), () => {}),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     // Payouts and costs are for Admin and Management only.
     if (viewer.role !== 'rep') {
-      subs.push(onSnapshot(query(collection(db, 'money_out')), s => setMoneyOut(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))));
+      subs.push(onSnapshot(query(collection(db, 'money_out')), s => setMoneyOut(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id }))))));
     }
     return () => subs.forEach(u => u());
   }, []);
@@ -491,6 +491,8 @@ export default function DealsBoard({
   };
   const refs = (list: any[]) => list.map(q => q.refNumber || 'no reference').join(', ');
   const deleteBlocker = (p: any): string => {
+    // Management can delete any deal at any time (Joel, 2026-10-20); everything on it is hidden with it.
+    if (viewer.role === 'management') return '';
     const linked: string[] = [];
     if (dealStage(p) === 'won') linked.push('it is won');
     const { drafts, sent, outlines: outs, tbs: tbList } = dealDocs(p);
@@ -514,14 +516,18 @@ export default function DealsBoard({
     const blocked = deleteBlocker(p);
     if (blocked) { setStageError(blocked); return false; }
     if (viewer.role !== 'management' && reason.trim().length < 3) { setStageError('Say why the deal is being deleted.'); return false; }
-    const { drafts, outlines: outs, tbs: tbList } = dealDocs(p);
+    const { drafts, sent, outlines: outs, tbs: tbList } = dealDocs(p);
     setBusy(true);
     setStageError('');
     try {
-      // All or nothing: the deal and its drafts are hidden together.
+      // All or nothing: the deal and its drafts are hidden together. Only Management gets this far with sent
+      // quotations, money or HRDC queries on the deal; they're hidden too, and Restore brings them back.
       const at = new Date().toISOString();
       const batch = writeBatch(db);
-      drafts.forEach(q => batch.update(doc(db, 'quotations', q.id), { dealDeleted: true }));
+      [...drafts, ...sent].forEach(q => batch.update(doc(db, 'quotations', q.id), { dealDeleted: true }));
+      moneyIn.filter(m => m.dealId === p.id).forEach(m => batch.update(doc(db, 'money_in', m.id), { dealDeleted: true }));
+      moneyOut.filter(m => m.dealId === p.id).forEach(m => batch.update(doc(db, 'money_out', m.id), { dealDeleted: true }));
+      queries.filter(q => q.dealId === p.id).forEach(q => batch.update(doc(db, 'hrdc_queries', q.id), { dealDeleted: true }));
       outs.forEach(o => batch.update(doc(db, 'course_outlines', o.id), { dealDeleted: true }));
       tbList.forEach(t => batch.update(doc(db, 'teambuilding_proposals', t.id), { dealDeleted: true }));
       batch.update(doc(db, 'pipelines', p.id), {
@@ -1355,7 +1361,9 @@ function DealPanel(props: {
             <div className="space-y-3 rounded-xl border border-danger/30 bg-danger-soft p-4">
               <p className="font-semibold text-danger">Delete this deal?</p>
               <p className="text-sm text-ink-soft">
-                It disappears from Deals, KPIs and every list{props.quotes.length + props.outlines.length ? ', with its draft quotations and course outlines' : ''}. Management can still see it and restore it.
+                {props.viewer.role === 'management'
+                  ? <>It disappears from Deals, KPIs, Project P&amp;L and every list, with everything on it (quotations, course outlines, money records, HRDC queries).{dealStage(p) === 'won' ? ' Its won value stops counting in KPIs and the rings.' : ''} Management can still see it in Management → Lost and deleted and restore it with all of that.</>
+                  : <>It disappears from Deals, KPIs and every list{props.quotes.length + props.outlines.length ? ', with its draft quotations and course outlines' : ''}. Management can still see it and restore it.</>}
               </p>
               <div>
                 <label htmlFor="del-reason" className="mb-1.5 block text-sm font-semibold text-danger">

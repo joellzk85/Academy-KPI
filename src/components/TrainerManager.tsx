@@ -7,6 +7,7 @@ import { STAGE_LABELS, dealStage, formatDate, formatRM, todayIso } from '../lib/
 import { ChecklistTask } from '../lib/checklist';
 import { Booking, trainerBookings } from '../lib/trainers';
 import { linkedOnly } from '../lib/linked';
+import { deleteTrainerEverywhere } from '../lib/detach';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
 import { ProfileSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
 import PhotoPicker from './PhotoPicker';
@@ -212,14 +213,13 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const remove = async (t: Trainer) => {
     setPanelError('');
     const { inQuotes, inChecklists } = usedOn(t);
-    if (inQuotes || inChecklists) {
-      const parts = [inQuotes ? `${inQuotes} quotation${inQuotes === 1 ? '' : 's'}` : '', inChecklists ? `${inChecklists} admin checklist${inChecklists === 1 ? '' : 's'}` : ''].filter(Boolean);
-      return setPanelError(`This trainer can't be deleted because ${parts.join(' and ')} use${inQuotes + inChecklists === 1 ? 's' : ''} them.`);
-    }
-    if (!window.confirm(`Delete ${t.name} from the trainer list? This can't be undone.`)) return;
+    // Management can delete a trainer in use (Joel, 2026-10-20): the name is kept on the quotations and checklists as typed text.
+    const parts = [inQuotes ? `${inQuotes} quotation${inQuotes === 1 ? '' : 's'}` : '', inChecklists ? `${inChecklists} admin checklist${inChecklists === 1 ? '' : 's'}` : ''].filter(Boolean);
+    const used = parts.length ? ` They are on ${parts.join(' and ')}; their name is kept there as typed text.` : '';
+    if (!window.confirm(`Delete ${t.name} from the trainer list?${used} This can't be undone.`)) return;
     setBusy(true);
     try {
-      await deleteDoc(doc(db, 'trainers_directory', t.id));
+      await deleteTrainerEverywhere(t);
       setOpenId(null);
       flash('Trainer deleted');
     } catch (err) {

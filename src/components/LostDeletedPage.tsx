@@ -92,15 +92,20 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
   };
 
   const restore = async (p: any) => {
-    if (!window.confirm(`Restore the deal for ${clientName(p)}? It comes back in ${nameOf(dealOwnerId(p))}'s Deals, with its draft quotations, course outlines and teambuilding proposals.`)) return;
+    if (!window.confirm(`Restore the deal for ${clientName(p)}? It comes back in ${nameOf(dealOwnerId(p))}'s Deals, with its quotations, course outlines, teambuilding proposals, money records and HRDC queries.`)) return;
     setBusyId(p.id); setMsg(null);
     try {
-      const [qs, os, ts] = await Promise.all([
+      const [qs, os, ts, mi, mo, hq] = await Promise.all([
         getDocs(query(collection(db, 'quotations'), where('pipelineId', '==', p.id))),
         getDocs(query(collection(db, 'course_outlines'), where('pipelineId', '==', p.id))),
         getDocs(query(collection(db, 'teambuilding_proposals'), where('pipelineId', '==', p.id))),
+        // Management can delete a deal with money and HRDC queries on it (2026-10-20); they come back with it.
+        getDocs(query(collection(db, 'money_in'), where('dealId', '==', p.id))),
+        getDocs(query(collection(db, 'money_out'), where('dealId', '==', p.id))),
+        getDocs(query(collection(db, 'hrdc_queries'), where('dealId', '==', p.id))),
       ]);
       const batch = writeBatch(db);
+      [mi, mo, hq].forEach(list => list.docs.filter(d => d.data().dealDeleted === true).forEach(d => batch.update(d.ref, { dealDeleted: false })));
       qs.docs.filter(d => d.data().dealDeleted === true).forEach(d => batch.update(d.ref, { dealDeleted: false }));
       os.docs.filter(d => d.data().dealDeleted === true).forEach(d => batch.update(d.ref, { dealDeleted: false }));
       ts.docs.filter(d => d.data().dealDeleted === true).forEach(d => batch.update(d.ref, { dealDeleted: false }));

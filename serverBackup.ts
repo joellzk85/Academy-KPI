@@ -141,7 +141,9 @@ function projectPLTable(raw: Record<string, { id: string; data: Record<string, a
   const list = (id: string): any[] => (raw[id] || []).map(d => ({ ...d.data, id: d.id }));
   const settings = readMoneySettings((raw.config || []).find(d => d.id === 'money_settings')?.data);
   const plDocs = Object.fromEntries((raw.project_pl || []).map(d => [d.id, d.data]));
-  const rows = projectRows(list('pipelines'), list('money_in'), list('money_out'), settings, malaysiaDay(Date.now()),
+  // Deals Management deleted (and their money) are left out, as on the screen.
+  const live = (id: string) => list(id).filter(r => r.deleted !== true && r.dealDeleted !== true);
+  const rows = projectRows(live('pipelines'), live('money_in'), live('money_out'), settings, malaysiaDay(Date.now()),
     { quotes: list('quotations'), plDocs });
   const clients = list('clients');
   const team = list('team');

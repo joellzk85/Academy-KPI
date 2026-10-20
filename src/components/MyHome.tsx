@@ -28,7 +28,7 @@ import { TeamFollowUpsSummary } from './TeamFollowUps';
 import { SharedItem, SharedKind, useSharedInbox } from '../lib/sharedInbox';
 import { clientDeals, clientQuotes, clientTimeline, touchFollowUpOpen } from '../lib/touchPoints';
 import { useTouchPoints } from '../lib/useClientHistory';
-import { linkedOnly } from '../lib/linked';
+import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { DocLink, openedText } from '../lib/docLinks';
 import ProposalActivity from './ProposalActivity';
 import { useProposalSettings } from '../lib/useProposalSettings';
@@ -159,8 +159,8 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   useEffect(() => {
     const subs = [
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
-      onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id })))),
-      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
+      onSnapshot(query(collection(db, 'hrdc_queries')), s => setQueries(withoutDeleted(s.docs.map(d => ({ ...(d.data() as HrdcQuery), id: d.id }))))),
+      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id }))))),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'doc_links')), s => setDocLinks(s.docs.map(d => ({ ...(d.data() as any), token: d.id }))), () => {}),
@@ -212,7 +212,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     ];
     // Payouts and programme admin are for Admin and Management only.
     if (staff) {
-      subs.push(onSnapshot(query(collection(db, 'money_out')), s => setMoneyOut(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))));
+      subs.push(onSnapshot(query(collection(db, 'money_out')), s => setMoneyOut(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id }))))));
       subs.push(onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))));
     }
     return () => subs.forEach(u => u());

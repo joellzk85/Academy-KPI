@@ -70,7 +70,7 @@ service cloud.firestore {
     // Deals: reps change only their own; anyone asked to help may tick "done".
     // Lost (2026-10-18): a deal can only become lost with a reason and a short explanation (at least 10 characters).
     // Deleted (2026-10-18): "Delete deal" keeps the deal and marks it deleted. Only its creator or Management may
-    // do that, never on a won deal, and everyone except Management must give a reason. Only Management restores
+    // do that, never on a won deal except by Management (2026-10-20: "managers can delete anything at any time"), and everyone except Management must give a reason. Only Management restores
     // a deleted deal or changes it while it is deleted.
     match /pipelines/{dealId} {
       function wasDeleted() {
@@ -82,7 +82,7 @@ service cloud.firestore {
       function deleteChangeOk() {
         return (wasDeleted() == becomesDeleted() && (!wasDeleted() || isManagement()))
           || (becomesDeleted() && !wasDeleted()
-              && resource.data.get('stage', '') != 'won'
+              && (resource.data.get('stage', '') != 'won' || isManagement())
               && request.resource.data.get('deletedById', '') == request.auth.uid
               && (isManagement()
                   || (resource.data.get('creatorId', resource.data.get('ownerId', '')) == request.auth.uid
@@ -106,10 +106,10 @@ service cloud.firestore {
         || (isMember()
             && request.auth.uid in resource.data.get('taggedRepIds', [])
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completedTags'])));
-      // Delete: only the person who created the deal, or Management, and never a won deal.
-      allow delete: if resource.data.get('stage', '') != 'won'
-        && (isManagement()
-            || (isMember() && resource.data.get('creatorId', resource.data.get('ownerId', '')) == request.auth.uid));
+      // Delete: Management any deal at any time (2026-10-20); otherwise only the person who created it, never a won deal.
+      allow delete: if isManagement()
+        || (resource.data.get('stage', '') != 'won'
+            && isMember() && resource.data.get('creatorId', resource.data.get('ownerId', '')) == request.auth.uid);
     }
 
     // Admin checklist per won deal (Phase 2B). Everyone can see progress.
@@ -168,10 +168,12 @@ service cloud.firestore {
         || (((resource.data.status == 'approved' && request.resource.data.status == 'paid')
              || (resource.data.status == 'paid' && request.resource.data.status == 'approved'))
           && changedOnly(['status', 'paidDate', 'paidRef', 'paidById', 'paidByName']))
+        // hidden with (or brought back with) a deal Management deleted (2026-10-20)
+        || (isManagement() && changedOnly(['dealDeleted']))
       );
-      allow delete: if isStaff()
-        && resource.data.status in ['pending', 'rejected']
-        && (resource.data.requestedById == request.auth.uid || isManagement());
+      // Delete: Management any request at any time (2026-10-20); the requester only while pending or rejected.
+      allow delete: if isManagement()
+        || (isStaff() && resource.data.status in ['pending', 'rejected'] && resource.data.requestedById == request.auth.uid);
     }
 
     // Quotations: reps change their own, ones shared with them, or ones they're asked to help on;

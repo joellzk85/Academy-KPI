@@ -9,7 +9,8 @@ import { pdfErrorText } from '../lib/oldTab';
 import { STAGE_LABELS, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso } from '../lib/deals';
 import { lastWonDeal, repeatDeal, repeatOwner } from '../lib/repeatDeal';
 import { MoneyIn } from '../lib/money';
-import { linkedOnly } from '../lib/linked';
+import { linkedOnly, withoutDeleted } from '../lib/linked';
+import { deleteClientEverywhere } from '../lib/detach';
 import { CODE_PROBLEM, cleanCode, clientCode, codeOk, codeTakenBy, suggestCode } from '../lib/docRefs';
 import { Contact, clientContacts, mainContactFields, newContactId } from '../lib/contacts';
 import { ProposalFile } from '../lib/proposals';
@@ -124,7 +125,7 @@ export default function ClientManager({ rep, reps, viewer, onOpenDeal, onOpenQuo
       onSnapshot(query(collection(db, 'course_outlines')), s => setOutlines(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => {}),
       onSnapshot(query(collection(db, 'proposal_files')), s => setFiles(s.docs.map(d => ({ ...(d.data() as ProposalFile), id: d.id }))), () => {}),
       onSnapshot(query(collection(db, 'tasks')), s => setTasks(s.docs.map(d => ({ ...d.data(), id: d.id })).filter((t: any) => !t.isDuplicate && taskClientIds(t).length)), () => {}),
-      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
+      onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id }))))),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -276,14 +277,13 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
   const remove = async (c: Client) => {
     setPanelError('');
     const nd = clientDeals(c, allDeals).length, nq = clientQuotes(c, allQuotes, allDeals).length;
-    if (nd || nq) {
-      const parts = [nd ? `${nd} deal${nd === 1 ? '' : 's'}` : '', nq ? `${nq} quotation${nq === 1 ? '' : 's'}` : ''].filter(Boolean);
-      return setPanelError(`This client can't be deleted because ${parts.join(' and ')} use${nd + nq === 1 ? 's' : ''} it.`);
-    }
-    if (!window.confirm(`Delete ${c.companyName} from the client list? This can't be undone.`)) return;
+    // Management can delete a client in use (Joel, 2026-10-20): its details are kept on the deals and quotations as typed text.
+    const parts = [nd ? `${nd} deal${nd === 1 ? '' : 's'}` : '', nq ? `${nq} quotation${nq === 1 ? '' : 's'}` : ''].filter(Boolean);
+    const used = parts.length ? ` It is used on ${parts.join(' and ')}; the company name, address and contact person are kept on them as typed text.` : '';
+    if (!window.confirm(`Delete ${c.companyName} from the client list?${used} This can't be undone.`)) return;
     setBusy(true);
     try {
-      await deleteDoc(doc(db, 'clients', c.id));
+      await deleteClientEverywhere(c, viewer);
       setOpenId(null);
       flash('Client deleted');
     } catch (err) {

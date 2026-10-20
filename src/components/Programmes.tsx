@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, writeBatch } from 'firebase/firestore';
 import { linkedOnly } from '../lib/linked';
+import { deleteProgrammeEverywhere } from '../lib/detach';
 import { outlineProgrammeId } from '../lib/outlineResolve';
 import { Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
@@ -207,6 +208,21 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
   };
 
   const remove = async (p: Programme) => {
+    // Management can delete a programme in use (Joel, 2026-10-20): its name is kept on the deals,
+    // quotations and course outlines as typed text. Admin still can't while it's in use.
+    if (viewer.role === 'management') {
+      const nd = usage[p.id] || 0, no = outlinesOf(p.id).length, nt = trainersOf(p.id).length;
+      const parts = [nd ? `${nd} deal${nd === 1 ? '' : 's'}` : '', no ? `${no} course outline${no === 1 ? '' : 's'}` : '', nt ? `${nt} trainer${nt === 1 ? '' : 's'}` : ''].filter(Boolean);
+      const used = parts.length ? ` It is used on ${parts.join(', ')}; the name is kept on deals, quotations and outlines as typed text, and it is unticked for the trainers.` : '';
+      if (!window.confirm(`Delete "${p.name}" from the programme list?${used} This can't be undone.`)) return;
+      try {
+        await deleteProgrammeEverywhere(p, viewer);
+        setEditing(null);
+      } catch (err) {
+        setError(friendlyError(err));
+      }
+      return;
+    }
     if (usage[p.id]) return setError(`"${p.name}" is used on ${usage[p.id]} deal${usage[p.id] === 1 ? '' : 's'}, so it can't be deleted.`);
     const nOut = outlinesOf(p.id).length;
     if (nOut) return setError(`"${p.name}" has ${nOut} course outline${nOut === 1 ? '' : 's'}, so it can't be deleted. Change their programme first.`);

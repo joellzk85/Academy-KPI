@@ -6,6 +6,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealStage, formatDate, todayIso } from '../lib/deals';
 import { VenueBooking, phoneIn, venueBookings } from '../lib/venues';
 import { linkedOnly } from '../lib/linked';
+import { deleteVenueEverywhere } from '../lib/detach';
 import { venuePhotos } from '../lib/teambuilding';
 import PhotoPicker from './PhotoPicker';
 
@@ -150,14 +151,13 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
     setPanelError('');
     const inQuotes = allQuotes.filter(q => q.venueId === v.id).length;
     const inChecklists = Object.values(checklists).filter((c: any) => (c.tasks || []).some((x: any) => x.kind === 'venue' && x.venueId === v.id)).length;
-    if (inQuotes || inChecklists) {
-      const parts = [inQuotes ? `${inQuotes} quotation${inQuotes === 1 ? '' : 's'}` : '', inChecklists ? `${inChecklists} admin checklist${inChecklists === 1 ? '' : 's'}` : ''].filter(Boolean);
-      return setPanelError(`This venue can't be deleted because ${parts.join(' and ')} use${inQuotes + inChecklists === 1 ? 's' : ''} it.`);
-    }
-    if (!window.confirm(`Delete ${v.name} from the venue list? This can't be undone.`)) return;
+    // Management can delete a venue in use (Joel, 2026-10-20): the name is kept on the quotations and checklists as typed text.
+    const parts = [inQuotes ? `${inQuotes} quotation${inQuotes === 1 ? '' : 's'}` : '', inChecklists ? `${inChecklists} admin checklist${inChecklists === 1 ? '' : 's'}` : ''].filter(Boolean);
+    const used = parts.length ? ` It is on ${parts.join(' and ')}; its name is kept there as typed text.` : '';
+    if (!window.confirm(`Delete ${v.name} from the venue list?${used} This can't be undone.`)) return;
     setBusy(true);
     try {
-      await deleteDoc(doc(db, 'venues_directory', v.id));
+      await deleteVenueEverywhere(v);
       setOpenId(null);
       flash('Venue deleted');
     } catch (err) {

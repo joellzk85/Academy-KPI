@@ -38,6 +38,12 @@ export function linkedOnly<T>(list: T[]): T[] {
   return list.filter(isLinked);
 }
 
+// Money records and HRDC queries on a deal Management deleted (2026-10-20) are marked dealDeleted and hidden
+// with the deal; Restore brings them back. Lists of them filter with this.
+export function withoutDeleted<T>(list: T[]): T[] {
+  return list.filter(r => !isDeletedRecord(r));
+}
+
 // Linked records including deleted ones (only for Management → Lost and deleted).
 export function linkedWithDeleted<T>(list: T[]): T[] {
   return list.filter((r: any) => !teamIds || (!!recordOwnerId(r) && teamIds.has(recordOwnerId(r))));

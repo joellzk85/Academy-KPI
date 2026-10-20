@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { AlertTriangle, Check, Download, Loader2, MessageCircle, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
@@ -9,7 +9,7 @@ import {
   canDecide, dealPL, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
-import { linkedOnly } from '../lib/linked';
+import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { onPhone } from '../lib/whatsapp';
 import PaymentRequestDocument, { paymentRef, paymentStatusText } from './PaymentRequestDocument';
 
@@ -53,6 +53,21 @@ function useRun() {
     try { await fn(); } catch (err) { setError(friendlyError(err)); } finally { setBusy(false); }
   };
   return { busy, error, setError, run };
+}
+
+// Delete a money record and say so in its deal's History (Joel, 2026-10-20: Management can delete any money
+// record, paid ones included, so the deal keeps a trail of what was deleted, by whom and when).
+async function deleteMoney(coll: 'money_in' | 'money_out', id: string, dealId: string, viewer: Viewer, what: string) {
+  const batch = writeBatch(db);
+  batch.delete(doc(db, coll, id));
+  if (dealId) {
+    const d = await getDoc(doc(db, 'pipelines', dealId));
+    if (d.exists()) {
+      const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Deleted ${what}` };
+      batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
+    }
+  }
+  await batch.commit();
 }
 
 // ---------- Rep view: status only ----------
@@ -196,8 +211,12 @@ export function InRow({ m, viewer, settings, context }: { m: MoneyIn; viewer: Vi
   };
   const undo = () => run(() => updateDoc(doc(db, 'money_in', m.id), { paidDate: '', paidAmount: 0, updatedAt: Date.now() }));
   const remove = () => {
-    if (!window.confirm(`Delete this ${IN_SOURCE_LABELS[m.source].toLowerCase()}?`)) return;
-    return run(() => deleteDoc(doc(db, 'money_in', m.id)));
+    const label = IN_SOURCE_LABELS[m.source].toLowerCase();
+    if (!window.confirm(paid
+      ? `Delete this ${label}? It has been paid (${formatRM(m.paidAmount || 0)}), so the deal's P&L and Project P&L change. This can't be undone.`
+      : `Delete this ${label}?`)) return;
+    const what = `${label}${m.invoiceNo ? ` ${m.invoiceNo}` : ''} (${formatRM(m.amount)}${paid ? `, paid ${formatRM(m.paidAmount || 0)}` : ''})`;
+    return run(() => deleteMoney('money_in', m.id, m.dealId, viewer, what));
   };
 
   return (
@@ -223,7 +242,7 @@ export function InRow({ m, viewer, settings, context }: { m: MoneyIn; viewer: Vi
           {paid
             ? <button type="button" disabled={busy} className={btnSmall} onClick={undo}><Undo2 className="h-3.5 w-3.5" /> Undo payment</button>
             : !paying && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setPaying(true); setError(''); }}><Check className="h-3.5 w-3.5" /> Record payment</button>}
-          {!paid && <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={remove} aria-label="Delete"><Trash2 className="h-4 w-4" /></button>}
+          {(!paid || viewer.role === 'management') && <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={remove} aria-label="Delete"><Trash2 className="h-4 w-4" /></button>}
         </span>
       </div>
       {paying && (
@@ -408,8 +427,12 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
   };
   const undoPaid = () => run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', paidDate: '', paidRef: '', paidById: '', paidByName: '' }));
   const cancel = () => {
-    if (!window.confirm('Cancel this payment request?')) return;
-    return run(() => deleteDoc(doc(db, 'money_out', o.id)));
+    const settled = o.status === 'approved' || o.status === 'paid';
+    if (!window.confirm(settled
+      ? `Delete this ${o.status} payment request? ${o.status === 'paid' ? 'It has been paid, so the' : 'The'} P&L changes. This can't be undone.`
+      : 'Cancel this payment request?')) return;
+    const what = `payment request: ${o.category} · ${o.payee} (${company ? formatSen(o.amount) : formatRM(o.amount)}, ${OUT_STATUS_LABELS[o.status].toLowerCase()})`;
+    return run(() => deleteMoney('money_out', o.id, o.dealId || '', viewer, what));
   };
 
   return (
@@ -447,7 +470,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
             {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={() => { setMode('reject'); setError(''); }}><X className="h-3.5 w-3.5" /> Reject</button>}
             {o.status === 'approved' && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setMode('pay'); setError(''); }}><Check className="h-3.5 w-3.5" /> Mark paid</button>}
             {o.status === 'paid' && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
-            {(o.status === 'pending' || o.status === 'rejected') && (isMine || viewer.role === 'management') && (
+            {(viewer.role === 'management' || ((o.status === 'pending' || o.status === 'rejected') && isMine)) && (
               <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={cancel} aria-label="Cancel request"><Trash2 className="h-4 w-4" /></button>
             )}
           </span>
@@ -605,8 +628,8 @@ export function MoneyOverview({ viewer }: { viewer: Viewer }) {
     const subs = [
       onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(query(collection(db, 'money_in')), s => setIns(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))),
-      onSnapshot(query(collection(db, 'money_out')), s => setOuts(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))),
+      onSnapshot(query(collection(db, 'money_in')), s => setIns(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id }))))),
+      onSnapshot(query(collection(db, 'money_out')), s => setOuts(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id }))))),
     ];
     return () => subs.forEach(u => u());
   }, []);
