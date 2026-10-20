@@ -65,7 +65,7 @@ export default function CourseOutlineDocument({ o, forPdf }: { o: CourseOutline;
     const groups = layout?.[si] || [s.blocks.map((_, i) => i)];
     groups.forEach((g, pi) => {
       const nodes = g.map(i => <div key={s.blocks[i].key}>{s.blocks[i].node}</div>);
-      pages.push(<Page key={`${s.key}-${pi}`} title={s.title}>{s.wrap ? s.wrap(nodes) : nodes}</Page>);
+      pages.push(<Page key={`${s.key}-${pi}`} track={pi ? `${s.key}-${pi}` : s.key} title={s.title}>{s.wrap ? s.wrap(nodes) : nodes}</Page>);
     });
   });
 
@@ -291,9 +291,10 @@ const pageStyle: React.CSSProperties = {
   fontFamily: FONT, color: INK, margin: '0 auto 24px', boxShadow: '0 1px 3px rgba(15,23,42,.12), 0 10px 30px rgba(15,23,42,.08)',
 };
 
-function Page({ title, children }: { title: string; children: React.ReactNode }) {
+// data-track: the page timed on the client's link (2026-10-20, lib/linkTracker.ts), e.g. "modules-1".
+function Page({ title, track, children }: { title: string; track?: string; children: React.ReactNode }) {
   return (
-    <section className="outline-page" style={pageStyle}>
+    <section className="outline-page" style={pageStyle} data-track={track}>
       <div style={{ position: 'absolute', top: 26, left: 22, right: PAD_R - 10, height: 74, display: 'flex', alignItems: 'center', gap: 16 }}>
         <Chevrons color={CHEVRON} width={80} height={72} />
         <h1 style={{ flex: 1, margin: 0, fontWeight: 700, lineHeight: 1.2, fontSize: title.length > 48 ? 17 : title.length > 32 ? 19.5 : 22 }}>{title}</h1>
@@ -309,7 +310,7 @@ function CoverPage({ o }: { o: CourseOutline }) {
   const title = o.courseTitle || 'Course outline';
   const dateText = o.date ? new Date(`${o.date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
   return (
-    <section className="outline-page" style={pageStyle}>
+    <section className="outline-page" style={pageStyle} data-track="cover">
       <svg width={PAGE_W} height={780} viewBox="0 0 794 780" style={{ position: 'absolute', top: 0, left: 0 }} aria-hidden>
         <polygon points="36,0 246,0 470,390 246,780 36,780 260,390" fill={MINT} />
         <polygon points="300,0 510,0 734,390 510,780 300,780 524,390" fill={MINT} />

@@ -357,7 +357,8 @@ export function registerBackupRoutes(app: Express) {
     try {
       const caller = await staffFrom(req);
       // Payment tracking is for Management only (Joel, 2026-10-20), so Admin's download leaves it out.
-      const tables = (await readAllTables()).filter(t => caller.role === 'management' || t.collectionId !== 'payment_records');
+      // Payment records and client link tracking (2026-10-20: "only management can see tracking") are Management only.
+      const tables = (await readAllTables()).filter(t => caller.role === 'management' || !['payment_records', 'proposal_views'].includes(t.collectionId));
       const now = new Date();
       const wb = new ExcelJS.Workbook();
       wb.creator = 'NEXT Academy CRM';

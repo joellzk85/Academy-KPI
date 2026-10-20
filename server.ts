@@ -10,6 +10,7 @@ import { registerMailRoutes } from "./serverMail";
 import { registerDocLinkRoutes } from "./serverDocLinks";
 import { registerPhotoRoutes } from "./serverPhotos";
 import { registerProposalLinkRoutes } from "./serverProposalLinks";
+import { registerLinkVisitRoutes } from "./serverLinkVisits";
 import { registerPaymentLinkRoutes } from "./serverPaymentLinks";
 import { registerBlueprintRoutes } from "./serverBlueprint";
 
@@ -51,6 +52,9 @@ async function startServer() {
 
   // Teambuilding proposal links: the client's page (/p/<token>), visit tracking and "Accept proposal"
   registerProposalLinkRoutes(app);
+
+  // Client link tracking (every link kind) and the heatmap's copy of the document (Management)
+  registerLinkVisitRoutes(app);
 
   // Payment links for accounts: open a payment request without logging in and click "Payment made" (/pay/<token>)
   registerPaymentLinkRoutes(app);

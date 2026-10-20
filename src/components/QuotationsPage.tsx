@@ -584,7 +584,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
                 ))}
               </ul>
             )}
-            {clientLink && <div className="mt-3 text-ink"><DocLinkBox link={clientLink} compact /></div>}
+            {clientLink && <div className="mt-3 text-ink"><DocLinkBox link={clientLink} compact viewer={me} /></div>}
           </div>
           <span className="flex flex-wrap gap-2">
             {canMarkWon && !markingWon && <button type="button" className={btnPrimary} onClick={() => setMarkingWon(true)}><Trophy className="h-4 w-4" /> Client signed: mark deal won</button>}

@@ -257,14 +257,15 @@ export function clientTimeline(s: TimelineSources): TimelineEntry[] {
     });
   });
 
-  // The client opened a teambuilding proposal link (push B): shown dashed, it doesn't count as contact (Joel).
+  // The client opened a client link (teambuilding push B; every kind since 2026-10-20): shown dashed, it doesn't count as
+  // contact (Joel). The caller passes only links the viewer may see tracking for.
   const dealIds = new Set(s.deals.map(d => d.id));
-  (s.links || []).filter(l => l.kind === 'teambuilding' && l.views && dealIds.has(l.dealId)).forEach(l => {
+  (s.links || []).filter(l => l.views && dealIds.has(l.dealId)).forEach(l => {
     const at = new Date(l.lastViewedAt || l.firstViewedAt || 0);
     if (!+at) return;
     out.push({
       key: `po_${l.token}`, kind: 'proposal_open', date: new Date(+at + 8 * 3600_000).toISOString().slice(0, 10), at: at.toISOString(),
-      title: `Client opened the teambuilding proposal${l.refNumber ? ` ${l.refNumber}` : ''}`,
+      title: `Client opened the ${l.kind === 'quotation' ? 'quotation' : l.kind === 'outline' ? 'course outline' : 'teambuilding proposal'}${l.refNumber ? ` ${l.refNumber}` : ''}`,
       text: `${l.views === 1 ? 'Once' : `${l.views} times`}${l.accepted ? `; accepted online by ${l.accepted.name} (${l.accepted.position})` : ''}`,
       dealId: l.dealId || undefined, counts: false,
     });

@@ -1,20 +1,23 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, Phone, Mail } from 'lucide-react';
 import logoUrl from '../assets/outline/next-logo.png';
 import RequestAccess, { linkVisitId } from './RequestAccess';
 import TeambuildingSite, { TB } from './TeambuildingSite';
 import { formatPrice, priceFor, ResolvedTb } from '../lib/teambuilding';
-import { EventType, VisitEvent, browserOf, deviceOf } from '../lib/proposalTracking';
+import LinkGuard, { todayText } from './LinkGuard';
+import { teamBrowser, useLinkTracking } from '../lib/linkTracker';
 
 // The client's private link to a teambuilding proposal: /p/<token> (push B, Joel 2026-10-19). No login. It talks only
 // to the CRM server (serverProposalLinks.ts), which returns just what the website shows.
 // - The same website as the CRM's Preview (TeambuildingSite), with the client's company name and today's date as a
 //   faint watermark, and "Accept proposal" at the end.
-// - Protection: no download button; printing gives a blank "Private & Confidential" page; right-click, copying, text
-//   selection and image dragging are blocked.
-// - Tracking (never shown or mentioned to the client): which section is on screen while the tab is visible, sent
-//   about every 15 seconds and when the page closes, plus "possible" screenshot / print / copy / right-click attempts.
-//   Not tracked when someone from NEXT Academy opens it (the CRM's Open button, or a browser logged in to the CRM).
+// - Protection (LinkGuard, shared with quotation and outline links since 2026-10-20): no download button; printing
+//   gives a blank "Private & Confidential" page; right-click, copying, text selection and image dragging are blocked;
+//   the page blurs when the window loses focus.
+// - Tracking (lib/linkTracker.ts; never shown or mentioned to the client): time per section, reading heatmap, mouse,
+//   taps, active time, devices, read depth, packages and group sizes tried, "possible" screenshot / print / copy
+//   attempts. Not tracked when someone from NEXT Academy opens it (the CRM's Open button, or a browser logged in to
+//   the CRM).
 
 type Gone = { code: string; message: string; canRequest?: boolean; requested?: boolean; contact?: { name: string; phone: string; email: string } };
 type Accepted = { name: string; position: string; note?: string; packageName?: string; pax?: number; price?: number | null; at: number };
@@ -26,30 +29,6 @@ async function post<T>(path: string, body: any): Promise<T> {
   if (!res.ok || !data?.ok) throw new Error(data?.error || 'Something went wrong. Please try again in a moment.');
   return data as T;
 }
-
-// Is someone from the team logged in to the CRM in this browser? (Firebase keeps the login in IndexedDB.)
-async function teamBrowser(): Promise<boolean> {
-  if (new URLSearchParams(window.location.search).get('team') === '1') return true;
-  try {
-    return await new Promise<boolean>(resolve => {
-      const req = indexedDB.open('firebaseLocalStorageDb');
-      req.onerror = () => resolve(false);
-      req.onupgradeneeded = () => { req.transaction?.abort(); resolve(false); };
-      req.onsuccess = () => {
-        const db = req.result;
-        try {
-          const tx = db.transaction('firebaseLocalStorage', 'readonly');
-          const all = tx.objectStore('firebaseLocalStorage').getAllKeys();
-          all.onsuccess = () => { resolve((all.result || []).some(k => String(k).startsWith('firebase:authUser:'))); db.close(); };
-          all.onerror = () => { resolve(false); db.close(); };
-        } catch { resolve(false); db.close(); }
-      };
-      window.setTimeout(() => resolve(false), 1500);
-    });
-  } catch { return false; }
-}
-
-const todayText = () => new Date().toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' });
 
 export default function ProposalLinkPage({ token }: { token: string }) {
   const [state, setState] = useState<{ loading: true } | { gone: Gone } | { r: ResolvedTb; accepted: Accepted | null }>({ loading: true });
@@ -80,8 +59,22 @@ export default function ProposalLinkPage({ token }: { token: string }) {
   }, [token]);
 
   const ready = 'r' in state;
-  useProtection(ready);
-  useTracking(token, ready && team === false);
+  const { pick } = useLinkTracking(token, ready && team === false);
+  // Packages and group sizes the client tries (the first package is chosen automatically, so it isn't counted; the
+  // group size is counted once it has stayed the same for 1.5 seconds).
+  const paxTimer = useRef(0);
+  const choosePax = (n: number) => {
+    setPax(n);
+    window.clearTimeout(paxTimer.current);
+    paxTimer.current = window.setTimeout(() => pick(`pax:${n}`), 1500);
+  };
+  const choosePackage = (id: string) => {
+    if (chosen && id !== chosen && 'r' in state) {
+      const col = (state.r.p.packages?.cols || []).find((c: any) => c.id === id);
+      if (col) pick(`pkg:${col.name || 'Package'}`);
+    }
+    setChosen(id);
+  };
 
   if ('loading' in state) {
     return <div className="flex min-h-screen items-center justify-center bg-white" style={{ fontFamily: "'Poppins', sans-serif" }}><Loader2 className="h-8 w-8 animate-spin" style={{ color: TB.teal }} /></div>;
@@ -90,32 +83,14 @@ export default function ProposalLinkPage({ token }: { token: string }) {
 
   const { r, accepted } = state;
   return (
-    <div className="tb-client">
-      <style>{CLIENT_CSS}</style>
-      <TeambuildingSite r={r} mode="client" pax={pax} onPax={setPax} chosen={chosen} onChosen={setChosen}
+    <LinkGuard on>
+      <TeambuildingSite r={r} mode="client" pax={pax} onPax={choosePax} chosen={chosen} onChosen={choosePackage}
         watermark={`${r.company ? `${r.company} · ` : ''}${todayText()}`}
         endSlot={<AcceptBlock token={token} r={r} pax={pax} chosen={chosen} accepted={accepted}
           onAccepted={a => setState({ r, accepted: a })} />} />
-      <div className="tb-print-note" aria-hidden="true">
-        <img src={logoUrl} alt="" />
-        <p>Private &amp; Confidential</p>
-      </div>
-    </div>
+    </LinkGuard>
   );
 }
-
-// Blank "Private & Confidential" page when printed; no selecting text or dragging images.
-const CLIENT_CSS = `
-.tb-client { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.tb-client input, .tb-client textarea { -webkit-user-select: text; user-select: text; }
-.tb-client img { -webkit-user-drag: none; user-drag: none; pointer-events: auto; }
-.tb-print-note { display: none; }
-@media print {
-  body * { visibility: hidden !important; }
-  .tb-print-note, .tb-print-note * { visibility: visible !important; }
-  .tb-print-note { display: flex !important; position: fixed; inset: 0; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: #fff; font-family: Poppins, sans-serif; font-size: 20px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; color: #1e2d29; }
-  .tb-print-note img { height: 56px; }
-}`;
 
 // ---------- Accept proposal ----------
 export function AcceptBlock({ token, r, pax, chosen, accepted, onAccepted, preview }: {
@@ -146,7 +121,7 @@ export function AcceptBlock({ token, r, pax, chosen, accepted, onAccepted, previ
   };
 
   return (
-    <section id="tb-accept" className="scroll-mt-14 px-4 py-14 sm:px-6 sm:py-20" style={{ background: TB.mintLight }}>
+    <section id="tb-accept" data-track="accept" className="scroll-mt-14 px-4 py-14 sm:px-6 sm:py-20" style={{ background: TB.mintLight }}>
       <div className="mx-auto max-w-2xl">
         {accepted ? (
           <div className="rounded-3xl bg-white p-6 text-center shadow-[0_20px_60px_-30px_rgba(30,45,41,0.45)] sm:p-10">
@@ -208,110 +183,4 @@ function GonePage({ g, token }: { g: Gone; token: string }) {
       </div>
     </div>
   );
-}
-
-// ---------- Protection ----------
-function useProtection(on: boolean) {
-  useEffect(() => {
-    if (!on) return;
-    const stop = (e: Event) => { if (!(e.target as HTMLElement)?.closest?.('input, textarea')) e.preventDefault(); };
-    const drag = (e: DragEvent) => e.preventDefault();
-    document.addEventListener('contextmenu', stop);
-    document.addEventListener('copy', stop);
-    document.addEventListener('cut', stop);
-    document.addEventListener('dragstart', drag);
-    return () => {
-      document.removeEventListener('contextmenu', stop);
-      document.removeEventListener('copy', stop);
-      document.removeEventListener('cut', stop);
-      document.removeEventListener('dragstart', drag);
-    };
-  }, [on]);
-}
-
-// ---------- Tracking ----------
-const SECTION_IDS = ['cover', 'objectives', 'trainers', 'agenda', 'activities', 'venues', 'packages', 'takeaways', 'hrdc', 'terms', 'accept'];
-
-function useTracking(token: string, on: boolean) {
-  const visitId = useMemo(() => Array.from(crypto.getRandomValues(new Uint8Array(12))).map(b => b.toString(36).padStart(2, '0')).join('').slice(0, 20), []);
-  const acc = useRef<Record<string, number>>({});
-  const events = useRef<VisitEvent[]>([]);
-  const lastShortcut = useRef(0);
-  useEffect(() => {
-    if (!on) return;
-    const base = { token, visitId, device: deviceOf(navigator.userAgent, navigator.maxTouchPoints || 0, window.innerWidth), browser: browserOf(navigator.userAgent) };
-    const take = () => {
-      const body = { ...base, add: acc.current, events: events.current };
-      acc.current = {};
-      events.current = [];
-      return body;
-    };
-    const hasData = () => Object.keys(acc.current).length > 0 || events.current.length > 0;
-    const send = () => {
-      if (!hasData()) return;
-      fetch('/api/proposal-link/visit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(take()), keepalive: true }).catch(() => {});
-    };
-    const beacon = () => {
-      if (!hasData()) return;
-      const blob = new Blob([JSON.stringify(take())], { type: 'application/json' });
-      if (!navigator.sendBeacon?.('/api/proposal-link/visit', blob)) send();
-    };
-    const record = (type: EventType, how?: string) => {
-      const now = Date.now();
-      // The same kind within 3 seconds is one attempt.
-      if (events.current.some(e => e.type === type && now - e.at < 3000)) return;
-      events.current.push({ type, at: now, ...(how ? { how } : {}) });
-    };
-    // Which section is in the middle of the screen, once a second, while the page is visible.
-    const tick = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
-      const mid = window.innerHeight / 2;
-      const key = SECTION_IDS.find(k => {
-        const el = document.getElementById(`tb-${k}`);
-        if (!el) return false;
-        const b = el.getBoundingClientRect();
-        return b.top <= mid && b.bottom >= mid;
-      });
-      if (key) acc.current[key] = (acc.current[key] || 0) + 1;
-    }, 1000);
-    const every = window.setInterval(send, 15000);
-    const onVis = () => { if (document.visibilityState === 'hidden') beacon(); };
-    const onKey = (e: KeyboardEvent) => {
-      const k = e.key || '';
-      if (k === 'PrintScreen' || e.code === 'PrintScreen') { record('screenshot', 'Print Screen key'); return; }
-      if (e.metaKey && e.shiftKey && ['3', '4', '5', '#', '$', '%'].includes(k)) { record('screenshot', 'Cmd+Shift+3/4/5'); return; }
-      if (e.shiftKey && (k === 's' || k === 'S') && (e.metaKey || e.getModifierState?.('OS'))) { record('screenshot', 'Win+Shift+S'); return; }
-      if ((e.metaKey || e.ctrlKey) && (k === 'p' || k === 'P')) { e.preventDefault(); record('print', 'Ctrl+P'); return; }
-      if ((e.metaKey || e.ctrlKey) && (k === 's' || k === 'S')) { e.preventDefault(); return; }
-      if ((e.metaKey || e.ctrlKey) && (k === 'c' || k === 'C') && !(e.target as HTMLElement)?.closest?.('input, textarea')) record('copy', 'Ctrl+C');
-      if (e.metaKey || k === 'Meta' || k === 'OS') lastShortcut.current = Date.now();
-    };
-    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'PrintScreen' || e.code === 'PrintScreen') record('screenshot', 'Print Screen key'); };
-    // Screenshot tools often take the focus away right after their shortcut.
-    const onBlur = () => { if (Date.now() - lastShortcut.current < 1500) record('screenshot', 'Window lost focus after a shortcut'); };
-    const onCopy = (e: Event) => { if (!(e.target as HTMLElement)?.closest?.('input, textarea')) record('copy'); };
-    const onMenu = () => record('rightclick');
-    const onPrint = () => record('print');
-    document.addEventListener('visibilitychange', onVis);
-    window.addEventListener('pagehide', beacon);
-    window.addEventListener('keydown', onKey, true);
-    window.addEventListener('keyup', onKeyUp, true);
-    window.addEventListener('blur', onBlur);
-    document.addEventListener('copy', onCopy);
-    document.addEventListener('contextmenu', onMenu);
-    window.addEventListener('beforeprint', onPrint);
-    return () => {
-      window.clearInterval(tick);
-      window.clearInterval(every);
-      beacon();
-      document.removeEventListener('visibilitychange', onVis);
-      window.removeEventListener('pagehide', beacon);
-      window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('keyup', onKeyUp, true);
-      window.removeEventListener('blur', onBlur);
-      document.removeEventListener('copy', onCopy);
-      document.removeEventListener('contextmenu', onMenu);
-      window.removeEventListener('beforeprint', onPrint);
-    };
-  }, [on]);
 }

@@ -1,17 +1,17 @@
 // Teambuilding proposal links, the public part (push B, Joel 2026-10-19). The client opens /p/<token> without logging
 // in. These routes are the only way in: they read the proposal with the server's own access and return only what the
-// website shows (never other clients, deals or CRM details), record each visit (proposal_views, server-written only,
-// no IP addresses), and record "Accept proposal". The team makes, extends and revokes links in the CRM
+// website shows (never other clients, deals or CRM details), and record "Accept proposal". Visits are recorded by
+// serverLinkVisits.ts (every link kind, since 2026-10-20). The team makes, extends and revokes links in the CRM
 // (serverDocLinks.ts, the same doc_links list as quotation and outline links).
 
 import type { Express, Request } from 'express';
-import { FieldValue, Firestore } from 'firebase-admin/firestore';
+import { Firestore } from 'firebase-admin/firestore';
 import { admin, UserError, route } from './serverAuth';
 import { isLinkToken } from './src/lib/docLinks';
 import { admitOpen } from './serverDocLinks';
 import { COMPANY } from './src/lib/company';
 import { statusForStage } from './src/lib/deals';
-import { EVENT_LABELS, cleanVisitUpdate, isExpired, plusDaysMY } from './src/lib/proposalTracking';
+import { isExpired, plusDaysMY } from './src/lib/proposalTracking';
 import { TbProposal, priceFor, resolveTb } from './src/lib/teambuilding';
 
 // Light protection against someone hammering the links: 120 requests a minute per address (tracking sends a small
@@ -52,7 +52,7 @@ async function openLink(db: Firestore, token: any, { allowExpired = false } = {}
 }
 
 // The proposal as the client sees it: the latest saved version (Joel: a fix after Revise + Save shows on the same link).
-async function loadProposal(db: Firestore, link: any) {
+export async function loadProposal(db: Firestore, link: any) {
   const snap = await db.collection('teambuilding_proposals').doc(link.docId).get();
   const p = snap.data() as TbProposal | undefined;
   if (!p || p.dealDeleted) throw new UserError(404, 'doc-gone', GONE);
@@ -73,7 +73,7 @@ async function loadProposal(db: Firestore, link: any) {
 }
 
 // Only what the website shows goes to the client's browser.
-function publicProposal(r: ReturnType<typeof resolveTb>) {
+export function publicProposal(r: ReturnType<typeof resolveTb>) {
   const p = r.p;
   return {
     refNumber: p.refNumber, title: p.title, subtitle: p.subtitle, coverPhoto: p.coverPhoto || '', stay: p.stay || '',
@@ -90,16 +90,6 @@ function publicProposal(r: ReturnType<typeof resolveTb>) {
 
 const historyLine = (action: string, at = Date.now()) => ({ at: new Date(at).toISOString(), byId: '', byName: 'Client', action });
 
-async function addDealHistory(db: Firestore, dealId: string, action: string) {
-  if (!dealId) return;
-  const ref = db.collection('pipelines').doc(dealId);
-  await db.runTransaction(async tx => {
-    const deal: any = (await tx.get(ref)).data();
-    if (!deal) return;
-    tx.update(ref, { history: [...(deal.history || []), historyLine(action)].slice(-40) });
-  }).catch(e => console.error('[proposal-link] deal history', e));
-}
-
 export function registerProposalLinkRoutes(app: Express) {
   // What the client's page shows. `team: true` (the CRM's Open button, or a browser where someone from the team is
   // logged in to the CRM) isn't counted.
@@ -109,10 +99,10 @@ export function registerProposalLinkRoutes(app: Express) {
     try {
       // Time and open limits, shared with quotation and outline links (2026-10-19, serverDocLinks.ts admitOpen).
       const { ref, link } = await openLink(db, req.body?.token, { allowExpired: true });
-      const { r, dealId } = await loadProposal(db, link);
-      const { blocked, first } = await admitOpen(db, ref, link, { visit: req.body?.visit, team: !!req.body?.team });
+      const { r } = await loadProposal(db, link);
+      // No "Client opened" History line (2026-10-20): History is seen by everyone on the deal, tracking only by Management.
+      const { blocked } = await admitOpen(db, ref, link, { visit: req.body?.visit, team: !!req.body?.team });
       if (blocked) return { gone: { ...blocked, canRequest: true, requested: !!link.reopenRequest, contact: await contactOf(db, link) } };
-      if (first) await addDealHistory(db, dealId || link.dealId, `Client opened the teambuilding proposal${link.refNumber ? ` ${link.refNumber}` : ''} (link)`);
       return { proposal: publicProposal(r), accepted: link.accepted || null, expiresAt: link.expiresAt || 0 };
     } catch (e: any) {
       if (e?.extra) return { gone: { code: e.code, message: e.message, ...e.extra } };
@@ -120,40 +110,7 @@ export function registerProposalLinkRoutes(app: Express) {
     }
   }));
 
-  // A small update about every 15 seconds while the page is visible, and one when it closes (sendBeacon).
-  app.post('/api/proposal-link/visit', route(async req => {
-    slowDown(req);
-    if (req.body?.team) return {};
-    const u = cleanVisitUpdate(req.body);
-    if (!u) return {};
-    const { db } = admin();
-    const { ref: linkRef, link, token } = await openLink(db, req.body?.token, { allowExpired: true });
-    const vRef = db.collection('proposal_views').doc(u.visitId);
-    const now = Date.now();
-    const added = Object.values(u.add).reduce((t, n) => t + n, 0);
-    let note = '';
-    await db.runTransaction(async tx => {
-      const v: any = (await tx.get(vRef)).data();
-      if (v && v.token !== token) return;   // someone else's visit id
-      const sections = { ...(v?.sections || {}) };
-      Object.entries(u.add).forEach(([k, n]) => { sections[k] = (sections[k] || 0) + n; });
-      const events = [...(v?.events || []), ...u.events].slice(-200);
-      const flagged = u.events.filter(e => e.type !== 'rightclick');
-      if (flagged.length && !v?.historyNoted) {
-        const kinds = Array.from(new Set(flagged.map(e => EVENT_LABELS[e.type].replace(/ attempt$/, '').toLowerCase())));
-        note = `${kinds.join(', ').replace(/^./, c => c.toUpperCase())} attempt while viewing the teambuilding proposal${link.refNumber ? ` ${link.refNumber}` : ''} (${u.device}, ${u.browser})`;
-      }
-      tx.set(vRef, {
-        token, docId: link.docId, dealId: link.dealId || '', device: u.device, browser: u.browser,
-        startedAt: v?.startedAt || now, lastSeenAt: now, seconds: (v?.seconds || 0) + added, sections, events,
-        ...(note || v?.historyNoted ? { historyNoted: true } : {}),
-      });
-      if (added) tx.update(linkRef, { totalSeconds: FieldValue.increment(added) });
-    });
-    // One History line per visit, however many keys were pressed.
-    if (note) await addDealHistory(db, link.dealId, note);
-    return {};
-  }));
+  // Visit updates: /api/proposal-link/visit is kept for pages opened before 2026-10-20 (serverLinkVisits.ts).
 
   // "Accept proposal": the client's name and position (and an optional note). A deal at New or Proposal sent moves to
   // Client approved; it is never marked Won (Won = the signed quotation). Further along, it's just recorded.

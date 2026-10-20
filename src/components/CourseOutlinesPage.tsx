@@ -845,7 +845,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
                 ))}
               </ul>
             )}
-            {clientLink && <div className="mt-3 text-ink"><DocLinkBox link={clientLink} compact /></div>}
+            {clientLink && <div className="mt-3 text-ink"><DocLinkBox link={clientLink} compact viewer={me} /></div>}
           </div>
           <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
         </div>

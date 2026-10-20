@@ -6,7 +6,7 @@ import {
   DEFAULT_FOLLOW_UP_RULES, FollowUpRules, RULE_STAGES, RULE_STAGE_FROM, RULE_STAGE_LABELS, RuleStage, cleanDays, ordinal,
 } from '../lib/followUps';
 import { useFollowUpRules } from '../lib/useFollowUpRules';
-import { useContactLimits } from '../lib/useClientHistory';
+import { useContactLimits, useTeamList } from '../lib/useClientHistory';
 import { DEFAULT_CONTACT_LIMITS } from '../lib/touchPoints';
 import { ContactDot } from './ClientContactDot';
 import { useProposalSettings } from '../lib/useProposalSettings';
@@ -130,28 +130,46 @@ export default function FollowUpRulesPage({ viewer }: { viewer: Viewer }) {
   );
 }
 
-// Teambuilding proposal tracking (push B, Joel 2026-10-19: "reps can see tracking or not, to be determined by
-// management"). Saved in config/proposal_settings (Management only; the database rule for proposal_views reads it).
+// Client link tracking (Joel, 2026-10-20: "only management can see tracking", "management can approve which rep to
+// see"). Management always sees it. People ticked here see it too, but only on their own deals. Saved in
+// config/proposal_settings.allowedIds (Management only; the database rule for proposal_views reads it).
 function ProposalTrackingSwitch({ viewer }: { viewer: Viewer }) {
   const settings = useProposalSettings();
-  const [busy, setBusy] = useState(false);
+  const team = useTeamList().filter(t => t.active && t.role !== 'management');
+  const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const toggle = async (on: boolean) => {
-    setBusy(true); setMsg(null);
+  const toggle = async (person: { id: string; name: string }, on: boolean) => {
+    setBusy(person.id); setMsg(null);
+    const ids = new Set(settings.allowedIds || []);
+    if (on) ids.add(person.id); else ids.delete(person.id);
     try {
-      await setDoc(doc(db, 'config', 'proposal_settings'), { repsSeeTracking: on, updatedAt: new Date().toISOString(), updatedById: viewer.id, updatedByName: viewer.name }, { merge: true });
-      setMsg({ ok: true, text: on ? 'Reps now see how clients use their own proposal links.' : 'Reps now see only whether a link is live and whether it was accepted.' });
-    } catch (e) { setMsg({ ok: false, text: friendlyError(e) }); } finally { setBusy(false); }
+      await setDoc(doc(db, 'config', 'proposal_settings'), { allowedIds: Array.from(ids), repsSeeTracking: false, updatedAt: new Date().toISOString(), updatedById: viewer.id, updatedByName: viewer.name }, { merge: true });
+      setMsg({ ok: true, text: on ? `${person.name} now sees how clients use the links on their own deals.` : `${person.name} no longer sees tracking.` });
+    } catch (e) { setMsg({ ok: false, text: friendlyError(e) }); } finally { setBusy(''); }
   };
   return (
     <section className="rounded-2xl border border-line bg-white p-5">
-      <h3 className="font-bold">Proposal tracking</h3>
-      <p className="mt-0.5 text-[15px] text-ink-soft">How clients use teambuilding proposal links: views, time per section, visits and possible screenshot attempts. Admin and Management always see it.</p>
-      <label className="mt-3 flex items-center gap-3 text-[15px]">
-        <input type="checkbox" checked={settings.repsSeeTracking} disabled={busy} onChange={e => toggle(e.target.checked)} className="h-5 w-5 accent-[#0E6E62]" />
-        <span><strong>Reps can see proposal tracking</strong> on their own deals{settings.repsSeeTracking ? '' : ' (now off: they see only whether the link is live and whether it was accepted)'}</span>
-        {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-      </label>
+      <h3 className="font-bold">Client link tracking</h3>
+      <p className="mt-0.5 text-[15px] text-ink-soft">
+        How clients use quotation, course outline and teambuilding links: reading now, Hot / Warm / Cold, views, reading time, the heatmap, devices and possible screenshot attempts.
+        Management always sees it. Tick anyone else who may see it <strong>on their own deals</strong>. Clients are never told.
+      </p>
+      {team.length === 0 ? <p className="mt-3 text-sm text-ink-soft">No one else on the team yet.</p> : (
+        <ul className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+          {team.map(t => {
+            const on = (settings.allowedIds || []).includes(t.id);
+            return (
+              <li key={t.id}>
+                <label className="flex items-center gap-3 py-1 text-[15px]">
+                  <input type="checkbox" checked={on} disabled={!!busy} onChange={e => toggle(t, e.target.checked)} className="h-5 w-5 accent-[#0E6E62]" />
+                  <span>{t.name} <span className="text-sm text-ink-soft">({t.role === 'admin' ? 'Admin' : 'Rep'})</span></span>
+                  {busy === t.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {msg && <p role={msg.ok ? 'status' : 'alert'} className={`mt-2 rounded-lg px-3 py-2 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</p>}
     </section>
   );

@@ -73,7 +73,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       <div className="bg-white border border-slate-300 rounded-xl shadow-xl overflow-hidden print-paper text-slate-900 font-sans p-8 md:p-12 space-y-6 max-w-4xl mx-auto min-w-[760px] lg:min-w-0">
       
       {/* NEXT Academy vector/text logo matching PDF structure */}
-      <div className="flex justify-between items-start border-b-2 border-slate-100 pb-5">
+      <div className="flex justify-between items-start border-b-2 border-slate-100 pb-5" data-track="letterhead">
         <div>
           <Logo className="h-[120px] w-auto object-contain" />
         </div>
@@ -97,7 +97,8 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       </div>
 
       {/* Address & Invoice Reference details section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+      {/* data-track: the parts timed on the client's link (2026-10-20, lib/linkTracker.ts); nothing changes on screen. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm" data-track="client">
         
         {/* Left Column: Client metadata */}
         <div className="space-y-2">
@@ -129,7 +130,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       </div>
 
       {/* Quotation Logistics details bar */}
-      {(!itemsOnly || venue || time) && <div className="bg-slate-50/50 border border-slate-200/80 rounded-lg p-5 grid grid-cols-1 md:grid-cols-3 gap-5 text-sm font-sans shadow-2xs">
+      {(!itemsOnly || venue || time) && <div className="bg-slate-50/50 border border-slate-200/80 rounded-lg p-5 grid grid-cols-1 md:grid-cols-3 gap-5 text-sm font-sans shadow-2xs" data-track="details">
         <div>
           <span className="block text-[11px] font-black text-slate-400 uppercase tracking-widest font-mono">Venue Selected</span>
           <span className="font-extrabold text-slate-800 mt-1.5 block">{venue || 'N/A'}</span>
@@ -161,7 +162,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
               <th className="p-3.5 w-32 text-right">{itemsOnly ? 'Total' : 'Total Fee'}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-250 text-slate-800 font-sans">
+          <tbody className="divide-y divide-slate-250 text-slate-800 font-sans" data-track="items">
             {items.map((item, index) => (
               <tr key={item.id} className="hover:bg-slate-50/40">
                 <td className="p-3.5 text-center font-mono font-bold border-r border-slate-200">{item.no}</td>
@@ -180,7 +181,8 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
                 </td>
               </tr>
             ))}
-
+          </tbody>
+          <tbody className="divide-y divide-slate-250 text-slate-800 font-sans" data-track="total">
             {/* SST and Total Rows */}
             {applySST && (
               <>
@@ -229,7 +231,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       </div>
 
       {/* Remarks Section */}
-      <div className="space-y-2 pt-4 border-t border-slate-100">
+      <div className="space-y-2 pt-4 border-t border-slate-100" data-track="remarks">
         <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider font-mono">
           Remarks:
         </h4>
@@ -248,7 +250,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
 
       {/* Terms and Conditions Section */}
       {itemsOnly ? (terms.some(t => t.trim()) && (
-        <div className="space-y-3 pt-4 border-t border-slate-200">
+        <div className="space-y-3 pt-4 border-t border-slate-200" data-track="terms">
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest font-mono border-b border-slate-100 pb-1">TERMS AND CONDITIONS</h3>
           <ul className="space-y-1 list-none pl-2 text-[11px] md:text-xs text-slate-600 leading-relaxed font-medium">
             {terms.filter(t => t.trim()).map((t, idx) => (
@@ -257,7 +259,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
           </ul>
         </div>
       )) : (
-      <div className="space-y-4 pt-4 border-t border-slate-200">
+      <div className="space-y-4 pt-4 border-t border-slate-200" data-track="terms">
         <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest font-mono border-b border-slate-100 pb-1">
           TERMS AND CONDITIONS
         </h3>
@@ -357,7 +359,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       )}
 
       {/* Signatures: NEXT Academy's signatory on the left (QUOTE_SIGNATORY), the client's on the right. */}
-      <div className="pt-12 flex justify-between items-end gap-8 text-sm font-sans">
+      <div className="pt-12 flex justify-between items-end gap-8 text-sm font-sans" data-track="sign">
         <div className="w-56">
           <p className="font-bold text-slate-500">Prepared By:</p>
           <p className="h-16 flex items-end pl-2 pb-1 text-[40px] leading-none text-[#1e3a8a] -rotate-3 origin-bottom-left" style={{ fontFamily: SIGNATURE_FONT }}>

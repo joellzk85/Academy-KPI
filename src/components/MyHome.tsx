@@ -32,7 +32,7 @@ import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { DocLink, openedText } from '../lib/docLinks';
 import ProposalActivity from './ProposalActivity';
 import { useProposalSettings } from '../lib/useProposalSettings';
-import { canSeeTracking } from '../lib/proposalTracking';
+import { seesLink } from '../lib/proposalTracking';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -59,7 +59,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'team_follow_ups', title: 'Team follow-ups', roles: ['management'] },
   { id: 'team_appointments', title: 'Team appointments this week', roles: ['admin', 'management'] },
   { id: 'shared_with_me', title: 'Shared with me', roles: ['rep', 'admin', 'management'] },   // needs a workspace (where the files open)
-  { id: 'proposal_activity', title: 'Proposal activity', roles: ['rep', 'admin', 'management'] },   // teambuilding proposal links (push B)
+  { id: 'proposal_activity', title: 'Client link activity', roles: ['rep', 'admin', 'management'] },   // client links (push B; every kind since 2026-10-20)
   { id: 'programmes_waiting', title: 'Programmes waiting on HRDC', roles: ['admin', 'management'] },
   { id: 'notices', title: 'Notices', roles: ['rep', 'admin', 'management'] },
 ];
@@ -154,7 +154,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const wide = useWide();
   const [teammate, setTeammate] = useState('');
   const [docLinks, setDocLinks] = useState<DocLink[]>([]);   // client links, to say when a client opened one
-  const seeTbTracking = canSeeTracking(viewer.role, useProposalSettings());   // teambuilding opens: reps only if Management allows
+  const trackingSettings = useProposalSettings();   // client opens: only Management and the people Management ticked (own deals)
 
   useEffect(() => {
     const subs = [
@@ -308,7 +308,8 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const ctx: CardCtx = {
     viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, programmes, representatives, venues,
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
-    docLinks: seeTbTracking ? docLinks : docLinks.filter(l => l.kind !== 'teambuilding'),
+    docLinks,
+    openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
   };
 
   return (
@@ -751,6 +752,7 @@ type CardCtx = {
   shared: SharedItem[];
   clientFollowUps: { clientId: string; title: string; date: string; d: number }[];
   docLinks: DocLink[];
+  openedLinks: DocLink[];   // the links this person may see opens of
 };
 
 type Item = { key: string; title: string; sub?: string; level?: 'danger' | 'attention'; onClick?: () => void };
@@ -880,10 +882,10 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         sub: x.d < 0 ? `Client follow-up overdue by ${-x.d} day${x.d === -1 ? '' : 's'}` : x.d === 0 ? 'Client follow-up today' : `Client follow-up ${formatDate(x.date)}`,
         level: x.d < 0 ? 'danger' as const : x.d === 0 ? 'attention' as const : undefined,
       }));
-      // A client opened a quotation or outline link in the last 7 days and nobody has logged a follow-up since
-      // (2026-10-19): a good moment to call.
+      // A client opened a link in the last 7 days and nobody has logged a follow-up since (2026-10-19): a good moment to
+      // call. Only for Management and the people Management ticked (2026-10-20).
       const weekAgo = Date.now() - 7 * 864e5;
-      const opened: Item[] = c.docLinks
+      const opened: Item[] = c.openedLinks
         .filter(l => l.status === 'open' && l.views && (l.lastViewedAt || 0) > weekAgo)
         .map(l => ({ l, p: c.deals.find(d => d.id === l.dealId) }))
         .filter(({ l, p }) => p && c.mine(p) && OPEN_STAGES.includes(dealStage(p))

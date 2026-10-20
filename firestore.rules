@@ -370,12 +370,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Teambuilding proposal visits (push B, 2026-10-19): written only by the server. Admin and Management read them;
-    // reps only when Management has switched on "Reps can see proposal tracking" (config/proposal_settings).
+    // Client link visits (teambuilding push B 2026-10-19; every link kind since 2026-10-20): written only by the server.
+    // Only Management reads them, plus the people Management ticked (config/proposal_settings.allowedIds), and those
+    // only for visits on their own deals (ownerId).
     match /proposal_views/{visitId} {
-      allow read: if isStaff()
-        || (isMember() && exists(/databases/$(database)/documents/config/proposal_settings)
-            && get(/databases/$(database)/documents/config/proposal_settings).data.get('repsSeeTracking', false) == true);
+      allow read: if isManagement()
+        || (isMember() && resource.data.get('ownerId', '') == request.auth.uid
+            && exists(/databases/$(database)/documents/config/proposal_settings)
+            && request.auth.uid in get(/databases/$(database)/documents/config/proposal_settings).data.get('allowedIds', []));
       allow write: if false;
     }
 

@@ -24,9 +24,9 @@ import {
 import { daysBetween } from '../lib/followUps';
 import { useContactLimits, useTeamList, useTouchPoints } from '../lib/useClientHistory';
 import { ContactBadge, ContactDot } from './ClientContactDot';
-import { useTbLinks } from '../lib/useProposalLinks';
+import { useAllLinks } from '../lib/useProposalLinks';
 import { useProposalSettings } from '../lib/useProposalSettings';
-import { canSeeTracking } from '../lib/proposalTracking';
+import { seesLink } from '../lib/proposalTracking';
 
 // Clients (redesigned 2026-10-17): one shared list, the same details as before.
 // Anyone can add and edit; only Management can delete, and only a client no deal or quotation uses.
@@ -169,15 +169,16 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
   const today = todayIso();
   const staff = viewer.role !== 'rep';
 
-  // Teambuilding proposal links: "Client opened the proposal" on the timeline, for people allowed to see tracking.
-  const tbLinks = useTbLinks();
-  const seeTracking = canSeeTracking(viewer.role, useProposalSettings());
+  // Client links: "Client opened the …" on the timeline, only for Management and the people Management ticked (own deals).
+  const allLinks = useAllLinks();
+  const trackingSettings = useProposalSettings();
+  const seenLinks = useMemo(() => allLinks.filter(l => seesLink(viewer, trackingSettings, l)), [allLinks, trackingSettings, viewer.id, viewer.role]);
   const summaries = useMemo(() => {
     const out: Record<string, ClientSummary> = {};
-    const all = { deals, quotes, outlines, files, touchPoints, tasks, links: seeTracking ? tbLinks : [] };
+    const all = { deals, quotes, outlines, files, touchPoints, tasks, links: seenLinks };
     clients.forEach(c => { out[c.id] = summariseClient(c, all, personName, today, limits); });
     return out;
-  }, [clients, deals, quotes, outlines, files, touchPoints, tasks, limits, team, today, tbLinks, seeTracking]);
+  }, [clients, deals, quotes, outlines, files, touchPoints, tasks, limits, team, today, seenLinks]);
 
   const dealCount = (c: Client) => clientDeals(c, deals).length;
 

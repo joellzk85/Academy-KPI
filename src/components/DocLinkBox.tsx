@@ -3,7 +3,8 @@ import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { CalendarClock, Check, CheckCircle2, Copy, ExternalLink, Eye, Link2, Loader2, MessageSquareWarning, RotateCcw } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { DocKind, DocLink, docLinkPath, openedText } from '../lib/docLinks';
-import { expiryDateMY, expiryProblem, plusDaysMY } from '../lib/proposalTracking';
+import { expiryDateMY, expiryProblem, plusDaysMY, seesLink } from '../lib/proposalTracking';
+import { useProposalSettings } from '../lib/useProposalSettings';
 import { DEFAULT_LINK_SETTINGS, LinkSettings, MAX_OPENS, defaultExpiry, linkState, opensProblem, readLinkSettings, untilText } from '../lib/linkLimits';
 import { formatDate } from '../lib/deals';
 
@@ -43,13 +44,14 @@ export async function stopDocLink(token: string) {
   await callServer('/api/doc-link/stop', { token }, true);
 }
 
-export default function DocLinkBox({ link, message, compact, showViews = true }: {
+export default function DocLinkBox({ link, message, compact, viewer }: {
   link: DocLink;
   message?: string;            // a ready-to-paste message with the link at the end
   compact?: boolean;           // on the Sent banner
-  showViews?: boolean;         // teambuilding: reps see opens only when Management allows it
+  viewer?: { id: string; role: string } | null;   // how often the client opened it: Management, or a person Management ticked (own deals)
 }) {
   const tb = link.kind === 'teambuilding';
+  const showViews = seesLink(viewer, useProposalSettings(), link);
   const settings = useLinkSettings();
   const state = linkState(link);
   const blocked = state === 'expired' || state === 'limit';

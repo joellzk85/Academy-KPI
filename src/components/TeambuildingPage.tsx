@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
   AlertTriangle, ArrowLeft, BookmarkPlus, ChevronDown, ChevronRight, Copy, Download, Eye, EyeOff, FilePlus2, Laptop, Library, Link2, Loader2, Lock,
@@ -22,14 +21,13 @@ import { Programme } from '../lib/programmes';
 import ShareWithBox, { NewCount } from './ShareWithBox';
 import { TeambuildingSendDialog } from './QuoteSendDialog';
 import TeambuildingSite from './TeambuildingSite';
+import PhoneFrame from './PhoneFrame';
 import PhotoPicker from './PhotoPicker';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import CustomerCodeBox from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { AcceptBlock } from './ProposalLinkPage';
-import { canSeeTracking } from '../lib/proposalTracking';
-import { useProposalSettings } from '../lib/useProposalSettings';
 import { ActivityLibrary, PackageTemplate, cleanActivity, useActivities, usePackageTemplate } from './TeambuildingLibrary';
 import { ActivityForm, Card, NumberBox, PackageEditor, UpDown, btnPrimary, btnSecondary, iconBtn, input, label, linkBtn, move } from './TeambuildingParts';
 
@@ -418,7 +416,6 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   const wantRef = !locked && p.refAuto ? refWithCode(p.refNumber, clientCode(r.client)) : p.refNumber;
   useEffect(() => { if (wantRef !== p.refNumber) set({ refNumber: wantRef }); }, [wantRef]);
   const clientLink = openLinkOf(useDocLinks(p.id), 'teambuilding');   // the client's private link, if one was made
-  const proposalSettings = useProposalSettings();
   const dirty = JSON.stringify(p) !== saved;
   const nameOf = (id?: string) => reps.find(x => x.id === id)?.name || '';
   const deal = r.deal;
@@ -643,7 +640,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
 
       <Card title="Client link" hint={clientLink ? 'The client always sees the latest saved version on this link.' : undefined}>
         {clientLink
-          ? <DocLinkBox link={clientLink} showViews={canSeeTracking(me.role, proposalSettings)} />
+          ? <DocLinkBox link={clientLink} viewer={me} />
           : <p className="text-[15px] text-ink-soft">No client link yet. Use {locked ? 'Send again' : 'Send'} → Client link to make one: a private website of this proposal the client opens without logging in.</p>}
       </Card>
 
@@ -721,31 +718,6 @@ function Preview({ r, pax, onPax, onBack, dirty, pdfBusy, onPdf, onSend, sendLab
       </div>
       {sendDialog}
     </div>
-  );
-}
-
-// The phone preview: a real phone-width page (an inner frame with the CRM's styles), so the website uses its
-// phone layout, exactly as on the client's phone.
-function PhoneFrame({ children }: { children: React.ReactNode }) {
-  const [body, setBody] = useState<HTMLElement | null>(null);
-  const ref = (el: HTMLIFrameElement | null) => {
-    if (!el || body) return;
-    const setup = () => {
-      const d = el.contentDocument;
-      if (!d || d.body.dataset.ready) return;
-      d.head.innerHTML = '<meta name="viewport" content="width=device-width, initial-scale=1">';
-      document.querySelectorAll('style, link[rel="stylesheet"]').forEach(n => d.head.appendChild(n.cloneNode(true)));
-      d.body.style.margin = '0';
-      d.body.dataset.ready = '1';
-      setBody(d.body);
-    };
-    if (el.contentDocument?.readyState === 'complete') setup(); else el.addEventListener('load', setup, { once: true });
-  };
-  return (
-    <>
-      <iframe ref={ref} title="Phone preview" className="h-full w-full border-0" />
-      {body && createPortal(children, body)}
-    </>
   );
 }
 

@@ -209,7 +209,7 @@ function Hero({ r, pax, pdf, onGo }: { r: ResolvedTb; pax: number; pdf: boolean;
     pax > 0 && { icon: <Users className="h-4 w-4" />, text: `${pax} participants` },
   ].filter(Boolean) as { icon: React.ReactNode; text: string }[];
   return (
-    <header id="tb-cover" className={`relative flex items-end overflow-hidden ${pdf ? '' : 'min-h-[calc(100svh-52px)]'}`} style={pdf ? { minHeight: Math.round(1100 * 297 / 210) } : undefined} data-pdf-block>
+    <header id="tb-cover" data-track="cover" className={`relative flex items-end overflow-hidden ${pdf ? '' : 'min-h-[calc(100svh-52px)]'}`} style={pdf ? { minHeight: Math.round(1100 * 297 / 210) } : undefined} data-pdf-block>
       {p.coverPhoto ? (
         <>
           <img src={p.coverPhoto} alt="" className="tb-hero-img absolute inset-0 h-full w-full object-cover" />
@@ -247,7 +247,7 @@ function Hero({ r, pax, pdf, onGo }: { r: ResolvedTb; pax: number; pdf: boolean;
 function Section({ id, tone, children }: { id: string; tone: 'white' | 'mint' | 'teal'; children: React.ReactNode }) {
   const bg = tone === 'mint' ? '#f1f8f5' : tone === 'teal' ? TB.tealDark : '#ffffff';
   return (
-    <section id={`tb-${id}`} className="scroll-mt-14 px-4 py-14 sm:px-6 sm:py-20" style={{ background: bg }} data-pdf-block>
+    <section id={`tb-${id}`} data-track={id} className="scroll-mt-14 px-4 py-14 sm:px-6 sm:py-20" style={{ background: bg }} data-pdf-block>
       <div className="mx-auto max-w-6xl">{children}</div>
     </section>
   );

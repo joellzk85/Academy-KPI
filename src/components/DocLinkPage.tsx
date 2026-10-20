@@ -1,16 +1,21 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Download, Loader2, Printer } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { CourseOutline, Quotation } from '../types';
 import { DocKind } from '../lib/docLinks';
 import { COMPANY } from '../lib/company';
-import { pdfErrorText } from '../lib/oldTab';
 import QuotationDocument from './QuotationDocument';
 import CourseOutlineDocument from './CourseOutlineDocument';
 import logoUrl from '../assets/outline/next-logo.png';
 import RequestAccess, { linkVisitId } from './RequestAccess';
+import LinkGuard, { todayText } from './LinkGuard';
+import { teamBrowser, useLinkTracking } from '../lib/linkTracker';
 
 // What a client sees when they open a quotation or course outline link (/q/<token> or /o/<token>, 2026-10-19).
-// No login: the page asks serverDocLinks.ts for the sent copy and shows it as a web page, with Download PDF and Print.
+// No login: the page asks serverDocLinks.ts for the sent copy and shows it as a web page.
+// Since 2026-10-20 (Joel: "client cannot download or screenshot"; "do not tell customer we are tracking"): no Download
+// PDF or Print, the same protection as teambuilding links (LinkGuard: blank print, no copying or right-click, watermark,
+// blur when the window loses focus) and the same tracking (lib/linkTracker.ts; never shown to the client). The team's
+// own opens (the CRM's Open button, or a browser logged in to the CRM) aren't counted or tracked.
 
 async function post(path: string, body: any) {
   let res: Response;
@@ -26,21 +31,23 @@ async function post(path: string, body: any) {
 
 type Gone = { code: string; message: string; canRequest?: boolean; requested?: boolean; contact?: { name: string; phone: string; email: string } };
 
-const btn = 'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors disabled:opacity-60';
-
 export default function DocLinkPage({ token }: { token: string }) {
   const [data, setData] = useState<{ kind: DocKind; doc: any } | null>(null);
   const [error, setError] = useState('');
   const [gone, setGone] = useState<Gone | null>(null);   // expired, out of opens, or stopped (2026-10-19)
-  const [pdfBusy, setPdfBusy] = useState(false);
-  const [pdfError, setPdfError] = useState('');
+  const [team, setTeam] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // The CRM's own "Open" button adds ?team=1 so the team's look isn't counted as the client opening it.
-    const team = new URLSearchParams(window.location.search).get('team') === '1';
-    post('/api/doc-link/get', { token, team, visit: team ? '' : linkVisitId(token) })
-      .then(d => (d.gone ? setGone(d.gone) : setData({ kind: d.kind, doc: d.doc })))
-      .catch(e => setError(e.message));
+    let live = true;
+    (async () => {
+      const t = await teamBrowser();
+      if (!live) return;
+      setTeam(t);
+      post('/api/doc-link/get', { token, team: t, visit: t ? '' : linkVisitId(token) })
+        .then(d => { if (live) (d.gone ? setGone(d.gone) : setData({ kind: d.kind, doc: d.doc })); })
+        .catch(e => { if (live) setError(e.message); });
+    })();
+    return () => { live = false; };
   }, [token]);
 
   const isQuote = data?.kind === 'quotation';
@@ -48,43 +55,20 @@ export default function DocLinkPage({ token }: { token: string }) {
     : isQuote ? `Quotation ${data.doc.refNumber || ''}`.trim()
     : String(data.doc.courseTitle || 'Course outline');
   useEffect(() => { document.title = data ? `${title} · NEXT Academy` : 'NEXT Academy'; }, [data]);
-
-  const downloadPdf = async () => {
-    if (!data) return;
-    setPdfBusy(true);
-    setPdfError('');
-    try {
-      const m = await import('../lib/quotePdf');
-      if (isQuote) m.downloadBlob(await m.makeQuotationPdf(data.doc as Quotation), m.pdfFileName(data.doc as Quotation));
-      else m.downloadBlob(await m.makeOutlinePdf(data.doc as CourseOutline), m.outlinePdfFileName(data.doc as CourseOutline));
-    } catch (e) {
-      setPdfError(pdfErrorText(e).replace(' Save your work, then reload', ' Reload'));
-    } finally {
-      setPdfBusy(false);
-    }
-  };
+  const company = data?.doc ? String((isQuote ? data.doc.company : data.doc.preparedForCompany) || '') : '';
+  useLinkTracking(token, !!data && team === false);
 
   return (
+    <LinkGuard on={!!data} watermark={data ? `${company ? `${company} · ` : ''}${todayText()}` : undefined}>
     <div className="min-h-screen bg-[#f3f5f4] font-sans text-ink">
       <header className="no-print sticky top-0 z-10 border-b border-line bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3 px-4 py-3">
           <img src={logoUrl} alt="NEXT Academy" className="h-8 w-auto" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[15px] font-semibold">{title}</p>
-            {data?.doc && (isQuote ? data.doc.company : data.doc.preparedForCompany) && (
-              <p className="truncate text-sm text-ink-soft">For {isQuote ? data.doc.company : data.doc.preparedForCompany}</p>
-            )}
+            {company && <p className="truncate text-sm text-ink-soft">For {company}</p>}
           </div>
-          {data && (
-            <span className="flex w-full gap-2 sm:w-auto [&>button]:flex-1 sm:[&>button]:flex-none">
-              <button type="button" className={`${btn} border border-line bg-white text-ink hover:bg-surface`} onClick={() => window.print()}><Printer className="h-4 w-4" /> Print</button>
-              <button type="button" className={`${btn} bg-accent text-white hover:bg-[#0B5A50]`} disabled={pdfBusy} onClick={downloadPdf}>
-                {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF
-              </button>
-            </span>
-          )}
         </div>
-        {pdfError && <p role="alert" className="mx-auto max-w-5xl px-4 pb-3 text-sm text-danger">{pdfError}</p>}
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-6">
@@ -119,6 +103,7 @@ export default function DocLinkPage({ token }: { token: string }) {
         NEXT Academy · {COMPANY.addressLines.join(', ')} · {COMPANY.email} · {COMPANY.phone}
       </footer>
     </div>
+    </LinkGuard>
   );
 }
 

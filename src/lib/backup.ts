@@ -18,7 +18,7 @@ export const LIST_NAMES: [string, string][] = [
   ['tb_activities', 'Teambuilding activities'],
   ['tb_settings', 'Teambuilding settings'],
   ['doc_links', 'Client links'],
-  ['proposal_views', 'Proposal visits'],
+  ['proposal_views', 'Client link visits'],
   ['proposal_files', 'Proposal files'],
   ['money_in', 'Money in'],
   ['money_out', 'Money out'],

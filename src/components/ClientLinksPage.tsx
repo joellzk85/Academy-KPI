@@ -4,13 +4,17 @@ import { ChevronDown, ChevronRight, Download, ExternalLink, Loader2, Search } fr
 import { db, friendlyError } from '../lib/firebase';
 import { DocKind, DocLink } from '../lib/docLinks';
 import { LINK_STATE_LABEL, LinkState, MAX_OPENS, linkState, readLinkSettings } from '../lib/linkLimits';
-import { durationText, expiryDateMY } from '../lib/proposalTracking';
+import { ProposalView, durationText, expiryDateMY, summarise } from '../lib/proposalTracking';
+import { useLinkVisits, useRecentVisits } from '../lib/useProposalLinks';
+import { HeatBadge, LinkUsage, ReadingNow } from './ProposalTracking';
 import { formatDate } from '../lib/deals';
 import { docLinkUrl, useLinkSettings } from './DocLinkBox';
 
 // Management → Client links (Joel, 2026-10-19: "management should be able to gather data on these as well. all links
 // all data"). Every client link (quotations, course outlines, teambuilding proposals) with its limits, opens and
 // requests; totals and a per-person summary; filters; a CSV download; and the default limits for new links.
+// Since 2026-10-20 also how each client used the link (Management only): reading now, Hot / Warm / Cold, and the full
+// tracking and heatmap in each link's details.
 
 type Person = { id: string; name: string };
 type Status = LinkState | 'requested';
@@ -39,6 +43,15 @@ export default function ClientLinksPage({ people, viewer }: { people: Person[]; 
   const [to, setTo] = useState('');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState('');
+  const mgmt = { id: viewer.id, role: 'management' };   // this page is Management only
+  const { views: recent, now } = useRecentVisits(mgmt);
+  const live = useMemo(() => {
+    const by: Record<string, ProposalView[]> = {};
+    recent.forEach(v => { (by[v.token] ||= []).push(v); });
+    const out: Record<string, ReturnType<typeof summarise>> = {};
+    Object.entries(by).forEach(([t, vs]) => { out[t] = summarise(vs, vs[0]?.kind, now); });
+    return out;
+  }, [recent, now]);
 
   useEffect(() => onSnapshot(collection(db, 'doc_links'),
     s => { setLinks(s.docs.map(d => ({ ...(d.data() as any), token: d.id } as DocLink)).sort((a, b) => b.createdAt - a.createdAt)); setLoaded(true); },
@@ -112,7 +125,9 @@ export default function ClientLinksPage({ people, viewer }: { people: Person[]; 
       <DefaultsCard viewer={viewer} />
 
       {/* Totals */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Tile label="Reading now" value={shown.filter(l => live[l.token]?.readingNow).length} sub="Clients on a link this minute" />
+        <Tile label="Hot links" value={shown.filter(l => live[l.token]?.heat === 'hot').length} sub="Last 14 days" />
         <Tile label="Links sent" value={totals.made} />
         <Tile label="Opened by the client" value={`${totals.opened}`} sub={`${pct(totals.opened, totals.made)}% of links`} />
         <Tile label="Total opens" value={totals.totalOpens} sub={`${totals.avg} per opened link`} />
@@ -189,7 +204,8 @@ export default function ClientLinksPage({ people, viewer }: { people: Person[]; 
                       <React.Fragment key={l.token}>
                         <tr className="cursor-pointer hover:bg-surface" onClick={() => setOpen(isOpen ? '' : l.token)}>
                           <td className="pl-3 text-ink-soft">{isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
-                          <td className="py-2 pr-3"><span className="block font-semibold">{l.refNumber || '—'}</span><span className="text-sm text-ink-soft">{KIND_LABEL[l.kind]}</span></td>
+                          <td className="py-2 pr-3"><span className="block font-semibold">{l.refNumber || '—'}</span><span className="text-sm text-ink-soft">{KIND_LABEL[l.kind]}</span>
+                            {live[l.token] && (live[l.token].readingNow || live[l.token].heat !== 'cold') && <span className="mt-1 flex flex-wrap gap-1">{live[l.token].readingNow && <ReadingNow />}{live[l.token].heat !== 'cold' && <HeatBadge level={live[l.token].heat} score={live[l.token].score} />}</span>}</td>
                           <td className="pr-3">{l.company || '—'}</td>
                           <td className="pr-3">{nameOf(repOf(l)) || l.byName}</td>
                           <td className="pr-3 text-sm">{formatDate(ymdOf(l.createdAt))}</td>
@@ -212,6 +228,7 @@ export default function ClientLinksPage({ people, viewer }: { people: Person[]; 
                                 {l.accepted && <Detail k="Accepted online" v={`${l.accepted.name} (${l.accepted.position}), ${whenText(l.accepted.at)}${l.accepted.packageName ? `, package "${l.accepted.packageName}"` : ''}`} />}
                                 {l.stoppedByName && <Detail k="Stopped" v={`${l.stoppedByName}, ${whenText(l.stoppedAt)}`} />}
                               </dl>
+                              <div className="mt-3 rounded-xl border border-line bg-white p-3.5"><UsageOf link={l} viewer={mgmt} /></div>
                               <a href={`${docLinkUrl(l)}?team=1`} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 font-semibold text-accent hover:underline"><ExternalLink className="h-4 w-4" /> Open the link (not counted)</a>
                               <p className="mt-1 text-ink-soft">To reopen or change limits, open the {KIND_LABEL[l.kind].toLowerCase()} in the CRM.</p>
                             </td>
@@ -227,6 +244,13 @@ export default function ClientLinksPage({ people, viewer }: { people: Person[]; 
       </section>
     </div>
   );
+}
+
+// How the client used one link (every visit, not just the last 14 days).
+function UsageOf({ link, viewer }: { link: DocLink; viewer: { id: string; role: string } }) {
+  const { views, blocked } = useLinkVisits({ token: link.token }, viewer);
+  if (blocked) return <p className="text-sm text-ink-soft">Tracking couldn't be loaded.</p>;
+  return <LinkUsage link={link} views={views} />;
 }
 
 function Tile({ label, value, sub, warn }: { label: string; value: React.ReactNode; sub?: string; warn?: boolean }) {

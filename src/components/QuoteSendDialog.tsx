@@ -9,8 +9,7 @@ import { blobToBase64, downloadBlob, makeOutlinePdf, makeQuotationPdf, outlinePd
 import { waPhone, onPhone } from '../lib/whatsapp';
 import DocLinkBox, { LimitsPicker, MakeLinkButton, openLinkOf, useDocLinks, useLinkSettings } from './DocLinkBox';
 import { defaultExpiry, opensProblem } from '../lib/linkLimits';
-import { canSeeTracking, expiryProblem, plusDaysMY } from '../lib/proposalTracking';
-import { useProposalSettings } from '../lib/useProposalSettings';
+import { expiryProblem, plusDaysMY } from '../lib/proposalTracking';
 import { DocKind } from '../lib/docLinks';
 
 // Send a quotation (2026-10-18): 1) Email from my own Outlook mailbox with the PDF attached (serverMail.ts),
@@ -87,7 +86,6 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
   const [expires, setExpires] = useState('');
   const [opens, setOpens] = useState('');
   useEffect(() => { setExpires(defaultExpiry(linkSettings)); setOpens(String(linkSettings.opens)); }, [linkSettings.days, linkSettings.opens]);
-  const proposalSettings = useProposalSettings();
   const [pdf, setPdf] = useState<Blob | null>(null);
   const [pdfError, setPdfError] = useState('');
   const [mail, setMail] = useState<{ configured: boolean; myEmail: string } | null>(null);
@@ -291,7 +289,7 @@ ${me.name}, NEXT Academy`;
                   <>
                     {linkMade && <p role="status" className="flex items-start gap-2 rounded-xl bg-accent-soft px-4 py-3 text-[15px] text-accent"><CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />Link ready{locked ? '' : ` and the ${noun} is locked`}. Copy it and send it to the client (WhatsApp, email…).</p>}
                     {!linkMade && <p className="text-[15px] text-ink-soft">This {noun} already has a client link. Send it again any way you like.</p>}
-                    <DocLinkBox link={openLink} message={linkMsg} showViews={!isTb || canSeeTracking(me.role, proposalSettings)} />
+                    <DocLinkBox link={openLink} message={linkMsg} viewer={me} />
                   </>
                 ) : (
                   <>

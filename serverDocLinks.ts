@@ -138,7 +138,7 @@ export function registerDocLinkRoutes(app: Express) {
       createdAt: Date.now(), byId: caller.memberId, byName: await memberName(db, caller.memberId), views: 0,
       expiresAt: lim.expiresAt, maxOpens: lim.opens,
       ownerId: String(deal?.ownerId || deal?.creatorId || d.ownerId || d.creatorId || ''),
-      ...(kind === 'teambuilding' ? { totalSeconds: 0 } : {}),
+      totalSeconds: 0,
     });
     return { token };
   }));
@@ -220,10 +220,9 @@ export function registerDocLinkRoutes(app: Express) {
     if (!d || d.dealDeleted) throw new UserError(404, 'doc-gone', gone);
     if (d.status !== 'sent') throw new UserError(409, 'being-revised', `NEXT Academy is updating this ${NOUN[kind]}. You'll receive the new version shortly.`);
 
-    const { blocked, first } = await admitOpen(db, ref, link, { visit: req.body?.visit, team: !!req.body?.team });
+    // No "Client opened" History line (2026-10-20): History is seen by everyone on the deal, tracking only by Management.
+    const { blocked } = await admitOpen(db, ref, link, { visit: req.body?.visit, team: !!req.body?.team });
     if (blocked) return { gone: { ...blocked, canRequest: true, requested: !!link.reopenRequest, contact: await contactOf(db, link) } };
-    // The first time the client opens it, the deal's history says so.
-    if (first) await addDealHistory(db, link.dealId, '', 'Client', `Client opened the ${NOUN[kind]}${link.refNumber ? ` ${link.refNumber}` : ''} (link)`);
     return { kind, doc: { ...publicDocFields(d), id: link.docId }, expiresAt: link.expiresAt || 0 };
   }));
 }
