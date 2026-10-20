@@ -27,7 +27,7 @@ interface Props {
   onSelectRep: (rep: Representative) => void;
   onOpenTeam?: () => void;
   people?: { id: string; name: string }[];   // everyone on the Team list, for owner names
-  onOpenDeal?: (deal: any) => void;     // opens the deal owner's Deals
+  onOpenDeal?: (deal: any) => void;     // opens the deal's panel in its owner's workspace
 }
 
 const card = 'rounded-2xl border border-line bg-white p-5';
@@ -185,12 +185,15 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
           {wonList.length === 0 ? <p className="text-ink-soft">No deals won this month yet.</p> : (
             <ul className="max-h-72 divide-y divide-line overflow-y-auto">
               {wonList.map(p => (
-                <li key={p.id} className="flex items-center justify-between gap-2 py-2 text-[15px]">
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">{clientName(p)}</span>
-                    <span className="block truncate text-sm text-ink-soft">{personName(dealOwnerId(p))} · {formatDate(dealWonDate(p))}</span>
-                  </span>
-                  <strong className="shrink-0 tabular-nums">{formatRM(dealValue(p))}</strong>
+                <li key={p.id}>
+                  <button type="button" disabled={!onOpenDeal} onClick={() => onOpenDeal?.(p)} title={onOpenDeal ? 'Open this deal' : undefined}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-2 text-left text-[15px] enabled:hover:bg-accent-soft">
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{clientName(p)}</span>
+                      <span className="block truncate text-sm text-ink-soft">{personName(dealOwnerId(p))} · {formatDate(dealWonDate(p))}</span>
+                    </span>
+                    <strong className="shrink-0 tabular-nums">{formatRM(dealValue(p))}</strong>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -212,9 +215,12 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
               </ul>
               <ul className="max-h-40 divide-y divide-line overflow-y-auto border-t border-line text-sm">
                 {lostList.map(p => (
-                  <li key={p.id} className="flex justify-between gap-2 py-1.5">
-                    <span className="min-w-0 truncate">{clientName(p)} <span className="text-ink-soft">({personName(dealOwnerId(p))})</span></span>
-                    <span className="shrink-0 text-ink-soft">{formatRM(dealValue(p))}</span>
+                  <li key={p.id}>
+                    <button type="button" disabled={!onOpenDeal} onClick={() => onOpenDeal?.(p)} title={onOpenDeal ? 'Open this deal' : undefined}
+                      className="flex w-full justify-between gap-2 rounded-lg px-1 py-1.5 text-left enabled:hover:bg-accent-soft">
+                      <span className="min-w-0 truncate">{clientName(p)} <span className="text-ink-soft">({personName(dealOwnerId(p))})</span></span>
+                      <span className="shrink-0 text-ink-soft">{formatRM(dealValue(p))}</span>
+                    </button>
                   </li>
                 ))}
               </ul>

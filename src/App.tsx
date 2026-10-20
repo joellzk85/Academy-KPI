@@ -987,7 +987,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 selectedMonth={selectedMonth}
                 onMonthChange={handleMonthChange}
                 onOpenTeam={() => setManagementView('team')}
-                onOpenDeal={(p: any) => { const owner = p.ownerId || p.creatorId; homeNav.openWorkspace(workspacePeople.some(r => r.id === owner) ? owner : currentMember.id, 'pipeline'); }}
+                onOpenDeal={homeNav.openDeal}
                 pipelinesSync={pipelinesSync}
                 people={teamMembers.map(m => ({ id: m.id, name: m.name }))}
               />
