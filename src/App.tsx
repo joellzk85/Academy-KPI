@@ -44,6 +44,7 @@ const TeamFollowUpsPage = React.lazy(() => import('./components/TeamFollowUps'))
 const LostDeletedPage = React.lazy(() => import('./components/LostDeletedPage'));
 const ClientLinksPage = React.lazy(() => import('./components/ClientLinksPage'));
 const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
+import type { AdminView } from './components/WorkQueue';
 const MyHome = React.lazy(() => import('./components/MyHome'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
@@ -227,7 +228,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   useFollowUpRules();
   const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
-  const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks' | 'backup'>('queue');
+  const [adminView, setAdminView] = useState<AdminView>('queue');
+  const [adminDealId, setAdminDealId] = useState('');   // a won deal to open in the work queue (My home's After training card)
 
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
     const saved = localStorage.getItem('next_events');
@@ -775,9 +777,10 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setSelectedRepId(repId);
       setCurrentTab('operations');
     },
-    openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup') => {
+    openAdminWork: (view?: AdminView, dealId?: string) => {
       if (!isStaff) return;
       setAdminView(view || 'queue');
+      setAdminDealId(dealId || '');
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
@@ -933,10 +936,14 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 <ArrowLeft className="h-4 w-4" /> Back to My home
               </button>
               <WorkQueue
+                key={`${adminView}:${adminDealId}`}
                 viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                 people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name }))}
                 onOpenQuotations={handleOpenQuotationsFor}
                 initialView={adminView}
+                initialDealId={adminDealId}
+                deals={pipelinesSync}
+                onOpenManagementPayments={() => homeNav.openManagement('payments')}
               />
             </motion.div>
           ) : currentTab === 'management' ? (
@@ -976,7 +983,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               ) : managementView === 'data' ? (
                 <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'payments' ? (
-                <PaymentTracking pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name }} onOpenDeal={homeNav.openDeal} />
+                <PaymentTracking pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }} onOpenDeal={homeNav.openDeal} />
               ) : managementView === 'pl' ? (
                 <ProjectPL pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : (

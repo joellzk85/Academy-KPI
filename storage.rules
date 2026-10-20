@@ -44,6 +44,18 @@ service firebase.storage {
       allow delete: if isStaff() && (resource.metadata.uploadedBy == request.auth.uid || isManagement());
     }
 
+    // Payment receipts from the client or HRDC (2026-10-20): receipts/{id}_{name}. Admin and Management upload and
+    // read; same types and size as checklist files. Records are in Firestore payment_receipts.
+    match /receipts/{fileName} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType.matches('application/(pdf|msword|vnd[.]ms-excel|vnd[.]openxmlformats-officedocument[.](wordprocessingml[.]document|spreadsheetml[.]sheet))|image/(jpeg|png)')
+        && request.resource.metadata.uploadedBy == request.auth.uid;
+      allow update: if false;
+      allow delete: if isStaff() && (resource.metadata.uploadedBy == request.auth.uid || isManagement());
+    }
+
     // Photos for teambuilding proposals, activities, trainers and venues (2026-10-19): photos/{folder}/{id}.jpg.
     // Every member uploads (made smaller in the browser first); up to 10 MB; JPG, PNG or WebP.
     // Never changed or deleted from the CRM, so a proposal that uses a photo never loses it.

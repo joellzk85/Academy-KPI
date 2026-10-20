@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, writeBatch } from 'firebase/firestore';
-import { ExternalLink, Loader2, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { ExternalLink, FileCheck2, Loader2, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 import { MoneyIn, MoneyOut } from '../lib/money';
@@ -10,16 +10,21 @@ import { PaymentLine } from '../lib/blueprint';
 import {
   COST_FIELDS, TrackLine, byPerson, dealLines, isIsoDay, lineNet, linePaid, mergeLines, statusText, totalsOf,
 } from '../lib/paymentTracking';
-import { useMoneySettings } from './Money';
+import { InRow, useMoneySettings } from './Money';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
+import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt, useReceipts } from './PaymentReceipts';
+import { needsReceipt } from '../lib/postTraining';
 
-// Management → Payment tracking (2026-10-20). Logic and sources: lib/paymentTracking.ts.
+// Payment tracking (2026-10-20). Logic and sources: lib/paymentTracking.ts.
+// Management: Management → Payment tracking, everything. Admin (2026-10-20): Admin work → Payment tracking, to mark
+// payments received and upload receipts; costs, profit and commission are hidden, and lines can't be added, edited
+// or deleted (the database rule lets Admin change only the paid fields of an imported line).
 
 interface Props {
   pipelinesSync?: any[];
   people: { id: string; name: string }[];
-  viewer: { id: string; name: string };
+  viewer: { id: string; name: string; role: 'rep' | 'admin' | 'management' };
   onOpenDeal: (deal: any) => void;
 }
 
@@ -65,6 +70,11 @@ function profitOf(c: Record<string, number | null>, before?: TrackLine | null): 
 export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenDeal }: Props) {
   const deals = pipelinesSync || [];
   const settings = useMoneySettings();
+  const seesProfit = viewer.role === 'management';
+  const receipts = useReceipts(true);
+  const receiptsOf = (l: TrackLine) => receipts.filter(r => (l.dealId ? r.moneyInId === l.id.slice(5) : r.recordId === l.id));
+  const moneyInOf = (l: TrackLine) => (l.dealId ? ins.find(m => m.id === l.id.slice(5)) : undefined);
+  const [payFile, setPayFile] = useState<File | null>(null);
   const [records, setRecords] = useState<TrackLine[] | null>(null);
   const [ins, setIns] = useState<MoneyIn[]>([]);
   const [outs, setOuts] = useState<MoneyOut[]>([]);
@@ -83,7 +93,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'quotations')), s => setQuotes(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
-      onSnapshot(query(collection(db, 'project_pl')), s => setPlDocs(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
+      onSnapshot(query(collection(db, 'project_pl')), s => setPlDocs(Object.fromEntries(s.docs.map(d => [d.id, d.data()]))), () => setPlDocs({})),   // Management only
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -184,6 +194,10 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
     if (paid && !isIsoDay(payDate)) return setErr('Enter the date it was paid.');
     setBusy(true); setErr('');
     try {
+      if (paid && payFile) {
+        try { await uploadReceipt(payFile, { dealId: '', moneyInId: '', recordId: l.id }, viewer); } catch (e) { throw new Error(receiptError(e)); }
+        setPayFile(null);
+      }
       await setDoc(doc(db, 'payment_records', l.id), paid
         ? { paidDate: payDate, paidNote: '', paidAmount: numOrNull(payAmount), updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name }
         : { paidDate: '', paidNote: '', paidAmount: null, updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name }, { merge: true });
@@ -211,10 +225,10 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
         <div>
           <h2 className="text-xl font-bold">Payment tracking</h2>
           <p className="max-w-3xl text-[15px] text-ink-soft">
-            Every HRDC claim and client invoice, and whether it has been paid. Lines from the Blueprint spreadsheet are kept here; claims and invoices recorded on deals show by themselves.
+            Every HRDC claim and client invoice, and whether it has been paid. Mark a payment received here with the receipt from the client or HRDC. Lines from the Blueprint spreadsheet are kept here; claims and invoices recorded on deals show by themselves.
           </p>
         </div>
-        <button type="button" className={btnPrimary} onClick={() => startEdit(null)}><Plus className="h-4 w-4" /> Add a line</button>
+        {seesProfit && <button type="button" className={btnPrimary} onClick={() => startEdit(null)}><Plus className="h-4 w-4" /> Add a line</button>}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -234,7 +248,10 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
         <Tile label="Approved (claimed or invoiced)" value={formatRM(t.approved)} sub={`After HRDC 4%: ${formatRM(t.afterDeduct)}`} />
         <Tile label="Paid" value={formatRM(t.received)} sub={`${t.lines - t.waitingLines} of ${t.lines} lines`} />
         <Tile label="Waiting for payment" value={formatRM(t.waiting)} sub={`${t.waitingLines} line${t.waitingLines === 1 ? '' : 's'}`} tone={t.waitingLines ? 'attention' : undefined} />
-        <Tile label="Gross profit" value={formatRM(t.grossProfit)} sub={`${t.trainings} training${t.trainings === 1 ? '' : 's'}${t.income ? ` · margin ${Math.round((t.grossProfit / t.income) * 100)}%` : ''}`} />
+        {seesProfit
+          ? <Tile label="Gross profit" value={formatRM(t.grossProfit)} sub={`${t.trainings} training${t.trainings === 1 ? '' : 's'}${t.income ? ` · margin ${Math.round((t.grossProfit / t.income) * 100)}%` : ''}`} />
+          : (() => { const missing = shown.filter(l => l.dealId && moneyInOf(l) && needsReceipt(moneyInOf(l)!) && !receiptsOf(l).length).length;
+              return <Tile label="Receipts to upload" value={String(missing)} sub="Payments received without their receipt" tone={missing ? 'attention' : undefined} />; })()}
       </div>
 
       <div className="grid gap-5 xl:grid-cols-2">
@@ -243,7 +260,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
           {byMonth.length === 0 ? <p className="mt-2 text-[15px] text-ink-soft">No lines in {year}.</p> : (
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[30rem] text-sm">
-                <thead><tr className="text-left text-ink-soft"><th className="py-1.5 font-semibold">Month</th><th className="text-right font-semibold">Approved</th><th className="text-right font-semibold">Paid</th><th className="text-right font-semibold">Waiting</th><th className="text-right font-semibold">Gross profit</th></tr></thead>
+                <thead><tr className="text-left text-ink-soft"><th className="py-1.5 font-semibold">Month</th><th className="text-right font-semibold">Approved</th><th className="text-right font-semibold">Paid</th><th className="text-right font-semibold">Waiting</th>{seesProfit && <th className="text-right font-semibold">Gross profit</th>}</tr></thead>
                 <tbody className="divide-y divide-line">
                   {byMonth.map(({ m, t: mt }) => (
                     <tr key={m} onClick={() => setMonth(month === m ? '' : m)} className={`cursor-pointer hover:bg-surface ${month === m ? 'bg-accent-soft' : ''}`}>
@@ -251,7 +268,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
                       <td className="text-right tabular-nums">{formatRM(mt.approved)}</td>
                       <td className="text-right tabular-nums">{formatRM(mt.received)}</td>
                       <td className={`text-right tabular-nums ${mt.waitingLines ? 'font-semibold text-attention' : ''}`}>{mt.waitingLines ? formatRM(mt.waiting) : '—'}</td>
-                      <td className="text-right tabular-nums">{formatRM(mt.grossProfit)}</td>
+                      {seesProfit && <td className="text-right tabular-nums">{formatRM(mt.grossProfit)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -264,13 +281,13 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
           {persons.length === 0 ? <p className="mt-2 text-[15px] text-ink-soft">Nothing in this view.</p> : (
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[26rem] text-sm">
-                <thead><tr className="text-left text-ink-soft"><th className="py-1.5 font-semibold">Sales person</th><th className="text-right font-semibold">Sales amount</th><th className="text-right font-semibold">Commission</th><th className="text-right font-semibold">Waiting</th></tr></thead>
+                <thead><tr className="text-left text-ink-soft"><th className="py-1.5 font-semibold">Sales person</th><th className="text-right font-semibold">Sales amount</th>{seesProfit && <th className="text-right font-semibold">Commission</th>}<th className="text-right font-semibold">Waiting</th></tr></thead>
                 <tbody className="divide-y divide-line">
                   {persons.map(p => (
                     <tr key={p.name} onClick={() => setPerson(person === p.name ? '' : p.name)} className="cursor-pointer hover:bg-surface">
                       <td className="py-2 font-semibold">{p.name} <span className="font-normal text-ink-soft">· {p.lines}</span></td>
                       <td className="text-right tabular-nums">{formatRM(p.approved)}</td>
-                      <td className="text-right tabular-nums">{formatRM(p.commission)}</td>
+                      {seesProfit && <td className="text-right tabular-nums">{formatRM(p.commission)}</td>}
                       <td className={`text-right tabular-nums ${p.waiting ? 'text-attention' : ''}`}>{p.waiting ? formatRM(p.waiting) : '—'}</td>
                     </tr>
                   ))}
@@ -278,7 +295,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
               </table>
             </div>
           )}
-          <p className="mt-2 text-xs text-ink-soft">Sales amount is the approved amount. Commission is counted once per training. Lines from deals have no commission here; it's in their payment requests.</p>
+          {seesProfit && <p className="mt-2 text-xs text-ink-soft">Sales amount is the approved amount. Commission is counted once per training. Lines from deals have no commission here; it's in their payment requests.</p>}
         </section>
       </div>
 
@@ -301,7 +318,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
                 {shown.map(l => {
                   const paid = linePaid(l);
                   return (
-                    <tr key={l.id} onClick={() => { setOpenId(l.id); setErr(''); setPayDate(today); setPayAmount(''); }} className="cursor-pointer align-top hover:bg-surface">
+                    <tr key={l.id} onClick={() => { setOpenId(l.id); setErr(''); setPayDate(today); setPayAmount(''); setPayFile(null); }} className="cursor-pointer align-top hover:bg-surface">
                       <td className="whitespace-nowrap px-5 py-2.5">{l.dateText && !isIsoDay(l.dateText) ? l.dateText : formatDate(l.date) || monthName(l.month)}</td>
                       <td className="max-w-[22rem] py-2.5 pr-3">
                         <span className="block truncate font-semibold">{l.programme}</span>
@@ -315,6 +332,9 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
                       <td className="whitespace-nowrap px-5 py-2.5 text-right">
                         <span className={`font-semibold ${paid ? 'text-accent' : 'text-attention'}`}>{statusText(l, today)}</span>
                         {isIsoDay(l.paidDate) && <span className="block text-ink-soft">{formatDate(l.paidDate)}</span>}
+                        {receiptsOf(l).length > 0
+                          ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-accent"><FileCheck2 className="h-3.5 w-3.5" /> Receipt</span>
+                          : l.dealId && moneyInOf(l) && needsReceipt(moneyInOf(l)!) && <span className="block text-xs font-semibold text-attention">No receipt yet</span>}
                       </td>
                     </tr>
                   );
@@ -337,25 +357,36 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
               <button type="button" onClick={() => setOpenId(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
 
-            <div className={`rounded-xl px-4 py-3 ${linePaid(open) ? 'bg-accent-soft' : 'bg-attention-soft'}`}>
-              <p className={`font-semibold ${linePaid(open) ? 'text-accent' : 'text-attention'}`}>
-                {statusText(open, today)}{isIsoDay(open.paidDate) ? ` on ${formatDate(open.paidDate)}` : ''}{linePaid(open) ? `: ${formatRM(lineNet(open))}` : `, expecting ${formatRM(lineNet(open))}`}
-              </p>
-              {!open.dealId && (linePaid(open) ? (
-                <button type="button" disabled={busy} onClick={() => markPaid(open, false)} className="mt-1 text-sm font-semibold text-ink-soft hover:underline">Undo paid</button>
-              ) : (
-                <div className="mt-2 flex flex-wrap items-end gap-2">
-                  <label className="text-sm">Paid on<input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className={`${input} mt-1 w-44`} /></label>
-                  <label className="text-sm">Amount received (optional)<input value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder={String(lineNet(open))} inputMode="decimal" className={`${input} mt-1 w-44`} /></label>
-                  <button type="button" disabled={busy} onClick={() => markPaid(open, true)} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Mark paid</button>
+            {open.dealId && moneyInOf(open) ? (
+              // A deal's invoice or claim: the same row as on the deal ("After training" → Payment received), so it has one home.
+              <div className="space-y-3">
+                <ul><InRow m={moneyInOf(open)!} viewer={viewer} settings={settings} receipts={receiptsOf(open)} /></ul>
+                <div className="rounded-xl border border-line p-4 text-[15px]">
+                  <p>This {open.remarks === 'HRDC claim' ? 'HRDC claim' : 'invoice'} is recorded on its deal. Marking it received here or in the deal's After training section is the same thing.{seesProfit ? ' Costs and profit come from Project P&L.' : ''}</p>
+                  <button type="button" className={`${btnSecondary} mt-3`} onClick={() => { const d = deals.find(x => x.id === open.dealId); if (d) onOpenDeal(d); }}><ExternalLink className="h-4 w-4" /> Open the deal</button>
                 </div>
-              ))}
-            </div>
-
-            {open.dealId && (
-              <div className="mt-4 rounded-xl border border-line p-4 text-[15px]">
-                <p>This claim is recorded on the deal, so it's changed there (deal panel → Money). Costs and profit come from Project P&amp;L.</p>
-                <button type="button" className={`${btnSecondary} mt-3`} onClick={() => { const d = deals.find(x => x.id === open.dealId); if (d) onOpenDeal(d); }}><ExternalLink className="h-4 w-4" /> Open the deal</button>
+              </div>
+            ) : (
+              <div className={`rounded-xl px-4 py-3 ${linePaid(open) ? 'bg-accent-soft' : 'bg-attention-soft'}`}>
+                <p className={`font-semibold ${linePaid(open) ? 'text-accent' : 'text-attention'}`}>
+                  {statusText(open, today)}{isIsoDay(open.paidDate) ? ` on ${formatDate(open.paidDate)}` : ''}{linePaid(open) ? `: ${formatRM(lineNet(open))}` : `, expecting ${formatRM(lineNet(open))}`}
+                </p>
+                {!open.dealId && (linePaid(open) ? (
+                  <button type="button" disabled={busy} onClick={() => markPaid(open, false)} className="mt-1 text-sm font-semibold text-ink-soft hover:underline">Undo paid</button>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    <ReceiptPick file={payFile} onFile={setPayFile} />
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="text-sm">Paid on<input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className={`${input} mt-1 w-44`} /></label>
+                      <label className="text-sm">Amount received (optional)<input value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder={String(lineNet(open))} inputMode="decimal" className={`${input} mt-1 w-44`} /></label>
+                      <button type="button" disabled={busy} onClick={() => markPaid(open, true)} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Mark paid</button>
+                    </div>
+                  </div>
+                ))}
+                {!open.dealId && <ReceiptList receipts={receiptsOf(open)} viewer={viewer} />}
+                {!open.dealId && linePaid(open) && !receiptsOf(open).length && (
+                  <ReceiptDrop target={{ dealId: '', moneyInId: '', recordId: open.id }} viewer={viewer} small prompt="Add the receipt" />
+                )}
               </div>
             )}
 
@@ -373,7 +404,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
               {open.remarks && <Item k="Remarks" v={open.remarks} wide />}
             </dl>
 
-            {!open.dealId && (
+            {!open.dealId && seesProfit && (
               <section className="mt-5 rounded-xl border border-line p-4">
                 <h4 className="font-bold">The training's costs{groupOf(open).length > 1 ? ` (shared by its ${groupOf(open).length} lines)` : ''}</h4>
                 <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-[15px] sm:grid-cols-3">
@@ -390,7 +421,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
             )}
 
             {err && <p role="alert" className="mt-4 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{err}</p>}
-            {!open.dealId && (
+            {!open.dealId && seesProfit && (
               <div className="mt-5 flex flex-wrap justify-between gap-2 border-t border-line pt-4">
                 <button type="button" onClick={() => remove(open)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-danger hover:underline"><Trash2 className="h-4 w-4" /> Delete line</button>
                 <button type="button" onClick={() => startEdit(open)} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit</button>
@@ -401,8 +432,8 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
         </div>
       )}
 
-      {/* Add / edit form */}
-      {editing && (
+      {/* Add / edit form (Management only) */}
+      {editing && seesProfit && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true">
           <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-1/2 md:min-w-[40rem]">
             <div className="mb-5 flex items-start justify-between gap-4">

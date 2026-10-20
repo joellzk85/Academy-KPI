@@ -114,7 +114,7 @@ export default function BackupPanel() {
             {busy === 'download' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download Excel file
           </button>
           <button type="button" className={btnSecondary} disabled={!!busy} onClick={downloadZip}>
-            {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all proposals and checklist files (ZIP)
+            {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all proposals, checklist files and receipts (ZIP)
           </button>
           <button type="button" className={btnSecondary} onClick={() => setSetupOpen(v => !v)}>
             <Settings2 className="h-4 w-4" /> {setupOpen ? 'Close setup' : connected ? 'Change Google Sheet' : 'Set up'}

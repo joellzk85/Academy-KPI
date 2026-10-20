@@ -20,6 +20,8 @@ import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/
 import { MoneyIn, MoneyOut, canDecide, dealPL, isCompanyPayment, isPaid, moneyFlags } from '../lib/money';
 import { useChecklistSettings } from './DealChecklist';
 import { useMoneySettings } from './Money';
+import { useReceipts } from './PaymentReceipts';
+import { Receipt, postTraining, postTrainingFlags } from '../lib/postTraining';
 import { MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import { alertText, followUpAlert } from '../lib/followUps';
 import { activeHold, holdDue, holdText } from '../lib/dealHold';
@@ -42,7 +44,8 @@ type Viewer = { id: string; name: string; role: Role };
 type CardId =
   | 'follow_up_alerts' | 'team_follow_ups'
   | 'follow_ups' | 'my_kpi' | 'my_won' | 'next14' | 'new_won' | 'due_now' | 'money_jobs'
-  | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments' | 'shared_with_me' | 'proposal_activity';
+  | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments' | 'shared_with_me' | 'proposal_activity'
+  | 'post_training';
 
 const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'follow_ups', title: 'My follow-ups', roles: ['rep', 'admin', 'management'] },
@@ -50,6 +53,7 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'my_won', title: 'My won deals', roles: ['rep', 'admin'] },
   { id: 'next14', title: 'Trainings in the next 14 days', roles: ['rep', 'admin', 'management'] },
   { id: 'new_won', title: 'New won deals', roles: ['admin', 'management'] },
+  { id: 'post_training', title: 'After training', roles: ['admin', 'management'] },   // trainings that ended, until the case is closed (2026-10-20)
   { id: 'due_now', title: 'Due now', roles: ['admin', 'management'] },
   { id: 'money_jobs', title: 'Money jobs', roles: ['admin', 'management'] },
   { id: 'approvals', title: 'Waiting for my approval', roles: ['management'] },
@@ -67,8 +71,8 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
 // Notices are off by default (Joel removed the newsfeed); anyone can switch the card back on.
 const DEFAULT_CARDS: Record<Role, CardId[]> = {
   rep: ['follow_ups', 'proposal_activity', 'my_kpi', 'next14', 'my_won'],
-  admin: ['shared_with_me', 'proposal_activity', 'new_won', 'due_now', 'money_jobs', 'next14'],
-  management: ['team_follow_ups', 'approvals', 'proposal_activity', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
+  admin: ['shared_with_me', 'post_training', 'proposal_activity', 'new_won', 'due_now', 'money_jobs', 'next14'],
+  management: ['team_follow_ups', 'approvals', 'post_training', 'proposal_activity', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
 };
 
 // ---------- Shortcut library (Joel, 2026-10-17) ----------
@@ -113,7 +117,7 @@ const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink 
 
 export interface MyHomeNav {
   openWorkspace: (repId: string, subTab?: string) => void;
-  openAdminWork: (view?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup') => void;
+  openAdminWork: (view?: 'queue' | 'money' | 'payments' | 'programmes' | 'tasks' | 'backup', dealId?: string) => void;
   openManagement: (view?: 'dashboard' | 'pl' | 'followups' | 'lost' | 'team' | 'data') => void;
   openFile?: (kind: SharedKind, id: string) => void;   // a shared quotation or outline, straight in the editor
   openClient?: (clientId: string) => void;             // a client's page (client touch point follow-ups)
@@ -142,6 +146,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const [venues, setVenues] = useState<any[]>([]);
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
+  const receipts = useReceipts(staff);   // payment receipts, for the After training card
   const [clients, setClients] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
   const touchPoints = useTouchPoints();
@@ -202,6 +207,15 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
           const cells = (Array.isArray(l) ? l : []).map((x: Cell) => ({ ...x, y: (Number(x.y) || 0) + DEFAULT_H }));
           setDoc(doc(db, 'user_prefs', viewer.id), {
             homeCards: ['proposal_activity', ...c], homeLayout: [{ i: 'proposal_activity', x: 0, y: 0, w: COLS / 2, h: DEFAULT_H }, ...cells], proposalCardAdded: true,
+          }, { merge: true }).catch(() => { /* tried again next time */ });
+        }
+        // Admin and Management who arranged their own cards before "After training" existed get it once, at the top
+        // (2026-10-20: the notice to start post-training). It waits for the Client link activity card above.
+        if (staff && Array.isArray(c) && !c.includes('post_training') && !s.data()?.postTrainingCardAdded && othersDone
+          && (c.includes('proposal_activity') || !!s.data()?.proposalCardAdded)) {
+          const cells = (Array.isArray(l) ? l : []).map((x: Cell) => ({ ...x, y: (Number(x.y) || 0) + DEFAULT_H }));
+          setDoc(doc(db, 'user_prefs', viewer.id), {
+            homeCards: ['post_training', ...c], homeLayout: [{ i: 'post_training', x: 0, y: 0, w: COLS / 2, h: DEFAULT_H }, ...cells], postTrainingCardAdded: true,
           }, { merge: true }).catch(() => { /* tried again next time */ });
         }
         setSavedCards(Array.isArray(c) ? c : null);
@@ -306,7 +320,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   }, [clients, touchPoints, deals, quotes, viewer.id, today, people]);
 
   const ctx: CardCtx = {
-    viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, programmes, representatives, venues,
+    viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, receipts, programmes, representatives, venues,
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
@@ -746,7 +760,7 @@ function CompactCalendar({ events, today, showFull, onToggleFull }: { events: Ca
 // ---------- Cards ----------
 type CardCtx = {
   viewer: Viewer; today: string; deals: any[]; wonDeals: any[]; checklists: Record<string, any>; queries: HrdcQuery[];
-  moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; programmes: any[]; representatives: Representative[]; venues: any[];
+  moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; receipts: Receipt[]; programmes: any[]; representatives: Representative[]; venues: any[];
   checklistSettings: any; moneySettings: any; nameOf: (id: string) => string; clientName: (p: any) => string;
   openDeal: (p: any) => void; nav: MyHomeNav; mine: (p: any) => boolean; notices: React.ReactNode;
   shared: SharedItem[];
@@ -983,6 +997,28 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         empty: 'No deals won in the last 7 days.',
       };
     }
+    case 'post_training': {
+      // The notice to start post-training, the day after a training ends, and what's left until the case is closed.
+      const items: (Item & { since: number })[] = [];
+      c.wonDeals.forEach(p => {
+        const cl = c.checklists[p.id];
+        const ins = c.moneyIn.filter(m => m.dealId === p.id);
+        const outs = c.moneyOut.filter(o => o.dealId === p.id);
+        const rc = c.receipts.filter(r => r.dealId === p.id);
+        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.today);
+        if (!st.ended || st.closed) return;
+        const flags = postTrainingFlags(p, cl?.tasks, ins, outs, rc, c.moneySettings, c.today);
+        const level = flags.some(f => f.level === 'danger') ? 'danger' as const : 'attention' as const;
+        const since = st.daysSince || 0;
+        items.push({
+          key: p.id, title: deal(p), level, since, onClick: () => c.nav.openAdminWork('queue', p.id),
+          sub: st.started ? `Ended ${since} day${since === 1 ? '' : 's'} ago · step ${Math.min(st.step, 3)} of 3: ${st.next}${flags[0] && flags[0].level === 'danger' ? ` · ${flags[0].text}` : ''}`
+            : flags[0]?.text || 'Training ended: start post-training',
+        });
+      });
+      items.sort((a, b) => (a.level === b.level ? b.since - a.since : a.level === 'danger' ? -1 : 1));
+      return { items, empty: 'No trainings waiting on post-training. Each one appears here the day after it ends.' };
+    }
     case 'due_now': {
       const items: Item[] = [];
       c.wonDeals.forEach(p => {
@@ -1006,9 +1042,10 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     }
     case 'money_jobs': {
       const items: Item[] = [];
+      // Before training only: invoicing a direct-pay client. From the day after the training it's in the After training card.
       c.wonDeals.forEach(p => {
         moneyFlags(p, c.moneyIn.filter(m => m.dealId === p.id), [], c.moneySettings, c.today).forEach((f, i) => items.push({
-          key: `${p.id}_m${i}`, title: deal(p), level: f.level, sub: f.text, onClick: () => c.nav.openAdminWork('money'),
+          key: `${p.id}_m${i}`, title: deal(p), level: f.level, sub: f.text, onClick: () => c.nav.openAdminWork('queue', p.id),
         }));
       });
       c.moneyOut.filter(o => o.status === 'approved').forEach(o => items.push({ key: o.id, title: `Pay ${o.payee}: ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment · ' : ''}${o.category}, approved by ${o.decidedByName}`, onClick: () => c.nav.openAdminWork('money') }));

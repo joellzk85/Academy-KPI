@@ -287,10 +287,12 @@ export function registerBackupRoutes(app: Express) {
       await staffFrom(req);
       const { db } = admin();
       const all = async (name: string) => (await db.collection(name).get()).docs.map(d => ({ ...d.data(), id: d.id }) as any);
-      const [proposals, stepFiles, deals, clients, programmes] = await Promise.all([all('proposal_files'), all('checklist_files'), all('pipelines'), all('clients'), all('programmes')]);
+      const [proposals, stepFiles, receipts, deals, clients, programmes] = await Promise.all([all('proposal_files'), all('checklist_files'), all('payment_receipts'), all('pipelines'), all('clients'), all('programmes')]);
       const files = [
         ...proposals.map((f: any) => ({ ...f, what: 'Proposal', sub: '' })),
         ...stepFiles.map((f: any) => ({ ...f, what: f.taskLabel || 'Checklist', sub: `${safeFileName(f.taskLabel || 'Checklist', 60)}/` })),
+        // Payment receipts (2026-10-20) in a "Payment receipts" sub-folder; receipts on imported Payment tracking lines have no deal.
+        ...receipts.map((f: any) => ({ ...f, what: 'Payment receipt', sub: 'Payment receipts/' })),
       ];
       if (!files.length) throw new UserError(404, 'no-proposals', 'There are no proposal or checklist files yet.');
       const bucket = getStorage(getApps()[0]).bucket((firebaseConfig as any).storageBucket);
@@ -308,6 +310,7 @@ export function registerBackupRoutes(app: Express) {
       const folderOf = new Map<string, string>();
       const usedFolders = new Set<string>();
       const folder = (dealId: string) => {
+        if (!dealId) return 'Payment tracking (no deal)';
         if (folderOf.has(dealId)) return folderOf.get(dealId)!;
         const d = deals.find((x: any) => x.id === dealId);
         const client = clients.find((c: any) => c.id === d?.clientId)?.companyName || d?.client || 'Deal removed';

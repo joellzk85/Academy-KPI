@@ -20,6 +20,7 @@ export interface TaskTemplate {
   appliesTo: AppliesTo;
   after?: boolean;        // done after training day (post-training documents)
   files?: boolean;        // has a file drop box; uploading ticks it, and it can't be ticked without a file
+  optional?: boolean;     // shown, but never needed for "Case closed" and not counted in "X of Y" (Certificates)
   retired?: boolean;      // hidden from new checklists, kept for the record
 }
 
@@ -31,6 +32,7 @@ export interface ChecklistTask {
   after?: boolean;        // done after training day
   oneOff?: boolean;       // added for this deal only
   files?: boolean;        // has a file drop box (lib/checklistFiles.ts)
+  optional?: boolean;     // not needed for "Case closed" (lib/postTraining.ts)
   done: boolean;
   doneAt?: string;
   doneById?: string;
@@ -84,12 +86,14 @@ export const DEFAULT_SETTINGS: ChecklistSettings = {
     { id: 'venue', label: 'Check venue + payment', kind: 'venue', appliesTo: 'all' },
     { id: 'materials', label: 'Prepare materials', kind: 'basic', appliesTo: 'all' },
     { id: 'trainer', label: 'Confirm trainer', kind: 'trainer', appliesTo: 'all' },
-    // After training day
+    // After training day, in Joel's order (2026-10-20): the invoice comes first (recorded in the deal's
+    // "After training" section, lib/postTraining.ts), then JD14, T3, training report, output assessment.
+    // Certificates is optional (not in Joel's list): shown last, never needed for "Case closed".
     { id: 'jd14', label: 'JD14', kind: 'basic', appliesTo: 'hrdc', after: true, files: true },
     { id: 't3', label: 'Verify T3 attendance', kind: 'basic', appliesTo: 'hrdc', after: true, files: true },
-    { id: 'certificates', label: 'Certificates', kind: 'basic', appliesTo: 'all', after: true },
     { id: 'training_report', label: 'Training report', kind: 'basic', appliesTo: 'all', after: true },
     { id: 'output_assessment', label: 'Output assessment', kind: 'basic', appliesTo: 'all', after: true, files: true },
+    { id: 'certificates', label: 'Certificates', kind: 'basic', appliesTo: 'all', after: true, optional: true },
   ],
 };
 
@@ -98,6 +102,9 @@ export const DEFAULT_SETTINGS: ChecklistSettings = {
 const FILE_BUILTINS = DEFAULT_SETTINGS.tasks.filter(t => t.files).map(t => t.id);
 export const hasFiles = (t: { id?: string; kind?: string; files?: boolean }) =>
   t.kind === 'basic' && (t.files ?? FILE_BUILTINS.includes(t.id || ''));
+// Optional built-in steps (Certificates). Older lists and checklists don't have the setting yet, so this decides for them.
+const OPTIONAL_BUILTINS = DEFAULT_SETTINGS.tasks.filter(t => t.optional).map(t => t.id);
+export const isOptional = (t: { id?: string; optional?: boolean }) => t.optional ?? OPTIONAL_BUILTINS.includes(t.id || '');
 
 export function readSettings(data: any): ChecklistSettings {
   const saved: TaskTemplate[] = Array.isArray(data?.tasks) && data.tasks.length ? data.tasks : [];
@@ -113,7 +120,7 @@ export function readSettings(data: any): ChecklistSettings {
       merged.splice(before ? merged.findIndex(t => t.id === before.id) + 1 : merged.length, 0, d);
     });
   }
-  const tasks = merged.map(t => ({ ...t, files: hasFiles(t), ...(isRetiredStep(t) ? { retired: true } : {}) }));
+  const tasks = merged.map(t => ({ ...t, files: hasFiles(t), optional: isOptional(t), ...(isRetiredStep(t) ? { retired: true } : {}) }));
   const num = (v: any, fallback: number) => (Number.isFinite(Number(v)) && v !== '' && v !== null && Number(v) >= 0 ? Number(v) : fallback);
   return { tasks, flagDays: num(data?.flagDays, DEFAULT_SETTINGS.flagDays), grantDays: num(data?.grantDays, DEFAULT_SETTINGS.grantDays) };
 }
@@ -130,7 +137,7 @@ export function isHrdc(fundingType?: string): boolean {
 export function buildChecklist(settings: ChecklistSettings): ChecklistTask[] {
   return settings.tasks
     .filter(t => !t.retired)
-    .map(t => ({ id: t.id, label: t.label, kind: t.kind, appliesTo: t.appliesTo, after: !!t.after, files: hasFiles(t), done: false }));
+    .map(t => ({ id: t.id, label: t.label, kind: t.kind, appliesTo: t.appliesTo, after: !!t.after, files: hasFiles(t), optional: isOptional(t), done: false }));
 }
 
 // Tasks that apply to this deal, in the checklist's own order.
@@ -140,8 +147,9 @@ export function applicableTasks(tasks: ChecklistTask[] | undefined, fundingType?
   return (tasks || []).filter(t => (t.appliesTo !== 'hrdc' || isHrdc(fundingType)) && !(isRetiredStep(t) && !t.done));
 }
 
-export function progress(tasks: ChecklistTask[] | undefined, fundingType?: string): { done: number; total: number } {
-  const list = applicableTasks(tasks, fundingType);
+// Optional steps (Certificates) aren't counted. part: only the steps before, or after, training day.
+export function progress(tasks: ChecklistTask[] | undefined, fundingType?: string, part?: 'before' | 'after'): { done: number; total: number } {
+  const list = applicableTasks(tasks, fundingType).filter(t => !isOptional(t) && (!part || (part === 'after') === !!t.after));
   return { done: list.filter(t => t.done).length, total: list.length };
 }
 
@@ -245,23 +253,16 @@ export function checklistFlags(deal: any, tasks: ChecklistTask[] | undefined, se
 }
 
 function trainingFlags(deal: any, tasks: ChecklistTask[] | undefined, settings: ChecklistSettings, today: string): Flag[] {
+  // After-training steps have their own reminders (postTrainingFlags in lib/postTraining.ts).
   const list = applicableTasks(tasks, deal?.fundingType);
-  const openAll = list.filter(t => !t.done);
-  if (openAll.length === 0) return [];
-  const open = openAll.filter(t => !t.after);          // must be done before training day
-  const openAfter = openAll.filter(t => t.after);      // post-training documents
+  const open = list.filter(t => !t.done && !t.after && !isOptional(t));   // must be done before training day
   const s = (n: number) => (n === 1 ? '' : 's');
   const start = daysUntil(deal?.trainingDate, today);
-  if (start === null) return [{ level: 'attention', text: 'No training date yet' }];
+  if (start === null) return list.some(t => !t.done && !isOptional(t)) ? [{ level: 'attention', text: 'No training date yet' }] : [];
   // A training of several days has "passed" only after its last day; while it's on, it counts as today.
   const end = daysUntil(trainingEndDate(deal), today) ?? start;
   const days = start < 0 && end >= 0 ? 0 : start;
-  if (end < 0) {
-    const flags: Flag[] = [];
-    if (open.length) flags.push({ level: 'danger', text: `Training date has passed with ${open.length} step${s(open.length)} open` });
-    if (openAfter.length) flags.push({ level: 'attention', text: `After training: ${openAfter.map(t => t.label).join(', ')} still to do` });
-    return flags;
-  }
+  if (end < 0) return open.length ? [{ level: 'danger', text: `Training date has passed with ${open.length} step${s(open.length)} open before training` }] : [];
   if (open.length === 0) return [];
   const flags: Flag[] = [];
   if (days <= settings.flagDays) {

@@ -44,6 +44,11 @@ export interface MoneyIn {
   amount: number;          // amount invoiced or claimed
   paidDate?: string;
   paidAmount?: number;
+  // Payment recorded since 2026-10-20: when and by whom. Such a payment needs its receipt uploaded before the
+  // deal is "Case closed" (lib/postTraining.ts); payments recorded before have no paidAt and need none.
+  paidAt?: string;
+  paidById?: string;
+  paidByName?: string;
   note?: string;
 }
 
@@ -170,37 +175,18 @@ export function canDecide(o: MoneyOut, viewer: { id: string; role: string }): bo
   return o.status === 'pending' && viewer.role === 'management' && o.requestedById !== viewer.id;
 }
 
-// Money reminders for the admin work queue.
+// Money reminders up to training day, for the admin work queue. From the day after the training, the invoice,
+// claim and payment reminders come from postTrainingFlags (lib/postTraining.ts), so nothing shows twice.
 export function moneyFlags(deal: any, ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings, today = todayIso()): Flag[] {
   const flags: Flag[] = [];
-  const hrdc = deal?.fundingType === 'hrdc' || deal?.fundingType === 'hrdc_topup';
   const client = deal?.fundingType === 'direct' || deal?.fundingType === 'hrdc_topup';
   const start = daysUntil(deal?.trainingDate, today);
   const end = daysUntil(trainingEndDate(deal), today);
-  // negative = training has passed (after its last day); while a training of several days is on, it counts as today
-  const days = start === null ? null : end !== null && end < 0 ? end : Math.max(start, 0);
-
-  if (hrdc && !ins.some(m => m.source === 'hrdc') && days !== null && days < 0) {
-    const since = -days;
-    const late = since >= s.claimReminderDays;   // red after the reminder period
-    if (s.claimDeadlineDays !== null) {
-      const left = s.claimDeadlineDays - since;
-      flags.push(left < 0
-        ? { level: 'danger', text: `HRDC claim deadline passed ${-left} day${left === -1 ? '' : 's'} ago` }
-        : { level: late ? 'danger' : 'attention', text: `HRDC claim not submitted, ${since} day${since === 1 ? '' : 's'} since training (deadline in ${left} day${left === 1 ? '' : 's'})` });
-    } else {
-      flags.push({ level: late ? 'danger' : 'attention', text: `HRDC claim not submitted, ${since} day${since === 1 ? '' : 's'} since training` });
-    }
+  const ended = end !== null && end < 0;
+  // Direct pay: the client is invoiced before training (Joel, 2026-10-16).
+  if (client && !ended && start !== null && start <= 7 && !ins.some(m => m.source === 'client')) {
+    flags.push({ level: 'attention', text: 'Client invoice not sent before training' });
   }
-  if (client && !ins.some(m => m.source === 'client') && days !== null) {
-    if (days < 0) flags.push({ level: 'danger', text: 'Client invoice not sent, training has passed' });
-    else if (days <= 7) flags.push({ level: 'attention', text: 'Client invoice not sent before training' });
-  }
-  ins.filter(m => !isPaid(m) && isDate(m.invoiceDate)).forEach(m => {
-    const age = -(daysUntil(m.invoiceDate, today) ?? 0);
-    if (age > s.overdueDays) flags.push({ level: 'danger', text: `${m.source === 'hrdc' ? 'HRDC' : 'Client'} payment overdue (${age} days since ${m.source === 'hrdc' ? 'claim' : 'invoice'})` });
-  });
-  ins.forEach(m => { const gap = shortfall(m, s); if (gap) flags.push({ level: 'danger', text: `HRDC paid ${formatRM(gap)} less than expected` }); });
   const pending = outs.filter(o => o.status === 'pending').length;
   if (pending) flags.push({ level: 'attention', text: `${pending} payment request${pending === 1 ? '' : 's'} waiting for approval` });
   return flags;

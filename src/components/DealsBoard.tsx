@@ -26,7 +26,10 @@ import HrdcQueries from './HrdcQueries';
 import DealAppointmentBox from './DealAppointmentBox';
 import TrainingTimeBox from './TrainingTimeBox';
 import { apptOf, apptOverdue, apptTime } from '../lib/appointments';
-import MoneyPanel, { RepMoneyStatus, useMoneySettings } from './Money';
+import MoneyPanel, { useMoneySettings } from './Money';
+import AfterTraining, { afterTrainingHint } from './AfterTraining';
+import { useReceipts } from './PaymentReceipts';
+import { daysSinceTraining } from '../lib/postTraining';
 import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
 import { HrdcQuery, Programme, grantBlockReason } from '../lib/programmes';
@@ -954,10 +957,11 @@ export default function DealsBoard({
 // Next step first (Joel, 2026-10-18): under the client name and journey line, one "Next step" box with the single
 // main button for the stage and "Mark lost" as a small link. Everything else folds into sections that open on tap;
 // the most useful one for the stage starts open.
-type SectionKey = 'appointment' | 'followups' | 'details' | 'documents' | 'checklist' | 'hrdc' | 'money' | 'history';
-function defaultSection(st: DealStage): SectionKey {
+type SectionKey = 'appointment' | 'followups' | 'details' | 'documents' | 'checklist' | 'after' | 'hrdc' | 'money' | 'history';
+function defaultSection(st: DealStage, deal?: any): SectionKey {
   if (st === 'lead' || st === 'appointment') return 'appointment';
-  if (st === 'won') return 'checklist';
+  // Won: the admin checklist until the training is over, then "After training" (2026-10-20).
+  if (st === 'won') return daysSinceTraining(deal) !== null ? 'after' : 'checklist';
   if (st === 'lost') return 'history';
   return 'documents';
 }
@@ -1008,10 +1012,11 @@ function DealPanel(props: {
   const draftTb = tbsNewest.find(t => t.status !== 'sent');
   const openTb = (t: any) => props.onOpenTeambuilding?.(t.id);
   const skipped = !!p.proposalSkipped && !stageDate(p, 'proposal');
-  const pr = props.checklist ? progress(props.checklist.tasks, p.fundingType) : null;
+  const pr = props.checklist ? progress(props.checklist.tasks, p.fundingType, 'before') : null;
+  const receipts = useReceipts(props.viewer.role !== 'rep' && st === 'won', p.id);
   const ap = apptOf(p);
   // A follow-up alert opens the Follow-ups section first.
-  const def: SectionKey = props.alert && OPEN_STAGES.includes(st) ? 'followups' : defaultSection(st);
+  const def: SectionKey = props.alert && OPEN_STAGES.includes(st) ? 'followups' : defaultSection(st, p);
   const nNotes = followUpNotes(p).length;
   const [deleting, setDeleting] = useState(false);
   const [deleteReason, setDeleteReason] = useState('');
@@ -1320,10 +1325,11 @@ function DealPanel(props: {
           </Fold>
         )}
 
-        {/* Admin checklist (after the deal is won) */}
+        {/* Admin checklist, up to training day (after the deal is won) */}
         {st === 'won' && (
-          <Fold title="Admin checklist" hint={pr ? `${pr.done} of ${pr.total} done` : 'Not started'} defaultOpen={def === 'checklist'} id={p.id}>
+          <Fold title="Before training (admin checklist)" hint={pr ? `${pr.done} of ${pr.total} done` : 'Not started'} defaultOpen={def === 'checklist'} id={p.id}>
             <DealChecklist
+              part="before"
               deal={p}
               checklist={props.checklist}
               quotes={props.quotes}
@@ -1342,12 +1348,19 @@ function DealPanel(props: {
           </Fold>
         )}
 
-        {/* Money (won deals): full view for Admin and Management, status only for reps */}
+        {/* After training: invoice, post-training documents, payment received → Case closed (2026-10-20).
+            Reps see where it stands. */}
         {st === 'won' && (
-          <Fold title={props.viewer.role === 'rep' ? 'Payment status' : 'Money'} defaultOpen={def === 'money'} id={p.id}>
-            {props.viewer.role === 'rep'
-              ? <RepMoneyStatus deal={p} ins={props.moneyIn} />
-              : <MoneyPanel deal={p} viewer={props.viewer} ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} />}
+          <Fold title="After training" hint={afterTrainingHint(p, props.checklist, props.moneyIn, props.moneyOut, receipts)} defaultOpen={def === 'after'} id={p.id}>
+            <AfterTraining deal={p} checklist={props.checklist} quotes={props.quotes} viewer={props.viewer}
+              ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} />
+          </Fold>
+        )}
+
+        {/* Money out and P&L (won deals): Admin and Management */}
+        {st === 'won' && props.viewer.role !== 'rep' && (
+          <Fold title="Money out and P&L" defaultOpen={def === 'money'} id={p.id}>
+            <MoneyPanel deal={p} viewer={props.viewer} ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} />
           </Fold>
         )}
 

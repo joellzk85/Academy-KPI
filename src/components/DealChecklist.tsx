@@ -5,7 +5,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
 import {
   ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, Picked, applicableTasks, buildChecklist, effectiveTrainer, effectiveVenue,
-  hasFiles, isHrdc, newTaskId, progress, readSettings, taskGate,
+  hasFiles, isHrdc, isOptional, newTaskId, progress, readSettings, taskGate,
 } from '../lib/checklist';
 import { ChecklistFile } from '../lib/checklistFiles';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
@@ -56,7 +56,7 @@ export function ProgressBar({ done, total, label = true }: { done: number; total
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 export default function DealChecklist({
-  deal, checklist, quotes, viewer, onCreateQuotation, onOpenQuotations, grantBlock = '',
+  deal, checklist, quotes, viewer, onCreateQuotation, onOpenQuotations, grantBlock = '', part, hideProgress,
 }: {
   deal: any;
   checklist: any | null;           // deal_checklists document, or null if not started
@@ -65,6 +65,8 @@ export default function DealChecklist({
   onCreateQuotation?: () => void;
   onOpenQuotations?: () => void;
   grantBlock?: string;             // why the grant step can't be ticked yet (programme not HRDC approved)
+  part?: 'before' | 'after';       // only the steps before training day, or only the after-training ones (AfterTraining.tsx)
+  hideProgress?: boolean;
 }) {
   const settings = useChecklistSettings();
   const [venues, setVenues] = useState<any[]>([]);
@@ -91,8 +93,9 @@ export default function DealChecklist({
   const filesOf = (t: ChecklistTask) => files.filter(f => f.taskId === t.id);
 
   const allTasks: ChecklistTask[] = checklist?.tasks || [];
-  const tasks = applicableTasks(allTasks, deal.fundingType);
-  const { done, total } = progress(allTasks, deal.fundingType);
+  const inPart = (t: { after?: boolean }) => !part || (part === 'after') === !!t.after;
+  const tasks = applicableTasks(allTasks, deal.fundingType).filter(inPart);
+  const { done, total } = progress(allTasks, deal.fundingType, part);
 
   const save = async (next: ChecklistTask[], action: string) => {
     setBusy(true);
@@ -164,12 +167,14 @@ export default function DealChecklist({
     const label = newTask.trim();
     if (!label) return;
     setNewTask('');
-    return save([...allTasks, { id: newTaskId(), label, kind: 'basic', appliesTo: 'all', oneOff: true, done: false }], `${label}: added`);
+    return save([...allTasks, { id: newTaskId(), label, kind: 'basic', appliesTo: 'all', oneOff: true, ...(part === 'after' ? { after: true } : {}), done: false }], `${label}: added`);
   };
 
-  const missing = settings.tasks.filter(m => !m.retired && !allTasks.some(t => t.id === m.id));
+  const missing = settings.tasks.filter(m => !m.retired && inPart(m) && !allTasks.some(t => t.id === m.id));
   const addMissing = () =>
-    save([...allTasks, ...missing.map(m => ({ id: m.id, label: m.label, kind: m.kind, appliesTo: m.appliesTo, after: !!m.after, files: hasFiles(m), done: false }))], `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
+    save([...allTasks, ...missing.map(m => ({ id: m.id, label: m.label, kind: m.kind, appliesTo: m.appliesTo, after: !!m.after, files: hasFiles(m), optional: isOptional(m), done: false }))], `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
+  // Optional steps (Certificates) show last, except while arranging (the arrows move the saved order).
+  const shown = arranging ? tasks : [...tasks.filter(t => !isOptional(t)), ...tasks.filter(t => isOptional(t))];
 
   const begin = async () => {
     setBusy(true);
@@ -201,18 +206,19 @@ export default function DealChecklist({
 
   return (
     <div className="space-y-3">
-      <ProgressBar done={done} total={total} />
+      {!hideProgress && <ProgressBar done={done} total={total} />}
       {!isHrdc(deal.fundingType) && allTasks.some(t => t.appliesTo === 'hrdc') && (
         <p className="text-sm text-ink-soft">HRDC-only steps are hidden because this deal isn't HRDC funded.</p>
       )}
 
+      {tasks.length === 0 && <p className="text-[15px] text-ink-soft">No steps here for this deal.</p>}
       <ul className="space-y-2">
-        {tasks.map((t, i) => (
+        {shown.map((t, i) => (
           <li key={t.id} className={`rounded-xl border px-3.5 py-3 ${t.done ? 'border-accent/25 bg-accent-soft/50' : 'border-line bg-white'}`}>
             <div className="flex items-start gap-3">
               {t.done ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-accent" /> : <Circle className="mt-0.5 h-5 w-5 shrink-0 text-ink-soft/50" />}
               <div className="min-w-0 flex-1">
-                <p className="font-semibold">{t.label}{t.after && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">After training</span>}{t.oneOff && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">This deal only</span>}</p>
+                <p className="font-semibold">{t.label}{t.after && !part && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">After training</span>}{isOptional(t) && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">Optional</span>}{t.oneOff && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">This deal only</span>}</p>
                 <TaskSummary t={t} venues={venues} trainers={trainers} quotes={quotes} withNote={!(editable && !t.done && !arranging)} />
                 {t.done && <p className="text-sm text-ink-soft">Done {formatDate(t.doneAt || '')} by {t.doneByName}</p>}
                 {t.kind === 'grant' && !t.done && grantBlock && <p className="mt-1 text-sm font-semibold text-attention">{grantBlock}</p>}
@@ -250,7 +256,7 @@ export default function DealChecklist({
           {arranging && (
             <>
               <form onSubmit={addOneOff} className="flex gap-2">
-                <input value={newTask} onChange={e => setNewTask(e.target.value)} className={input} placeholder="Add a step for this deal only" aria-label="New step for this deal" />
+                <input value={newTask} onChange={e => setNewTask(e.target.value)} className={input} placeholder={part === 'after' ? 'Add an after-training step for this deal only' : 'Add a step for this deal only'} aria-label="New step for this deal" />
                 <button type="submit" disabled={busy || !newTask.trim()} className={btnSecondary}><Plus className="h-4 w-4" /> Add</button>
               </form>
               {missing.length > 0 && (

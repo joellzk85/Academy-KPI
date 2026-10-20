@@ -14,6 +14,8 @@ import { onPhone } from '../lib/whatsapp';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import PaymentRequestDocument, { paymentRef, paymentStatusText } from './PaymentRequestDocument';
+import { Receipt, needsReceipt } from '../lib/postTraining';
+import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -89,12 +91,13 @@ export function RepMoneyStatus({ deal, ins }: { deal: any; ins: MoneyIn[] }) {
   );
 }
 
-// ---------- Full money panel for one deal (Admin and Management) ----------
+// ---------- Money out and P&L for one deal (Admin and Management) ----------
+// Invoices, HRDC claims and the payments received are in the deal's "After training" section (AfterTraining.tsx),
+// so they have one home (Joel, 2026-10-20).
 export default function MoneyPanel({ deal, viewer, ins, outs, settings }: {
   deal: any; viewer: Viewer; ins: MoneyIn[]; outs: MoneyOut[]; settings: MoneySettings;
 }) {
   const pl = dealPL(ins, outs, settings);
-  const [addingIn, setAddingIn] = useState<InSource | null>(null);
   const [addingOut, setAddingOut] = useState(false);
 
   return (
@@ -112,22 +115,7 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings }: {
         {pl.invoiced === 0 && dealValue(deal) > 0 && <> · Deal value {formatRM(dealValue(deal))}, nothing invoiced or claimed yet</>}
       </p>
 
-      {/* Money in */}
-      <section className="space-y-2">
-        <h5 className="text-sm font-bold uppercase tracking-wide text-ink-soft">Money in</h5>
-        {ins.length === 0 && !addingIn && <p className="text-[15px] text-ink-soft">No claim or invoice recorded yet.</p>}
-        <ul className="space-y-2">
-          {ins.map(m => <InRow key={m.id} m={m} viewer={viewer} settings={settings} />)}
-        </ul>
-        {addingIn ? (
-          <InForm deal={deal} source={addingIn} viewer={viewer} settings={settings} onDone={() => setAddingIn(null)} />
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {isHrdcDeal(deal) && <button type="button" className={btnSecondary} onClick={() => setAddingIn('hrdc')}><Plus className="h-4 w-4" /> Record HRDC claim</button>}
-            <button type="button" className={btnSecondary} onClick={() => setAddingIn('client')}><Plus className="h-4 w-4" /> Record client invoice</button>
-          </div>
-        )}
-      </section>
+      <p className="text-sm text-ink-soft">Invoices, HRDC claims and payments received are recorded in this deal's <strong className="text-ink">After training</strong> section.</p>
 
       {/* Money out */}
       <section className="space-y-2">
@@ -156,7 +144,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'da
 }
 
 // ---------- Money in ----------
-function InForm({ deal, source, viewer, settings, onDone }: { deal: any; source: InSource; viewer: Viewer; settings: MoneySettings; onDone: () => void }) {
+export function InForm({ deal, source, viewer, settings, onDone }: { deal: any; source: InSource; viewer: Viewer; settings: MoneySettings; onDone: () => void }) {
   const [f, setF] = useState({ invoiceNo: '', invoiceDate: todayIso(), amount: dealValue(deal) ? String(dealValue(deal)) : '', note: '' });
   // Kept in this browser until it's saved (lib/useFormDraft.ts).
   const draft = useFormDraft(viewer.id, `money-in:${source}:${deal.id}`, f, setF);
@@ -197,9 +185,15 @@ function InForm({ deal, source, viewer, settings, onDone }: { deal: any; source:
   );
 }
 
-export function InRow({ m, viewer, settings, context }: { m: MoneyIn; viewer: Viewer; settings: MoneySettings; context?: string; key?: string }) {
+// One invoice or HRDC claim, with "Record payment" (date, amount and the receipt) and its receipts.
+// readOnly: reps see the status only (no buttons, no receipts).
+export function InRow({ m, viewer, settings, context, receipts = [], readOnly }: {
+  m: MoneyIn; viewer: Viewer; settings: MoneySettings; context?: string; receipts?: Receipt[]; readOnly?: boolean; key?: string;
+}) {
   const [paying, setPaying] = useState(false);
   const [pay, setPay] = useState({ date: todayIso(), amount: String(Math.round(expectedFor(m, settings) * 100) / 100) });
+  const [file, setFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
   const { busy, error, setError, run } = useRun();
   const paid = isPaid(m);
   const gap = shortfall(m, settings);
@@ -211,11 +205,19 @@ export function InRow({ m, viewer, settings, context }: { m: MoneyIn; viewer: Vi
     if (!pay.date) return setError('Enter the date the money came in.');
     if (!(amount > 0)) return setError('Enter the amount received.');
     return run(async () => {
-      await updateDoc(doc(db, 'money_in', m.id), { paidDate: pay.date, paidAmount: amount, paidById: viewer.id, paidByName: viewer.name, updatedAt: Date.now() });
+      // The receipt goes up first, so a payment is never marked received with a half-uploaded receipt.
+      if (file) {
+        setProgress(0);
+        try { await uploadReceipt(file, { dealId: m.dealId, moneyInId: m.id, recordId: '' }, viewer, setProgress); }
+        catch (e) { setProgress(null); throw new Error(receiptError(e)); }
+        setProgress(null);
+      }
+      await updateDoc(doc(db, 'money_in', m.id), { paidDate: pay.date, paidAmount: amount, paidAt: new Date().toISOString(), paidById: viewer.id, paidByName: viewer.name, updatedAt: Date.now() });
+      setFile(null);
       setPaying(false);
     });
   };
-  const undo = () => run(() => updateDoc(doc(db, 'money_in', m.id), { paidDate: '', paidAmount: 0, updatedAt: Date.now() }));
+  const undo = () => run(() => updateDoc(doc(db, 'money_in', m.id), { paidDate: '', paidAmount: 0, paidAt: '', updatedAt: Date.now() }));
   const remove = () => {
     const label = IN_SOURCE_LABELS[m.source].toLowerCase();
     if (!window.confirm(paid
@@ -243,21 +245,31 @@ export function InRow({ m, viewer, settings, context }: { m: MoneyIn; viewer: Vi
           ) : (
             <p className={`text-sm ${overdue ? 'font-semibold text-danger' : 'text-ink-soft'}`}>{overdue && <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />}Not paid yet ({age} day{age === 1 ? '' : 's'})</p>
           )}
+          {!readOnly && paid && needsReceipt(m) && !receipts.length && <p className="text-sm font-semibold text-attention">Receipt not uploaded yet: the case closes once it's in.</p>}
         </div>
-        <span className="flex shrink-0 gap-1">
+        {!readOnly && <span className="flex shrink-0 gap-1">
           {paid
             ? <button type="button" disabled={busy} className={btnSmall} onClick={undo}><Undo2 className="h-3.5 w-3.5" /> Undo payment</button>
             : !paying && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setPaying(true); setError(''); }}><Check className="h-3.5 w-3.5" /> Record payment</button>}
           {(!paid || viewer.role === 'management') && <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={remove} aria-label="Delete"><Trash2 className="h-4 w-4" /></button>}
-        </span>
+        </span>}
       </div>
-      {paying && (
-        <div className="mt-3 flex flex-wrap items-end gap-2">
-          <div><label className={small} htmlFor={`pd-${m.id}`}>Received on</label><input id={`pd-${m.id}`} type="date" value={pay.date} onChange={e => setPay(p => ({ ...p, date: e.target.value }))} className={input} /></div>
-          <div><label className={small} htmlFor={`pa-${m.id}`}>Amount received (RM)</label><input id={`pa-${m.id}`} inputMode="decimal" value={pay.amount} onChange={e => setPay(p => ({ ...p, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
-          <button type="button" className={btnSecondary} onClick={() => setPaying(false)}>Cancel</button>
-          <button type="button" disabled={busy} className={btnPrimary} onClick={recordPay}>Save</button>
+      {paying && !readOnly && (
+        <div className="mt-3 space-y-3 rounded-lg border border-line bg-white p-3">
+          <ReceiptPick file={file} onFile={setFile} />
+          <div className="flex flex-wrap items-end gap-2">
+            <div><label className={small} htmlFor={`pd-${m.id}`}>Received on</label><input id={`pd-${m.id}`} type="date" value={pay.date} onChange={e => setPay(p => ({ ...p, date: e.target.value }))} className={input} /></div>
+            <div><label className={small} htmlFor={`pa-${m.id}`}>Amount received (RM)</label><input id={`pa-${m.id}`} inputMode="decimal" value={pay.amount} onChange={e => setPay(p => ({ ...p, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
+            <button type="button" className={btnSecondary} onClick={() => { setPaying(false); setFile(null); }}>Cancel</button>
+            <button type="button" disabled={busy} className={btnPrimary} onClick={recordPay}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{progress !== null ? `Uploading… ${progress}%` : 'Save'}</button>
+          </div>
+          {!file && <p className="text-sm text-ink-soft">No receipt yet? You can save now and upload it later; the case closes once it's in.</p>}
         </div>
+      )}
+      {!readOnly && <ReceiptList receipts={receipts} viewer={viewer} />}
+      {!readOnly && paid && !receipts.length && (
+        <ReceiptDrop target={{ dealId: m.dealId, moneyInId: m.id, recordId: '' }} viewer={viewer} small={!needsReceipt(m)}
+          prompt={needsReceipt(m) ? 'Drop the receipt here, or click to choose' : 'Add the receipt'} />
       )}
       {error && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
     </li>
@@ -710,8 +722,9 @@ function CompanyPayments({ outs, viewer }: { outs: MoneyOut[]; viewer: Viewer })
   );
 }
 
-// ---------- Admin work → Money: everything across deals ----------
-export function MoneyOverview({ viewer }: { viewer: Viewer }) {
+// ---------- Admin work → Money: payment requests across deals, company payments, settings ----------
+// Money coming in (invoices and claims still to be paid) is listed in Payment tracking only (Joel, 2026-10-20: no repeats).
+export function MoneyOverview({ viewer, onOpenPayments }: { viewer: Viewer; onOpenPayments?: () => void }) {
   const settings = useMoneySettings();
   const [deals, setDeals] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
@@ -739,16 +752,19 @@ export function MoneyOverview({ viewer }: { viewer: Viewer }) {
   const pending = outs.filter(o => o.status === 'pending').sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
   const mine = pending.filter(o => canDecide(o, viewer));
   const toPay = outs.filter(o => o.status === 'approved');
-  const owed = useMemo(() => ins.filter(m => !isPaid(m)).sort((a, b) => String(a.invoiceDate).localeCompare(String(b.invoiceDate))), [ins]);
+  const owed = useMemo(() => ins.filter(m => !isPaid(m)), [ins]);
   const owedTotal = owed.reduce((t, m) => t + expectedFor(m, settings), 0);
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <Stat label={viewer.role === 'management' ? 'Waiting for your approval' : 'Waiting for approval'} value={String(viewer.role === 'management' ? mine.length : pending.length)} />
         <Stat label="Approved, to pay" value={`${toPay.length} · ${formatRM(toPay.reduce((t, o) => t + o.amount, 0))}`} />
-        <Stat label="Still to come in" value={formatRM(owedTotal)} />
-        <Stat label="Invoices and claims unpaid" value={String(owed.length)} />
+        <button type="button" onClick={onOpenPayments} disabled={!onOpenPayments} className="col-span-2 rounded-xl border border-line bg-white px-3 py-2.5 text-left hover:bg-surface sm:col-span-1">
+          <p className="text-xs font-semibold text-ink-soft">Still to come in ({owed.length} unpaid)</p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums">{formatRM(owedTotal)}</p>
+          {onOpenPayments && <p className="text-xs font-semibold text-accent">See them in Payment tracking</p>}
+        </button>
       </div>
 
       <Section title="Payment requests waiting for approval" empty="Nothing waiting for approval.">

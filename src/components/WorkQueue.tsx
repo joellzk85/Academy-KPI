@@ -12,7 +12,11 @@ import DealChecklist, { ProgressBar, startChecklist, useChecklistSettings } from
 import TrainingTimeBox from './TrainingTimeBox';
 import HrdcQueries from './HrdcQueries';
 import MoneyPanel, { MoneyOverview, useMoneySettings } from './Money';
-import { MoneyIn, MoneyOut, moneyFlags, moneySettled } from '../lib/money';
+import { MoneyIn, MoneyOut, moneyFlags } from '../lib/money';
+import AfterTraining from './AfterTraining';
+import { useReceipts } from './PaymentReceipts';
+import { postTraining, postTrainingFlags } from '../lib/postTraining';
+const PaymentTracking = React.lazy(() => import('./PaymentTracking'));
 import ProgrammesManager, { StatusChip } from './Programmes';
 import BackupPanel from './BackupPanel';
 import { Flag } from '../lib/checklist';
@@ -32,13 +36,22 @@ const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink disabled:opacity-30';
 
-export default function WorkQueue({ viewer, people, onOpenQuotations, initialView = 'queue' }: {
+export type AdminView = 'queue' | 'money' | 'payments' | 'programmes' | 'tasks' | 'backup';
+
+export default function WorkQueue({ viewer, people, onOpenQuotations, initialView = 'queue', initialDealId = '', deals = [], onOpenManagementPayments }: {
   viewer: Viewer;
   people: { id: string; name: string }[];
   onOpenQuotations: (repId: string) => void;   // opens that person's quotation library
-  initialView?: 'queue' | 'money' | 'programmes' | 'tasks' | 'backup';   // which tab to open (from My home)
+  initialView?: AdminView;                     // which tab to open (from My home)
+  initialDealId?: string;                      // a won deal whose panel opens in the work queue (from My home)
+  deals?: any[];                               // every deal (for Payment tracking)
+  onOpenManagementPayments?: () => void;       // Management's Payment tracking (Management → Payment tracking)
 }) {
-  const [view, setView] = useState<'queue' | 'money' | 'programmes' | 'tasks' | 'backup'>(initialView);
+  const [view, setView] = useState<AdminView>(initialView);
+  const [focusDeal, setFocusDeal] = useState(initialDealId);
+  // Payment tracking is in Admin work for Admin; Management has it under Management (with profit), so it isn't repeated.
+  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ['backup', 'Backup']];
+  const openPayments = viewer.role === 'admin' ? () => setView('payments') : onOpenManagementPayments;
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -47,7 +60,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
           <p className="mt-0.5 text-[15px] text-ink-soft">Every won deal and what still needs doing, soonest training first.</p>
         </div>
         <div className="inline-flex flex-wrap rounded-lg border border-line bg-white p-0.5" role="tablist">
-          {([['queue', 'Work queue'], ['money', 'Money'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ['backup', 'Backup']] as const).map(([k, t]) => (
+          {tabs.map(([k, t]) => (
             <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
               className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === k ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>
               {t}
@@ -55,13 +68,20 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
           ))}
         </div>
       </div>
-      {view === 'queue' ? <Queue viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} /> : view === 'money' ? <MoneyOverview viewer={viewer} /> : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : view === 'tasks' ? <TaskSettings viewer={viewer} /> : <BackupPanel />}
+      {view === 'queue' ? <Queue key={focusDeal} viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} initialOpenId={focusDeal} />
+        : view === 'money' ? <MoneyOverview viewer={viewer} onOpenPayments={openPayments} />
+        : view === 'payments' && viewer.role === 'admin' ? (
+          <React.Suspense fallback={<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}>
+            <PaymentTracking pipelinesSync={linkedOnly(deals)} people={people} viewer={viewer} onOpenDeal={d => { setFocusDeal(d.id); setView('queue'); }} />
+          </React.Suspense>
+        )
+        : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : view === 'tasks' ? <TaskSettings viewer={viewer} /> : <BackupPanel />}
     </div>
   );
 }
 
 // ---------- Work queue ----------
-function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: { id: string; name: string }[]; onOpenQuotations: (repId: string) => void }) {
+function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewer: Viewer; people: { id: string; name: string }[]; onOpenQuotations: (repId: string) => void; initialOpenId?: string; key?: string }) {
   const settings = useChecklistSettings();
   const [deals, setDeals] = useState<any[]>([]);
   const [checklists, setChecklists] = useState<Record<string, any>>({});
@@ -73,9 +93,10 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const moneySettings = useMoneySettings();
   const [loaded, setLoaded] = useState(false);
-  const [filter, setFilter] = useState<'open' | 'flagged' | 'done'>('open');
+  const receipts = useReceipts(true);
+  const [filter, setFilter] = useState<'open' | 'flagged' | 'after' | 'done'>('open');
   const [search, setSearch] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialOpenId || null);
   const [showUnstarted, setShowUnstarted] = useState(false);
   const [busyId, setBusyId] = useState('');
   const [toast, setToast] = useState('');
@@ -125,9 +146,15 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
     flags.push(...checklistFlags(p, cl.tasks, settings, today, dealWonDate(p)));
     const mIn = moneyIn.filter(m => m.dealId === p.id);
     const mOut = moneyOut.filter(m => m.dealId === p.id);
+    const rc = receipts.filter(r => r.dealId === p.id);
+    // Up to training day: money reminders; from the day after: one after-training journey (lib/postTraining.ts).
+    flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, moneySettings, today));
     flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
-    return { deal: p, pr, overdue: overdue.length > 0, complete: pr.total > 0 && pr.done === pr.total && open.length === 0 && moneySettled(mIn, mOut), flags };
-  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings]);
+    const post = postTraining(p, cl.tasks, mIn, mOut, rc, today);
+    // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).
+    const complete = pr.done === pr.total && open.length === 0 && post.closed;
+    return { deal: p, pr, overdue: overdue.length > 0, complete, after: post.ended && !complete, post, flags };
+  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts]);
   const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
 
   // Needs attention: any red flag, plus "grant not applied" even while it's amber (Joel, 2026-10-18).
@@ -135,11 +162,12 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
   const counts = {
     open: rows.filter(r => !r.complete).length,
     flagged: rows.filter(needsAttention).length,
+    after: rows.filter(r => r.after).length,
     done: rows.filter(r => r.complete).length,
   };
 
   const visible = useMemo(() => {
-    const base = rows.filter(r => (filter === 'done' ? r.complete : filter === 'flagged' ? needsAttention(r) : !r.complete));
+    const base = rows.filter(r => (filter === 'done' ? r.complete : filter === 'flagged' ? needsAttention(r) : filter === 'after' ? r.after : !r.complete));
     const q = search.trim().toLowerCase();
     const list = q ? base.filter(r => `${clientName(r.deal)} ${courseOf(r.deal)} ${personName(dealOwnerId(r.deal))}`.toLowerCase().includes(q)) : base;
     return list.sort((a, b) => {
@@ -189,8 +217,8 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-2" role="tablist" aria-label="Filter the work queue">
-        {([['open', 'In progress'], ['flagged', 'Needs attention'], ['done', 'All done']] as const).map(([k, t]) => {
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="tablist" aria-label="Filter the work queue">
+        {([['open', 'In progress'], ['flagged', 'Needs attention'], ['after', 'After training'], ['done', 'Case closed']] as const).map(([k, t]) => {
           const active = filter === k;
           return (
             <button key={k} type="button" role="tab" aria-selected={active} onClick={() => setFilter(k)}
@@ -212,12 +240,13 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
           <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
         ) : visible.length === 0 ? (
           <div className="p-8 text-center">
-            <p className="font-semibold">{filter === 'done' ? 'No finished checklists yet' : filter === 'flagged' ? 'Nothing urgent right now' : 'No won deals waiting on admin'}</p>
+            <p className="font-semibold">{filter === 'done' ? 'No closed cases yet' : filter === 'flagged' ? 'Nothing urgent right now' : filter === 'after' ? 'No trainings waiting on post-training' : 'No won deals waiting on admin'}</p>
+            {filter === 'after' && <p className="mt-1 text-[15px] text-ink-soft">The day after a training ends, it appears here until the case is closed.</p>}
             {filter === 'open' && <p className="mt-1 text-[15px] text-ink-soft">When a rep marks a deal as won, it appears here with its checklist.</p>}
           </div>
         ) : (
           <ul className="divide-y divide-line">
-            {visible.map(({ deal: p, pr, flags }) => (
+            {visible.map(({ deal: p, pr, flags, post, complete }) => (
               <li key={p.id}>
                 <button type="button" onClick={() => setOpenId(p.id)} className="grid w-full gap-2 px-5 py-3.5 text-left hover:bg-surface sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-center sm:gap-4">
                   <span className="min-w-0">
@@ -230,6 +259,9 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
                   </span>
                   <span className="min-w-0 space-y-1">
                     <ProgressBar done={pr.done} total={pr.total} />
+                    {complete
+                      ? <span className="block text-sm font-semibold text-accent">Case closed</span>
+                      : post.ended && post.started && <span className="block text-sm text-ink-soft">After training, step {Math.min(post.step, 3)} of 3: {post.next}</span>}
                     {flags.map((f, i) => (
                       <span key={i} className={`flex items-center gap-1 text-sm font-semibold ${f.level === 'danger' ? 'text-danger' : 'text-attention'}`}>
                         <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {f.text}
@@ -305,8 +337,9 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
               <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">No training date yet. Click "Set" next to Training date to add it.</p>
             )}
             <section>
-              <h4 className="mb-2 font-bold">Admin checklist</h4>
+              <h4 className="mb-2 font-bold">Before training (admin checklist)</h4>
               <DealChecklist
+                part="before"
                 deal={openDeal}
                 checklist={checklists[openDeal.id] || null}
                 quotes={quotes.filter(q => q.pipelineId === openDeal.id)}
@@ -316,6 +349,11 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
                 grantBlock={grantBlockReason(openDeal, programmeOf(openDeal))}
               />
             </section>
+            <section>
+              <h4 className="mb-2 font-bold">After training</h4>
+              <AfterTraining deal={openDeal} checklist={checklists[openDeal.id] || null} quotes={quotes.filter(q => q.pipelineId === openDeal.id)} viewer={viewer}
+                ins={moneyIn.filter(m => m.dealId === openDeal.id)} outs={moneyOut.filter(m => m.dealId === openDeal.id)} settings={moneySettings} />
+            </section>
             {(openDeal.fundingType === 'hrdc' || openDeal.fundingType === 'hrdc_topup') && (
               <section>
                 <h4 className="mb-2 font-bold">HRDC queries</h4>
@@ -323,7 +361,7 @@ function Queue({ viewer, people, onOpenQuotations }: { viewer: Viewer; people: {
               </section>
             )}
             <section>
-              <h4 className="mb-2 font-bold">Money</h4>
+              <h4 className="mb-2 font-bold">Money out and P&amp;L</h4>
               <MoneyPanel deal={openDeal} viewer={viewer} settings={moneySettings}
                 ins={moneyIn.filter(m => m.dealId === openDeal.id)} outs={moneyOut.filter(m => m.dealId === openDeal.id)} />
             </section>

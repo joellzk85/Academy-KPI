@@ -339,9 +339,23 @@ service cloud.firestore {
     }
 
     // Payment tracking (2026-10-20): HRDC claim and invoice lines imported from the Blueprint spreadsheet
-    // ("Sales 2026") or added by hand. Management only.
+    // ("Sales 2026") or added by hand. Management adds, edits and deletes. Admin (2026-10-20) reads them and may
+    // change only the paid fields (mark paid / undo), from Admin work → Payment tracking.
     match /payment_records/{recordId} {
-      allow read, write: if isManagement();
+      allow read: if isStaff();
+      allow create, delete: if isManagement();
+      allow update: if isManagement() || (isStaff() && request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['paidDate', 'paidNote', 'paidAmount', 'updatedAt', 'updatedById', 'updatedByName']));
+    }
+
+    // Payment receipts from the client or HRDC (2026-10-20): on a deal's invoice or claim (money_in) or on a
+    // Payment tracking line. Admin and Management upload and read; delete by the uploader or Management.
+    // The files are in Storage receipts/... (storage.rules).
+    match /payment_receipts/{receiptId} {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.byId == request.auth.uid && request.resource.data.path is string;
+      allow update: if false;
+      allow delete: if isManagement() || (isStaff() && resource.data.byId == request.auth.uid);
     }
 
     // Trainer links (2026-10-17): private links for a trainer to fill in a course outline or their profile.
