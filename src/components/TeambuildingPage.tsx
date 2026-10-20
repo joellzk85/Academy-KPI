@@ -863,7 +863,7 @@ function Agenda({ days, onChange }: { days: TbAgendaDay[]; onChange: (d: TbAgend
             {d.rows.map((row, k) => (
               <div key={row.id} className="flex flex-wrap items-center gap-2 border-b border-line pb-2 last:border-0 sm:flex-nowrap sm:border-0 sm:pb-0">
                 <input value={row.time} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, time: e.target.value } : x)) })} className={`${input} min-w-0 flex-1 sm:w-44 sm:flex-none`} placeholder="2:00pm - 2:30pm" aria-label="Time" />
-                <select value={row.tag || ''} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, tag: e.target.value as AgendaTag } : x)) })} className={`${input} w-36 shrink-0 sm:order-3`} aria-label="Where">
+                <select value={row.tag || ''} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, tag: e.target.value as AgendaTag } : x)) })} className={`${input} shrink-0 sm:w-44! sm:order-3`} aria-label="Where">
                   {AGENDA_TAGS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
                 </select>
                 <input value={row.text} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} className={`${input} min-w-0 basis-full sm:order-2 sm:basis-auto sm:flex-1`} placeholder="Ice breaker and energizer" aria-label="What happens" />
