@@ -3,7 +3,7 @@
 // both the Google Sheet copy and the Excel download (serverBackup.ts). Pure, so it can be tested.
 
 // Never backed up: login data and the server's own bookkeeping.
-export const SKIP_COLLECTIONS = ['secrets', 'server_secrets', 'auth_map', 'calendar_sync', 'user_prefs'];
+export const SKIP_COLLECTIONS = ['secrets', 'server_secrets', 'auth_map', 'calendar_sync', 'user_prefs', 'payment_links'];
 // Never backed up from the config list.
 export const SKIP_CONFIG_DOCS = ['passwords', 'google_calendar', 'backup_settings', 'outlook'];
 

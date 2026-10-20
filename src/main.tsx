@@ -14,9 +14,15 @@ const docToken = tokenFromPath(window.location.pathname);
 const ProposalLinkPage = lazy(() => import('./components/ProposalLinkPage'));
 const proposalToken = window.location.pathname.match(/^\/p\/([a-f0-9]{32})\/?$/)?.[1];
 
+// Accounts' link to a payment request (/pay/<token>): see it and click "Payment made" (PaymentLinkPage.tsx).
+const PaymentLinkPage = lazy(() => import('./components/PaymentLinkPage'));
+const paymentToken = window.location.pathname.match(/^\/pay\/([a-f0-9]{32})\/?$/)?.[1];
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {trainerToken ? (
+    {paymentToken ? (
+      <Suspense fallback={null}><PaymentLinkPage token={paymentToken} /></Suspense>
+    ) : trainerToken ? (
       <Suspense fallback={null}><TrainerLinkPage token={trainerToken} /></Suspense>
     ) : proposalToken ? (
       <Suspense fallback={null}><ProposalLinkPage token={proposalToken} /></Suspense>

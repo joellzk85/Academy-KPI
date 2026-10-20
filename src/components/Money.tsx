@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDoc, onSnapshot, query, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { AlertTriangle, Check, Download, Loader2, MessageCircle, Plus, Trash2, Undo2, X } from 'lucide-react';
-import { db, friendlyError } from '../lib/firebase';
+import { AlertTriangle, Check, Copy, Download, Link2, Loader2, MessageCircle, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
 import { dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
   COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_CATEGORIES, OUT_STATUS_LABELS, OutStatus, OutTiming,
-  canDecide, dealPL, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
+  canDecide, dateTimeMY, dealPL, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
@@ -410,8 +410,77 @@ function PaymentShare({ o, forText }: { o: MoneyOut; forText: string }) {
   );
 }
 
+// ---------- Link for accounts (Joel, 2026-10-20) ----------
+// Accounts open the link without logging in (/pay/<token>, PaymentLinkPage.tsx), see the request and where it stands,
+// and click "Payment made" once it's approved and paid. The server (serverPaymentLinks.ts) keeps the token on the
+// request (accountsLink), so the same link shows here until someone stops it.
+function AccountsLink({ o, forText, onClose }: { o: MoneyOut; forText: string; onClose: () => void }) {
+  const [token, setToken] = useState(o.accountsLink?.token || '');
+  const [busy, setBusy] = useState(!o.accountsLink?.token);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState<'' | 'link' | 'msg'>('');
+
+  useEffect(() => {
+    if (o.accountsLink?.token) { setToken(o.accountsLink.token); return; }
+    if (token) return;
+    setBusy(true);
+    callServer<{ token: string }>('/api/pay-link/create', { id: o.id, forText }, true)
+      .then(r => setToken(r.token)).catch(e => setError(friendlyError(e))).finally(() => setBusy(false));
+  }, [o.accountsLink?.token]);
+
+  const url = token ? `${window.location.origin}/pay/${token}` : '';
+  const message = [
+    `Payment request ${paymentRef(o)}`,
+    `${o.category} · ${forText}`,
+    `Pay to: ${o.payee}`,
+    `Total: ${formatSen(o.amount)}`,
+    '',
+    'Please open this link to see the details, and click "Payment made" once it is paid:',
+    url,
+  ].join('\n');
+  const copy = async (what: 'link' | 'msg') => {
+    const text = what === 'link' ? url : message;
+    try { await navigator.clipboard.writeText(text); } catch { window.prompt('Copy this:', text); }
+    setCopied(what);
+    window.setTimeout(() => setCopied(''), 2000);
+  };
+  const stop = async () => {
+    if (!window.confirm('Stop this link? Accounts will no longer be able to open it. Making a link again gives a new address.')) return;
+    setBusy(true); setError('');
+    try { await callServer('/api/pay-link/stop', { token }, true); setToken(''); onClose(); }
+    catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mt-3 space-y-2 rounded-lg border border-line bg-surface px-3 py-2.5">
+      <p className="text-sm font-semibold">Link for accounts</p>
+      {busy && !token && <p className="flex items-center gap-2 text-sm text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Making the link…</p>}
+      {token && (
+        <>
+          <p className="break-all rounded-md border border-line bg-white px-2.5 py-1.5 font-mono text-xs">{url}</p>
+          <p className="text-sm text-ink-soft">
+            {o.status === 'pending' ? 'Accounts will see "Payment raised, waiting approval" until a manager approves it; then a Payment made button appears.'
+              : o.status === 'approved' ? 'Accounts can click Payment made on this link once they have paid.'
+              : o.status === 'paid' ? 'Already paid. The link shows when it was paid.'
+              : 'Rejected: the link tells accounts not to pay it.'}
+          </p>
+          <span className="flex flex-wrap gap-1">
+            <button type="button" className={btnSmall} onClick={() => copy('link')}>{copied === 'link' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied === 'link' ? 'Copied' : 'Copy link'}</button>
+            <button type="button" className={btnSmall} onClick={() => copy('msg')}>{copied === 'msg' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied === 'msg' ? 'Copied' : 'Copy message with link'}</button>
+            <a className={btnSmall} href={url} target="_blank" rel="noopener">Open</a>
+            <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={stop}>Stop link</button>
+            <button type="button" className={btnSmall} onClick={onClose}>Close</button>
+          </span>
+        </>
+      )}
+      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+    </div>
+  );
+}
+
 export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Viewer; context?: string; docFor?: string; key?: string }) {
   const [mode, setMode] = useState<null | 'reject' | 'pay'>(null);
+  const [showLink, setShowLink] = useState(false);
   const [reason, setReason] = useState('');
   const [pay, setPay] = useState({ date: todayIso(), ref: '' });
   const { busy, error, setError, run } = useRun();
@@ -469,13 +538,23 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
             Requested by {o.requestedByName} on {formatDate(o.requestDate || o.requestedAt)}
             {o.decidedByName && ` · ${o.status === 'rejected' ? 'rejected' : 'approved'} by ${o.decidedByName} on ${formatDate(o.decidedAt || '')}`}
             {o.status === 'rejected' && o.rejectReason ? `: ${o.rejectReason}` : ''}
-            {o.status === 'paid' && ` · paid ${formatDate(o.paidDate || '')}${o.paidRef ? ` (ref ${o.paidRef})` : ''} by ${o.paidByName}`}
+            {o.status === 'paid' && !paidViaLink(o) && ` · paid ${formatDate(o.paidDate || '')}${o.paidRef ? ` (ref ${o.paidRef})` : ''} by ${o.paidByName}`}
           </p>
+          {paidViaLink(o) && (
+            <p className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent-soft px-2 py-1 text-sm font-semibold text-accent">
+              <Check className="h-3.5 w-3.5" /> Payment made {dateTimeMY(o.paidAt)} · by accounts (via link){o.paidRef ? ` · ref ${o.paidRef}` : ''}
+            </p>
+          )}
           {o.status === 'pending' && isMine && <p className="text-sm text-attention">{viewer.role === 'management' ? 'Waiting for the other manager to approve.' : 'Waiting for a manager to approve.'}</p>}
         </div>
         {viewer.role !== 'rep' && !mode && (
           <span className="flex max-w-full shrink-0 flex-wrap justify-end gap-1 sm:max-w-[22rem]">
             <PaymentShare o={o} forText={forText} />
+            {o.status !== 'rejected' && (
+              <button type="button" className={btnSmall} onClick={() => setShowLink(v => !v)} title="A link your accounts open to pay it and click Payment made">
+                <Link2 className="h-3.5 w-3.5" /> {o.accountsLink?.token ? 'Accounts link' : 'Link for accounts'}
+              </button>
+            )}
             {decide && <button type="button" disabled={busy} className={`${btnPrimary} py-1.5`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
             {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={() => { setMode('reject'); setError(''); }}><X className="h-3.5 w-3.5" /> Reject</button>}
             {o.status === 'approved' && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setMode('pay'); setError(''); }}><Check className="h-3.5 w-3.5" /> Mark paid</button>}
@@ -486,6 +565,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
           </span>
         )}
       </div>
+      {showLink && viewer.role !== 'rep' && <AccountsLink o={o} forText={forText} onClose={() => setShowLink(false)} />}
       {mode === 'reject' && (
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <input value={reason} onChange={e => setReason(e.target.value)} className={`${input} min-w-[14rem] flex-1`} placeholder="Why it is rejected" aria-label="Reason for rejecting" />

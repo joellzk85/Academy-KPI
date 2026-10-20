@@ -5,17 +5,12 @@
 import React from 'react';
 import Logo from './Logo';
 import { COMPANY_ADDRESS } from '../lib/company';
-import { MoneyOut, OUT_STATUS_LABELS, isCompanyPayment } from '../lib/money';
+import { MoneyOut, OUT_STATUS_LABELS, dateTimeMY, isCompanyPayment, paidViaLink, paymentRef } from '../lib/money';
 import { formatDate } from '../lib/deals';
 
-const sen = (n: number) => 'RM ' + (Number(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export { paymentRef };
 
-// PR-YYYYMMDD-NNNN, from the request date and the record's id (fixed, so it never changes).
-export function paymentRef(o: MoneyOut): string {
-  const day = String(o.requestDate || o.requestedAt || '').slice(0, 10).replace(/-/g, '');
-  const tail = String(o.id || '').replace(/\D/g, '').slice(-4) || '0000';
-  return `PR-${day || 'NEW'}-${tail}`;
-}
+const sen = (n: number) => 'RM ' + (Number(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function paymentLines(o: MoneyOut): { description: string; qty: number; price: number }[] {
   if (isCompanyPayment(o) && (o.items || []).length) return o.items!.map(i => ({ description: i.description, qty: Number(i.qty) || 0, price: Number(i.price) || 0 }));
@@ -23,7 +18,7 @@ export function paymentLines(o: MoneyOut): { description: string; qty: number; p
 }
 
 export function paymentStatusText(o: MoneyOut): string {
-  if (o.status === 'paid') return `Paid ${formatDate(o.paidDate || '')}${o.paidRef ? `, ref ${o.paidRef}` : ''}${o.decidedByName ? ` (approved by ${o.decidedByName} on ${formatDate(o.decidedAt || '')})` : ''}`;
+  if (o.status === 'paid') return `Payment made ${paidViaLink(o) ? dateTimeMY(o.paidAt) : formatDate(o.paidDate || '')}${o.paidRef ? `, ref ${o.paidRef}` : ''}${o.decidedByName ? ` (approved by ${o.decidedByName} on ${formatDate(o.decidedAt || '')})` : ''}`;
   if (o.status === 'approved') return `Approved by ${o.decidedByName} on ${formatDate(o.decidedAt || '')}, not paid yet`;
   if (o.status === 'rejected') return `Rejected by ${o.decidedByName} on ${formatDate(o.decidedAt || '')}${o.rejectReason ? `: ${o.rejectReason}` : ''}`;
   return OUT_STATUS_LABELS.pending;

@@ -27,7 +27,7 @@ export const OUT_STATUS_LABELS: Record<OutStatus, string> = {
   pending: 'Waiting for approval',
   approved: 'Approved, not paid',
   rejected: 'Rejected',
-  paid: 'Paid',
+  paid: 'Payment made',
 };
 
 export const IN_SOURCE_LABELS: Record<InSource, string> = {
@@ -73,6 +73,29 @@ export interface MoneyOut {
   items?: OutItem[];       // amount = their total
   neededBy?: string;
   paymentDetails?: string; // e.g. bank and account name
+  // Link for accounts (Joel, 2026-10-20): accounts open it without logging in and click "Payment made".
+  accountsLink?: { token: string; at: string; byName: string } | null;
+  paidAt?: string;         // exact time accounts clicked "Payment made" (ISO); with an empty paidById
+}
+
+// PR-YYYYMMDD-NNNN, from the request date and the record's id (fixed, so it never changes).
+export function paymentRef(o: Pick<MoneyOut, 'id' | 'requestDate' | 'requestedAt'>): string {
+  const day = String(o.requestDate || o.requestedAt || '').slice(0, 10).replace(/-/g, '');
+  const tail = String(o.id || '').replace(/\D/g, '').slice(-4) || '0000';
+  return `PR-${day || 'NEW'}-${tail}`;
+}
+
+// Marked paid by accounts through the link (not by someone in the CRM). A later Undo paid + Mark paid in the CRM
+// sets paidById, so an old paidAt is then ignored.
+export const paidViaLink = (o: MoneyOut) => o.status === 'paid' && !o.paidById && !!o.paidAt;
+export const ACCOUNTS_PAID_BY = 'Accounts (via link)';
+
+// "21 Oct 2026, 3:45 pm" in Malaysian time.
+export function dateTimeMY(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 export interface MoneySettings {

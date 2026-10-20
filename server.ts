@@ -10,6 +10,7 @@ import { registerMailRoutes } from "./serverMail";
 import { registerDocLinkRoutes } from "./serverDocLinks";
 import { registerPhotoRoutes } from "./serverPhotos";
 import { registerProposalLinkRoutes } from "./serverProposalLinks";
+import { registerPaymentLinkRoutes } from "./serverPaymentLinks";
 
 // Load environment variables
 dotenv.config();
@@ -46,6 +47,9 @@ async function startServer() {
 
   // Teambuilding proposal links: the client's page (/p/<token>), visit tracking and "Accept proposal"
   registerProposalLinkRoutes(app);
+
+  // Payment links for accounts: open a payment request without logging in and click "Payment made" (/pay/<token>)
+  registerPaymentLinkRoutes(app);
 
   // Photos for the teambuilding proposal PDF (read by the server, so the PDF can include them)
   registerPhotoRoutes(app);
