@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, CheckCircle2, Eye, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Eye, Loader2, X } from 'lucide-react';
 import TrainerBiodataDocument from './TrainerBiodataDocument';
 import Logo from './Logo';
-import {
-  OutlineSubmission, ProfileSubmission, cleanOutline, cleanProfile, outlineProblem, profileProblem,
-} from '../lib/trainerLinks';
+import { ProfileSubmission, cleanProfile, profileProblem } from '../lib/trainerLinks';
 import { PROFILE_PARTS, emptyExtras, profileGaps } from '../lib/trainerProfile';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
+import OutlineLinkForm from './OutlineLinkForm';
 
 // The page a trainer opens from a private link (/t/<token>), without logging in (Joel, 2026-10-17).
 // It talks only to the CRM server (serverTrainerLinks.ts), never to the database.
@@ -18,7 +17,6 @@ const btnPrimary =
   'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-[15px] font-semibold text-white hover:bg-[#0B5A50] disabled:opacity-60';
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-surface';
-const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface disabled:opacity-30';
 
 async function post(path: string, body: any) {
   let res: Response;
@@ -32,18 +30,12 @@ async function post(path: string, body: any) {
   return data;
 }
 
-const emptyModule = () => ({ moduleTitle: '', duration: '', methodology: '', topics: '' });
-
 export default function TrainerLinkPage({ token }: { token: string }) {
   const [info, setInfo] = useState<any>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [problem, setProblem] = useState('');
-  const [outline, setOutline] = useState<OutlineSubmission>({
-    durationDays: 1, totalHours: 8, level: 'Beginner', audience: '', prerequisites: '', overview: '', outcomes: [], items: [emptyModule()],
-  });
-  const [outcomesText, setOutcomesText] = useState('');
   const [profile, setProfile] = useState<ProfileSubmission>({
     ...emptyExtras(), name: '', contact: '', email: '', bio: '', experienceYears: 0, qualifications: '', pastClients: '', programmeIds: [], suggestedTopics: '', rate: 0,
   });
@@ -52,11 +44,6 @@ export default function TrainerLinkPage({ token }: { token: string }) {
     document.title = 'NEXT Academy';
     post('/api/trainer-link/get', { token }).then(d => {
       setInfo(d);
-      if (d.kind === 'outline' && d.prefill) {
-        const o = cleanOutline(d.prefill);
-        setOutline({ ...o, items: o.items.length ? o.items : [emptyModule()] });
-        setOutcomesText(o.outcomes.join('\n'));
-      }
       if (d.kind === 'profile' && d.prefill) setProfile(cleanProfile(d.prefill, (d.programmes || []).map((p: any) => p.id), token));
     }).catch(e => setError(e.message));
   }, [token]);
@@ -73,10 +60,8 @@ export default function TrainerLinkPage({ token }: { token: string }) {
       if (gaps.length) { setNudge(gaps); return; }
     }
     setNudge(null);
-    const data = info.kind === 'outline'
-      ? cleanOutline({ ...outline, outcomes: outcomesText.split('\n') })
-      : cleanProfile(profile, (info.programmes || []).map((p: any) => p.id), token);
-    const p = info.kind === 'outline' ? outlineProblem(data as OutlineSubmission) : profileProblem(data as ProfileSubmission);
+    const data = cleanProfile(profile, (info.programmes || []).map((p: any) => p.id), token);
+    const p = profileProblem(data);
     if (p) return setProblem(p);
     setBusy(true);
     try {
@@ -107,14 +92,6 @@ export default function TrainerLinkPage({ token }: { token: string }) {
     </div>
   );
 
-  const setItem = (i: number, c: any) => setOutline(o => ({ ...o, items: o.items.map((m, k) => (k === i ? { ...m, ...c } : m)) }));
-  const moveItem = (i: number, d: number) => setOutline(o => {
-    const items = [...o.items]; const j = i + d;
-    if (j < 0 || j >= items.length) return o;
-    [items[i], items[j]] = [items[j], items[i]];
-    return { ...o, items };
-  });
-
   // The extra details (gender, languages, uploads…). Files go to this link's own folder (storage.rules).
   const extrasProps = {
     value: profile,
@@ -137,8 +114,7 @@ export default function TrainerLinkPage({ token }: { token: string }) {
     ),
   };
 
-  return shell(
-    <form onSubmit={submit} className="space-y-5">
+  const intro = (
       <div>
         <h1 className="text-xl font-bold">{info.kind === 'outline' ? 'Course outline' : 'Your trainer profile'}</h1>
         <p className="mt-1 text-[15px] text-ink-soft">
@@ -149,6 +125,7 @@ export default function TrainerLinkPage({ token }: { token: string }) {
           {' '}Your answers go to the NEXT Academy team for review.
         </p>
         {info.status === 'submitted' && <p className="mt-2 rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">You've already submitted this. You can correct it and submit again.</p>}
+        {info.kind === 'outline' && <p className="mt-2 text-[15px] text-ink-soft">Fill in the parts below. Click <strong className="text-ink">Preview</strong> any time to see it the way NEXT Academy prints it.</p>}
         {info.kind === 'profile' && (() => {
           const pct = Math.round(((PROFILE_PARTS - profileGaps({ ...profile, icOnFile: info.icOnFile }).length) / PROFILE_PARTS) * 100);
           return (
@@ -160,49 +137,19 @@ export default function TrainerLinkPage({ token }: { token: string }) {
           );
         })()}
       </div>
+  );
 
-      {info.kind === 'outline' ? (
-        <>
-          <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
-            <h2 className="font-bold">Course details</h2>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div><label className={label} htmlFor="t-days">Days</label><input id="t-days" inputMode="decimal" value={outline.durationDays || ''} onChange={e => setOutline(o => ({ ...o, durationDays: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 }))} className={input} /></div>
-              <div><label className={label} htmlFor="t-hours">Total hours</label><input id="t-hours" inputMode="decimal" value={outline.totalHours || ''} onChange={e => setOutline(o => ({ ...o, totalHours: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 }))} className={input} /></div>
-              <div><label className={label} htmlFor="t-level">Level</label>
-                <select id="t-level" value={outline.level} onChange={e => setOutline(o => ({ ...o, level: e.target.value as any }))} className={input}>
-                  <option>Beginner</option><option>Intermediate</option><option>Advanced</option>
-                </select></div>
-            </div>
-            <div><label className={label} htmlFor="t-aud">Who it's for</label><input id="t-aud" value={outline.audience} onChange={e => setOutline(o => ({ ...o, audience: e.target.value }))} className={input} placeholder="e.g. New managers and team leaders" /></div>
-            <div><label className={label} htmlFor="t-pre">Prerequisites <span className="font-normal text-ink-soft">(optional)</span></label><input id="t-pre" value={outline.prerequisites} onChange={e => setOutline(o => ({ ...o, prerequisites: e.target.value }))} className={input} /></div>
-            <div><label className={label} htmlFor="t-ov">Overview</label><textarea id="t-ov" rows={4} value={outline.overview} onChange={e => setOutline(o => ({ ...o, overview: e.target.value }))} className={`${input} resize-y`} /></div>
-            <div><label className={label} htmlFor="t-out">Learning outcomes <span className="font-normal text-ink-soft">(one per line)</span></label><textarea id="t-out" rows={4} value={outcomesText} onChange={e => setOutcomesText(e.target.value)} className={`${input} resize-y`} placeholder={'By the end, participants will be able to…'} /></div>
-          </section>
+  if (info.kind === 'outline') return shell(
+    <div className="space-y-5">
+      {intro}
+      <OutlineLinkForm info={info} token={token} post={post} onDone={sent => { setInfo((i: any) => ({ ...i, prefill: sent, status: 'submitted' })); setDone(true); }} />
+    </div>
+  );
 
-          <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
-            <h2 className="font-bold">Modules</h2>
-            {outline.items.map((m, i) => (
-              <div key={i} className="space-y-2 rounded-xl border border-line p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-ink-soft">Module {i + 1}</span>
-                  <span className="flex">
-                    <button type="button" className={iconBtn} disabled={i === 0} onClick={() => moveItem(i, -1)} aria-label={`Move module ${i + 1} up`}><ArrowUp className="h-4 w-4" /></button>
-                    <button type="button" className={iconBtn} disabled={i === outline.items.length - 1} onClick={() => moveItem(i, 1)} aria-label={`Move module ${i + 1} down`}><ArrowDown className="h-4 w-4" /></button>
-                    <button type="button" className={iconBtn} disabled={outline.items.length === 1} onClick={() => setOutline(o => ({ ...o, items: o.items.filter((_, k) => k !== i) }))} aria-label={`Remove module ${i + 1}`}><Trash2 className="h-4 w-4" /></button>
-                  </span>
-                </div>
-                <input value={m.moduleTitle} onChange={e => setItem(i, { moduleTitle: e.target.value })} placeholder="Module title" aria-label={`Module ${i + 1} title`} className={input} />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <input value={m.duration} onChange={e => setItem(i, { duration: e.target.value })} placeholder="Duration, e.g. 2 hours" aria-label={`Module ${i + 1} duration`} className={input} />
-                  <input value={m.methodology} onChange={e => setItem(i, { methodology: e.target.value })} placeholder="Method, e.g. Lecture, role play" aria-label={`Module ${i + 1} method`} className={input} />
-                </div>
-                <textarea rows={3} value={m.topics} onChange={e => setItem(i, { topics: e.target.value })} placeholder="Topics covered (one per line)" aria-label={`Module ${i + 1} topics`} className={`${input} resize-y`} />
-              </div>
-            ))}
-            <button type="button" className={btnSecondary} onClick={() => setOutline(o => ({ ...o, items: [...o.items, emptyModule()] }))}><Plus className="h-4 w-4" /> Add a module</button>
-          </section>
-        </>
-      ) : (
+  return shell(
+    <form onSubmit={submit} className="space-y-5">
+      {intro}
+
         <>
           <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
             <h2 className="font-bold">Contact details</h2>
@@ -253,7 +200,6 @@ export default function TrainerLinkPage({ token }: { token: string }) {
 
           <TrainerExtrasFields {...extrasProps} only={['biodata', 'online', 'uploads']} />
         </>
-      )}
 
       {problem && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{problem}</p>}
       {nudge ? (
