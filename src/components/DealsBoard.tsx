@@ -38,6 +38,8 @@ import { ClientLastTouch } from './ClientContactDot';
 import { DuplicateStart, duplicateDeal, repeatDeal, repeatOwner } from '../lib/repeatDeal';
 import { activeHold, canHold, holdDue, holdText } from '../lib/dealHold';
 import { HoldBox, ResumeBox } from './DealHold';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -132,6 +134,8 @@ export default function DealsBoard({
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState(emptyForm());
   const [formError, setFormError] = useState('');
+  // An unfinished new deal or edit is kept in this browser until it's saved (lib/useFormDraft.ts).
+  const formDraft = useFormDraft(viewer.id, editing === 'new' ? `deal:new:${owner.id}` : editing ? `deal:${editing}` : null, form, setForm);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [stagePanel, setStagePanel] = useState<StagePanel>(null);
@@ -354,6 +358,7 @@ export default function DealsBoard({
         data.history = [...(existing.history || []), historyEntry(viewer, changes.length ? changes.join('. ') : 'Details updated')].slice(-40);
       }
       await setDoc(doc(db, 'pipelines', id), data, { merge: true });
+      formDraft.clear();
       setEditing(null);
       setOpenId(id);
       flash(existing ? 'Deal saved' : 'Deal created');
@@ -787,6 +792,7 @@ export default function DealsBoard({
               <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
             <form onSubmit={saveForm} className="space-y-4">
+              <DraftBar draft={formDraft} what={editing === 'new' ? 'new deal' : 'change to this deal'} />
               <div>
                 <span className={label}>Client</span>
                 <ClientPicker

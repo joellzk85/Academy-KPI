@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { deleteDoc, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { AlertTriangle, Check, Loader2, MessageSquareWarning, Plus, Trash2, Undo2 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 import { formatDate, todayIso } from '../lib/deals';
 import { HrdcQuery, QUERY_PHASE_LABELS, QueryPhase, isQueryOpen, isQueryOverdue } from '../lib/programmes';
 
@@ -25,6 +27,8 @@ export default function HrdcQueries({ deal, queries, viewer, people }: {
   const editable = viewer.role !== 'rep';
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ phase: 'before' as QueryPhase, question: '', receivedDate: todayIso(), replyBy: '', handledById: viewer.id });
+  // Kept in this browser until it's saved (lib/useFormDraft.ts).
+  const draft = useFormDraft(viewer.id, adding ? `hrdc-query:${deal.id}` : null, form, setForm);
   const [answering, setAnswering] = useState<string | null>(null);
   const [answer, setAnswer] = useState({ date: todayIso(), text: '' });
   const [busy, setBusy] = useState(false);
@@ -61,6 +65,7 @@ export default function HrdcQueries({ deal, queries, viewer, people }: {
         handledById: handler.id, handledByName: handler.name, answeredDate: '', answer: '',
         createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
       });
+      draft.clear();
       setAdding(false);
       setForm({ phase: form.phase, question: '', receivedDate: todayIso(), replyBy: '', handledById: viewer.id });
     });
@@ -136,6 +141,7 @@ export default function HrdcQueries({ deal, queries, viewer, people }: {
 
       {editable && adding && (
         <form onSubmit={save} className="space-y-3 rounded-xl border border-line bg-surface p-4">
+          <DraftBar draft={draft} what="HRDC query" />
           <p className="text-sm font-semibold">New HRDC query</p>
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="When the query came">
             {(Object.keys(QUERY_PHASE_LABELS) as QueryPhase[]).map(ph => (

@@ -7,6 +7,8 @@ import TrainingDaysPicker from './TrainingDaysPicker';
 import { ApptMode, DealAppointment, MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import { ProgrammePicker } from './Programmes';
 import { dealContact } from '../lib/contacts';
+import { forgetDraft, useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -43,6 +45,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
     setError('');
     try {
       await updateDoc(doc(db, 'pipelines', deal.id), clean(changes));
+      if (mode === 'log') forgetDraft(viewer.id, `appt-log:${deal.id}`);
       setMode(null);
       onDone(msg);
     } catch (e) {
@@ -198,6 +201,8 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
     followUpDate: /^\d{4}-\d{2}-\d{2}/.test(deal.followUpDate || '') ? deal.followUpDate.slice(0, 10) : '',
   });
   const [err, setErr] = useState('');
+  // Kept in this browser until it's saved (lib/useFormDraft.ts; cleared by the box once the log is saved).
+  const draft = useFormDraft(viewer.id, `appt-log:${deal.id}`, v, setV);
   const set = (c: Partial<typeof v>) => setV(x => ({ ...x, ...c }));
 
   const submit = () => {
@@ -214,6 +219,7 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
   return (
     <div className="space-y-4 rounded-xl border border-accent/30 bg-accent-soft/40 p-4">
       <p className="font-semibold">Log appointment</p>
+      <DraftBar draft={draft} what="appointment log" />
       <div className="grid gap-3 sm:grid-cols-3">
         <div><label className={label} htmlFor="lg-d">Date of meeting</label><input id="lg-d" type="date" value={v.date} max={todayIso()} onChange={e => set({ date: e.target.value })} className={input} /></div>
         <div className="sm:col-span-2"><label className={label} htmlFor="lg-m">Met with</label><input id="lg-m" value={v.metWith} onChange={e => set({ metWith: e.target.value })} className={input} placeholder="Contact person" /></div>

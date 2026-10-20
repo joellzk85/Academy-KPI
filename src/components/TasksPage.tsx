@@ -8,6 +8,8 @@ import { GROUP_LABELS, GROUP_ORDER, Task, TaskGroup, assigneesOf, assignerOf, is
 import { linkedOnly } from '../lib/linked';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { useTeamList } from '../lib/useClientHistory';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 import { ClientTouchPoint, TOUCH_HOW_LABELS, TouchHow, newTouchPointId } from '../lib/touchPoints';
 
 // To-do (redesigned 2026-10-17). One shared task per job (no copies): quick add at the top,
@@ -67,6 +69,9 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenClient
   const [assignTo, setAssignTo] = useState<string[]>([rep.id]);
   const [tagged, setTagged] = useState<ClientRef[]>([]);
   const [dealId, setDealId] = useState('');
+  // An unfinished To-do is kept in this browser until it's added (lib/useFormDraft.ts).
+  const addDraft = useFormDraft(me.id, `todo:new:${rep.id}`, { detail, due, assignTo, tagged, dealId },
+    v => { setDetail(v.detail); setDue(v.due); setAssignTo(v.assignTo); setTagged(v.tagged); setDealId(v.dealId); });
 
   useEffect(() => {
     const subs = [
@@ -137,6 +142,7 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenClient
     try {
       await setDoc(doc(db, 'tasks', id), t);
       setDetail(''); setDue(''); setDealId(''); setTagged([]); setAssignTo([rep.id]);
+      addDraft.discard();
       const others = assignTo.filter(x => x !== rep.id);
       flash(others.length ? `Task sent to ${others.map(x => nameOf(x)).join(', ')}` : 'Task added');
     } catch (err) {
@@ -195,6 +201,7 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenClient
 
       {/* Quick add */}
       <form onSubmit={add} className="space-y-3 rounded-2xl border border-line bg-white p-4">
+        <DraftBar draft={addDraft} what="To-do" />
         <MentionInput value={detail} onChange={setDetail} clients={clientRefs} people={team} placeholder="What needs doing? Type @ to tag a client or teammate" ariaLabel="What needs doing"
           onPickClient={c => setTagged(x => (x.some(y => y.id === c.id) ? x : [...x, c]))}
           onPickPerson={p => setAssignTo(x => (x.includes(p.id) ? x : [...x, p.id]))} />
@@ -458,6 +465,9 @@ function TaskPanel({ t, team, clients, nameOf, dealChoices, deals, dealLabel, ca
   const [to, setTo] = useState<string[]>(assigneesOf(t));
   const [tagged, setTagged] = useState<ClientRef[]>(tagsOf(t));
   const [dealId, setDealId] = useState(t.pipelineId || '');
+  // Unsaved changes are kept in this browser until saved (lib/useFormDraft.ts).
+  const editDraft = useFormDraft(me.id, canChange ? `todo:${t.id}` : null, { detail, due, to, tagged, dealId },
+    v => { setDetail(v.detail); setDue(v.due); setTo(v.to); setTagged(v.tagged); setDealId(v.dealId); });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const deal = deals.find(d => d.id === dealId);
@@ -479,6 +489,7 @@ function TaskPanel({ t, team, clients, nameOf, dealChoices, deals, dealLabel, ca
         detail: detail.trim(), dateline: due, assignedToId: to[0], assignedTo: nameOf(to[0]), assignedToIds: to, ownerRepId: to[0], pipelineId: dealId,
         clientIds: tags.map(c => c.id), clientNames: tags.map(c => c.companyName),
       });
+      editDraft.clear();
       onSaved();
     } catch (err) {
       setError(friendlyError(err));
@@ -526,6 +537,7 @@ function TaskPanel({ t, team, clients, nameOf, dealChoices, deals, dealLabel, ca
         </div>
       )}
 
+      <DraftBar draft={editDraft} what="change to this To-do" />
       <fieldset disabled={!canChange} className="min-w-0 space-y-4">
         <div>
           <label className={label} htmlFor="tp-detail">What needs doing</label>

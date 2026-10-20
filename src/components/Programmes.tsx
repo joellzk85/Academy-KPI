@@ -6,6 +6,8 @@ import { deleteProgrammeEverywhere } from '../lib/detach';
 import { outlineProgrammeId } from '../lib/outlineResolve';
 import { Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 import { formatDate, todayIso } from '../lib/deals';
 import { HRDC_STATUS_LABELS, HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus } from '../lib/programmes';
 
@@ -121,6 +123,8 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState(emptyForm());
+  // An unfinished new programme or edit is kept in this browser until it's saved (lib/useFormDraft.ts).
+  const formDraft = useFormDraft(viewer.id, editing ? `programme:${editing}` : null, form, setForm);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -199,6 +203,7 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
         linked.slice(i, i + 400).forEach(d => batch.update(doc(db, 'pipelines', d.id), { courseName: name }));
         await batch.commit();
       }
+      formDraft.clear();
       setEditing(null);
     } catch (err) {
       setError(friendlyError(err));
@@ -310,6 +315,7 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
               <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
             <form onSubmit={save} className="space-y-4">
+              <DraftBar draft={formDraft} what={editing === 'new' ? 'new programme' : 'change to this programme'} />
               <div>
                 <label htmlFor="pg-name" className={label}>Programme name</label>
                 <input id="pg-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className={input} placeholder="Leadership for new managers" />

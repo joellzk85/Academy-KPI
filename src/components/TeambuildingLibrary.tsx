@@ -5,6 +5,8 @@ import { db, friendlyError } from '../lib/firebase';
 import { formatDate } from '../lib/deals';
 import { TbActivity, TbActivityContent, TbPackages, blankActivity, defaultPackages, trimLines } from '../lib/teambuilding';
 import { ActivityForm, Card, PackageEditor, btnPrimary, btnSecondary, input, linkBtn } from './TeambuildingParts';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 
 // Teambuilding → Activity library and Package template (Joel, 2026-10-19: "everyone can amend").
 // - Activities are typed once (photos, how it's played, takeaways…) and picked into proposals, where they can be
@@ -104,6 +106,8 @@ function ActivityPanel({ initial, isNew, me, onClose }: { initial: TbActivity; i
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const dirty = JSON.stringify(a) !== JSON.stringify(initial);
+  // Unsaved changes are kept in this browser to continue later (lib/useFormDraft.ts), so closing doesn't ask.
+  const draft = useFormDraft(me.id, isNew ? 'activity:new' : `activity:${initial.id}`, a, setA);
   const save = async () => {
     if (!a.name.trim()) { setError('Give the activity a name.'); return; }
     setBusy(true); setError('');
@@ -113,6 +117,7 @@ function ActivityPanel({ initial, isNew, me, onClose }: { initial: TbActivity; i
         ...(isNew ? { createdAt: new Date().toISOString(), createdById: me.id, createdByName: me.name } : {}),
       };
       await setDoc(doc(db, 'tb_activities', a.id), JSON.parse(JSON.stringify(out)));
+      draft.clear();
       onClose();
     } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
@@ -127,7 +132,7 @@ function ActivityPanel({ initial, isNew, me, onClose }: { initial: TbActivity; i
     try { await deleteDoc(doc(db, 'tb_activities', a.id)); onClose(); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
   const canDelete = !isNew && (me.role === 'management' || initial.createdById === me.id);
-  const close = () => { if (!dirty || window.confirm('Leave without saving your changes?')) onClose(); };
+  const close = onClose;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" aria-label="Activity" onClick={close}>
@@ -140,6 +145,7 @@ function ActivityPanel({ initial, isNew, me, onClose }: { initial: TbActivity; i
           <button type="button" onClick={close} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-4 empty:hidden"><DraftBar draft={draft} what={isNew ? 'new activity' : 'change to this activity'} /></div>
           <ActivityForm a={a} onChange={c => setA(x => ({ ...x, ...c }))} me={me} />
           {!isNew && <p className="mt-4 text-sm text-ink-soft">Changes here are used by proposals made from now on. Proposals that already have this activity keep their own copy.</p>}
         </div>

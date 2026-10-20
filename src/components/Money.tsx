@@ -11,6 +11,8 @@ import {
 import { daysUntil } from '../lib/checklist';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { onPhone } from '../lib/whatsapp';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 import PaymentRequestDocument, { paymentRef, paymentStatusText } from './PaymentRequestDocument';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -156,6 +158,8 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'da
 // ---------- Money in ----------
 function InForm({ deal, source, viewer, settings, onDone }: { deal: any; source: InSource; viewer: Viewer; settings: MoneySettings; onDone: () => void }) {
   const [f, setF] = useState({ invoiceNo: '', invoiceDate: todayIso(), amount: dealValue(deal) ? String(dealValue(deal)) : '', note: '' });
+  // Kept in this browser until it's saved (lib/useFormDraft.ts).
+  const draft = useFormDraft(viewer.id, `money-in:${source}:${deal.id}`, f, setF);
   const { busy, error, setError, run } = useRun();
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -168,6 +172,7 @@ function InForm({ deal, source, viewer, settings, onDone }: { deal: any; source:
         id, dealId: deal.id, source, invoiceNo: f.invoiceNo.trim(), invoiceDate: f.invoiceDate, amount, paidDate: '', paidAmount: 0, note: f.note.trim(),
         createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
       });
+      draft.clear();
       onDone();
     });
   };
@@ -175,6 +180,7 @@ function InForm({ deal, source, viewer, settings, onDone }: { deal: any; source:
   return (
     <form onSubmit={save} className="space-y-3 rounded-xl border border-line bg-surface p-4">
       <p className="text-sm font-semibold">{source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}</p>
+      <DraftBar draft={draft} what={source === 'hrdc' ? 'HRDC claim' : 'client invoice'} />
       <div className="grid gap-3 sm:grid-cols-2">
         <div><label className={small} htmlFor="mi-no">{source === 'hrdc' ? 'Claim / invoice no.' : 'Invoice no.'}</label><input id="mi-no" value={f.invoiceNo} onChange={e => setF(x => ({ ...x, invoiceNo: e.target.value }))} className={input} /></div>
         <div><label className={small} htmlFor="mi-date">{source === 'hrdc' ? 'Submitted on' : 'Invoice date'}</label><input id="mi-date" type="date" value={f.invoiceDate} onChange={e => setF(x => ({ ...x, invoiceDate: e.target.value }))} className={input} /></div>
@@ -261,6 +267,8 @@ export function InRow({ m, viewer, settings, context }: { m: MoneyIn; viewer: Vi
 // ---------- Money out ----------
 function OutForm({ deal, viewer, onDone }: { deal: any; viewer: Viewer; onDone: () => void }) {
   const [f, setF] = useState({ category: 'Trainer', payee: '', description: '', amount: '', timing: 'after' as OutTiming });
+  // Kept in this browser until it's saved (lib/useFormDraft.ts).
+  const draft = useFormDraft(viewer.id, `money-out:${deal.id}`, f, setF);
   const { busy, error, setError, run } = useRun();
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,12 +282,14 @@ function OutForm({ deal, viewer, onDone }: { deal: any; viewer: Viewer; onDone: 
         status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
         decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
       });
+      draft.clear();
       onDone();
     });
   };
   return (
     <form onSubmit={save} className="space-y-3 rounded-xl border border-line bg-surface p-4">
       <p className="text-sm font-semibold">Request a payment</p>
+      <DraftBar draft={draft} what="payment request" />
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className={small} htmlFor="mo-cat">What for</label>
@@ -504,6 +514,8 @@ const blankItem = (): ItemDraft => ({ description: '', qty: '1', price: '' });
 function CompanyForm({ viewer, onDone }: { viewer: Viewer; onDone: () => void }) {
   const [f, setF] = useState({ requestDate: todayIso(), category: COMPANY_CATEGORIES[0], payee: '', info: '', neededBy: '', paymentDetails: '' });
   const [items, setItems] = useState<ItemDraft[]>([blankItem()]);
+  // Kept in this browser until it's saved (lib/useFormDraft.ts).
+  const draft = useFormDraft(viewer.id, 'company-payment:new', { f, items }, v => { setF(v.f); setItems(v.items); });
   const { busy, error, setError, run } = useRun();
   const parsed = items.map(i => ({ description: i.description.trim(), qty: num(i.qty), price: num(i.price) }));
   const total = itemsTotal(parsed);
@@ -526,6 +538,7 @@ function CompanyForm({ viewer, onDone }: { viewer: Viewer; onDone: () => void })
         status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
         decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
       });
+      draft.clear();
       onDone();
     });
   };
@@ -533,6 +546,7 @@ function CompanyForm({ viewer, onDone }: { viewer: Viewer; onDone: () => void })
   return (
     <form onSubmit={save} className="space-y-4 rounded-2xl border border-line bg-surface p-4">
       <p className="font-semibold">Raise a company payment</p>
+      <DraftBar draft={draft} what="company payment" />
       <div className="grid gap-3 sm:grid-cols-2">
         <div><label className={small} htmlFor="cp-date">Date of request</label><input id="cp-date" type="date" value={f.requestDate} onChange={e => setF(x => ({ ...x, requestDate: e.target.value }))} className={input} /></div>
         <div>

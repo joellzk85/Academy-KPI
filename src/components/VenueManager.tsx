@@ -8,6 +8,8 @@ import { VenueBooking, phoneIn, venueBookings } from '../lib/venues';
 import { linkedOnly } from '../lib/linked';
 import { deleteVenueEverywhere } from '../lib/detach';
 import { venuePhotos } from '../lib/teambuilding';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
 
 // Venues (redesigned 2026-10-17, like Clients and Trainers): one shared list, the same details as before.
@@ -62,6 +64,8 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm());
+  // An unfinished new venue or edit is kept in this browser until it's saved (lib/useFormDraft.ts).
+  const formDraft = useFormDraft(viewer.id, editing ? `venue:${editing}` : null, form, setForm);
   const [formError, setFormError] = useState('');
   const [dupId, setDupId] = useState<string | null>(null);
   const [panelError, setPanelError] = useState('');
@@ -138,6 +142,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
         await setDoc(doc(db, 'venues_directory', editing), details, { merge: true });
         flash('Venue saved');
       }
+      formDraft.clear();
       setEditing(null);
     } catch (err) {
       setFormError(friendlyError(err));
@@ -250,6 +255,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
               <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
             <form onSubmit={save} className="space-y-6">
+              <DraftBar draft={formDraft} what={editing === 'new' ? 'new venue' : 'change to this venue'} />
               <fieldset className="space-y-4">
                 <legend className="mb-3 text-[15px] font-bold">Venue</legend>
                 <div>

@@ -10,6 +10,8 @@ import { linkedOnly } from '../lib/linked';
 import { deleteTrainerEverywhere } from '../lib/detach';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
 import { ProfileSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
@@ -68,6 +70,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm());
+  // An unfinished new trainer or edit is kept in this browser until it's saved (lib/useFormDraft.ts).
+  const formDraft = useFormDraft(viewer.id, editing ? `trainer:${editing}` : null, form, setForm);
   const [formError, setFormError] = useState('');
   const [dupId, setDupId] = useState<string | null>(null);
   const [panelError, setPanelError] = useState('');
@@ -196,6 +200,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         await setDoc(doc(db, 'trainers_directory', editing), details, { merge: true });
         flash('Trainer saved');
       }
+      formDraft.clear();
       setEditing(null);
     } catch (err) {
       setFormError(friendlyError(err));
@@ -399,6 +404,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
               <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
             <form onSubmit={save} className="space-y-4">
+              <DraftBar draft={formDraft} what={editing === 'new' ? 'new trainer' : 'change to this trainer'} />
               <div>
                 <label className={label} htmlFor="t-name">Name</label>
                 <input id="t-name" value={form.name} onChange={e => set({ name: e.target.value })} className={input} autoFocus />

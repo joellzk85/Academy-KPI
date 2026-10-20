@@ -26,6 +26,7 @@ import PhotoPicker from './PhotoPicker';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import CustomerCodeBox from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
+import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { AcceptBlock } from './ProposalLinkPage';
 import { canSeeTracking } from '../lib/proposalTracking';
 import { useProposalSettings } from '../lib/useProposalSettings';
@@ -43,6 +44,7 @@ import { ActivityForm, Card, NumberBox, PackageEditor, UpDown, btnPrimary, btnSe
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 type Tab = 'proposals' | 'activities' | 'template';
 const TAB_KEY = 'next_tb_tab';
+const toneClass = { soft: 'text-ink-soft', attention: 'text-attention', danger: 'text-danger' };
 
 export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStartHandled, openId, onOpenHandled, startOnShared, fromDealId, onBackToDeal, onOpenDeals }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
@@ -437,8 +439,17 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   };
   const save = () => persist(p, 'Saved');
   const ensureSaved = async () => (dirty ? persist(p, 'Saved') : true);
-  const close = () => { if (!dirty || window.confirm('You have unsaved changes. Leave without saving?')) onClose(); };
-  const goBack = () => { if (backToDeal && (!dirty || window.confirm('You have unsaved changes. Leave without saving?'))) backToDeal(); };
+  // Drafts save themselves a couple of seconds after the last change, and before leaving (see lib/useAutoSave.ts).
+  // A new proposal only once something in it was changed (the customer code going in doesn't count).
+  const touched = !isNew || saved !== '' || JSON.stringify({ ...p, refNumber: '' }) !== JSON.stringify({ ...initial, refNumber: '' });
+  const auto = useAutoSave({
+    value: p, dirty, enabled: !locked && touched && !busy,
+    write: async v => { await setDoc(doc(db, 'teambuilding_proposals', v.id), JSON.parse(JSON.stringify(cleanForSave({ ...v, updatedAt: new Date().toISOString() })))); },
+    onSaved: setSaved,
+  });
+  const status = note ? { text: note, tone: 'soft' as const } : autoSaveText(auto.state, dirty && touched, locked, touched);
+  const close = () => leaveAfterSave(auto.flush, onClose);
+  const goBack = () => { if (backToDeal) leaveAfterSave(auto.flush, backToDeal); };
 
   // Sending the proposal: a deal at New moves to "Proposal sent", with the same check as its own button
   // (programme from the list and the deal value). Same rules as course outlines.
@@ -504,7 +515,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   const sendLabel = locked ? 'Send again' : dealAtNew ? 'Send proposal' : 'Send';
 
   if (preview) {
-    return <Preview r={r} pax={pax} onPax={locked ? undefined : changePax} onBack={() => setPreview(false)} dirty={dirty}
+    return <Preview r={r} pax={pax} onPax={locked ? undefined : changePax} onBack={() => setPreview(false)} dirty={dirty && touched}
       pdfBusy={pdfBusy} onPdf={downloadPdf} onSend={startSend} sendLabel={sendLabel} busy={busy} error={error} sendDialog={sendDialog} />;
   }
 
@@ -589,7 +600,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
               <p className="font-semibold">{r.company || deal.client || 'No client'}</p>
               <p className="text-sm text-ink-soft">
                 {dealProgrammeName(deal, programmes) || deal.enquiryNote || 'No programme'} · {STAGE_LABELS[dealStage(deal)]} · {nameOf(dealOwnerId(deal))}
-                {onOpenDeals && <> · <button type="button" className={linkBtn} onClick={() => { if (!dirty || window.confirm('Leave this proposal without saving?')) onOpenDeals(); }}>Edit deal</button></>}
+                {onOpenDeals && <> · <button type="button" className={linkBtn} onClick={() => leaveAfterSave(auto.flush, onOpenDeals)}>Edit deal</button></>}
               </p>
             </div>
           ) : (
@@ -651,7 +662,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3">
           <span className="text-[15px] font-semibold">{tbSummary({ ...r.p, pax })}</span>
-          <span className={`text-sm ${dirty ? 'text-attention' : 'text-ink-soft'}`}>{note || (dirty ? 'Not saved yet' : locked ? 'Sent and locked' : 'All changes saved')}</span>
+          <span className={`text-sm ${toneClass[status.tone]}`}>{status.text}</span>
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
             <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
@@ -691,7 +702,7 @@ function Preview({ r, pax, onPax, onBack, dirty, pdfBusy, onPdf, onSend, sendLab
         </div>
         <span className="hidden text-sm text-ink-soft md:inline">This is what the client will see.</span>
         <span className="ml-auto flex flex-wrap items-center gap-2">
-          {dirty && <span className="text-sm text-attention">Not saved yet</span>}
+          {dirty && <span className="text-sm text-attention">Draft saves in a moment</span>}
           <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={onPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
           <button type="button" className={btnPrimary} disabled={busy} onClick={onSend}><Send className="h-4 w-4" /> {sendLabel}</button>
         </span>

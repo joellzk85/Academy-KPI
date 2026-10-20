@@ -14,6 +14,8 @@ import { deleteClientEverywhere } from '../lib/detach';
 import { CODE_PROBLEM, cleanCode, clientCode, codeOk, codeTakenBy, suggestCode } from '../lib/docRefs';
 import { Contact, clientContacts, mainContactFields, newContactId } from '../lib/contacts';
 import { ProposalFile } from '../lib/proposals';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 import { openProposalFile } from './ProposalFiles';
 import {
   COLOUR_LABELS, ClientSummary, ClientTouchPoint, ContactColour, FILTER_LABELS, TOUCH_HOW_LABELS, TimelineEntry, TimelineFilter, TouchHow,
@@ -111,6 +113,8 @@ export default function ClientManager({ rep, reps, viewer, onOpenDeal, onOpenQuo
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm());
+  // An unfinished new client or edit is kept in this browser until it's saved (lib/useFormDraft.ts).
+  const formDraft = useFormDraft(viewer.id, editing ? `client:${editing}` : null, form, setForm);
   const [formError, setFormError] = useState('');
   const [dupId, setDupId] = useState<string | null>(null);
   const [panelError, setPanelError] = useState('');
@@ -265,6 +269,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
         await setDoc(doc(db, 'clients', editing), details, { merge: true });
         flash('Client saved');
       }
+      formDraft.clear();
       setEditing(null);
     } catch (err) {
       setFormError(friendlyError(err));
@@ -445,6 +450,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
               <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
             <form onSubmit={save} className="space-y-6">
+              <DraftBar draft={formDraft} what={editing === 'new' ? 'new client' : 'change to this client'} />
               <fieldset className="space-y-4">
                 <legend className="mb-3 text-[15px] font-bold">Company</legend>
                 <div>
@@ -751,6 +757,9 @@ function TouchPointForm({ client, team, viewer, today, onCancel, onSaved }: {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const people = team.some(p => p.id === viewer.id) ? team : [{ id: viewer.id, name: viewer.name }, ...team];
+  // Kept in this browser until it's saved (lib/useFormDraft.ts).
+  const draft = useFormDraft(viewer.id, `touch-point:${client.id}`, { date, how, contactId, text, nextDate, byId },
+    v => { setDate(v.date); setHow(v.how); setContactId(v.contactId); setText(v.text); setNextDate(v.nextDate); setById(v.byId); });
 
   const save = async () => {
     setErr('');
@@ -769,6 +778,7 @@ function TouchPointForm({ client, team, viewer, today, onCancel, onSaved }: {
     setBusy(true);
     try {
       await setDoc(doc(db, 'client_touch_points', id), tp);
+      draft.clear();
       onSaved();
     } catch (e) {
       setErr(friendlyError(e));
@@ -780,6 +790,7 @@ function TouchPointForm({ client, team, viewer, today, onCancel, onSaved }: {
   return (
     <div className="space-y-3 rounded-xl border border-accent/40 bg-white p-4">
       <p className="font-semibold">Add touch point</p>
+      <DraftBar draft={draft} what="touch point" />
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label htmlFor="tp-date" className={label}>Date</label>

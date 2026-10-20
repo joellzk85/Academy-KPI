@@ -4,6 +4,8 @@ import { Loader2, XCircle } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { dealOwnerId, dealStage, formatDate, todayIso, STAGE_LABELS } from '../lib/deals';
 import { useTeamList } from '../lib/useClientHistory';
+import { useFormDraft } from '../lib/useFormDraft';
+import DraftBar from './DraftBar';
 import { FollowUpAlert, FollowUpHow, FollowUpNote, HOW_LABELS, alertText, followUpNotes, newNoteId } from '../lib/followUps';
 
 // Follow-up notes on a deal (Joel, 2026-10-18): "Log follow-up" in the deal panel's Next step box, and the
@@ -37,6 +39,9 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
   const people = team.some(p => p.id === byId) || !byId ? team : [{ id: byId, name: deal.ownerName || 'Deal owner', role: '', active: true }, ...team];
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // Kept in this browser until it's saved (lib/useFormDraft.ts).
+  const draft = useFormDraft(viewer.id, `follow-up:${deal.id}`, { date, how, text, reason, nextDate, byId },
+    v => { setDate(v.date); setHow(v.how); setText(v.text); setReason(v.reason); setNextDate(v.nextDate); setById(v.byId); });
 
   const save = async () => {
     setErr('');
@@ -63,6 +68,7 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
         followUpById: byId, followUpByName: byName,
         history: [...(deal.history || []), { at: note.at, byId: viewer.id, byName: viewer.name, action }].slice(-40),
       });
+      draft.clear();
       onDone(decision ? 'Kept open' : 'Follow-up logged');
     } catch (e) {
       setErr(friendlyError(e));
@@ -74,6 +80,7 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
   return (
     <div className="space-y-3 rounded-xl border border-line bg-white p-4">
       <p className="font-semibold">{decision ? 'Decide: keep this deal open, or mark it lost' : 'Log follow-up'}</p>
+      <DraftBar draft={draft} what="follow-up note" />
       {decision && (
         <p className="text-sm text-ink-soft">
           It has been {alert!.daysInStage} days at {STAGE_LABELS[dealStage(deal)]}, past the last follow-up checkpoint.

@@ -23,6 +23,7 @@ import { OutlineSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
 import { trainerOptions } from './PickOrType';
 import CustomerCodeBox from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
+import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 
 // Course outlines (redesigned 2026-10-17, like quotations).
 // An outline is made for a deal (or as a general outline with no client), starting blank or from a copy
@@ -49,6 +50,16 @@ const newModule = (): CourseOutlineItem => ({ id: newId('m'), no: 0, moduleTitle
 const newRow = (isDay = false): OutlineAgendaRow => ({ id: newId('a'), time: '', text: '', ...(isDay ? { isDay: true } : {}) });
 const summary = (o: CourseOutline) => `${durationText(o.durationDays) || '0 days'} · ${(o.items || []).length} module${(o.items || []).length === 1 ? '' : 's'}`;
 const trimList = (v?: string[]) => (v || []).map(x => x.trim()).filter(Boolean);
+const toneClass = { soft: 'text-ink-soft', attention: 'text-attention', danger: 'text-danger' };
+// What goes to the database (the Save button and the automatic draft save write the same thing).
+const prepareOutline = (out: CourseOutline): CourseOutline => clean({
+  ...out,
+  outcomes: trimList(out.outcomes),
+  items: (out.items || []).map((m, i) => ({ ...m, no: i + 1 })),
+  ...(out.methods ? { methods: trimList(out.methods) } : {}),
+  ...(out.evaluation ? { evaluation: trimList(out.evaluation) } : {}),
+  ...(out.nextTraining ? { nextTraining: trimList(out.nextTraining) } : {}),
+});
 
 export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onStartHandled, onOpenTab, openId, onOpenHandled, startOnShared, fromDealId, onBackToDeal }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
@@ -448,14 +459,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     setBusy(true);
     setError('');
     try {
-      const final = clean({
-        ...out,
-        outcomes: trimList(out.outcomes),
-        items: (out.items || []).map((m, i) => ({ ...m, no: i + 1 })),
-        ...(out.methods ? { methods: trimList(out.methods) } : {}),
-        ...(out.evaluation ? { evaluation: trimList(out.evaluation) } : {}),
-        ...(out.nextTraining ? { nextTraining: trimList(out.nextTraining) } : {}),
-      });
+      const final = prepareOutline(out);
       await setDoc(doc(db, 'course_outlines', final.id), final);
       setO(final);
       setSaved(JSON.stringify(final));
@@ -470,6 +474,15 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     }
   };
   const save = () => persist(o, 'Saved');
+  // Drafts save themselves a couple of seconds after the last change, and before leaving (see lib/useAutoSave.ts).
+  // A new outline only once something in it was changed (the customer code going in doesn't count).
+  const touched = !isNew || saved !== '' || JSON.stringify({ ...o, refNumber: '' }) !== JSON.stringify({ ...initial, refNumber: '' });
+  const auto = useAutoSave({
+    value: o, dirty, enabled: !locked && touched && !busy,
+    write: async v => { await setDoc(doc(db, 'course_outlines', v.id), prepareOutline(v)); },
+    onSaved: setSaved,
+  });
+  const status = note ? { text: note, tone: 'soft' as const } : autoSaveText(auto.state, dirty && touched, locked, touched);
   // Sending the outline is sending the proposal (Joel, 2026-10-19): a deal at New moves to "Proposal sent", with the
   // same check as the deal's own button (programme from the list and the deal value; GapsBox asks for what's missing).
   // Only from New, so re-sending keeps the first date, and "Revise" never moves the deal back. Only the deal's
@@ -539,8 +552,8 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     if (!window.confirm('Unlock this outline to revise it? It will read the latest deal and client details again.')) return;
     return persist({ ...o, status: 'draft', sentAt: '', sentById: '', sentByName: '' }, 'Unlocked for revision');
   };
-  const close = () => { if (!dirty || window.confirm('You have unsaved changes. Leave without saving?')) onClose(); };
-  const goBackToDeal = () => { if (backToDeal && (!dirty || window.confirm('You have unsaved changes. Leave without saving?'))) backToDeal(); };
+  const close = () => leaveAfterSave(auto.flush, onClose);
+  const goBackToDeal = () => { if (backToDeal) leaveAfterSave(auto.flush, backToDeal); };
   const printIt = () => {
     const t = document.title;
     document.title = o.refNumber || 'Course outline';
@@ -618,7 +631,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
             <button type="button" className={btnSecondary} onClick={() => setPreview(false)}>{backToDeal ? <Pencil className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />} Back to edit</button>
           </span>
           <span className="flex flex-wrap items-center gap-2">
-            {dirty && <span className="text-sm text-attention">Not saved yet</span>}
+            {dirty && touched && <span className={`text-sm ${toneClass[status.tone]}`}>{status.text}</span>}
             <button type="button" className={btnSecondary} onClick={printIt}><Printer className="h-4 w-4" /> Print</button>
             <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
             <button type="button" className={btnPrimary} disabled={busy} onClick={startSend}><Send className="h-4 w-4" /> {sendLabel}</button>
@@ -711,7 +724,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
               <p className="font-semibold">{clientName || r.deal.client || 'No client'}</p>
               <p className="text-sm text-ink-soft">
                 {r.programmeName || 'No programme'} · {STAGE_LABELS[dealStage(r.deal)]} · {nameOf(dealOwnerId(r.deal))}
-                {onOpenTab && <> · <button type="button" className={linkBtn} onClick={() => { if (!dirty || window.confirm('Leave this outline without saving?')) onOpenTab('pipeline'); }}>Edit deal</button></>}
+                {onOpenTab && <> · <button type="button" className={linkBtn} onClick={() => leaveAfterSave(auto.flush, () => onOpenTab('pipeline'))}>Edit deal</button></>}
               </p>
             </div>
           ) : r.client ? (
@@ -954,7 +967,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3">
           <span className="text-[15px] font-semibold">{summary(shownO)}</span>
-          <span className={`text-sm ${dirty ? 'text-attention' : 'text-ink-soft'}`}>{note || (dirty ? 'Not saved yet' : locked ? 'Sent and locked' : 'All changes saved')}</span>
+          <span className={`text-sm ${toneClass[status.tone]}`}>{status.text}</span>
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
             <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>

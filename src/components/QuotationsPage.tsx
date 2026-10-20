@@ -24,6 +24,7 @@ import QuoteFixBox from './QuoteFixBox';
 import CustomerCodeBox from './CustomerCodeBox';
 import { clientCode, nextDocRef, refWithCode } from '../lib/docRefs';
 import { isItemsOnly } from '../lib/dealQuotes';
+import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 
 // Quotations (redesigned 2026-10-16; one source of truth).
 // A quotation is made for a deal (or a client). While it's a draft, the client's details, programme,
@@ -368,6 +369,10 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 }
 
 // ---------- Editor ----------
+const toneClass = { soft: 'text-ink-soft', attention: 'text-attention', danger: 'text-danger' };
+// What goes to the database (the Save button and the automatic draft save write the same thing).
+const prepareQuote = (out: Quotation): Quotation => clean({ ...out, items: (out.items || []).map((it, i) => ({ ...it, no: i + 1 })) });
+
 export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, backToDeal }: {
   initial: Quotation; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: QuoteSources; dealsForPicker: any[];
   onOpenTab?: (tab: Tab) => void; onClose: () => void; key?: string;
@@ -409,7 +414,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     setBusy(true);
     setError('');
     try {
-      const final = clean({ ...out, items: (out.items || []).map((it, i) => ({ ...it, no: i + 1 })) });
+      const final = prepareQuote(out);
       await setDoc(doc(db, 'quotations', final.id), final);
       setQ(final);
       setSaved(JSON.stringify(final));
@@ -424,6 +429,15 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     }
   };
   const save = () => persist(q, 'Saved');
+  // Drafts save themselves a couple of seconds after the last change, and before leaving (see lib/useAutoSave.ts).
+  // A new quotation only once something in it was changed (the customer code going in doesn't count).
+  const touched = !isNew || saved !== '' || JSON.stringify({ ...q, refNumber: '' }) !== JSON.stringify({ ...initial, refNumber: '' });
+  const auto = useAutoSave({
+    value: q, dirty, enabled: !locked && touched && !busy,
+    write: async v => { await setDoc(doc(db, 'quotations', v.id), prepareQuote(v)); },
+    onSaved: setSaved,
+  });
+  const status = note ? { text: note, tone: 'soft' as const } : autoSaveText(auto.state, dirty && touched, locked, touched);
   // Sent (by email, WhatsApp or by hand): lock a copy of exactly what prints now, and log how it went.
   // Sending again after it's locked only adds to the log.
   const lockAsSent = async (entry: QuoteSendEntry) => {
@@ -457,8 +471,8 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
     if (!window.confirm('Unlock this quotation to revise it? It will read the latest client, deal and programme details again.')) return;
     return persist({ ...q, status: 'draft', sentAt: '', sentById: '', sentByName: '' }, 'Unlocked for revision');
   };
-  const close = () => { if (!dirty || window.confirm('You have unsaved changes. Leave without saving?')) onClose(); };
-  const goBackToDeal = () => { if (backToDeal && (!dirty || window.confirm('You have unsaved changes. Leave without saving?'))) backToDeal(); };
+  const close = () => leaveAfterSave(auto.flush, onClose);
+  const goBackToDeal = () => { if (backToDeal) leaveAfterSave(auto.flush, backToDeal); };
   // "Client signed: mark deal won" on a sent quotation: same people as on the deal (its owner, Admin, Management).
   const canMarkWon = !!r.deal && dealStage(r.deal) === 'quoted' && (me.role !== 'rep' || dealOwnerId(r.deal) === me.id);
   const downloadPdf = async () => {
@@ -521,7 +535,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
             <button type="button" className={btnSecondary} onClick={() => setPreview(false)}>{backToDeal ? <Pencil className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />} Back to edit</button>
           </span>
           <span className="flex items-center gap-2">
-            {dirty && <span className="text-sm text-attention">Not saved yet</span>}
+            {dirty && touched && <span className={`text-sm ${toneClass[status.tone]}`}>{status.text}</span>}
             <button type="button" className={btnSecondary} onClick={printIt}>Print</button>
             <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
             <button type="button" className={btnPrimary} onClick={() => setSending(true)}><Send className="h-4 w-4" /> {locked ? 'Send again' : 'Send'}</button>
@@ -536,7 +550,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
 
   const opts = nameOptions;
   const goto = (tab: Tab, what: string) => onOpenTab ? (
-    <button type="button" className={linkBtn} onClick={() => { if (!dirty || window.confirm('Leave this quotation without saving?')) onOpenTab(tab); }}>{what}</button>
+    <button type="button" className={linkBtn} onClick={() => leaveAfterSave(auto.flush, () => onOpenTab(tab))}>{what}</button>
   ) : null;
 
   return (
@@ -815,7 +829,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3">
           <span className="text-lg font-bold tabular-nums">{formatRM(total)}</span>
-          <span className={`text-sm ${dirty ? 'text-attention' : 'text-ink-soft'}`}>{note || (dirty ? 'Not saved yet' : locked ? 'Sent and locked' : 'All changes saved')}</span>
+          <span className={`text-sm ${toneClass[status.tone]}`}>{status.text}</span>
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
             <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
