@@ -254,5 +254,5 @@ export function trainingDateText(p: any, withDays = false): string {
 }
 
 export function formatRM(n: number): string {
-  return 'RM ' + Math.round(n).toLocaleString('en-MY');
+  return 'RM ' + (Number(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

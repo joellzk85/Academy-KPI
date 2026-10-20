@@ -5,7 +5,7 @@
 // - config/money_settings: HRDC deduction %, days before a payment counts as overdue,
 //   and the HRDC claim deadline (blank until Joel confirms HRD Corp's current rule).
 
-import { todayIso, trainingEndDate } from './deals';
+import { formatRM, todayIso, trainingEndDate } from './deals';
 import { daysUntil, Flag } from './checklist';
 
 export type InSource = 'hrdc' | 'client';
@@ -200,7 +200,7 @@ export function moneyFlags(deal: any, ins: MoneyIn[], outs: MoneyOut[], s: Money
     const age = -(daysUntil(m.invoiceDate, today) ?? 0);
     if (age > s.overdueDays) flags.push({ level: 'danger', text: `${m.source === 'hrdc' ? 'HRDC' : 'Client'} payment overdue (${age} days since ${m.source === 'hrdc' ? 'claim' : 'invoice'})` });
   });
-  ins.forEach(m => { const gap = shortfall(m, s); if (gap) flags.push({ level: 'danger', text: `HRDC paid RM ${Math.round(gap).toLocaleString('en-MY')} less than expected` }); });
+  ins.forEach(m => { const gap = shortfall(m, s); if (gap) flags.push({ level: 'danger', text: `HRDC paid ${formatRM(gap)} less than expected` }); });
   const pending = outs.filter(o => o.status === 'pending').length;
   if (pending) flags.push({ level: 'attention', text: `${pending} payment request${pending === 1 ? '' : 's'} waiting for approval` });
   return flags;

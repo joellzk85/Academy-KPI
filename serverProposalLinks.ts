@@ -174,7 +174,7 @@ export function registerProposalLinkRoutes(app: Express) {
     const price = col ? priceFor(pk, col.id, pax).price : null;
     const now = Date.now();
     const accepted = { name, position, ...(note ? { note } : {}), ...(col ? { packageName: col.name } : {}), pax, price, at: now };
-    const what = [col ? `package "${col.name}"` : '', pax ? `${pax} pax` : '', price ? `RM ${price.toLocaleString('en-MY')}` : ''].filter(Boolean).join(', ');
+    const what = [col ? `package "${col.name}"` : '', pax ? `${pax} pax` : '', price ? `RM ${price.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''].filter(Boolean).join(', ');
     const dRef = dealId ? db.collection('pipelines').doc(dealId) : null;
     await db.runTransaction(async tx => {
       const l: any = (await tx.get(ref)).data();

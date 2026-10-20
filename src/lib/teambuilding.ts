@@ -414,7 +414,7 @@ export const tbSummary = (p: TbProposal) => {
   return [days ? `${days} day${days === 1 ? '' : 's'}` : '', `${acts} activit${acts === 1 ? 'y' : 'ies'}`, p.pax ? `${p.pax} pax` : ''].filter(Boolean).join(' · ');
 };
 
-export const formatPrice = (n: number) => `RM ${Math.round(n).toLocaleString('en-MY')}`;
+export const formatPrice = (n: number) => `RM ${(Number(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // Lines of text to a list ("one per line").
 export const lines = (v: string) => v.split('\n');

@@ -489,7 +489,7 @@ export default function HomeDashboard({
                 TOTAL SALES TO DATE (YTD)
               </span>
               <h3 className="text-3xl font-black font-mono tracking-tight text-white mt-1">
-                RM {totalSalesToDateYTD.toLocaleString()}
+                RM {totalSalesToDateYTD.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </h3>
             </div>
             
@@ -513,7 +513,7 @@ export default function HomeDashboard({
                 FILTERED YTD SALES
               </span>
               <h3 className="text-3xl font-black font-mono tracking-tight text-slate-800 mt-1">
-                RM {filteredYTDSales.toLocaleString()}
+                RM {filteredYTDSales.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </h3>
             </div>
             
@@ -537,7 +537,7 @@ export default function HomeDashboard({
                 ACTIVE MONTH SALES ({selectedMonth})
               </span>
               <h3 className="text-3xl font-black font-mono tracking-tight text-[#10B981] mt-1">
-                RM {activeMonthSales.toLocaleString()}
+                RM {activeMonthSales.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </h3>
             </div>
             
