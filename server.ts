@@ -11,6 +11,7 @@ import { registerDocLinkRoutes } from "./serverDocLinks";
 import { registerPhotoRoutes } from "./serverPhotos";
 import { registerProposalLinkRoutes } from "./serverProposalLinks";
 import { registerPaymentLinkRoutes } from "./serverPaymentLinks";
+import { registerBlueprintRoutes } from "./serverBlueprint";
 
 // Load environment variables
 dotenv.config();
@@ -27,6 +28,9 @@ async function startServer() {
   // Outlook email (quotations with their PDF). Registered before the general JSON reader below, because
   // a PDF is bigger than its 100 KB limit; these routes read their own bodies.
   registerMailRoutes(app);
+
+  // Import from the Blueprint spreadsheet (Management): reads the Excel file, also bigger than 100 KB.
+  registerBlueprintRoutes(app);
 
   app.use(express.json());
 

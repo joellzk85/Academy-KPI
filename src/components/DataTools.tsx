@@ -3,9 +3,11 @@ import { collection, doc, getDocs, writeBatch } from 'firebase/firestore';
 import { AlertTriangle, Check, Link2, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { TeamMember, ROLE_LABELS } from '../types';
+import BlueprintImport from './BlueprintImport';
 
 interface DataToolsProps {
   teamMembers: TeamMember[];
+  viewer: { id: string; name: string };
 }
 
 // Records that carry people's IDs and should follow them to their new Team profile.
@@ -45,7 +47,7 @@ async function commitInChunks(ops: ((b: ReturnType<typeof writeBatch>) => void)[
   }
 }
 
-export default function DataTools({ teamMembers }: DataToolsProps) {
+export default function DataTools({ teamMembers, viewer }: DataToolsProps) {
   const [records, setRecords] = useState<Doc[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [mapping, setMapping] = useState<Record<string, string>>({});
@@ -238,6 +240,8 @@ export default function DataTools({ teamMembers }: DataToolsProps) {
         </div>
         <button type="button" className={btnSecondary} onClick={load}><RefreshCw className="h-4 w-4" /> Refresh</button>
       </div>
+      <BlueprintImport viewer={viewer} />
+
       {loadError && <p role="alert" className="rounded-lg bg-danger-soft px-4 py-3 text-[15px] text-danger">{loadError}</p>}
 
       {/* Link old records */}

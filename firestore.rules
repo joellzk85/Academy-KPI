@@ -338,6 +338,12 @@ service cloud.firestore {
       allow read, write: if isManagement();
     }
 
+    // Payment tracking (2026-10-20): HRDC claim and invoice lines imported from the Blueprint spreadsheet
+    // ("Sales 2026") or added by hand. Management only.
+    match /payment_records/{recordId} {
+      allow read, write: if isManagement();
+    }
+
     // Trainer links (2026-10-17): private links for a trainer to fill in a course outline or their profile.
     // Team members make, cancel and accept them. Trainers never use the database: the CRM server reads the
     // link and stores what they submit (serverTrainerLinks.ts).

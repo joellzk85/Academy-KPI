@@ -116,10 +116,13 @@ export function ProgrammePicker({ programmes, value, legacyName, viewer, onChang
 // ---------- Programme list (Admin work → Programmes) ----------
 type Filter = 'all' | HrdcStatus;
 
-const emptyForm = () => ({ name: '', hrdcStatus: 'not_registered' as HrdcStatus, hrdcCode: '', submittedDate: '', approvedDate: '', notes: '' });
+const emptyForm = () => ({ name: '', category: '', days: '', hrdcStatus: 'not_registered' as HrdcStatus, hrdcCode: '', submittedDate: '', approvedDate: '', notes: '' });
+const daysText = (d?: number | null) => (d ? (d === 0.5 ? 'Half day' : `${d} day${d === 1 ? '' : 's'}`) : '');
 
 export default function ProgrammesManager({ programmes, deals, viewer }: { programmes: Programme[]; deals: any[]; viewer: Viewer }) {
   const [filter, setFilter] = useState<Filter>('all');
+  const [category, setCategory] = useState('');   // '' = all, '-' = no category
+  const categories = useMemo(() => [...new Set(programmes.map(p => (p.category || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [programmes]);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState(emptyForm());
@@ -159,13 +162,14 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
     const q = search.trim().toLowerCase();
     return programmes
       .filter(p => filter === 'all' || programmeStatus(p) === filter)
-      .filter(p => !q || `${p.name} ${p.hrdcCode || ''}`.toLowerCase().includes(q))
+      .filter(p => !category || (category === '-' ? !(p.category || '').trim() : (p.category || '').trim() === category))
+      .filter(p => !q || `${p.name} ${p.hrdcCode || ''} ${p.category || ''}`.toLowerCase().includes(q))
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [programmes, filter, search]);
+  }, [programmes, filter, search, category]);
 
   const startNew = () => { setForm(emptyForm()); setError(''); setEditing('new'); };
   const startEdit = (p: Programme) => {
-    setForm({ name: p.name, hrdcStatus: programmeStatus(p), hrdcCode: p.hrdcCode || '', submittedDate: p.submittedDate || '', approvedDate: p.approvedDate || '', notes: p.notes || '' });
+    setForm({ name: p.name, category: p.category || '', days: p.days ? String(p.days) : '', hrdcStatus: programmeStatus(p), hrdcCode: p.hrdcCode || '', submittedDate: p.submittedDate || '', approvedDate: p.approvedDate || '', notes: p.notes || '' });
     setError('');
     setEditing(p.id);
   };
@@ -182,13 +186,17 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
     const name = form.name.trim();
     if (!name) return setError('Enter the programme name.');
     if (programmes.some(p => p.id !== editing && p.name.trim().toLowerCase() === name.toLowerCase())) return setError('A programme with this name is already in the list.');
-    if (form.hrdcStatus === 'approved' && !form.approvedDate) return setError('Enter the date HRDC approved it.');
+    // The approval date is asked for when a programme becomes approved here; ones imported as approved may not have it.
+    const wasApproved = editing !== 'new' && programmeStatus(programmes.find(p => p.id === editing)) === 'approved';
+    if (form.hrdcStatus === 'approved' && !form.approvedDate && !wasApproved) return setError('Enter the date HRDC approved it.');
+    const days = String(form.days || '').trim() ? Number(form.days) : 0;
+    if (String(form.days || '').trim() && !(days > 0 && days <= 60 && Number.isInteger(days * 2))) return setError('Number of days: a whole or half number, e.g. 1, 2 or 0.5.');
     setBusy(true);
     setError('');
     try {
       const id = editing && editing !== 'new' ? editing : `prog_${Date.now()}`;
       const data: any = {
-        id, name, hrdcStatus: form.hrdcStatus, hrdcCode: form.hrdcCode.trim(),
+        id, name, category: String(form.category || '').trim(), days: days || null, hrdcStatus: form.hrdcStatus, hrdcCode: form.hrdcCode.trim(),
         submittedDate: form.hrdcStatus === 'not_registered' ? '' : form.submittedDate,
         approvedDate: form.hrdcStatus === 'approved' ? form.approvedDate : '',
         notes: form.notes.trim(), updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name,
@@ -268,9 +276,18 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
         })}
       </div>
 
-      <div className="relative sm:w-72">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name or HRDC code" className={`${input} pl-9`} aria-label="Search programmes" />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, HRDC code or category" className={`${input} pl-9`} aria-label="Search programmes" />
+        </div>
+        {categories.length > 0 && (
+          <select value={category} onChange={e => setCategory(e.target.value)} aria-label="Category" className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none sm:w-auto">
+            <option value="">All categories</option>
+            {categories.map(c => <option key={c} value={c}>{c} ({programmes.filter(p => (p.category || '').trim() === c).length})</option>)}
+            <option value="-">No category</option>
+          </select>
+        )}
       </div>
 
       {error && !editing && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
@@ -291,7 +308,7 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{p.name}</span>
                       <span className="block truncate text-sm text-ink-soft">
-                        {p.hrdcCode ? `HRDC code ${p.hrdcCode}` : 'No HRDC code'} · {usage[p.id] || 0} deal{usage[p.id] === 1 ? '' : 's'} · {outlinesOf(p.id).length} outline{outlinesOf(p.id).length === 1 ? '' : 's'} · {trainersOf(p.id).length} trainer{trainersOf(p.id).length === 1 ? '' : 's'}
+                        {[p.category, daysText(p.days)].filter(Boolean).map(x => `${x} · `).join('')}{p.hrdcCode ? `HRDC code ${p.hrdcCode}` : 'No HRDC code'} · {usage[p.id] || 0} deal{usage[p.id] === 1 ? '' : 's'} · {outlinesOf(p.id).length} outline{outlinesOf(p.id).length === 1 ? '' : 's'} · {trainersOf(p.id).length} trainer{trainersOf(p.id).length === 1 ? '' : 's'}
                       </span>
                     </span>
                     <span className="flex items-center gap-2 text-sm text-ink-soft sm:w-64 sm:justify-end">
@@ -319,6 +336,17 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
               <div>
                 <label htmlFor="pg-name" className={label}>Programme name</label>
                 <input id="pg-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className={input} placeholder="Leadership for new managers" />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
+                <div>
+                  <label htmlFor="pg-cat" className={label}>Category <span className="font-normal text-ink-soft">(optional)</span></label>
+                  <input id="pg-cat" list="pg-cats" value={form.category || ""} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className={input} placeholder="e.g. Leadership & Professional Development" />
+                  <datalist id="pg-cats">{categories.map(c => <option key={c} value={c} />)}</datalist>
+                </div>
+                <div>
+                  <label htmlFor="pg-days" className={label}>Number of days <span className="font-normal text-ink-soft">(optional)</span></label>
+                  <input id="pg-days" inputMode="decimal" value={form.days || ""} onChange={e => setForm(f => ({ ...f, days: e.target.value }))} className={input} placeholder="e.g. 1 or 0.5" />
+                </div>
               </div>
               <div>
                 <span className={label}>HRDC registration</span>

@@ -356,7 +356,8 @@ export function registerBackupRoutes(app: Express) {
   app.post('/api/backup/download', async (req: Request, res: ExpressResponse) => {
     try {
       const caller = await staffFrom(req);
-      const tables = await readAllTables();
+      // Payment tracking is for Management only (Joel, 2026-10-20), so Admin's download leaves it out.
+      const tables = (await readAllTables()).filter(t => caller.role === 'management' || t.collectionId !== 'payment_records');
       const now = new Date();
       const wb = new ExcelJS.Workbook();
       wb.creator = 'NEXT Academy CRM';

@@ -340,6 +340,8 @@ export interface Venue {
   facilities?: string;
   contact?: string;
   remarks?: string;
+  region?: string;              // state / area, e.g. "Pahang" (from the Blueprint venue list, 2026-10-20)
+  quotationDate?: string;       // YYYY-MM-DD: date of the venue's latest quotation (its prices)
   pictures?: string;            // older: a typed link or note
   photos?: string[];            // uploaded photos (2026-10-19); the first is the main one
   status: 'Available' | 'Booked' | 'Under Renovation';

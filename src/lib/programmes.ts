@@ -34,6 +34,8 @@ export interface Programme {
   submittedDate?: string;
   approvedDate?: string;
   notes?: string;
+  category?: string;         // e.g. "Leadership & Professional Development" (from the Blueprint list, 2026-10-20)
+  days?: number | null;      // usual length in days (half days allowed)
 }
 
 export interface HrdcQuery {

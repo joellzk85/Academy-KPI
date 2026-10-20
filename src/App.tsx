@@ -36,6 +36,7 @@ const HomeDashboard = React.lazy(() => import('./components/HomeDashboard'));
 const RepDetailDashboard = React.lazy(() => import('./components/RepDetailDashboard'));
 const ManagementDashboard = React.lazy(() => import('./components/ManagementDashboard'));
 const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
+const PaymentTracking = React.lazy(() => import('./components/PaymentTracking'));
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
 const FollowUpRulesPage = React.lazy(() => import('./components/FollowUpRulesPage'));
@@ -224,7 +225,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
   useFollowUpRules();
-  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'links' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
   const [adminView, setAdminView] = useState<'queue' | 'money' | 'programmes' | 'tasks' | 'backup'>('queue');
 
@@ -780,7 +781,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
-    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'links' | 'followups' | 'lost' | 'team' | 'data') => {
+    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'data') => {
       if (!isManagement) return;
       if (view) setManagementView(view);
       handleSwitchTab('management');
@@ -948,7 +949,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['pl', 'Project P&L'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -973,7 +974,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               ) : managementView === 'team' ? (
                 <TeamManager currentMember={currentMember} teamMembers={teamMembers} />
               ) : managementView === 'data' ? (
-                <DataTools teamMembers={teamMembers} />
+                <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
+              ) : managementView === 'payments' ? (
+                <PaymentTracking pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name }} onOpenDeal={homeNav.openDeal} />
               ) : managementView === 'pl' ? (
                 <ProjectPL pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : (

@@ -34,8 +34,8 @@ const btnSecondary =
 const optional = <span className="font-normal text-ink-soft">(optional)</span>;
 
 const emptyForm = () => ({
-  name: '', distance: '', pictures: '', meetingPackagePrice: '', roomPackagePrice: '', dinnerPackage: '',
-  facilities: '', contact: '', remarks: '', renovation: false, photos: [] as string[],
+  name: '', region: '', distance: '', pictures: '', meetingPackagePrice: '', roomPackagePrice: '', dinnerPackage: '',
+  quotationDate: '', facilities: '', contact: '', remarks: '', renovation: false, photos: [] as string[],
 });
 type Form = ReturnType<typeof emptyForm>;
 
@@ -96,11 +96,20 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
     return out;
   }, [venues, deals, checklists, quotes]);
 
+  // Regions (Joel's venue list is grouped by state, 2026-10-20): chips to show one region.
+  const [region, setRegion] = useState('');
+  const regions = useMemo(() => {
+    const m: Record<string, number> = {};
+    venues.forEach(v => { const r = (v.region || '').trim(); if (r) m[r] = (m[r] || 0) + 1; });
+    return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [venues]);
+
   const visible = useMemo(() => {
     const q = norm(search);
-    const list = q ? venues.filter(v => [v.name, v.facilities, v.contact, v.distance, v.remarks].some(x => norm(x).includes(q))) : venues;
+    const inRegion = region ? venues.filter(v => (v.region || '').trim() === region) : venues;
+    const list = q ? inRegion.filter(v => [v.name, v.region, v.facilities, v.contact, v.distance, v.remarks].some(x => norm(x).includes(q))) : inRegion;
     return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }));
-  }, [venues, search]);
+  }, [venues, search, region]);
 
   const openVenue = venues.find(v => v.id === openId) || null;
 
@@ -108,8 +117,8 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
   const startNew = () => { setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
   const startEdit = (v: Venue) => {
     setForm({
-      name: v.name || '', distance: v.distance || '', pictures: v.pictures || '', meetingPackagePrice: v.meetingPackagePrice || '',
-      roomPackagePrice: v.roomPackagePrice || '', dinnerPackage: v.dinnerPackage || '', facilities: v.facilities || '',
+      name: v.name || '', region: v.region || '', distance: v.distance || '', pictures: v.pictures || '', meetingPackagePrice: v.meetingPackagePrice || '',
+      roomPackagePrice: v.roomPackagePrice || '', dinnerPackage: v.dinnerPackage || '', quotationDate: v.quotationDate || '', facilities: v.facilities || '',
       contact: v.contact || '', remarks: v.remarks || '', renovation: v.status === 'Under Renovation', photos: v.photos || [],
     });
     setFormError(''); setDupId(null); setEditing(v.id);
@@ -125,8 +134,9 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
     if (dup) { setDupId(dup.id); return setFormError(`"${dup.name}" is already in the venue list.`); }
 
     const details = {
-      name, distance: form.distance.trim(), pictures: form.pictures.trim(),
+      name, region: (form.region || '').trim(), distance: form.distance.trim(), pictures: form.pictures.trim(),
       meetingPackagePrice: form.meetingPackagePrice.trim(), roomPackagePrice: form.roomPackagePrice.trim(), dinnerPackage: form.dinnerPackage.trim(),
+      quotationDate: form.quotationDate || '',
       facilities: form.facilities.trim(), contact: form.contact.trim(), remarks: form.remarks.trim(),
       status: (form.renovation ? 'Under Renovation' : 'Available') as Venue['status'],
       photos: form.photos.filter(Boolean),
@@ -188,8 +198,17 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, facilities, contact or distance" className={`${input} pl-9`} aria-label="Search venues" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, region, facilities, contact or distance" className={`${input} pl-9`} aria-label="Search venues" />
       </div>
+
+      {regions.length > 0 && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Region">
+          {[['', `All (${venues.length})`] as [string, string], ...regions.map(([r, n]) => [r, `${r} (${n})`] as [string, string])].map(([r, t]) => (
+            <button key={r || 'all'} type="button" aria-pressed={region === r} onClick={() => setRegion(r)}
+              className={`rounded-full border px-3 py-1 text-sm font-semibold ${region === r ? 'border-accent bg-accent text-white' : 'border-line bg-white text-ink-soft hover:text-ink'}`}>{t}</button>
+          ))}
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-2xl border border-line bg-white">
         {!loaded ? (
@@ -203,7 +222,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
         ) : (
           <ul className="divide-y divide-line">
             {visible.map(v => {
-              const sub = [v.distance, v.contact].map(x => (x || '').trim()).filter(Boolean).join(' · ');
+              const sub = [v.region, v.distance, (v.contact || '').split('\n')[0]].map(x => (x || '').trim()).filter(Boolean).join(' · ');
               const next = nextTraining[v.id];
               return (
                 <li key={v.id}>
@@ -216,7 +235,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
                       </span>
                       <span className="block truncate text-sm text-ink-soft">{sub || 'No distance or contact yet'}</span>
                     </span>
-                    <span className="hidden w-36 shrink-0 truncate text-right text-sm font-semibold sm:block">{v.meetingPackagePrice || ''}</span>
+                    <span className="hidden w-36 shrink-0 truncate text-right text-sm font-semibold sm:block">{(v.meetingPackagePrice || '').split('\n')[0]}</span>
                     <span className="w-32 shrink-0 text-right text-sm text-ink-soft">{next ? `Next ${formatDate(next)}` : 'No training booked'}</span>
                   </button>
                 </li>
@@ -264,6 +283,11 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
+                    <label className={label} htmlFor="v-region">Region {optional}</label>
+                    <input id="v-region" list="v-regions" value={form.region || ''} onChange={e => set({ region: e.target.value })} placeholder="e.g. Pahang" className={input} />
+                    <datalist id="v-regions">{regions.map(([r]) => <option key={r} value={r} />)}</datalist>
+                  </div>
+                  <div>
                     <label className={label} htmlFor="v-dist">Distance {optional}</label>
                     <input id="v-dist" value={form.distance} onChange={e => set({ distance: e.target.value })} placeholder="e.g. 45 km from office" className={input} />
                   </div>
@@ -284,26 +308,30 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div>
                     <label className={label} htmlFor="v-meet">Meeting package</label>
-                    <input id="v-meet" value={form.meetingPackagePrice} onChange={e => set({ meetingPackagePrice: e.target.value })} placeholder="e.g. RM 150/pax/day" className={input} />
+                    <textarea id="v-meet" rows={3} value={form.meetingPackagePrice} onChange={e => set({ meetingPackagePrice: e.target.value })} placeholder="e.g. RM 150/pax/day" className={`${input} resize-y`} />
                   </div>
                   <div>
                     <label className={label} htmlFor="v-room">Room package</label>
-                    <input id="v-room" value={form.roomPackagePrice} onChange={e => set({ roomPackagePrice: e.target.value })} placeholder="e.g. RM 280/pax" className={input} />
+                    <textarea id="v-room" rows={3} value={form.roomPackagePrice} onChange={e => set({ roomPackagePrice: e.target.value })} placeholder="e.g. RM 280/pax" className={`${input} resize-y`} />
                   </div>
                   <div>
-                    <label className={label} htmlFor="v-dinner">Dinner package</label>
-                    <input id="v-dinner" value={form.dinnerPackage} onChange={e => set({ dinnerPackage: e.target.value })} placeholder="e.g. RM 120/pax (BBQ)" className={input} />
+                    <label className={label} htmlFor="v-dinner">Meal package</label>
+                    <textarea id="v-dinner" rows={3} value={form.dinnerPackage} onChange={e => set({ dinnerPackage: e.target.value })} placeholder="e.g. BBQ dinner RM 120/pax" className={`${input} resize-y`} />
                   </div>
+                </div>
+                <div className="sm:w-56">
+                  <label className={label} htmlFor="v-qdate">Quotation date {optional}</label>
+                  <input id="v-qdate" type="date" value={form.quotationDate || ''} onChange={e => set({ quotationDate: e.target.value })} className={input} />
                 </div>
               </fieldset>
 
               <div>
                 <label className={label} htmlFor="v-fac">Facilities {optional}</label>
-                <input id="v-fac" value={form.facilities} onChange={e => set({ facilities: e.target.value })} placeholder="e.g. WiFi, projector, sound system" className={input} />
+                <textarea id="v-fac" rows={3} value={form.facilities} onChange={e => set({ facilities: e.target.value })} placeholder="e.g. WiFi, projector, sound system" className={`${input} resize-y`} />
               </div>
               <div>
                 <label className={label} htmlFor="v-contact">Contact person {optional}</label>
-                <input id="v-contact" value={form.contact} onChange={e => set({ contact: e.target.value })} placeholder="e.g. Ms Wong, 019-222 3344" className={input} />
+                <textarea id="v-contact" rows={2} value={form.contact} onChange={e => set({ contact: e.target.value })} placeholder="e.g. Ms Wong, 019-222 3344" className={`${input} resize-y`} />
               </div>
               <div>
                 <label className={label} htmlFor="v-rem">Remarks {optional}</label>
@@ -349,7 +377,7 @@ function VenuePanel(props: {
   const clientName = (d: any) => props.clients.find(c => c.id === d.clientId)?.companyName || d.client || 'No client';
   const upcoming = bookings.filter(b => !b.date || b.date >= today).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
   const past = bookings.filter(b => b.date && b.date < today).sort((a, b) => b.date.localeCompare(a.date));
-  const packages = [['Meeting package', v.meetingPackagePrice], ['Room package', v.roomPackagePrice], ['Dinner package', v.dinnerPackage]].filter(([, x]) => (x || '').trim());
+  const packages = [['Meeting package', v.meetingPackagePrice], ['Room package', v.roomPackagePrice], ['Meal package', v.dinnerPackage]].filter(([, x]) => (x || '').trim());
 
   const row = (b: VenueBooking) => (
     <li key={b.deal.id} className="flex items-center gap-3 px-4 py-2.5 text-[15px]">
@@ -369,7 +397,7 @@ function VenuePanel(props: {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-lg font-bold"><Building className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{v.name}</span></h3>
-          <p className="mt-0.5 text-[15px] text-ink-soft">{[v.distance, v.status === 'Under Renovation' ? 'Under renovation' : 'Available'].filter(Boolean).join(' · ')}</p>
+          <p className="mt-0.5 text-[15px] text-ink-soft">{[v.region, v.distance, v.status === 'Under Renovation' ? 'Under renovation' : 'Available'].filter(Boolean).join(' · ')}</p>
         </div>
         <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
       </div>
@@ -387,7 +415,7 @@ function VenuePanel(props: {
         <h4 className="text-sm font-semibold text-ink-soft">Contact person</h4>
         {v.contact ? (
           <>
-            <p className="mt-1 font-semibold">{v.contact}</p>
+            <p className="mt-1 whitespace-pre-line font-semibold">{v.contact}</p>
             {phone && (
               <div className="mt-3 flex flex-wrap gap-2">
                 <a href={`tel:${phone.replace(/\s/g, '')}`} className={btnSecondary}><Phone className="h-4 w-4" /> Call</a>
@@ -403,8 +431,9 @@ function VenuePanel(props: {
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px] sm:grid-cols-3">
         {packages.length === 0
           ? <div className="col-span-full"><dt className="text-sm text-ink-soft">Packages</dt><dd className="text-ink-soft">No prices yet</dd></div>
-          : packages.map(([k, x]) => <div key={k}><dt className="text-sm text-ink-soft">{k}</dt><dd className="font-semibold">{x}</dd></div>)}
-        {v.facilities && <div className="col-span-full"><dt className="text-sm text-ink-soft">Facilities</dt><dd>{v.facilities}</dd></div>}
+          : packages.map(([k, x]) => <div key={k} className={packages.length === 1 ? 'col-span-full' : ''}><dt className="text-sm text-ink-soft">{k}</dt><dd className="whitespace-pre-line font-semibold">{x}</dd></div>)}
+        {v.quotationDate && <div className="col-span-full"><dt className="text-sm text-ink-soft">Quotation date</dt><dd>{formatDate(v.quotationDate)}</dd></div>}
+        {v.facilities && <div className="col-span-full"><dt className="text-sm text-ink-soft">Facilities</dt><dd className="whitespace-pre-line">{v.facilities}</dd></div>}
         {v.remarks && <div className="col-span-full"><dt className="text-sm text-ink-soft">Remarks</dt><dd className="whitespace-pre-line">{v.remarks}</dd></div>}
         {v.pictures && !isLink(v.pictures) && <div className="col-span-full"><dt className="text-sm text-ink-soft">Pictures</dt><dd className="flex items-start gap-1.5"><MapPin className="mt-1 h-4 w-4 shrink-0 text-ink-soft" />{v.pictures}</dd></div>}
       </dl>

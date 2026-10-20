@@ -23,6 +23,7 @@ export const LIST_NAMES: [string, string][] = [
   ['money_in', 'Money in'],
   ['money_out', 'Money out'],
   ['project_pl', 'Project P&L SST typed'],
+  ['payment_records', 'Payment tracking'],
   ['deal_checklists', 'Admin checklists'],
   ['checklist_files', 'Checklist files'],
   ['hrdc_queries', 'HRDC queries'],
