@@ -326,6 +326,17 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       });
   }, [teamMembers, repDocs, monthKpiDocs, selectedMonth]);
 
+  // People with a workspace: everyone above, plus Management members without a KPI set (Joel, 2026-10-20).
+  // Those are marked noKpis: no KPI page, and left out of rings, Team performance and the Company target,
+  // which keep using `representatives`.
+  const workspacePeople: Representative[] = React.useMemo(() => {
+    const extra = teamMembers
+      .filter(m => m.active && m.role === 'management' && !representatives.some(r => r.id === m.id))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(m => ({ id: m.id, name: m.name, role: m.role, kpiTemplate: '', noKpis: true, targets: DEFAULT_TARGETS, kpi: emptyKpi() as Representative['kpi'] }));
+    return [...representatives, ...extra];
+  }, [teamMembers, representatives]);
+
   // Switching month only changes what is shown; nothing is copied or overwritten.
   const handleMonthChange = async (newMonth: string) => {
     setSelectedMonth(newMonth);
@@ -576,7 +587,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const handleOpenQuotationsFor = (repId: string) => {
     // Admin opens their own Quotations (which lists everyone's); Management can open the owner's.
     const wanted = canOpenWorkspace(repId) ? repId : currentMember.id;
-    const target = representatives.find(r => r.id === wanted) || representatives.find(r => r.id === currentMember.id);
+    const target = workspacePeople.find(r => r.id === wanted) || workspacePeople.find(r => r.id === currentMember.id);
     if (!target) {
       showToast("That person's workspace isn't available. Open the quotation from a rep's workspace instead.");
       return;
@@ -696,7 +707,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     }
   };
 
-  const selectedRep = representatives.find(r => r.id === selectedRepId);
+  const selectedRep = workspacePeople.find(r => r.id === selectedRepId);
 
   // Team calendar = typed events + appointments booked on deals (read from the deals, never copied).
   const allCalendarEvents = [...calendarEvents, ...googleCalEvents, ...appointmentEvents(pipelinesSync, id => teamMembers.find(m => m.id === id)?.name || '')];
@@ -735,8 +746,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     // A client's page (the client list is shared, so any workspace shows it): my own, else for Management
     // without a workspace, the first teammate's.
     openClient: (clientId: string) => {
-      const repId = canOpenWorkspace(currentMember.id) && representatives.some(r => r.id === currentMember.id)
-        ? currentMember.id : isManagement ? representatives[0]?.id : '';
+      const repId = canOpenWorkspace(currentMember.id) && workspacePeople.some(r => r.id === currentMember.id)
+        ? currentMember.id : isManagement ? workspacePeople[0]?.id : '';
       if (!repId) return;
       setClientToOpen({ repId, clientId });
       homeNav.openWorkspace(repId, 'client');
@@ -744,8 +755,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     // A deal's panel in its owner's workspace (Management), else my own.
     openDeal: (deal: any) => {
       const owner = deal?.ownerId || deal?.creatorId;
-      const repId = isManagement && representatives.some(r => r.id === owner) ? owner
-        : representatives.some(r => r.id === currentMember.id) ? currentMember.id : isManagement ? representatives[0]?.id : '';
+      const repId = isManagement && workspacePeople.some(r => r.id === owner) ? owner
+        : workspacePeople.some(r => r.id === currentMember.id) ? currentMember.id : isManagement ? workspacePeople[0]?.id : '';
       if (!repId || !deal?.id) return;
       setDealToOpen({ repId, dealId: deal.id });
       homeNav.openWorkspace(repId, 'pipeline');
@@ -976,7 +987,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 selectedMonth={selectedMonth}
                 onMonthChange={handleMonthChange}
                 onOpenTeam={() => setManagementView('team')}
-                onOpenDeal={(p: any) => { const owner = p.ownerId || p.creatorId; homeNav.openWorkspace(representatives.some(r => r.id === owner) ? owner : currentMember.id, 'pipeline'); }}
+                onOpenDeal={(p: any) => { const owner = p.ownerId || p.creatorId; homeNav.openWorkspace(workspacePeople.some(r => r.id === owner) ? owner : currentMember.id, 'pipeline'); }}
                 pipelinesSync={pipelinesSync}
                 people={teamMembers.map(m => ({ id: m.id, name: m.name }))}
               />
@@ -995,6 +1006,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                 people={teamMembers.map(m => ({ id: m.id, name: m.name, role: m.role, active: m.active }))}
                 representatives={representatives}
+                workspaces={workspacePeople}
                 deals={pipelinesSync}
                 events={allCalendarEvents}
                 calendar={<HomeDashboard {...homeDashboardProps} section="calendar" />}
@@ -1014,7 +1026,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               {selectedRep ? (
                 <RepDetailDashboard
                   rep={selectedRep}
-                  reps={representatives}
+                  reps={workspacePeople}
                   onBack={() => {
                     if (repSelectionSource === 'management') {
                       setCurrentTab('management');

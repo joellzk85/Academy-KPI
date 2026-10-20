@@ -323,12 +323,14 @@ export default function RepDetailDashboard({
   // The old payment, P&L, appointment and Admin records screens were retired; anyone left on them,
   // however they got there, lands on Deals.
   const RETIRED_TABS: SubTab[] = ['payment', 'client_payments', 'pl', 'appointments', 'admin_record'];
+  // Management without a KPI set has a workspace but no KPI page (Joel, 2026-10-20); they start on Deals.
+  const homeTab: SubTab = rep.noKpis ? 'pipeline' : 'kpi';
   const savedSubTab = (): SubTab => {
     const saved = localStorage.getItem(`next_active_subtab_${rep.id}`) as SubTab | null;
-    return saved && RETIRED_TABS.includes(saved) ? 'pipeline' : saved || 'kpi';
+    return saved && RETIRED_TABS.includes(saved) ? 'pipeline' : saved || homeTab;
   };
   const [chosenSubTab, setActiveSubTab] = useState<SubTab>(savedSubTab);
-  const activeSubTab: SubTab = RETIRED_TABS.includes(chosenSubTab) ? 'pipeline' : chosenSubTab;
+  const activeSubTab: SubTab = RETIRED_TABS.includes(chosenSubTab) || (rep.noKpis && chosenSubTab === 'kpi') ? 'pipeline' : chosenSubTab;
   const [subTabHistory, setSubTabHistory] = useState<SubTab[]>(() => [savedSubTab()]);
 
   const handleSubTabChange = (newTab: SubTab) => {
@@ -344,14 +346,14 @@ export default function RepDetailDashboard({
     if (subTabHistory.length > 1) {
       const updatedHistory = [...subTabHistory];
       updatedHistory.pop(); // remove current subtab
-      const prevTab = updatedHistory[updatedHistory.length - 1] || 'kpi';
+      const prevTab = updatedHistory[updatedHistory.length - 1] || homeTab;
       setSubTabHistory(updatedHistory);
       setActiveSubTab(prevTab);
       localStorage.setItem(`next_active_subtab_${rep.id}`, prevTab);
-    } else if (activeSubTab !== 'kpi') {
-      setActiveSubTab('kpi');
-      setSubTabHistory(['kpi']);
-      localStorage.setItem(`next_active_subtab_${rep.id}`, 'kpi');
+    } else if (activeSubTab !== homeTab) {
+      setActiveSubTab(homeTab);
+      setSubTabHistory([homeTab]);
+      localStorage.setItem(`next_active_subtab_${rep.id}`, homeTab);
     } else {
       onBack();
     }
@@ -407,7 +409,7 @@ export default function RepDetailDashboard({
 
     // Read saved subtab or default to kpi
     const savedSubTab = localStorage.getItem(`next_active_subtab_${rep.id}`);
-    const initialSubTab = (savedSubTab as SubTab) || 'kpi';
+    const initialSubTab = (savedSubTab as SubTab) || homeTab;
     setActiveSubTab(initialSubTab);
     setSubTabHistory([initialSubTab]);
 
@@ -2019,7 +2021,7 @@ export default function RepDetailDashboard({
   const activeLink = getActiveGoogleLink();
 
   // Selected Section Header Title
-  const kpiAsksOpen = asksFor(rep, reps).filter(a => !a.done).length;
+  const kpiAsksOpen = asksFor(rep, reps.filter(r => !r.noKpis)).filter(a => !a.done).length;
   // Same as the Deals screen: only this person's own deals, or a teammate's deal they've been asked to help on.
   // Teambuilding proposal links (push B): the client opened or accepted a proposal (own workspace only).
   const proposalAlerts = useProposalAlerts({ id: viewer && viewer.id !== rep.id ? '' : rep.id, role: viewer?.role || rep.role || 'rep' }, pipelines);
@@ -2030,7 +2032,7 @@ export default function RepDetailDashboard({
   // Files shared with this person that they haven't opened (only in their own workspace: the alerts are theirs).
   const inbox = useSharedInbox(viewer && viewer.id !== rep.id ? undefined : rep.id);
   const workspaceMenuItems: MenuItem[] = [
-    { key: 'kpi', label: MENU_LABELS.kpi, alert: kpiAsksOpen ? `${kpiAsksOpen} teammate request${kpiAsksOpen === 1 ? '' : 's'}` : undefined },
+    ...(rep.noKpis ? [] : [{ key: 'kpi' as const, label: MENU_LABELS.kpi, alert: kpiAsksOpen ? `${kpiAsksOpen} teammate request${kpiAsksOpen === 1 ? '' : 's'}` : undefined }]),
     { key: 'pipeline', label: MENU_LABELS.pipeline, alert: dealsAlert },
     { key: 'quotation', label: MENU_LABELS.quotation, count: inbox.quotations,
       alert: inbox.quotations ? `${inbox.quotations} shared with you` : hasTaggedQuotations ? 'Tagged quotation' : undefined },
@@ -2101,7 +2103,7 @@ export default function RepDetailDashboard({
           ) : activeSubTab === 'venue' ? (
             <VenueManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
           ) : activeSubTab === 'kpi' ? (
-            <KpiPage rep={rep} reps={reps} viewer={viewer} selectedMonth={selectedMonth} onMonthChange={onMonthChange} onUpdateRepKpi={onUpdateRepKpi} />
+            <KpiPage rep={rep} reps={reps.filter(r => !r.noKpis)} viewer={viewer} selectedMonth={selectedMonth} onMonthChange={onMonthChange} onUpdateRepKpi={onUpdateRepKpi} />
           ) : activeSubTab === 'pipeline' ? (
             <DealsBoard
               owner={rep}

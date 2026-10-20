@@ -75,6 +75,7 @@ export interface Representative {
   email?: string;
   role?: 'rep' | 'admin' | 'management';
   kpiTemplate?: string;   // KPI template chosen by Management (see src/lib/kpi.ts)
+  noKpis?: boolean;       // Management without a KPI set: has a workspace, but no KPI page and no KPI counting
   kpi: {
     salesFigure: number[];
     proposals: number[];

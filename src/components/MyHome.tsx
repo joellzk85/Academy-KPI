@@ -120,10 +120,11 @@ export interface MyHomeNav {
   openTeamFollowUps?: (personId?: string) => void;     // Management → Team follow-ups (one person, or '__quiet')
 }
 
-export default function MyHome({ viewer, people, representatives, deals, events, calendar, notices, nav }: {
+export default function MyHome({ viewer, people, representatives, workspaces, deals, events, calendar, notices, nav }: {
   viewer: Viewer;
   people: { id: string; name: string; role: Role; active: boolean }[];   // the Team list
-  representatives: Representative[];   // people with a workspace (reps and admins), with KPI settings
+  representatives: Representative[];   // people with KPIs (reps, admins, Management with a KPI set)
+  workspaces?: Representative[];       // people with a workspace: the above plus Management without KPIs
   deals: any[];
   events: CalendarEvent[];
   calendar: React.ReactNode;   // the full calendar (adding events, Google sync)
@@ -217,16 +218,18 @@ export default function MyHome({ viewer, people, representatives, deals, events,
     return () => subs.forEach(u => u());
   }, [viewer.id, staff]);
 
-  const hasWorkspace = (id: string) => representatives.some(r => r.id === id);
+  const hasWorkspace = (id: string) => (workspaces || representatives).some(r => r.id === id);
+  const hasKpis = (id: string) => representatives.some(r => r.id === id);
   // Management with a KPI set (e.g. Ying) can also have the personal KPI cards.
   const allowed = CARDS.filter(c => (c.roles.includes(viewer.role)
-    || (viewer.role === 'management' && hasWorkspace(viewer.id) && (c.id === 'my_kpi' || c.id === 'my_won')))
+    || (viewer.role === 'management' && hasKpis(viewer.id) && (c.id === 'my_kpi' || c.id === 'my_won')))
     && (c.id !== 'shared_with_me' || (hasWorkspace(viewer.id) && !!nav.openFile)));
   const shared = useSharedInbox(hasWorkspace(viewer.id) ? viewer.id : undefined).items;
 
   // Shortcuts: only the ones this person's role allows, whatever was saved.
   const mayUse = (need: Need) => need === 'all' || (need === 'workspace' ? hasWorkspace(viewer.id) : need === 'staff' ? staff : viewer.role === 'management');
-  const allowedShortcuts = SHORTCUTS.filter(s => mayUse(s.need));
+  // My KPI only for people with KPIs (Management without a KPI set has a workspace but no KPI page).
+  const allowedShortcuts = SHORTCUTS.filter(s => mayUse(s.need) && (s.id !== 'ws_kpi' || hasKpis(viewer.id)));
   const shortcuts: ShortcutId[] = (savedShortcuts || DEFAULT_SHORTCUTS).filter(id => allowedShortcuts.some(s => s.id === id));
   const saveShortcuts = async (next: ShortcutId[]) => {
     setSavedShortcuts(next);
@@ -333,7 +336,7 @@ export default function MyHome({ viewer, people, representatives, deals, events,
             <span className="sr-only">Open a teammate's workspace</span>
             <select value={teammate} onChange={e => { const id = e.target.value; setTeammate(''); if (id) nav.openWorkspace(id); }} className="bg-transparent font-semibold focus:outline-none">
               <option value="">Open a teammate's workspace…</option>
-              {representatives.filter(r => r.id !== viewer.id).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {(workspaces || representatives).filter(r => r.id !== viewer.id).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </label>
         )}
