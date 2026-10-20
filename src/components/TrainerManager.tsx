@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
-import { FileText, GraduationCap, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
+import { collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { Download, FileText, GraduationCap, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Trainer } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealStage, formatDate, formatRM, todayIso } from '../lib/deals';
@@ -13,8 +13,10 @@ import { ProfileSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
+import { downloadBiodataPdf } from './TrainerBiodataDocument';
+import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
-import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, extrasFrom, extrasToSave, languagesText, linkHref, topicList, trainingTypeLabel } from '../lib/trainerProfile';
+import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel } from '../lib/trainerProfile';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -42,6 +44,30 @@ const emptyForm = () => ({ ...emptyExtras(), name: '', specialization: '', progr
 type Form = ReturnType<typeof emptyForm>;
 
 const norm = (s?: string) => (s || '').trim().toLowerCase();
+
+// IC / passport number (2026-10-20): kept apart, Admin and Management only (trainer_private/{id}); a number a trainer
+// typed on a profile link that a rep accepted stays in trainer_link_private/{token} until Admin or Management save it.
+async function readIc(t: { id: string; icLinkToken?: string }): Promise<string> {
+  const own = await getDoc(doc(db, 'trainer_private', t.id));
+  if (own.exists()) return String(own.data().icNumber || '');
+  if (t.icLinkToken) {
+    const fromLink = await getDoc(doc(db, 'trainer_link_private', t.icLinkToken));
+    if (fromLink.exists()) return String(fromLink.data().icNumber || '');
+  }
+  return '';
+}
+function useIc(t: { id: string; icLinkToken?: string } | null, allowed: boolean) {
+  const [ic, setIc] = useState<{ id: string; value: string } | null>(null);
+  useEffect(() => {
+    if (!t || !allowed) { setIc(null); return; }
+    let live = true;
+    readIc(t).then(v => live && setIc({ id: t.id, value: v })).catch(() => live && setIc({ id: t.id, value: '' }));
+    return () => { live = false; };
+  }, [t?.id, t?.icLinkToken, allowed]);
+  return ic && t && ic.id === t.id ? ic.value : null;
+}
+// One biodata list as lines of text, e.g. "Bachelor of Business · Universiti Malaya · 2010".
+const bioText = (rows?: Record<string, string>[]) => (rows || []).filter(rowFilled).map(r => Object.values(r).map(v => String(v || '').trim()).filter(Boolean).join(' · ')).join('\n');
 const ecText = (e?: { name?: string; relationship?: string; phone?: string }) =>
   e ? [e.name, e.relationship ? `(${e.relationship})` : '', e.phone].filter(Boolean).join(' ') : '';
 
@@ -126,13 +152,21 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       pastClients: s.pastClients, programmeIds: s.programmeIds, suggestedTopics: s.suggestedTopics, rate: s.rate,
       ...x, docs: { ...(cur?.docs || {}), ...x.docs },
       ...(s.photoUrl ? { photoUrl: s.photoUrl } : {}),
+      ...(s.icSent ? { icOnFile: true, icLinkToken: l.id } : {}),
     };
+    delete (details as any).icNumber;
+    delete (details as any).icSent;
     setBusy(true);
     try {
       if (targetId) await setDoc(doc(db, 'trainers_directory', targetId), details, { merge: true });
       else {
         targetId = `trainer_${Date.now()}`;
         await setDoc(doc(db, 'trainers_directory', targetId), { id: targetId, ...details, photoUrl: s.photoUrl || '', specialization: '', status: 'Available', notes: '', createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+      }
+      // Admin and Management copy the IC number into the trainer's own private record straight away.
+      if (s.icSent && isStaff) {
+        const fromLink = await getDoc(doc(db, 'trainer_link_private', l.id));
+        if (fromLink.exists()) await setDoc(doc(db, 'trainer_private', targetId), { icNumber: fromLink.data().icNumber || '', at: Date.now(), byName: viewer.name });
       }
       await closeTrainerLink(l, 'accepted', viewer);
       setReviewId(null);
@@ -184,6 +218,12 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     setFormError(''); setDupId(null); setEditing(t.id);
   };
   const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
+  const isStaff = viewer.role === 'admin' || viewer.role === 'management';
+  const editingTrainer = editing && editing !== 'new' ? trainers.find(t => t.id === editing) || null : null;
+  const savedIc = useIc(editingTrainer, isStaff);
+  const [icInput, setIcInput] = useState<string | null>(null);   // null = not changed on the form
+  useEffect(() => { setIcInput(null); }, [editing]);
+  const icValue = icInput ?? savedIc ?? '';
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -216,6 +256,12 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         // Each field is replaced as a whole, so a file removed on the form comes off the record.
         await setDoc(doc(db, 'trainers_directory', editing), details, { mergeFields: Object.keys(details) });
         flash('Trainer saved');
+      }
+      if (isStaff && icInput !== null && cleanIc(icInput) !== (savedIc || '')) {
+        const id = editing === 'new' ? newId : editing!;
+        const ic = cleanIc(icInput);
+        await setDoc(doc(db, 'trainer_private', id), { icNumber: ic, at: Date.now(), byName: viewer.name });
+        await setDoc(doc(db, 'trainers_directory', id), { icOnFile: !!ic }, { merge: true });
       }
       formDraft.clear();
       setEditing(null);
@@ -257,6 +303,11 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     onChange: (p: any) => setForm(f => ({ ...f, ...(typeof p === 'function' ? p(f) : p) })),
     uploader: { prefix: `trainer_files/${editing === 'new' ? newId : editing}/`, byName: viewer.name, uploadedBy: viewer.id },
     idPrefix: 't',
+    ic: isStaff ? {
+      value: icValue,
+      onChange: (v: string) => setIcInput(v),
+      note: savedIc === null && editing !== 'new' ? 'Loading…' : 'Only Admin and Management can see this.',
+    } : undefined,
     photoSlot: <div className="rounded-xl border border-line p-3"><PhotoPicker photos={form.photoUrl ? [form.photoUrl] : []} onChange={ph => set({ photoUrl: ph[0] || '' })} folder="trainers" me={viewer} single label="Professional photo (shown on teambuilding proposals)" /></div>,
     wrap: (title: string, children: React.ReactNode) => (
       <section className="space-y-3 border-t border-line pt-4">
@@ -361,6 +412,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
               clients={clients}
               today={today}
               canDelete={viewer.role === 'management'}
+              isStaff={isStaff}
               busy={busy}
               error={panelError}
               onClose={() => setOpenId(null)}
@@ -424,14 +476,18 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                 {row('Years of experience', s.experienceYears ? String(s.experienceYears) : '', cur?.experienceYears ? String(cur.experienceYears) : '')}
                 {row('Daily rate', s.rate ? formatRM(s.rate) : '', cur?.rate ? formatRM(cur.rate) : '')}
                 {row('Bio', s.bio, cur?.bio)}
-                {row('Qualifications', s.qualifications, cur?.qualifications)}
+                {row('IC / Passport No.', s.icSent ? 'Sent (only Admin and Management can see it)' : '', cur?.icOnFile ? 'On file' : '')}
+                {row('Nationality', s.nationality || '', cur?.nationality)}
+                {row('Race', s.race || '', cur?.race)}
+                {row('TTT number', s.tttNumber || '', cur?.tttNumber)}
+                {BIO_LISTS.map(b => <React.Fragment key={b.key}>{row(b.title, bioText(s[b.key]), bioText(cur?.[b.key]))}</React.Fragment>)}
+                {s.qualifications && s.qualifications !== (cur?.qualifications || '') && row('Qualifications (typed before)', s.qualifications, cur?.qualifications)}
                 {row('Past clients', s.pastClients, cur?.pastClients)}
                 {row('Gender', s.gender || '', cur?.gender)}
                 {row('Address', s.address || '', cur?.address)}
                 {row('Emergency contact', ecText(s.emergencyContact), ecText(cur?.emergencyContact))}
                 {row('Languages', languagesText(s), cur ? languagesText(cur) : '')}
                 {row('Type of training', (s.trainingTypes || []).map(trainingTypeLabel).join(', '), (cur?.trainingTypes || []).map(trainingTypeLabel).join(', '))}
-                {row('Other certificates', s.otherCerts || '', cur?.otherCerts)}
                 {row('LinkedIn', s.linkedin || '', cur?.linkedin)}
                 {row('YouTube', s.youtube || '', cur?.youtube)}
                 {row('Other social media', s.otherSocial || '', cur?.otherSocial)}
@@ -544,21 +600,17 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                 <label className={label} htmlFor="t-bio">Short bio</label>
                 <textarea id="t-bio" value={form.bio} onChange={e => set({ bio: e.target.value })} rows={3} className={`${input} resize-y`} />
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className={label} htmlFor="t-qual">Qualifications</label>
-                  <textarea id="t-qual" value={form.qualifications} onChange={e => set({ qualifications: e.target.value })} rows={3} className={`${input} resize-y`} />
+              {(form.qualifications || form.otherCerts) && (
+                <div className="rounded-lg bg-surface px-3 py-2 text-sm">
+                  <span className="font-semibold">Qualifications typed before:</span> {[form.qualifications, form.otherCerts].filter(Boolean).join(' · ')}
+                  <span className="block text-ink-soft">Kept as a note. Put them in the HRDC lists below, then <button type="button" className="font-semibold text-accent hover:underline" onClick={() => set({ qualifications: '', otherCerts: '' })}>remove this note</button>.</span>
                 </div>
-                <div>
-                  <label className={label} htmlFor="t-certs">Other certificates</label>
-                  <textarea id="t-certs" value={form.otherCerts} onChange={e => set({ otherCerts: e.target.value })} rows={3} className={`${input} resize-y`} />
-                </div>
-              </div>
+              )}
               <div>
                 <label className={label} htmlFor="t-past">Past clients</label>
                 <textarea id="t-past" value={form.pastClients} onChange={e => set({ pastClients: e.target.value })} rows={3} className={`${input} resize-y`} />
               </div>
-              <TrainerExtrasFields {...teamExtras} only={['online', 'uploads']} />
+              <TrainerExtrasFields {...teamExtras} only={['biodata', 'online', 'uploads']} />
               <div>
                 <label className={label} htmlFor="t-notes">Notes <span className="font-normal text-ink-soft">(optional)</span></label>
                 <textarea id="t-notes" value={form.notes} onChange={e => set({ notes: e.target.value })} rows={3} placeholder="Anything the team should know about this trainer" className={`${input} resize-y`} />
@@ -586,8 +638,20 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
 function TrainerPanel(props: {
   trainer: Trainer; teaches: string[]; bookings: Booking[]; clients: any[]; today: string;
   canDelete: boolean; busy: boolean; error: string; onClose: () => void; onEdit: () => void; onDelete: () => void;
+  isStaff: boolean;
 }) {
   const { trainer: t, bookings, today } = props;
+  // IC / passport number and the HRDC biodata PDF: Admin and Management only (Joel, 2026-10-20).
+  const ic = useIc(t, props.isStaff);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState('');
+  const downloadBiodata = async () => {
+    setPdfBusy(true); setPdfError('');
+    try { await downloadBiodataPdf({ ...t, icNumber: ic || '' }); }
+    catch (e: any) { setPdfError(pdfErrorText(e)); }
+    finally { setPdfBusy(false); }
+  };
+  const hasBio = !!(t.nationality || t.race || t.tttNumber || t.icOnFile || BIO_LISTS.some(b => (t[b.key] || []).some(rowFilled)));
   const phone = (t.contact || '').trim();
   const wa = phone ? whatsappLink(phone) : '';
   const clientName = (d: any) => props.clients.find(c => c.id === d.clientId)?.companyName || d.client || 'No client';
@@ -626,7 +690,34 @@ function TrainerPanel(props: {
         {(t.specialization || '').trim() && <p className="mt-1.5 text-sm text-ink-soft">Topics typed before: {t.specialization}</p>}
       </section>
 
-      <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={props.onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Edit details</button>
+        {props.isStaff && (
+          <button type="button" onClick={downloadBiodata} disabled={pdfBusy} className={btnSecondary}>
+            {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download HRDC biodata (PDF)
+          </button>
+        )}
+      </div>
+      {pdfError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{pdfError}</p>}
+
+      {hasBio && (
+        <section className="rounded-xl border border-line p-4">
+          <h4 className="text-sm font-semibold text-ink-soft">HRDC biodata</h4>
+          <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-[15px]">
+            <div><dt className="text-sm text-ink-soft">IC / Passport No.</dt><dd className="font-semibold">{props.isStaff ? (ic === null ? '…' : ic || 'Not given') : t.icOnFile ? 'On file (Admin and Management can see it)' : 'Not given'}</dd></div>
+            {t.tttNumber && <div><dt className="text-sm text-ink-soft">TTT number</dt><dd className="font-semibold">{t.tttNumber}</dd></div>}
+            {t.nationality && <div><dt className="text-sm text-ink-soft">Nationality</dt><dd className="font-semibold">{t.nationality}</dd></div>}
+            {t.race && <div><dt className="text-sm text-ink-soft">Race</dt><dd className="font-semibold">{t.race}</dd></div>}
+            {BIO_LISTS.map(b => {
+              const rows = (t[b.key] || []).filter(rowFilled);
+              return rows.length ? (
+                <div key={b.key} className="col-span-2"><dt className="text-sm text-ink-soft">{b.title}</dt>
+                  <dd><ul className="mt-0.5 space-y-0.5">{rows.map((r, i) => <li key={i}>{b.cols.map(c => r[c.k]).filter(Boolean).join(' · ')}</li>)}</ul></dd></div>
+              ) : null;
+            })}
+          </dl>
+        </section>
+      )}
 
       <section className="rounded-xl border border-line p-4">
         <h4 className="text-sm font-semibold text-ink-soft">Contact</h4>
@@ -657,7 +748,7 @@ function TrainerPanel(props: {
           <div className="col-span-2"><dt className="text-sm text-ink-soft">Emergency contact</dt>
             <dd>{ecText(t.emergencyContact)}{t.emergencyContact?.phone && <a href={`tel:${t.emergencyContact.phone.replace(/\s/g, '')}`} className="ml-2 text-sm font-semibold text-accent hover:underline">Call</a>}</dd></div>
         )}
-        {t.otherCerts && <div className="col-span-2"><dt className="text-sm text-ink-soft">Other certificates</dt><dd className="whitespace-pre-line">{t.otherCerts}</dd></div>}
+        {t.otherCerts && <div className="col-span-2"><dt className="text-sm text-ink-soft">Other certificates (typed before)</dt><dd className="whitespace-pre-line">{t.otherCerts}</dd></div>}
         {(t.linkedin || t.youtube || t.otherSocial) && (
           <div className="col-span-2"><dt className="text-sm text-ink-soft">Online</dt>
             <dd className="space-y-0.5">
@@ -680,7 +771,7 @@ function TrainerPanel(props: {
             })}
           </dd></div>
         {t.bio && <div className="col-span-2"><dt className="text-sm text-ink-soft">Bio</dt><dd className="whitespace-pre-line">{t.bio}</dd></div>}
-        {t.qualifications && <div className="col-span-2"><dt className="text-sm text-ink-soft">Qualifications</dt><dd className="whitespace-pre-line">{t.qualifications}</dd></div>}
+        {t.qualifications && <div className="col-span-2"><dt className="text-sm text-ink-soft">Qualifications (typed before)</dt><dd className="whitespace-pre-line">{t.qualifications}</dd></div>}
         {t.pastClients && <div className="col-span-2"><dt className="text-sm text-ink-soft">Past clients</dt><dd className="whitespace-pre-line">{t.pastClients}</dd></div>}
         {t.notes && <div className="col-span-2"><dt className="text-sm text-ink-soft">Notes</dt><dd className="whitespace-pre-line">{t.notes}</dd></div>}
       </dl>

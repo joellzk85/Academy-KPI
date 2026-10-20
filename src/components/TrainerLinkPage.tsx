@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, CheckCircle2, Loader2, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, CheckCircle2, Eye, Loader2, Plus, Trash2, X } from 'lucide-react';
+import TrainerBiodataDocument from './TrainerBiodataDocument';
 import Logo from './Logo';
 import {
   OutlineSubmission, ProfileSubmission, cleanOutline, cleanProfile, outlineProblem, profileProblem,
@@ -62,11 +63,13 @@ export default function TrainerLinkPage({ token }: { token: string }) {
 
   // Nothing is compulsory (Joel, 2026-10-20). Submitting with gaps first lists them once, with "Submit anyway".
   const [nudge, setNudge] = useState<string[] | null>(null);
+  // Preview of their HRDC biodata (Joel: the trainer previews only; Admin and Management download it in the CRM).
+  const [preview, setPreview] = useState(false);
   const submit = async (e?: React.FormEvent, anyway = false) => {
     e?.preventDefault();
     setProblem('');
     if (info.kind === 'profile' && !anyway) {
-      const gaps = profileGaps(profile);
+      const gaps = profileGaps({ ...profile, icOnFile: info.icOnFile });
       if (gaps.length) { setNudge(gaps); return; }
     }
     setNudge(null);
@@ -118,6 +121,13 @@ export default function TrainerLinkPage({ token }: { token: string }) {
     onChange: (p: any) => setProfile(cur => ({ ...cur, ...(typeof p === 'function' ? p(cur) : p) })),
     uploader: { prefix: `trainer_uploads/${token}/`, byName: profile.name.trim() || info.trainerName || 'Trainer' },
     onFile: info.onFile,
+    ic: {
+      value: profile.icNumber || '',
+      onChange: (v: string) => setProfile(p => ({ ...p, icNumber: v })),
+      note: info.icOnFile
+        ? 'We already have your IC / passport number. Type it again only if it has changed. Only NEXT Academy Admin and Management can see it.'
+        : 'Kept private: only NEXT Academy Admin and Management can see it.',
+    },
     idPrefix: 'p',
     wrap: (title: string, children: React.ReactNode, hint?: string) => (
       <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
@@ -140,7 +150,7 @@ export default function TrainerLinkPage({ token }: { token: string }) {
         </p>
         {info.status === 'submitted' && <p className="mt-2 rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">You've already submitted this. You can correct it and submit again.</p>}
         {info.kind === 'profile' && (() => {
-          const pct = Math.round(((PROFILE_PARTS - profileGaps(profile).length) / PROFILE_PARTS) * 100);
+          const pct = Math.round(((PROFILE_PARTS - profileGaps({ ...profile, icOnFile: info.icOnFile }).length) / PROFILE_PARTS) * 100);
           return (
             <div className="mt-3 rounded-xl border border-line bg-white p-4">
               <p className="flex items-center justify-between text-sm font-semibold"><span>Your profile is {pct}% complete</span><span className="text-ink-soft">{pct === 100 ? 'All done, thank you!' : ''}</span></p>
@@ -235,12 +245,13 @@ export default function TrainerLinkPage({ token }: { token: string }) {
               <div><label className={label} htmlFor="p-rate">Your daily rate (RM)</label><input id="p-rate" inputMode="decimal" value={profile.rate || ''} onChange={e => setProfile(p => ({ ...p, rate: Number(e.target.value.replace(/[^0-9.]/g, '')) || 0 }))} className={input} /></div>
             </div>
             <div><label className={label} htmlFor="p-bio">Short bio</label><textarea id="p-bio" rows={4} value={profile.bio} onChange={e => setProfile(p => ({ ...p, bio: e.target.value }))} className={`${input} resize-y`} /></div>
-            <div><label className={label} htmlFor="p-qual">Qualifications</label><textarea id="p-qual" rows={3} value={profile.qualifications} onChange={e => setProfile(p => ({ ...p, qualifications: e.target.value }))} className={`${input} resize-y`} placeholder="e.g. Degree, master's, HRD Corp TTT" /></div>
-            <div><label className={label} htmlFor="p-certs">Other certificates</label><textarea id="p-certs" rows={3} value={profile.otherCerts} onChange={e => setProfile(p => ({ ...p, otherCerts: e.target.value }))} className={`${input} resize-y`} placeholder="e.g. DISC, MBTI, NLP, ICF coaching" /></div>
+            {(profile.qualifications || profile.otherCerts) && (
+              <p className="rounded-lg bg-surface px-3 py-2 text-sm"><span className="font-semibold">You typed before:</span> {[profile.qualifications, profile.otherCerts].filter(Boolean).join(' · ')}<span className="block text-ink-soft">Please put these in the qualification lists below.</span></p>
+            )}
             <div><label className={label} htmlFor="p-clients">Past clients <span className="font-normal text-ink-soft">(optional)</span></label><textarea id="p-clients" rows={3} value={profile.pastClients} onChange={e => setProfile(p => ({ ...p, pastClients: e.target.value }))} className={`${input} resize-y`} /></div>
           </section>
 
-          <TrainerExtrasFields {...extrasProps} only={['online', 'uploads']} />
+          <TrainerExtrasFields {...extrasProps} only={['biodata', 'online', 'uploads']} />
         </>
       )}
 
@@ -252,12 +263,31 @@ export default function TrainerLinkPage({ token }: { token: string }) {
           <p className="text-sm text-ink-soft">Nothing is compulsory. The more you fill in, the better we can match you with trainings. You can also submit now and add the rest later from this same link.</p>
           <div className="flex flex-wrap justify-end gap-2">
             <button type="button" className={btnSecondary} onClick={() => setNudge(null)}>Keep filling in</button>
+            <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
             <button type="button" disabled={busy} className={btnPrimary} onClick={() => submit(undefined, true)}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Submit anyway</button>
           </div>
         </div>
       ) : (
-        <div className="flex justify-end pb-10">
+        <div className="flex flex-wrap justify-end gap-2 pb-10">
+          {info.kind === 'profile' && <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>}
           <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Submit</button>
+        </div>
+      )}
+
+      {preview && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-ink/50" role="dialog" aria-modal="true" aria-label="Preview of your HRDC biodata" onClick={() => setPreview(false)}>
+          <div className="flex items-center justify-between gap-3 bg-white px-4 py-3 shadow" onClick={e => e.stopPropagation()}>
+            <p className="text-[15px] font-semibold">Preview: your HRDC trainer biodata</p>
+            <button type="button" className={btnSecondary} onClick={() => setPreview(false)}><X className="h-4 w-4" /> Close</button>
+          </div>
+          <div className="flex-1 overflow-auto p-4" onClick={e => e.stopPropagation()} onContextMenu={e => e.preventDefault()}>
+            <div className="mx-auto max-w-[900px] overflow-x-auto rounded-lg shadow-lg">
+              <div className="min-w-[640px]">
+                <TrainerBiodataDocument t={{ ...profile, name: profile.name || info.trainerName || '' }} icHidden={!profile.icNumber && !!info.icOnFile} />
+              </div>
+            </div>
+            <p className="mx-auto mt-3 max-w-[900px] text-center text-sm text-white">This is how NEXT Academy will present your biodata to HRD Corp. Close it to make changes, then Submit.</p>
+          </div>
         </div>
       )}
     </form>

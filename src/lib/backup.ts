@@ -28,6 +28,8 @@ export const LIST_NAMES: [string, string][] = [
   ['hrdc_queries', 'HRDC queries'],
   ['programmes', 'Programmes'],
   ['trainers_directory', 'Trainers'],
+  ['trainer_private', 'Trainer IC numbers'],
+  ['trainer_link_private', 'Trainer IC numbers from links'],
   ['venues_directory', 'Venues'],
   ['tasks', 'To-do'],
   ['events', 'Calendar events'],

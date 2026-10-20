@@ -1,4 +1,4 @@
-import type { DocKind, EmergencyContact, Gender, TrainerFile, TrainingType } from './lib/trainerProfile';
+import type { BioRow, DocKind, EmergencyContact, Gender, TrainerFile, TrainingType } from './lib/trainerProfile';
 
 export interface Student {
   id: string;
@@ -310,6 +310,16 @@ export interface Trainer {
   youtube?: string;
   otherSocial?: string;
   docs?: Partial<Record<DocKind, TrainerFile>>;   // Accredited TTT form, biodata, trainer profile (latest of each)
+  // HRDC standard trainer biodata (2026-10-20). The IC / passport number itself is in trainer_private/{id}.
+  nationality?: string;
+  race?: string;
+  tttNumber?: string;
+  academic?: BioRow[];
+  professional?: BioRow[];
+  career?: BioRow[];
+  trainingExp?: BioRow[];
+  icOnFile?: boolean;           // an IC / passport number is kept for them (Admin and Management see it)
+  icLinkToken?: string;         // the profile link it came from, until Admin or Management save it on the trainer
   contact?: string;
   email?: string;
   rate: number;

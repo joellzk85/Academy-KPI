@@ -43,10 +43,47 @@ export interface TrainerFile {
 
 export interface EmergencyContact { name: string; relationship: string; phone: string }
 
+// HRDC's "Standard trainer biodata" (Joel, 2026-10-20): four lists, each with "Add another".
+// The IC / passport number is NOT here: it's kept apart, for Admin and Management only (trainer_private).
+export type BioRow = Record<string, string>;
+export type BioListKey = 'academic' | 'professional' | 'career' | 'trainingExp';
+export const BIO_LISTS: { key: BioListKey; title: string; add: string; cols: { k: string; label: string; ph?: string; year?: boolean }[] }[] = [
+  { key: 'academic', title: 'Academic qualification', add: 'Add another qualification', cols: [
+    { k: 'qualification', label: 'Qualification', ph: 'e.g. Bachelor of Business Administration' },
+    { k: 'institute', label: 'Name of academic institute', ph: 'e.g. Universiti Malaya' },
+    { k: 'year', label: 'Year awarded', year: true },
+    { k: 'otherInstitute', label: 'Other academic institute' },
+  ] },
+  { key: 'professional', title: 'Professional qualification', add: 'Add another certification', cols: [
+    { k: 'certification', label: 'Professional certification', ph: 'e.g. Certified NLP Practitioner' },
+    { k: 'body', label: 'Certification body' },
+    { k: 'year', label: 'Year awarded', year: true },
+  ] },
+  { key: 'career', title: 'Career experience', add: 'Add another job', cols: [
+    { k: 'company', label: 'Previous company' },
+    { k: 'position', label: 'Position' },
+    { k: 'from', label: 'Year from', year: true },
+    { k: 'to', label: 'Year to', year: true, ph: 'e.g. 2020 or Present' },
+  ] },
+  { key: 'trainingExp', title: 'Training experience', add: 'Add another programme', cols: [
+    { k: 'programme', label: 'Training programme conducted' },
+    { k: 'from', label: 'Year from', year: true },
+    { k: 'to', label: 'Year to', year: true, ph: 'e.g. 2024 or Present' },
+  ] },
+];
+export const rowFilled = (r?: BioRow) => !!r && Object.values(r).some(v => String(v || '').trim());
+
 // The extra details, the same shape on the trainer record and in what a trainer submits.
 export interface TrainerExtras {
   gender: Gender;
   address: string;
+  nationality: string;
+  race: string;
+  tttNumber: string;            // TTT certification / exemption number
+  academic: BioRow[];
+  professional: BioRow[];
+  career: BioRow[];
+  trainingExp: BioRow[];
   emergencyContact: EmergencyContact;
   languages: string[];          // from LANGUAGES
   languagesOther: string;       // anything else, typed
@@ -60,13 +97,15 @@ export interface TrainerExtras {
 }
 
 export const emptyExtras = (): TrainerExtras => ({
-  gender: '', address: '', emergencyContact: { name: '', relationship: '', phone: '' }, languages: [], languagesOther: '',
+  gender: '', address: '', nationality: '', race: '', tttNumber: '', academic: [], professional: [], career: [], trainingExp: [], emergencyContact: { name: '', relationship: '', phone: '' }, languages: [], languagesOther: '',
   trainingTypes: [], otherCerts: '', linkedin: '', youtube: '', otherSocial: '', photoUrl: '', docs: {},
 });
 
 // The extra details of a saved trainer (missing ones blank).
 export const extrasFrom = (t: any): TrainerExtras => ({
   gender: t?.gender || '', address: t?.address || '',
+  nationality: t?.nationality || '', race: t?.race || '', tttNumber: t?.tttNumber || '',
+  academic: [...(t?.academic || [])], professional: [...(t?.professional || [])], career: [...(t?.career || [])], trainingExp: [...(t?.trainingExp || [])],
   emergencyContact: { name: t?.emergencyContact?.name || '', relationship: t?.emergencyContact?.relationship || '', phone: t?.emergencyContact?.phone || '' },
   languages: t?.languages || [], languagesOther: t?.languagesOther || '', trainingTypes: t?.trainingTypes || [],
   otherCerts: t?.otherCerts || '', linkedin: t?.linkedin || '', youtube: t?.youtube || '', otherSocial: t?.otherSocial || '',
@@ -76,6 +115,9 @@ export const extrasFrom = (t: any): TrainerExtras => ({
 // Ready to save on a trainer record: text trimmed. Empty uploads are left out.
 export const extrasToSave = (x: TrainerExtras) => ({
   gender: x.gender, address: x.address.trim(),
+  nationality: x.nationality.trim(), race: x.race.trim(), tttNumber: x.tttNumber.trim(),
+  academic: cleanRows(x.academic, 'academic'), professional: cleanRows(x.professional, 'professional'),
+  career: cleanRows(x.career, 'career'), trainingExp: cleanRows(x.trainingExp, 'trainingExp'),
   emergencyContact: { name: x.emergencyContact.name.trim(), relationship: x.emergencyContact.relationship.trim(), phone: x.emergencyContact.phone.trim() },
   languages: x.languages, languagesOther: x.languagesOther.trim(), trainingTypes: x.trainingTypes,
   otherCerts: x.otherCerts.trim(), linkedin: x.linkedin.trim(), youtube: x.youtube.trim(), otherSocial: x.otherSocial.trim(),
@@ -109,6 +151,15 @@ export function trainerFileProblem(name: string, size: number): string {
 export const safeName = (name: string) => String(name || 'file').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').slice(-80) || 'file';
 
 // ---------- Cleaning (the server keeps only this) ----------
+// A biodata list: known columns only, up to 30 rows, empty rows left out.
+export function cleanRows(list: any, key: BioListKey): BioRow[] {
+  const cols = BIO_LISTS.find(l => l.key === key)!.cols;
+  return (Array.isArray(list) ? list : []).slice(0, 30)
+    .map((r: any) => Object.fromEntries(cols.map(c => [c.k, String(r?.[c.k] ?? '').trim().slice(0, c.year ? 20 : 200)])))
+    .filter(rowFilled);
+}
+// IC / passport number: letters, numbers, dashes and spaces only.
+export const cleanIc = (v: any) => String(v ?? '').replace(/[^A-Za-z0-9 -]/g, '').trim().slice(0, 30);
 const str = (v: any, max: number) => String(v ?? '').replace(/\u0000/g, '').trim().slice(0, max);
 const FIREBASE_FILE = /^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^/]+\/o\/([^?]+)\?alt=media&token=[A-Za-z0-9-]+$/;
 
@@ -143,6 +194,9 @@ export function cleanExtras(d: any, prefixes: string[]): TrainerExtras {
   return {
     gender: (GENDERS as string[]).includes(d?.gender) ? d.gender : '',
     address: str(d?.address, 500),
+    nationality: str(d?.nationality, 60), race: str(d?.race, 60), tttNumber: str(d?.tttNumber, 60),
+    academic: cleanRows(d?.academic, 'academic'), professional: cleanRows(d?.professional, 'professional'),
+    career: cleanRows(d?.career, 'career'), trainingExp: cleanRows(d?.trainingExp, 'trainingExp'),
     emergencyContact: { name: str(ec.name, 100), relationship: str(ec.relationship, 60), phone: str(ec.phone, 40) },
     languages: (Array.isArray(d?.languages) ? d.languages : []).map(String).filter((x: string) => (LANGUAGES as readonly string[]).includes(x)),
     languagesOther: str(d?.languagesOther, 200),
@@ -166,21 +220,26 @@ export function profileGaps(p: any): string[] {
     [has(p.contact) || has(p.email), 'phone or email'],
     [has(p.gender), 'gender'],
     [has(p.address), 'address'],
+    [has(p.icNumber) || !!p.icOnFile, 'IC / passport number'],
+    [has(p.nationality) && has(p.race), 'nationality and race'],
+    [has(p.tttNumber), 'TTT certification / exemption number'],
     [has(p.emergencyContact?.name) && has(p.emergencyContact?.phone), 'emergency contact'],
     [has(p.languages) || has(p.languagesOther), 'languages'],
     [has(p.trainingTypes), 'Team building / Soft skills'],
     [has(p.programmeIds) || has(p.suggestedTopics), 'what you teach'],
     [has(p.experienceYears), 'years of experience'],
     [has(p.bio), 'short bio'],
-    [has(p.qualifications), 'qualifications'],
-    [has(p.otherCerts), 'other certificates'],
+    [(p.academic || []).some(rowFilled), 'academic qualification'],
+    [(p.professional || []).some(rowFilled), 'professional qualification'],
+    [(p.career || []).some(rowFilled), 'career experience'],
+    [(p.trainingExp || []).some(rowFilled), 'training experience'],
     [has(p.linkedin) || has(p.youtube) || has(p.otherSocial), 'LinkedIn, YouTube or other social media'],
     [has(p.photoUrl), 'professional photo'],
     ...DOC_KINDS.map(k => [!!p.docs?.[k.id], k.label] as [boolean, string]),
   ];
   return gaps.filter(([done]) => !done).map(([, what]) => what);
 }
-export const PROFILE_PARTS = 17;
+export const PROFILE_PARTS = 22;
 
 // A link typed without https:// still opens.
 export const linkHref = (s: string) => (/^https?:\/\//i.test(s.trim()) ? s.trim() : `https://${s.trim()}`);

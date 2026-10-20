@@ -51,6 +51,9 @@ export function registerTrainerLinkRoutes(app: Express) {
       const t: any = link.trainerId ? (await db.collection('trainers_directory').doc(link.trainerId).get()).data() || {} : null;
       // Files and photo already on their record: the form says so (a new upload replaces them). Links aren't sent.
       if (t) out.onFile = { photo: !!t.photoUrl, docs: Object.keys(t.docs || {}).filter(k => t.docs[k]) };
+      // Whether we already have their IC / passport number (the number itself is never sent back).
+      out.icOnFile = (await db.collection('trainer_link_private').doc(String(req.body?.token)).get()).exists
+        || (!!link.trainerId && ((await db.collection('trainer_private').doc(link.trainerId).get()).exists || !!t?.icOnFile));
       if (link.submission) out.prefill = link.submission;
       else if (t) {
         out.prefill = {
@@ -60,6 +63,8 @@ export function registerTrainerLinkRoutes(app: Express) {
           gender: t.gender || '', address: t.address || '', emergencyContact: t.emergencyContact || {}, languages: t.languages || [],
           languagesOther: t.languagesOther || '', trainingTypes: t.trainingTypes || [], otherCerts: t.otherCerts || '',
           linkedin: t.linkedin || '', youtube: t.youtube || '', otherSocial: t.otherSocial || '',
+          nationality: t.nationality || '', race: t.race || '', tttNumber: t.tttNumber || '', academic: t.academic || [],
+          professional: t.professional || [], career: t.career || [], trainingExp: t.trainingExp || [],
         };
       }
     } else {
@@ -88,6 +93,13 @@ export function registerTrainerLinkRoutes(app: Express) {
       submission = cleanProfile(req.body?.data, ids, ref.id);
       const problem = profileProblem(submission);
       if (problem) throw new UserError(400, 'invalid', problem);
+      // The IC / passport number never goes in the link (which every team member can read): it's kept in
+      // trainer_link_private/{token}, which only Admin and Management can read. Left blank = keep the earlier one.
+      const ic = submission.icNumber;
+      delete submission.icNumber;
+      const priv = db.collection('trainer_link_private').doc(ref.id);
+      if (ic) await priv.set({ icNumber: ic, at: Date.now() });
+      submission.icSent = !!ic || (await priv.get()).exists;
     } else {
       submission = cleanOutline(req.body?.data);
       const problem = outlineProblem(submission);

@@ -346,6 +346,17 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
+    // Trainer IC / passport numbers (2026-10-20; Joel: only Admin and Management can see them).
+    // trainer_private/{trainerId}: { icNumber, at, byName }. trainer_link_private/{token}: what a trainer typed on
+    // their profile link, written only by the server (serverTrainerLinks.ts).
+    match /trainer_private/{trainerId} {
+      allow read, write: if isStaff();
+    }
+    match /trainer_link_private/{token} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
     // Client links for quotations and course outlines (2026-10-19): members see them (and how often the client
     // opened them); only the server makes, stops and counts them (serverDocLinks.ts).
     match /doc_links/{token} {

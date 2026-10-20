@@ -5,7 +5,7 @@ import { storage } from '../lib/firebase';
 import { shrink } from './PhotoPicker';
 import { storageError } from './ProposalFiles';
 import {
-  DOC_KINDS, DocKind, GENDERS, LANGUAGES, TRAINER_FILE_ACCEPT, TRAINER_FILE_KINDS, TRAINING_TYPES, TrainerExtras, TrainerFile,
+  BIO_LISTS, BioRow, DOC_KINDS, DocKind, rowFilled, GENDERS, LANGUAGES, TRAINER_FILE_ACCEPT, TRAINER_FILE_KINDS, TRAINING_TYPES, TrainerExtras, TrainerFile,
   safeName, topicList, topicText, trainerFileProblem, trainerFileType,
 } from '../lib/trainerProfile';
 
@@ -125,9 +125,41 @@ export function TopicList({ value, onChange, idPrefix }: { value: string; onChan
   );
 }
 
-export type ExtrasPart = 'about' | 'emergency' | 'languages' | 'online' | 'uploads';
+export type ExtrasPart = 'about' | 'emergency' | 'languages' | 'biodata' | 'online' | 'uploads';
 
-export default function TrainerExtrasFields({ value, onChange, uploader, wrap, onFile, photoSlot, idPrefix = 'tx', only }: {
+// One HRDC biodata list (academic, professional, career, training): a card per row, with "Add another".
+function BioList({ list, rows, onChange, idPrefix }: { list: typeof BIO_LISTS[number]; rows: BioRow[]; onChange: (rows: BioRow[]) => void; idPrefix: string }) {
+  const shown = rows.length ? rows : [{}];
+  const setRow = (i: number, k: string, val: string) => onChange(shown.map((r, j) => (j === i ? { ...r, [k]: val } : r)));
+  return (
+    <div className="space-y-3">
+      {shown.map((r, i) => (
+        <div key={i} className="rounded-xl border border-line p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold text-ink-soft">{list.title} {i + 1}</span>
+            {(shown.length > 1 || rowFilled(r)) && (
+              <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-surface" onClick={() => onChange(shown.filter((_, j) => j !== i))} aria-label={`Remove ${list.title.toLowerCase()} ${i + 1}`}><X className="h-4 w-4" /></button>
+            )}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {list.cols.map(c => (
+              <div key={c.k}>
+                <label className={label} htmlFor={`${idPrefix}-${list.key}-${i}-${c.k}`}>{c.label}</label>
+                <input id={`${idPrefix}-${list.key}-${i}-${c.k}`} value={r[c.k] || ''} onChange={e => setRow(i, c.k, e.target.value)}
+                  inputMode={c.year && c.k !== 'to' ? 'numeric' : undefined} placeholder={c.ph || (c.year ? 'e.g. 2018' : '')} className={input} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <button type="button" className={btnSecondary} onClick={() => onChange([...shown, {}])}><Plus className="h-4 w-4" /> {list.add}</button>
+    </div>
+  );
+}
+
+export default function TrainerExtrasFields({ value, onChange, uploader, wrap, onFile, photoSlot, idPrefix = 'tx', only, ic }: {
+  // IC / passport number (kept apart from the rest, for Admin and Management only). Not given = the box isn't shown.
+  ic?: { value: string; onChange: (v: string) => void; note?: string };
   only?: ExtrasPart[];                           // which groups to show (default all)
   value: TrainerExtras;
   onChange: (patch: Partial<TrainerExtras> | ((cur: TrainerExtras) => Partial<TrainerExtras>)) => void;
@@ -157,6 +189,18 @@ export default function TrainerExtrasFields({ value, onChange, uploader, wrap, o
                   className={`rounded-lg border px-4 py-2 text-[15px] font-semibold ${v.gender === g ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>{g}</button>
               ))}
             </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {ic && (
+              <div className="sm:col-span-2">
+                <label className={label} htmlFor={id('ic')}>IC / Passport No.</label>
+                <input id={id('ic')} value={ic.value} onChange={e => ic.onChange(e.target.value)} className={input} placeholder="e.g. 850101-14-5678" autoComplete="off" />
+                <p className="mt-1 text-sm text-ink-soft">{ic.note || 'Kept private: only NEXT Academy Admin and Management can see it.'}</p>
+              </div>
+            )}
+            <div><label className={label} htmlFor={id('nat')}>Nationality</label><input id={id('nat')} value={v.nationality} onChange={e => onChange({ nationality: e.target.value })} className={input} placeholder="e.g. Malaysian" /></div>
+            <div><label className={label} htmlFor={id('race')}>Race</label><input id={id('race')} value={v.race} onChange={e => onChange({ race: e.target.value })} className={input} /></div>
+            <div className="sm:col-span-2"><label className={label} htmlFor={id('ttt')}>TTT certification / exemption number</label><input id={id('ttt')} value={v.tttNumber} onChange={e => onChange({ tttNumber: e.target.value })} className={input} placeholder="From your HRD Corp Train the Trainer certificate" /></div>
           </div>
           <div>
             <label className={label} htmlFor={id('addr')}>Address</label>
@@ -200,6 +244,12 @@ export default function TrainerExtrasFields({ value, onChange, uploader, wrap, o
             </div>
           </div>
         </>
+      ))}
+
+      {show('biodata') && BIO_LISTS.map(l => (
+        <React.Fragment key={l.key}>
+          {wrap(l.title, <BioList list={l} rows={v[l.key] || []} onChange={rows => onChange({ [l.key]: rows } as Partial<TrainerExtras>)} idPrefix={idPrefix} />)}
+        </React.Fragment>
       ))}
 
       {show('online') && wrap('Online', (

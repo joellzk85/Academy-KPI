@@ -6,7 +6,7 @@
 // trainer_links/{token}: { kind, token, status, createdAt, expiresAt, requestedById, requestedByName,
 //   outlineId?, trainerId?, trainerName?, title?, submission?, submittedAt?, decidedById?, decidedByName?, decidedAt? }
 
-import { TrainerExtras, cleanExtras } from './trainerProfile';
+import { TrainerExtras, cleanExtras, cleanIc } from './trainerProfile';
 
 export type LinkKind ='outline' | 'profile';
 export type LinkStatus = 'open' | 'submitted' | 'accepted' | 'cancelled';
@@ -19,6 +19,10 @@ export interface OutlineSubmission {
 }
 
 export interface ProfileSubmission extends TrainerExtras {
+  // IC / passport number (2026-10-20): typed by the trainer, but the server moves it to trainer_link_private/{token}
+  // (Admin and Management only) and keeps just icSent: true in the submission everyone on the team can read.
+  icNumber?: string;
+  icSent?: boolean;
   name: string; contact: string; email: string; bio: string; experienceYears: number;
   qualifications: string; pastClients: string; programmeIds: string[]; suggestedTopics: string; rate: number;
 }
@@ -73,6 +77,7 @@ export function outlineProblem(s: OutlineSubmission): string {
 export function cleanProfile(d: any, programmeIds: string[], token: string): ProfileSubmission {
   return {
     ...cleanExtras(d, [`trainer_uploads/${token}/`]),
+    icNumber: cleanIc(d?.icNumber), icSent: !!d?.icSent,
     name: str(d?.name, 100), contact: str(d?.contact, 40), email: str(d?.email, 120),
     bio: str(d?.bio, 3000), experienceYears: num(d?.experienceYears, 0, 80),
     qualifications: str(d?.qualifications, 1500), pastClients: str(d?.pastClients, 1500),
