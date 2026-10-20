@@ -66,14 +66,11 @@ export function registerTrainerLinkRoutes(app: Express) {
       if (link.submission) out.prefill = link.submission;
       else if (link.outlineId) {
         const o = (await db.collection('course_outlines').doc(link.outlineId).get()).data();
-        if (o && (o.items || []).some((m: any) => m.moduleTitle || m.topics)) {
-          out.prefill = {
-            durationDays: o.durationDays || 0, totalHours: o.totalHours || 0, level: o.level || 'Beginner', audience: o.audience || '',
-            prerequisites: o.prerequisites || '', overview: o.overview || '', outcomes: o.outcomes || [],
-            items: (o.items || []).map((m: any) => ({ moduleTitle: m.moduleTitle || '', duration: m.duration || '', methodology: m.methodology || '', topics: m.topics || '' })),
-          };
-        }
+        // What the outline already has (cleaned the same way as a submission, so only the outline's own content goes out).
+        if (o) out.prefill = cleanOutline({ ...o, courseTitle: o.useProgrammeName ? '' : o.courseTitle, level: undefined });
       }
+      // The course title starts as the programme's (or the outline's) name; the trainer can change it.
+      if (out.prefill && !out.prefill.courseTitle) out.prefill.courseTitle = link.title || '';
     }
     return out;
   }));

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, X,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, UserPlus, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { CourseOutline, CourseOutlineItem, OutlineAgendaRow, QuoteSendEntry, Representative } from '../types';
@@ -19,7 +19,7 @@ import { linkedOnly } from '../lib/linked';
 import ShareWithBox, { NewCount } from './ShareWithBox';
 import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
-import { OutlineSubmission, TrainerLink, isLive } from '../lib/trainerLinks';
+import { OutlineSubmission, TrainerLink, isLive, outlineFieldsFrom, outlineSummary, previewOutline } from '../lib/trainerLinks';
 import { trainerOptions } from './PickOrType';
 import CustomerCodeBox from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
@@ -82,7 +82,8 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
   const links = useTrainerLinks();
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<{ o: CourseOutline; isNew: boolean } | null>(null);
-  const [choosing, setChoosing] = useState<null | { step: 'deal' } | { step: 'start'; deal: any | null }>(null);
+  const [choosing, setChoosing] = useState<null | { step: 'deal'; invite?: TrainerLink } | { step: 'start'; deal: any | null }>(null);
+  const [inviteError, setInviteError] = useState('');
   const [backDeal, setBackDeal] = useState<string | null>(null);   // opened from a deal: "Back to deal"
 
   useEffect(() => {
@@ -150,6 +151,35 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
     setChoosing(null);
     setDraft({ o, isNew: true });
   };
+  // A trainer's outline from an invite link (Joel, 2026-10-20): accepting it saves a new draft outline, for the deal
+  // picked (or a general one), with the trainer and programme from the link, then opens it to check and send.
+  const acceptInvite = async (deal: any | null, link: TrainerLink) => {
+    setChoosing(null);
+    setInviteError('');
+    const sub = link.submission as OutlineSubmission;
+    const date = todayIso();
+    const ownerId = (deal && dealOwnerId(deal)) || rep.id;
+    const programmeId = link.programmeId || deal?.programmeId || '';
+    const progName = String(programmes.find(p => p.id === programmeId)?.name || '').trim();
+    const title = (sub.courseTitle || link.title || '').trim();
+    const useProg = !!programmeId && (!title || title === progName);
+    const o: CourseOutline = prepareOutline({
+      courseTitle: useProg ? '' : title, category: '', level: 'Beginner', kind: 'training',
+      ...outlineFieldsFrom(sub),
+      id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date, clientCode(clients.find(c => c.id === deal?.clientId))), refAuto: true, date,
+      preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
+      clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
+      programmeId, useProgrammeName: useProg, trainerId: link.trainerId || '',
+      status: 'draft', sharedWithIds: [], isHidden: false,
+    } as CourseOutline);
+    try {
+      await setDoc(doc(db, 'course_outlines', o.id), o);
+      await closeTrainerLink(link, 'accepted', me);
+      open(o);
+    } catch (e) {
+      setInviteError(`Couldn't make the outline: ${friendlyError(e)}`);
+    }
+  };
   const open = (o: CourseOutline) => {
     markSharedSeen(me.id, 'outline', o);   // clears this person's "Shared with me" alert for it
     setDraft({ o: clean({ ...o, items: o.items || [], outcomes: o.outcomes || [] }), isNew: false });
@@ -181,11 +211,14 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
           backToDeal={backDeal && onBackToDeal ? leave : undefined} />
       ) : (
         <OutlineList rep={rep} me={me} staff={staff} outlines={outlines} loaded={loaded} sources={sources} personName={personName} links={links} startOnShared={startOnShared}
-          onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} />
+          onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate}
+          trainers={trainers} onAcceptInvite={link => setChoosing({ step: 'deal', invite: link })} inviteError={inviteError} />
       )}
       {choosing?.step === 'deal' && (
         <DealChooser deals={dealsForPicker} sources={sources} personName={personName}
-          onPick={deal => setChoosing({ step: 'start', deal })} onCancel={() => setChoosing(null)} allowGeneral />
+          title={choosing.invite ? "Which deal is this trainer's outline for?" : undefined}
+          onPick={deal => { const inv = choosing.invite; if (inv) acceptInvite(deal, inv); else setChoosing({ step: 'start', deal }); }}
+          onCancel={() => setChoosing(null)} allowGeneral />
       )}
       {choosing?.step === 'start' && (
         <StartChooser deal={choosing.deal} outlines={outlines} sources={sources}
@@ -297,9 +330,9 @@ function Modal({ title, onCancel, children }: { title: string; onCancel: () => v
 // ---------- List ----------
 type Scope = 'mine' | 'shared' | 'everyone';
 
-function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, links, onNew, onOpen, onDuplicate, startOnShared }: {
+function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, links, onNew, onOpen, onDuplicate, startOnShared, trainers, onAcceptInvite, inviteError }: {
   rep: Representative; me: Viewer; staff: boolean; outlines: CourseOutline[]; loaded: boolean; sources: OutlineSources; personName: (id?: string) => string;
-  links: TrainerLink[]; startOnShared?: boolean;
+  links: TrainerLink[]; startOnShared?: boolean; trainers: any[]; onAcceptInvite: (link: TrainerLink) => void; inviteError: string;
   onNew: () => void; onOpen: (o: CourseOutline) => void; onDuplicate: (o: CourseOutline) => Promise<void>;
 }) {
   const canSeeEveryone = staff && me.id === rep.id;
@@ -311,6 +344,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [inviting, setInviting] = useState(false);
 
   const resolved = useMemo(() => outlines.map(o => ({ raw: o, r: resolveOutline(o, sources) })), [outlines, sources]);
   const isMine = (x: { raw: CourseOutline; r: { ownerId: string } }) => x.r.ownerId === rep.id || x.raw.creatorId === rep.id || (!x.raw.creatorId && !x.raw.ownerId && !!x.raw.preparedBy && x.raw.preparedBy === rep.name);
@@ -336,8 +370,15 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
           <h2 className="text-xl font-bold">Course outlines</h2>
           <p className="mt-0.5 text-[15px] text-ink-soft">Click an outline to open it.</p>
         </div>
-        <button type="button" className={btnPrimary} onClick={onNew}><Plus className="h-4 w-4" /> New outline</button>
+        <span className="flex flex-wrap gap-2">
+          <button type="button" className={btnSecondary} onClick={() => setInviting(true)}><UserPlus className="h-4 w-4" /> Invite a trainer to write one</button>
+          <button type="button" className={btnPrimary} onClick={onNew}><Plus className="h-4 w-4" /> New outline</button>
+        </span>
       </div>
+
+      <TrainerInvites links={links} mine={l => l.requestedById === rep.id || canSeeEveryone} trainers={trainers} me={me} onAccept={onAcceptInvite} />
+      {inviteError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{inviteError}</p>}
+      {inviting && <InviteModal me={me} trainers={trainers} programmes={sources.programmes} onClose={() => setInviting(false)} />}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
@@ -417,6 +458,135 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
     <button type="button" role="menuitem" onClick={onClick} className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium ${danger ? 'text-danger hover:bg-danger-soft' : 'text-ink hover:bg-surface'}`}>
       {icon}{text}
     </button>
+  );
+}
+
+// ---------- Inviting a trainer to write an outline (Joel, 2026-10-20: "same as invite trainer") ----------
+// A link not tied to an outline yet. The trainer fills in the outline form and previews it; what they send waits
+// here until someone accepts it as a new outline (picking the deal) or discards it.
+function InviteModal({ me, trainers, programmes, onClose }: { me: Viewer; trainers: any[]; programmes: any[]; onClose: () => void }) {
+  const [programmeId, setProgrammeId] = useState('');
+  const [trainerId, setTrainerId] = useState('');
+  const [link, setLink] = useState<TrainerLink | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const progName = String(programmes.find(p => p.id === programmeId)?.name || '').trim();
+  const trainer = trainers.find(t => t.id === trainerId);
+  const make = async () => {
+    setBusy(true); setError('');
+    try {
+      setLink(await createTrainerLink({ kind: 'outline', programmeId, title: progName, trainerId: trainer?.id || '', trainerName: trainer?.name || '' }, me));
+    } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Invite a trainer to write a course outline" onCancel={onClose}>
+      {!link ? (
+        <div className="space-y-3">
+          <p className="text-[15px] text-ink-soft">The trainer gets a private link (no login). They fill in the same parts as our outline editor, can preview it in the NEXT Academy look, and submit. It then waits at the top of Course outlines for you to review.</p>
+          <div>
+            <label className={label} htmlFor="inv-prog">Programme <span className="font-normal text-ink-soft">(optional; the trainer can type the title)</span></label>
+            <select id="inv-prog" value={programmeId} onChange={e => setProgrammeId(e.target.value)} className={input}>
+              <option value="">Not chosen</option>
+              {[...programmes].sort((a, b) => String(a.name).localeCompare(String(b.name))).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={label} htmlFor="inv-trainer">Trainer <span className="font-normal text-ink-soft">(optional, for a trainer already in the list)</span></label>
+            <select id="inv-trainer" value={trainerId} onChange={e => setTrainerId(e.target.value)} className={input}>
+              <option value="">Someone not in the list / not chosen</option>
+              {trainerOptions(trainers, programmeId).map(t => <option key={t.id} value={t.id}>{t.name}{t.hint ? ` (${t.hint.toLowerCase()})` : ''}</option>)}
+            </select>
+          </div>
+          {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" className={btnSecondary} onClick={onClose}>Cancel</button>
+            <button type="button" className={btnPrimary} disabled={busy} onClick={make}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Make the link</button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-[15px]">Send this link to {link.trainerName || 'the trainer'}. It works for 14 days.</p>
+          <LinkShareBox link={link} phone={trainer?.contact}
+            message={`Hi${link.trainerName ? ` ${link.trainerName}` : ''}, please fill in your course outline${link.title ? ` for "${link.title}"` : ''} for NEXT Academy here. You can preview it before you submit:`} />
+          <div className="flex justify-end"><button type="button" className={btnPrimary} onClick={onClose}>Done</button></div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function TrainerInvites({ links, mine, trainers, me, onAccept }: {
+  links: TrainerLink[]; mine: (l: TrainerLink) => boolean; trainers: any[]; me: Viewer; onAccept: (l: TrainerLink) => void;
+}) {
+  const [peek, setPeek] = useState<TrainerLink | null>(null);
+  const [showWaiting, setShowWaiting] = useState(false);
+  const [error, setError] = useState('');
+  const invites = links.filter(l => l.kind === 'outline' && !l.outlineId && isLive(l) && mine(l));
+  const submitted = invites.filter(l => l.status === 'submitted').sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
+  const waiting = invites.filter(l => l.status === 'open').sort((a, b) => b.createdAt - a.createdAt);
+  if (!submitted.length && !waiting.length) return null;
+  const discard = async (l: TrainerLink) => {
+    if (!window.confirm("Discard what the trainer submitted? The link will be closed.")) return;
+    setError('');
+    try { await closeTrainerLink(l, 'cancelled', me); setPeek(null); } catch (e) { setError(friendlyError(e)); }
+  };
+  const cancel = async (l: TrainerLink) => {
+    if (!window.confirm('Cancel this link? The trainer will no longer be able to open it.')) return;
+    try { await closeTrainerLink(l, 'cancelled', me); } catch (e) { setError(friendlyError(e)); }
+  };
+  const subOf = (l: TrainerLink) => l.submission as OutlineSubmission;
+  const titleOf = (l: TrainerLink) => (subOf(l)?.courseTitle || l.title || 'Untitled outline').trim();
+
+  return (
+    <div className="space-y-3">
+      {submitted.length > 0 && (
+        <section className="rounded-2xl border border-attention/40 bg-attention-soft/40 p-4">
+          <h3 className="font-bold">Course outlines from trainers, waiting for review ({submitted.length})</h3>
+          <ul className="mt-2 space-y-2">
+            {submitted.map(l => (
+              <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-white px-3 py-2.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold">{titleOf(l)}</span>
+                  <span className="block truncate text-sm text-ink-soft">
+                    {l.trainerName || 'A trainer'} · {outlineSummary(subOf(l))}{l.submittedAt ? ` · sent ${formatDate(new Date(l.submittedAt).toISOString().slice(0, 10))}` : ''} · asked by {l.requestedByName}
+                  </span>
+                </span>
+                <button type="button" className={btnSecondary} onClick={() => setPeek(l)}><Eye className="h-4 w-4" /> Preview</button>
+                <button type="button" className={btnPrimary} onClick={() => onAccept(l)}>Accept as a new outline</button>
+                <button type="button" className={`${linkBtn} text-danger`} onClick={() => discard(l)}>Discard</button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {waiting.length > 0 && (
+        <div className="rounded-2xl border border-line bg-white px-4 py-3">
+          <button type="button" className={linkBtn} onClick={() => setShowWaiting(v => !v)} aria-expanded={showWaiting}>
+            {showWaiting ? 'Hide' : 'Show'} links waiting for trainers ({waiting.length})
+          </button>
+          {showWaiting && (
+            <ul className="mt-3 space-y-3">
+              {waiting.map(l => (
+                <li key={l.id} className="space-y-1.5">
+                  <p className="text-sm"><strong>{l.trainerName || 'Trainer not chosen'}</strong>{l.title ? ` · ${l.title}` : ''} · made by {l.requestedByName} {formatDate(new Date(l.createdAt).toISOString().slice(0, 10))}</p>
+                  <LinkShareBox link={l} phone={trainers.find(t => t.id === l.trainerId)?.contact}
+                    message={`Hi${l.trainerName ? ` ${l.trainerName}` : ''}, please fill in your course outline${l.title ? ` for "${l.title}"` : ''} for NEXT Academy here. You can preview it before you submit:`}
+                    onCancel={() => cancel(l)} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {peek && (
+        <SubmissionPreview sub={subOf(peek)} title={peek.title || ''} forCompany="" who={peek.trainerName} onClose={() => setPeek(null)}
+          actions={<>
+            <button type="button" className={btnSecondary} onClick={() => discard(peek)}>Discard</button>
+            <button type="button" className={btnPrimary} onClick={() => { const l = peek; setPeek(null); onAccept(l); }}>Accept as a new outline</button>
+          </>} />
+      )}
+    </div>
   );
 }
 
@@ -706,11 +876,10 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
           onTrainer={id => set({ trainerId: id })}
           onAccept={s => {
             const hasContent = !!(o.overview || '').trim() || (o.items || []).some(m => (m.moduleTitle || m.topics || '').trim());
-            if (hasContent && !window.confirm("Replace this outline's overview, outcomes and modules with what the trainer submitted?")) return false;
-            set({
-              durationDays: s.durationDays, totalHours: s.totalHours, audience: s.audience, prerequisites: s.prerequisites,
-              overview: s.overview, outcomes: s.outcomes, items: s.items.map(m => ({ ...newModule(), ...m })),
-            });
+            if (hasContent && !window.confirm("Replace this outline's course details, overview, modules, agenda and extras with what the trainer submitted?")) return false;
+            // A title the trainer typed that differs from the one printing now replaces it.
+            const title = (s.courseTitle || '').trim();
+            set({ ...outlineFieldsFrom(s), ...(title && title !== shownO.courseTitle ? { courseTitle: title, useProgrammeName: false } : {}) });
             setNote("Filled in from the trainer's submission. Check it, then click Save.");
             return true;
           }} />
@@ -1001,6 +1170,7 @@ function TrainerCard({ o, r, me, trainers, links, saved, onTrainer, onAccept }: 
   };
   const send = () => run(() => createTrainerLink({ kind: 'outline', outlineId: o.id, trainerId: trainer?.id || '', trainerName: trainer?.name || '', title }, me));
   const sub = link?.status === 'submitted' ? (link.submission as OutlineSubmission) : null;
+  const [peek, setPeek] = useState(false);
 
   return (
     <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
@@ -1022,8 +1192,9 @@ function TrainerCard({ o, r, me, trainers, links, saved, onTrainer, onAccept }: 
           {sub && (
             <div className="rounded-xl border border-attention/40 bg-attention-soft/40 p-3">
               <p className="font-semibold">{link.trainerName || 'The trainer'} submitted the outline{link.submittedAt ? ` on ${formatDate(new Date(link.submittedAt).toISOString().slice(0, 10))}` : ''}.</p>
-              <p className="text-sm text-ink-soft">{sub.durationDays} day{sub.durationDays === 1 ? '' : 's'} · {sub.totalHours} hours · {sub.items.length} module{sub.items.length === 1 ? '' : 's'}: {sub.items.map(m => m.moduleTitle).join(', ')}</p>
+              <p className="text-sm text-ink-soft">{outlineSummary(sub)}: {sub.items.map(m => m.moduleTitle).join(', ')}</p>
               <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className={btnSecondary} onClick={() => setPeek(true)}><Eye className="h-4 w-4" /> Preview</button>
                 <button type="button" className={btnPrimary} disabled={busy} onClick={() => { if (onAccept(sub)) run(() => closeTrainerLink(link, 'accepted', me)); }}>Accept into this outline</button>
                 <button type="button" className={btnSecondary} disabled={busy} onClick={() => { if (window.confirm("Discard what the trainer submitted? The link will be closed.")) run(() => closeTrainerLink(link, 'cancelled', me)); }}>Discard</button>
               </div>
@@ -1035,7 +1206,27 @@ function TrainerCard({ o, r, me, trainers, links, saved, onTrainer, onAccept }: 
         </>
       )}
       {error && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {peek && sub && <SubmissionPreview sub={sub} title={title} forCompany={r.o.preparedForCompany || ''} who={link.trainerName} onClose={() => setPeek(false)} />}
     </section>
+  );
+}
+
+// What a trainer submitted, the way it prints (before accepting it).
+function SubmissionPreview({ sub, title, forCompany, who, onClose, actions }: {
+  sub: OutlineSubmission; title: string; forCompany: string; who?: string; onClose: () => void; actions?: React.ReactNode;
+}) {
+  const shown = useMemo(() => previewOutline(sub, title, forCompany), [sub, title, forCompany]);
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-surface" role="dialog" aria-modal="true" aria-label="Preview of the trainer's outline">
+      <div className="sticky top-0 z-10 border-b border-line bg-white/95 px-4 py-3 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2">
+          <button type="button" className={btnSecondary} onClick={onClose}><ArrowLeft className="h-4 w-4" /> Close preview</button>
+          <span className="min-w-0 flex-1 text-sm text-ink-soft">Submitted by {who || 'the trainer'}. Nothing is saved until you accept it.</span>
+          {actions}
+        </div>
+      </div>
+      <div className="mx-auto max-w-5xl px-4 py-6"><CourseOutlineDocument o={shown} /></div>
+    </div>
   );
 }
 
