@@ -3,6 +3,8 @@ import { collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'fi
 import { ArrowLeft, Calculator, Plus, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM } from '../lib/deals';
+import { LIGHT_TEXT } from '../lib/kpi';
+import { gpLight } from '../lib/kpiLibrary';
 import { useMoneySettings } from './Money';
 import { useAutoSave, autoSaveText, leaveAfterSave } from '../lib/useAutoSave';
 import {
@@ -27,7 +29,8 @@ const btnLink = 'inline-flex items-center gap-1 text-sm font-semibold text-accen
 
 const OPTION_NAMES = ['A', 'B', 'C', 'D'];
 const pctText = (v: number) => `${(Number.isFinite(v) ? v : 0).toFixed(1)}%`;
-const gpTone = (pct: number) => (pct < 0 ? 'text-danger' : pct < 20 ? 'text-attention' : 'text-accent');
+// GP colour: the company gross profit bands (Team → KPI library, Joel 2026-10-22); a loss is always red.
+const gpTone = (pct: number) => (pct < 0 ? 'text-danger' : LIGHT_TEXT[gpLight(pct)]);
 
 // A number box that lets you type freely ("12.", "") and hands back a number.
 function NumInput({ value, onChange, className, placeholder = '0', ariaLabel }: {

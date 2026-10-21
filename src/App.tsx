@@ -50,7 +50,9 @@ const MyHome = React.lazy(() => import('./components/MyHome'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, TeamMember, ROLE_LABELS } from './types';
-import { metricsFor, templateById } from './lib/kpi';
+import { hasKpis, metricsFor } from './lib/kpi';
+import { KpiSetItem } from './lib/kpiLibrary';
+import { useKpiLibrary } from './lib/useKpiLibrary';
 import { appointmentEvents } from './lib/appointments';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
 import { runBackup } from './lib/backupApi';
@@ -201,13 +203,13 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const isStaff = !isRep; // Admin or Management
 
   // Per-person KPI settings (template + targets) keyed by team member id.
-  const [repDocs, setRepDocs] = useState<Record<string, { targets?: Representative['targets']; kpiTemplate?: string }>>({});
+  const [repDocs, setRepDocs] = useState<Record<string, { targets?: Representative['targets']; kpiTemplate?: string; kpiSet?: { items?: KpiSetItem[] } }>>({});
   // Typed-in weekly KPI numbers, one document per person per month: "<memberId>_<MMM-YY>".
   const [monthKpiDocs, setMonthKpiDocs] = useState<Record<string, Representative['kpi']>>({});
 
   // Automatic KPIs (counted from deals) are never typed in, so any old typed
   // numbers for them are ignored. Ones that also take typed extras (plusTyped) keep them.
-  const withoutAutoKpis = (person: { id: string; role?: string; kpiTemplate?: string; targets?: any }, kpi: Representative['kpi'] | undefined) => {
+  const withoutAutoKpis = (person: { id: string; role?: string; kpiTemplate?: string; kpiSet?: any; targets?: any }, kpi: Representative['kpi'] | undefined) => {
     const base: any = JSON.parse(JSON.stringify(kpi || emptyKpi()));
     metricsFor(person).forEach(m => {
       if (m.auto && !m.plusTyped) base[m.key] = [0, 0, 0, 0, 0];
@@ -228,6 +230,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
   useFollowUpRules();
+  // KPI library (Team → KPI library): every screen's KPIs, colour bands and the company GP bands.
+  useKpiLibrary();
   // Login history (Team → Login log): counts this person's active minutes in the CRM.
   useActivityTracker(currentMember.id);
   const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
@@ -318,16 +322,17 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const ROLE_ORDER: Record<string, number> = { rep: 0, admin: 1, management: 2 };
   const representatives: Representative[] = React.useMemo(() => {
     return teamMembers
-      .filter(m => m.active && (m.role === 'rep' || m.role === 'admin' || (m.role === 'management' && !!templateById(repDocs[m.id]?.kpiTemplate))))
+      .filter(m => m.active && (m.role === 'rep' || m.role === 'admin' || (m.role === 'management' && hasKpis(repDocs[m.id], m.role))))
       .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : ROLE_ORDER[a.role] - ROLE_ORDER[b.role]))
       .map(m => {
         const settings = repDocs[m.id] || {};
-        const person = { id: m.id, role: m.role, kpiTemplate: settings.kpiTemplate, targets: settings.targets || DEFAULT_TARGETS };
+        const person = { id: m.id, role: m.role, kpiTemplate: settings.kpiTemplate, kpiSet: settings.kpiSet, targets: settings.targets || DEFAULT_TARGETS };
         return {
           id: m.id,
           name: m.name,
           role: m.role,
           kpiTemplate: settings.kpiTemplate,
+          kpiSet: settings.kpiSet,
           targets: settings.targets || DEFAULT_TARGETS,
           kpi: withoutAutoKpis(person, monthKpiDocs[`${m.id}_${selectedMonth}`])
         };
@@ -355,10 +360,10 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   useEffect(() => {
     if (!db) return;
     const unsubscribe = onSnapshot(collection(db, 'reps'), (snapshot) => {
-      const next: Record<string, { targets?: Representative['targets']; kpiTemplate?: string }> = {};
+      const next: Record<string, { targets?: Representative['targets']; kpiTemplate?: string; kpiSet?: { items?: KpiSetItem[] } }> = {};
       snapshot.forEach((docSnap) => {
         const data: any = docSnap.data();
-        next[docSnap.id] = { targets: data.targets, kpiTemplate: data.kpiTemplate };
+        next[docSnap.id] = { targets: data.targets, kpiTemplate: data.kpiTemplate, kpiSet: data.kpiSet };
       });
       setRepDocs(next);
     }, (err) => console.error('Rep workspaces failed to load:', err));
@@ -545,7 +550,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   // Year-to-date figures on Home and Management read this cache.
   useEffect(() => {
     const dict: Record<string, any> = {};
-    const people = teamMembers.map(m => ({ id: m.id, role: m.role, kpiTemplate: repDocs[m.id]?.kpiTemplate, targets: repDocs[m.id]?.targets }));
+    const people = teamMembers.map(m => ({ id: m.id, role: m.role, kpiTemplate: repDocs[m.id]?.kpiTemplate, kpiSet: repDocs[m.id]?.kpiSet, targets: repDocs[m.id]?.targets }));
     Object.entries(monthKpiDocs).forEach(([key, kpi]) => {
       const person = people.find(p => key.startsWith(p.id + '_'));
       dict[key] = person ? withoutAutoKpis(person, kpi as any) : kpi;

@@ -9,6 +9,11 @@ import {
 } from '../lib/projectPL';
 import { useMoneySettings } from './Money';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
+import { LIGHT_TEXT } from '../lib/kpi';
+import { gpLight } from '../lib/kpiLibrary';
+
+// Margin colour: the company gross profit bands (Team → KPI library, Joel 2026-10-22); a loss is always red.
+const marginTone = (profit: number, margin: number) => (profit < 0 ? 'text-danger' : LIGHT_TEXT[gpLight(margin)]);
 
 // Management → Project P&L (2026-10-17). One row per won deal (training session), worked out
 // live from the deal's money in and money out (lib/projectPL.ts). Invoices, claims and costs are
@@ -159,7 +164,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.commission ? `− ${formatRM(t.commission)}` : '—'}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.costs ? `− ${formatRM(t.costs)}` : '—'}</td>
                     <td className={`whitespace-nowrap py-2 pr-3 text-right font-bold tabular-nums ${t.profit < 0 ? 'text-danger' : ''}`}>{t.count ? formatRM(t.profit) : '—'}</td>
-                    <td className="whitespace-nowrap py-2 text-right tabular-nums text-ink-soft">{t.income > 0 ? `${Math.round(t.margin)}%` : '—'}</td>
+                    <td className={`whitespace-nowrap py-2 text-right tabular-nums ${t.income > 0 ? marginTone(t.profit, t.margin) : 'text-ink-soft'}`}>{t.income > 0 ? `${Math.round(t.margin)}%` : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -173,7 +178,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.commission ? `− ${formatRM(totals.commission)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.costs ? `− ${formatRM(totals.costs)}` : '—'}</td>
                   <td className={`whitespace-nowrap py-2 pr-3 text-right tabular-nums ${totals.profit < 0 ? 'text-danger' : ''}`}>{formatRM(totals.profit)}</td>
-                  <td className="whitespace-nowrap py-2 text-right tabular-nums">{totals.income > 0 ? `${Math.round(totals.margin)}%` : '—'}</td>
+                  <td className={`whitespace-nowrap py-2 text-right tabular-nums ${totals.income > 0 ? marginTone(totals.profit, totals.margin) : ''}`}>{totals.income > 0 ? `${Math.round(totals.margin)}%` : '—'}</td>
                 </tr>
               </tfoot>
             </table>
@@ -234,7 +239,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                       <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-ink-soft">{r.commission ? `− ${formatRM(r.commission)}` : '—'}</td>
                       <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-ink-soft">{r.costs ? `− ${formatRM(r.costs)}` : '—'}</td>
                       <td className={`whitespace-nowrap py-2.5 pr-3 text-right font-bold tabular-nums ${r.profit < 0 ? 'text-danger' : ''}`}>{formatRM(r.profit)}</td>
-                      <td className={`whitespace-nowrap py-2.5 pr-3 text-right tabular-nums ${r.profit < 0 ? 'text-danger' : 'text-ink-soft'}`}>{r.income > 0 ? `${Math.round(r.margin)}%` : '—'}</td>
+                      <td className={`whitespace-nowrap py-2.5 pr-3 text-right tabular-nums ${r.income > 0 ? marginTone(r.profit, r.margin) : 'text-ink-soft'}`}>{r.income > 0 ? `${Math.round(r.margin)}%` : '—'}</td>
                       <td className="py-2.5 text-sm">
                         <span className="block">{TRAINING_STATUS_LABELS[r.training]}</span>
                         <span className={`block ${r.money === 'settled' ? 'text-accent' : r.money === 'not_invoiced' ? 'text-attention' : 'text-ink-soft'}`}>{MONEY_STATUS_LABELS[r.money]}</span>
@@ -255,7 +260,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.commission ? `− ${formatRM(totals.commission)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.costs ? `− ${formatRM(totals.costs)}` : '—'}</td>
                   <td className={`whitespace-nowrap py-2.5 pr-3 text-right tabular-nums ${totals.profit < 0 ? 'text-danger' : ''}`}>{formatRM(totals.profit)}</td>
-                  <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.income > 0 ? `${Math.round(totals.margin)}%` : '—'}</td>
+                  <td className={`whitespace-nowrap py-2.5 pr-3 text-right tabular-nums ${totals.income > 0 ? marginTone(totals.profit, totals.margin) : ''}`}>{totals.income > 0 ? `${Math.round(totals.margin)}%` : '—'}</td>
                   <td />
                 </tr>
               </tfoot>
@@ -292,7 +297,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
           <span className="text-ink-soft">HRDC <span className="tabular-nums">− {formatRM(tickedTotals.hrdcFee)}</span></span>
           <span className="text-ink-soft">Commission <span className="tabular-nums">− {formatRM(tickedTotals.commission)}</span></span>
           <span className="text-ink-soft">Costs <span className="tabular-nums">− {formatRM(tickedTotals.costs)}</span></span>
-          <span>Profit <strong className={`tabular-nums ${tickedTotals.profit < 0 ? 'text-danger' : 'text-accent'}`}>{formatRM(tickedTotals.profit)}</strong> <span className="text-ink-soft">({Math.round(tickedTotals.margin)}%)</span></span>
+          <span>Profit <strong className={`tabular-nums ${tickedTotals.profit < 0 ? 'text-danger' : 'text-accent'}`}>{formatRM(tickedTotals.profit)}</strong> <span className={tickedTotals.income > 0 ? marginTone(tickedTotals.profit, tickedTotals.margin) : 'text-ink-soft'}>({Math.round(tickedTotals.margin)}%)</span></span>
           {tickedTotals.estimated > 0 && <span className="text-sm text-attention">incl. {formatRM(tickedTotals.estimated)} estimated</span>}
           {tickedHidden > 0 && <span className="text-sm text-ink-soft">{tickedHidden} not in this view</span>}
           <button type="button" onClick={() => setTicked(new Set())} className="ml-auto rounded-lg border border-line px-3 py-1 text-sm font-semibold hover:bg-surface">Clear ticks</button>

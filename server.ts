@@ -15,6 +15,7 @@ import { registerProposalLinkRoutes } from "./serverProposalLinks";
 import { registerLinkVisitRoutes } from "./serverLinkVisits";
 import { registerPaymentLinkRoutes } from "./serverPaymentLinks";
 import { registerBlueprintRoutes } from "./serverBlueprint";
+import { registerKpiRoutes } from "./serverKpi";
 
 // Load environment variables
 dotenv.config();
@@ -67,6 +68,9 @@ async function startServer() {
 
   // Photos for the teambuilding proposal PDF (read by the server, so the PDF can include them)
   registerPhotoRoutes(app);
+
+  // Gross profit KPIs: the GP % only, worked out from the P&L (reps and Admin can't read costs)
+  registerKpiRoutes(app);
 
   // API Routes
   app.get("/api/health", (req, res) => {

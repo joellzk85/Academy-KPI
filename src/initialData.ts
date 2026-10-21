@@ -145,13 +145,13 @@ export const MOTIVATIONAL_QUOTES: string[] = [
 import { metricsFor } from './lib/kpi';
 
 export interface RepMetricConfig {
-  key: 'salesFigure' | 'proposals' | 'preview' | 'extraMetric';
+  key: string;
   label: string;
   targetLabel: string;
   targetVal: number;
   isRM: boolean;
   weight: number;
-  auto?: 'won' | 'proposals' | 'appointments' | null;
+  auto?: string | null;
 }
 
 // Each person's KPIs now come from the KPI template Management picks for
