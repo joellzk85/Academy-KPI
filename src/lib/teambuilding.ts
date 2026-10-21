@@ -262,6 +262,8 @@ export interface TbProposal {
   isHidden?: boolean;
   dealDeleted?: boolean;
   updatedAt?: string;
+  fromTrainerDocId?: string;       // made from a trainer's own proposal in the portal (trainer_docs, lib/trainerDocs.ts)
+  fromTrainerDocVersion?: number;  // which version of it we have
 }
 
 export const DEFAULT_HRDC_NOTE =

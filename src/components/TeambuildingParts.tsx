@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus, Star, Trash2 } from 'lucide-react';
-import PhotoPicker from './PhotoPicker';
+import PhotoPicker, { PhotoUpload } from './PhotoPicker';
 import {
-  LOCATIONS, RATINGS, TbActivityContent, TbPackages, TbPriceBand, bandProblems, cellKey, formatPrice, newTbId, sortedBands,
+  AGENDA_TAGS, AgendaTag, LOCATIONS, RATINGS, TbActivityContent, TbAgendaDay, TbPackages, TbPoint, TbPriceBand, bandProblems, cellKey, formatPrice, newTbId, sortedBands,
 } from '../lib/teambuilding';
 
 // Shared pieces for teambuilding: form styles, the package editor (template and proposals) and the activity form
@@ -216,14 +216,14 @@ export function PackageEditor({ pk, onChange, disabled, pax }: { pk: TbPackages;
 }
 
 // ---------- Activity ----------
-export function ActivityForm({ a, onChange, me, disabled }: { a: TbActivityContent; onChange: (c: Partial<TbActivityContent>) => void; me: Viewer; disabled?: boolean }) {
+export function ActivityForm({ a, onChange, me, disabled, upload }: { a: TbActivityContent; onChange: (c: Partial<TbActivityContent>) => void; me: Viewer; disabled?: boolean; upload?: PhotoUpload }) {
   return (
     <fieldset disabled={disabled} className="min-w-0 space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2"><label className={label} htmlFor="ac-name">Activity name</label><input id="ac-name" value={a.name} onChange={e => onChange({ name: e.target.value })} className={input} placeholder="e.g. The Million Ringgit Project" /></div>
         <div className="sm:col-span-2"><label className={label} htmlFor="ac-sum">Short description</label><textarea id="ac-sum" value={a.summary} onChange={e => onChange({ summary: e.target.value })} rows={2} className={`${input} resize-y`} placeholder="One or two lines that make the client want to play it" /></div>
       </div>
-      <PhotoPicker photos={a.photos || []} onChange={photos => onChange({ photos })} folder="activities" me={me} disabled={disabled} />
+      <PhotoPicker photos={a.photos || []} onChange={photos => onChange({ photos })} folder="activities" me={me} disabled={disabled} upload={upload} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div><label className={label} htmlFor="ac-dur">Duration</label><input id="ac-dur" value={a.duration} onChange={e => onChange({ duration: e.target.value })} className={input} placeholder="75 - 90 minutes" /></div>
         <div>
@@ -260,5 +260,62 @@ export function ActivityForm({ a, onChange, me, disabled }: { a: TbActivityConte
         </div>
       </div>
     </fieldset>
+  );
+}
+
+// ---------- Numbered points (objectives, takeaways) and the agenda: proposals and the trainer portal ----------
+export function Points({ list, onChange, prefix, titlePh, textPh }: { list: TbPoint[]; onChange: (l: TbPoint[]) => void; prefix: string; titlePh: string; textPh: string }) {
+  const setAt = (i: number, c: Partial<TbPoint>) => onChange(list.map((x, k) => (k === i ? { ...x, ...c } : x)));
+  return (
+    <div className="space-y-3">
+      {list.map((o, i) => (
+        <div key={o.id} className="flex gap-2 rounded-xl border border-line p-3">
+          <span className="mt-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-bold text-accent">{i + 1}</span>
+          <div className="min-w-0 flex-1 space-y-2">
+            <input value={o.title} onChange={e => setAt(i, { title: e.target.value })} className={`${input} font-semibold`} placeholder={titlePh} aria-label="Heading" />
+            <textarea value={o.text} onChange={e => setAt(i, { text: e.target.value })} rows={2} className={`${input} resize-y`} placeholder={textPh} aria-label="Text" />
+          </div>
+          <span className="flex flex-col">
+            <UpDown i={i} n={list.length} onMove={by => onChange(move(list, i, by))} />
+            <button type="button" className={iconBtn} onClick={() => onChange(list.filter((_, k) => k !== i))} aria-label="Remove"><Trash2 className="h-4 w-4" /></button>
+          </span>
+        </div>
+      ))}
+      <button type="button" className={btnSecondary} onClick={() => onChange([...list, { id: newTbId(prefix), title: '', text: '' }])}><Plus className="h-4 w-4" /> Add</button>
+    </div>
+  );
+}
+
+export function Agenda({ days, onChange }: { days: TbAgendaDay[]; onChange: (d: TbAgendaDay[]) => void }) {
+  const setDay = (i: number, c: Partial<TbAgendaDay>) => onChange(days.map((d, k) => (k === i ? { ...d, ...c } : d)));
+  return (
+    <div className="space-y-4">
+      {days.map((d, i) => (
+        <div key={d.id} className="rounded-xl border border-line p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <input value={d.title} onChange={e => setDay(i, { title: e.target.value })} className={`${input} font-semibold`} placeholder={`Day ${i + 1}: Leadership alignment and recognition`} aria-label="Day heading" />
+            <UpDown i={i} n={days.length} onMove={by => onChange(move(days, i, by))} />
+            <button type="button" className={iconBtn} onClick={() => { if (!d.rows.some(x => x.text.trim()) || window.confirm('Remove this day and its rows?')) onChange(days.filter((_, k) => k !== i)); }} aria-label="Remove day"><Trash2 className="h-4 w-4" /></button>
+          </div>
+          <div className="space-y-2">
+            {d.rows.map((row, k) => (
+              <div key={row.id} className="flex flex-wrap items-center gap-2 border-b border-line pb-2 last:border-0 sm:flex-nowrap sm:border-0 sm:pb-0">
+                <input value={row.time} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, time: e.target.value } : x)) })} className={`${input} min-w-0 flex-1 sm:w-44 sm:flex-none`} placeholder="2:00pm - 2:30pm" aria-label="Time" />
+                <select value={row.tag || ''} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, tag: e.target.value as AgendaTag } : x)) })} className={`${input} shrink-0 sm:w-44! sm:order-3`} aria-label="Where">
+                  {AGENDA_TAGS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                </select>
+                <input value={row.text} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} className={`${input} min-w-0 basis-full sm:order-2 sm:basis-auto sm:flex-1`} placeholder="Ice breaker and energizer" aria-label="What happens" />
+                <span className="ml-auto flex sm:order-4 sm:ml-0">
+                  <UpDown i={k} n={d.rows.length} onMove={by => setDay(i, { rows: move(d.rows, k, by) })} />
+                  <button type="button" className={iconBtn} onClick={() => setDay(i, { rows: d.rows.filter((_, j) => j !== k) })} aria-label="Remove row"><Trash2 className="h-4 w-4" /></button>
+                </span>
+              </div>
+            ))}
+          </div>
+          <button type="button" className={`${linkBtn} mt-2`} onClick={() => setDay(i, { rows: [...d.rows, { id: newTbId('ar'), time: '', text: '', tag: '' }] })}><Plus className="mr-1 inline h-4 w-4" />Add a time slot</button>
+        </div>
+      ))}
+      <button type="button" className={btnSecondary} onClick={() => onChange([...days, { id: newTbId('day'), title: `Day ${days.length + 1}`, rows: [{ id: newTbId('ar'), time: '', text: '', tag: '' }] }])}><Plus className="h-4 w-4" /> Add day</button>
+    </div>
   );
 }

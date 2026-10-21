@@ -24,6 +24,8 @@ import { trainerOptions } from './PickOrType';
 import CustomerCodeBox from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
+import { FromTrainers, TrainerUpdateBanner, useTrainerDocs } from './TrainerDocsBox';
+import { TrainerDoc, newerFromTrainer } from '../lib/trainerDocs';
 
 // Course outlines (redesigned 2026-10-17, like quotations).
 // An outline is made for a deal (or as a general outline with no client), starting blank or from a copy
@@ -80,9 +82,11 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
   const [deals, setDeals] = useState<any[]>([]);
   const [trainers, setTrainers] = useState<any[]>([]);
   const links = useTrainerLinks();
+  const trainerDocs = useTrainerDocs('outline');
+  const [peekDoc, setPeekDoc] = useState<TrainerDoc | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<{ o: CourseOutline; isNew: boolean } | null>(null);
-  const [choosing, setChoosing] = useState<null | { step: 'deal'; invite?: TrainerLink } | { step: 'start'; deal: any | null }>(null);
+  const [choosing, setChoosing] = useState<null | { step: 'deal'; invite?: TrainerLink; fromDoc?: TrainerDoc } | { step: 'start'; deal: any | null }>(null);
   const [inviteError, setInviteError] = useState('');
   const [backDeal, setBackDeal] = useState<string | null>(null);   // opened from a deal: "Back to deal"
 
@@ -180,6 +184,35 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       setInviteError(`Couldn't make the outline: ${friendlyError(e)}`);
     }
   };
+  // A trainer's own outline from the portal (2026-10-21): "Use for a deal" saves our own draft copy from what they
+  // last sent, remembering which version, then opens it.
+  const copyTrainerDoc = async (deal: any | null, d: TrainerDoc) => {
+    setChoosing(null);
+    setInviteError('');
+    const sub = d.sent!.outline!;
+    const date = todayIso();
+    const ownerId = (deal && dealOwnerId(deal)) || rep.id;
+    const programmeId = d.sent!.programmeId || deal?.programmeId || '';
+    const progName = String(programmes.find(p => p.id === programmeId)?.name || '').trim();
+    const title = (sub.courseTitle || '').trim();
+    const useProg = !!programmeId && (!title || title === progName);
+    const o: CourseOutline = prepareOutline({
+      courseTitle: useProg ? '' : title, category: '', level: 'Beginner', kind: 'training',
+      ...outlineFieldsFrom(sub),
+      id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date, clientCode(clients.find(c => c.id === deal?.clientId))), refAuto: true, date,
+      preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
+      clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
+      programmeId, useProgrammeName: useProg, trainerId: d.trainerId,
+      fromTrainerDocId: d.id, fromTrainerDocVersion: d.version,
+      status: 'draft', sharedWithIds: [], isHidden: false,
+    } as CourseOutline);
+    try {
+      await setDoc(doc(db, 'course_outlines', o.id), o);
+      open(o);
+    } catch (e) {
+      setInviteError(`Couldn't make the outline: ${friendlyError(e)}`);
+    }
+  };
   const open = (o: CourseOutline) => {
     markSharedSeen(me.id, 'outline', o);   // clears this person's "Shared with me" alert for it
     setDraft({ o: clean({ ...o, items: o.items || [], outcomes: o.outcomes || [] }), isNew: false });
@@ -208,16 +241,26 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       {draft ? (
         <Editor key={draft.o.id} initial={draft.o} isNew={draft.isNew} me={me} staff={staff} reps={reps} sources={sources}
           dealsForPicker={dealsForPicker} onOpenTab={onOpenTab} onClose={() => { setDraft(null); setBackDeal(null); }} trainers={trainers} links={links}
-          backToDeal={backDeal && onBackToDeal ? leave : undefined} />
+          backToDeal={backDeal && onBackToDeal ? leave : undefined} trainerDocs={trainerDocs} />
       ) : (
         <OutlineList rep={rep} me={me} staff={staff} outlines={outlines} loaded={loaded} sources={sources} personName={personName} links={links} startOnShared={startOnShared}
           onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate}
-          trainers={trainers} onAcceptInvite={link => setChoosing({ step: 'deal', invite: link })} inviteError={inviteError} />
+          trainers={trainers} onAcceptInvite={link => setChoosing({ step: 'deal', invite: link })} inviteError={inviteError}
+          fromTrainers={<FromTrainers kind="outline" docs={trainerDocs} ours={outlines} programmes={programmes}
+            onUse={d => setChoosing({ step: 'deal', fromDoc: d })} onPreview={setPeekDoc} />} />
+      )}
+      {peekDoc && (
+        <SubmissionPreview sub={peekDoc.sent!.outline!} title={String(programmes.find(p => p.id === peekDoc.sent!.programmeId)?.name || '')} forCompany=""
+          who={peekDoc.trainerName} note={`Written by ${peekDoc.trainerName || 'the trainer'} in the trainer portal (version ${peekDoc.version}).`} onClose={() => setPeekDoc(null)}
+          actions={<button type="button" className={btnPrimary} onClick={() => { const d = peekDoc; setPeekDoc(null); setChoosing({ step: 'deal', fromDoc: d }); }}>Use for a deal</button>} />
       )}
       {choosing?.step === 'deal' && (
         <DealChooser deals={dealsForPicker} sources={sources} personName={personName}
-          title={choosing.invite ? "Which deal is this trainer's outline for?" : undefined}
-          onPick={deal => { const inv = choosing.invite; if (inv) acceptInvite(deal, inv); else setChoosing({ step: 'start', deal }); }}
+          title={choosing.invite || choosing.fromDoc ? "Which deal is this trainer's outline for?" : undefined}
+          onPick={deal => {
+            const inv = choosing.invite, fromDoc = choosing.fromDoc;
+            if (inv) acceptInvite(deal, inv); else if (fromDoc) copyTrainerDoc(deal, fromDoc); else setChoosing({ step: 'start', deal });
+          }}
           onCancel={() => setChoosing(null)} allowGeneral />
       )}
       {choosing?.step === 'start' && (
@@ -330,8 +373,9 @@ function Modal({ title, onCancel, children }: { title: string; onCancel: () => v
 // ---------- List ----------
 type Scope = 'mine' | 'shared' | 'everyone';
 
-function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, links, onNew, onOpen, onDuplicate, startOnShared, trainers, onAcceptInvite, inviteError }: {
+function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, links, onNew, onOpen, onDuplicate, startOnShared, trainers, onAcceptInvite, inviteError, fromTrainers }: {
   rep: Representative; me: Viewer; staff: boolean; outlines: CourseOutline[]; loaded: boolean; sources: OutlineSources; personName: (id?: string) => string;
+  fromTrainers?: React.ReactNode;
   links: TrainerLink[]; startOnShared?: boolean; trainers: any[]; onAcceptInvite: (link: TrainerLink) => void; inviteError: string;
   onNew: () => void; onOpen: (o: CourseOutline) => void; onDuplicate: (o: CourseOutline) => Promise<void>;
 }) {
@@ -377,6 +421,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
       </div>
 
       <TrainerInvites links={links} mine={l => l.requestedById === rep.id || canSeeEveryone} trainers={trainers} me={me} onAccept={onAcceptInvite} />
+      {fromTrainers}
       {inviteError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{inviteError}</p>}
       {inviting && <InviteModal me={me} trainers={trainers} programmes={sources.programmes} onClose={() => setInviting(false)} />}
 
@@ -591,8 +636,9 @@ function TrainerInvites({ links, mine, trainers, me, onAccept }: {
 }
 
 // ---------- Editor ----------
-function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, trainers, links, backToDeal }: {
+function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, trainers, links, backToDeal, trainerDocs }: {
   initial: CourseOutline; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: OutlineSources; dealsForPicker: any[];
+  trainerDocs: TrainerDoc[];
   onOpenTab?: (tab: Tab) => void; onClose: () => void; key?: string; trainers: any[]; links: TrainerLink[];
   backToDeal?: () => void;   // shown as "Back to deal" when opened from a deal
 }) {
@@ -610,10 +656,12 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const [sending, setSending] = useState(false);
   const [sentNow, setSentNow] = useState(false);                // sent in this visit: closing the Send window goes back to the deal
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [peekNewer, setPeekNewer] = useState(false);
 
   const r = resolveOutline(o, sources);
   const shownO = r.o;                       // what prints
   const locked = outlineSent(o);
+  const newer = newerFromTrainer(o, trainerDocs);   // the trainer sent a newer version of the outline this came from
   const clientLink = openLinkOf(useDocLinks(o.id), 'outline');   // the private client link, if one was made
   const dirty = JSON.stringify(o) !== saved;
   const set = (c: Partial<CourseOutline>) => setO(x => ({ ...x, ...c }));
@@ -849,6 +897,24 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
           </div>
           <button type="button" className={btnSecondary} onClick={revise}><Unlock className="h-4 w-4" /> Revise</button>
         </div>
+      )}
+
+      {newer && (
+        <TrainerUpdateBanner doc={newer} locked={locked} onPreview={() => setPeekNewer(true)}
+          onBring={() => {
+            const s = newer.sent!.outline!;
+            const title = (s.courseTitle || '').trim();
+            set({ ...outlineFieldsFrom(s), fromTrainerDocVersion: newer.version, ...(title && title !== shownO.courseTitle ? { courseTitle: title, useProgrammeName: false } : {}) });
+            setNote("Brought in the trainer's changes. Check them; they save in a moment.");
+            window.setTimeout(() => setNote(''), 4000);
+          }}
+          onKeep={() => (locked
+            ? updateDoc(doc(db, 'course_outlines', o.id), { fromTrainerDocVersion: newer.version }).then(() => setO(x => ({ ...x, fromTrainerDocVersion: newer.version }))).catch(e => setError(friendlyError(e)))
+            : set({ fromTrainerDocVersion: newer.version }))} />
+      )}
+      {peekNewer && newer && (
+        <SubmissionPreview sub={newer.sent!.outline!} title={shownO.courseTitle || ''} forCompany={clientName} who={newer.trainerName}
+          note={`${newer.trainerName || 'The trainer'}'s latest version (${newer.version}). Nothing changes here until you bring it in.`} onClose={() => setPeekNewer(false)} />
       )}
 
       {!locked && editMeta && (
@@ -1212,8 +1278,8 @@ function TrainerCard({ o, r, me, trainers, links, saved, onTrainer, onAccept }: 
 }
 
 // What a trainer submitted, the way it prints (before accepting it).
-function SubmissionPreview({ sub, title, forCompany, who, onClose, actions }: {
-  sub: OutlineSubmission; title: string; forCompany: string; who?: string; onClose: () => void; actions?: React.ReactNode;
+function SubmissionPreview({ sub, title, forCompany, who, onClose, actions, note }: {
+  sub: OutlineSubmission; title: string; forCompany: string; who?: string; onClose: () => void; actions?: React.ReactNode; note?: string;
 }) {
   const shown = useMemo(() => previewOutline(sub, title, forCompany), [sub, title, forCompany]);
   return (
@@ -1221,7 +1287,7 @@ function SubmissionPreview({ sub, title, forCompany, who, onClose, actions }: {
       <div className="sticky top-0 z-10 border-b border-line bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2">
           <button type="button" className={btnSecondary} onClick={onClose}><ArrowLeft className="h-4 w-4" /> Close preview</button>
-          <span className="min-w-0 flex-1 text-sm text-ink-soft">Submitted by {who || 'the trainer'}. Nothing is saved until you accept it.</span>
+          <span className="min-w-0 flex-1 text-sm text-ink-soft">{note || `Submitted by ${who || 'the trainer'}. Nothing is saved until you accept it.`}</span>
           {actions}
         </div>
       </div>

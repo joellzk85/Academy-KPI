@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUp, Eye, Loader2, Plus, X } from 'lucide-react';
 import CourseOutlineDocument from './CourseOutlineDocument';
 import { BLOOM_LEVELS, DIFFICULTIES, durationText } from '../lib/outlineContent';
@@ -69,8 +69,11 @@ function move<T>(list: T[], i: number, dir: number): T[] {
   return out;
 }
 
-export default function OutlineLinkForm({ info, token, post, onDone }: {
-  info: any; token: string; post: (path: string, body: any) => Promise<any>; onDone: (sent: OutlineSubmission) => void;
+// The trainer portal (2026-10-21) uses the same form for a trainer's own outlines: onData gets every change (saved as
+// they type) and actions replaces the Submit button.
+export default function OutlineLinkForm({ info, token = '', post, onDone, onData, actions }: {
+  info: any; token?: string; post?: (path: string, body: any) => Promise<any>; onDone?: (sent: OutlineSubmission) => void;
+  onData?: (data: OutlineSubmission) => void; actions?: React.ReactNode;
 }) {
   const [d, setD] = useState<Draft>(() => toDraft(info.prefill ? cleanOutline(info.prefill) : null, info.title || ''));
   const [preview, setPreview] = useState(false);
@@ -79,6 +82,7 @@ export default function OutlineLinkForm({ info, token, post, onDone }: {
   const set = (c: Partial<Draft>) => setD(x => ({ ...x, ...c }));
 
   const data = useMemo(() => cleanOutline(d), [d]);
+  useEffect(() => { onData?.(data); }, [data]);
   const shown = useMemo(() => (preview ? previewOutline(data, info.title || '') : null), [preview, data, info.title]);
   const dayCount = Math.max(1, Math.ceil(d.durationDays || 0));
 
@@ -111,8 +115,8 @@ export default function OutlineLinkForm({ info, token, post, onDone }: {
     if (p) { setPreview(false); setProblem(p); return; }
     setBusy(true);
     try {
-      await post('/api/trainer-link/submit', { token, data });
-      onDone(data);
+      await post?.('/api/trainer-link/submit', { token, data });
+      onDone?.(data);
       window.scrollTo(0, 0);
     } catch (err: any) {
       setProblem(err.message);
@@ -128,7 +132,7 @@ export default function OutlineLinkForm({ info, token, post, onDone }: {
         {preview
           ? <button type="button" className={btnSecondary} onClick={() => { setPreview(false); window.scrollTo(0, 0); }}><ArrowLeft className="h-4 w-4" /> Back to edit</button>
           : <button type="button" className={btnSecondary} onClick={() => { setPreview(true); window.scrollTo(0, 0); }}><Eye className="h-4 w-4" /> Preview</button>}
-        <button type="button" disabled={busy} className={btnPrimary} onClick={() => submit()}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Submit</button>
+        {actions ?? <button type="button" disabled={busy} className={btnPrimary} onClick={() => submit()}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Submit</button>}
       </div>
     </>
   );

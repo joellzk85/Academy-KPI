@@ -39,7 +39,7 @@ async function staffFrom(req: Request) {
 }
 
 const seen = new Map<string, number>();
-async function trainerFrom(req: Request) {
+export async function trainerFrom(req: Request) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token) throw new UserError(401, 'not-logged-in', 'You are logged out. Log in again.');

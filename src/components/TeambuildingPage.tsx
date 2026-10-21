@@ -29,7 +29,9 @@ import { clientCode, refWithCode } from '../lib/docRefs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { AcceptBlock } from './ProposalLinkPage';
 import { ActivityLibrary, PackageTemplate, cleanActivity, useActivities, usePackageTemplate } from './TeambuildingLibrary';
-import { ActivityForm, Card, NumberBox, PackageEditor, UpDown, btnPrimary, btnSecondary, iconBtn, input, label, linkBtn, move } from './TeambuildingParts';
+import { FromTrainers, TbTrainerPreview, TrainerUpdateBanner, useTrainerDocs } from './TrainerDocsBox';
+import { TrainerDoc, newerFromTrainer, tbFieldsFrom } from '../lib/trainerDocs';
+import { ActivityForm, Agenda, Card, NumberBox, PackageEditor, Points, UpDown, btnPrimary, btnSecondary, iconBtn, input, label, linkBtn, move } from './TeambuildingParts';
 
 // Teambuilding proposal (Joel, 2026-10-19; push A1). Its own menu item next to Course outlines, which it doesn't touch.
 // Three tabs: Proposals · Activity library · Package template (everyone can amend all three).
@@ -68,8 +70,11 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
   const [loaded, setLoaded] = useState(false);
   const template = usePackageTemplate();
   const [draft, setDraft] = useState<{ p: TbProposal; isNew: boolean } | null>(null);
-  const [choosing, setChoosing] = useState<null | { step: 'deal' } | { step: 'start'; deal: any | null }>(null);
+  const [choosing, setChoosing] = useState<null | { step: 'deal'; fromDoc?: TrainerDoc } | { step: 'start'; deal: any | null }>(null);
   const [backDeal, setBackDeal] = useState<string | null>(null);
+  const trainerDocs = useTrainerDocs('teambuilding');
+  const [peekDoc, setPeekDoc] = useState<TrainerDoc | null>(null);
+  const [docError, setDocError] = useState('');
 
   useEffect(() => {
     const all = (s: any) => s.docs.map((d: any) => ({ ...d.data(), id: d.id }));
@@ -127,6 +132,25 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
     setChoosing(null);
     setDraft({ p, isNew: true });
   };
+  // A trainer's own proposal from the portal (2026-10-21): "Use for a deal" saves our own draft from what they last
+  // sent (their parts), with our package template, then opens it to add packages, venues and the rest.
+  const copyTrainerDoc = async (deal: any | null, d: TrainerDoc) => {
+    setChoosing(null); setDocError('');
+    const date = todayIso();
+    const ownerId = (deal && dealOwnerId(deal)) || rep.id;
+    const fields = tbFieldsFrom(d.sent!.tb!);
+    const p: TbProposal = JSON.parse(JSON.stringify({
+      ...blankProposalContent(template.pk), ...fields,
+      id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date, clientCode(clients.find(c => c.id === deal?.clientId))), refAuto: true, date,
+      preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
+      clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
+      title: fields.title || (deal ? dealProgrammeName(deal, programmes) : ''),
+      fromTrainerDocId: d.id, fromTrainerDocVersion: d.version,
+      status: 'draft', sharedWithIds: [], isHidden: false,
+    }));
+    try { await setDoc(doc(db, 'teambuilding_proposals', p.id), cleanForSave(p)); open(p); }
+    catch (e) { setDocError(`Couldn't make the proposal: ${friendlyError(e)}`); }
+  };
   const open = (p: TbProposal) => {
     markSharedSeen(me.id, 'teambuilding', p);
     setDraft({ p: JSON.parse(JSON.stringify({ ...blankProposalContent(null), ...p })), isNew: false });
@@ -145,7 +169,7 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
     return (
       <Editor key={draft.p.id} initial={draft.p} isNew={draft.isNew} me={me} staff={staff} reps={reps} sources={sources} programmes={programmes}
         dealsForPicker={dealsForPicker} templatePk={template.pk} onClose={() => { setDraft(null); setBackDeal(null); }}
-        backToDeal={backDeal && onBackToDeal ? leave : undefined} onOpenDeals={onOpenDeals} />
+        backToDeal={backDeal && onBackToDeal ? leave : undefined} onOpenDeals={onOpenDeals} trainerDocs={trainerDocs} />
     );
   }
 
@@ -166,12 +190,22 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
       {tab === 'activities' ? <ActivityLibrary me={me} />
         : tab === 'template' ? <PackageTemplate me={me} />
         : (
+          <>
+          <FromTrainers kind="teambuilding" docs={trainerDocs} ours={list} programmes={programmes}
+            onUse={d => setChoosing({ step: 'deal', fromDoc: d })} onPreview={setPeekDoc} />
+          {docError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{docError}</p>}
           <ProposalList rep={rep} me={me} staff={staff} list={list} loaded={loaded} sources={sources} personName={personName} startOnShared={startOnShared}
             onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} />
+          </>
         )}
+      {peekDoc && (
+        <TbTrainerPreview tb={peekDoc.sent!.tb!} trainers={trainers} who={peekDoc.trainerName} onClose={() => setPeekDoc(null)}
+          actions={<button type="button" className={btnPrimary} onClick={() => { const d = peekDoc; setPeekDoc(null); setChoosing({ step: 'deal', fromDoc: d }); }}>Use for a deal</button>} />
+      )}
       {choosing?.step === 'deal' && (
         <DealChooser deals={dealsForPicker} clients={clients} programmes={programmes} personName={personName}
-          onPick={deal => setChoosing({ step: 'start', deal })} onCancel={() => setChoosing(null)} allowGeneral />
+          title={choosing.fromDoc ? "Which deal is this trainer's proposal for?" : undefined}
+          onPick={deal => { const d = choosing.fromDoc; if (d) copyTrainerDoc(deal, d); else setChoosing({ step: 'start', deal }); }} onCancel={() => setChoosing(null)} allowGeneral />
       )}
       {choosing?.step === 'start' && (
         <StartChooser deal={choosing.deal} list={list} sources={sources} clients={clients}
@@ -388,8 +422,9 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 }
 
 // ---------- Editor ----------
-function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsForPicker, templatePk, onClose, backToDeal, onOpenDeals }: {
+function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsForPicker, templatePk, onClose, backToDeal, onOpenDeals, trainerDocs }: {
   initial: TbProposal; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: TbSources; programmes: any[];
+  trainerDocs: TrainerDoc[];
   dealsForPicker: any[]; templatePk: any; onClose: () => void; backToDeal?: () => void; onOpenDeals?: () => void; key?: string;
 }) {
   const [p, setP] = useState<TbProposal>(initial);
@@ -407,11 +442,13 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   const [pdfBusy, setPdfBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const { list: library } = useActivities();
+  const [peekNewer, setPeekNewer] = useState(false);
 
   const set = (c: Partial<TbProposal>) => setP(x => ({ ...x, ...c }));
   const srcNow = gapDeal ? { ...sources, deals: sources.deals.map(d => (d.id === gapDeal.id ? gapDeal : d)) } : sources;
   const r = resolveTb(p, srcNow);
   const locked = tbSent(p);
+  const newer = newerFromTrainer(p, trainerDocs);   // the trainer sent a newer version of the proposal this came from
   // A draft numbered by the CRM takes its client's customer code (added, or swapped when the client changes).
   const wantRef = !locked && p.refAuto ? refWithCode(p.refNumber, clientCode(r.client)) : p.refNumber;
   useEffect(() => { if (wantRef !== p.refNumber) set({ refNumber: wantRef }); }, [wantRef]);
@@ -584,6 +621,20 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
         </div>
       )}
 
+      {newer && (
+        <TrainerUpdateBanner doc={newer} locked={locked} onPreview={() => setPeekNewer(true)}
+          onBring={() => {
+            if (!window.confirm("Replace the cover, objectives, trainers, agenda, activities and takeaways with the trainer's latest version? Packages, venues, HRDC and terms stay.")) return;
+            set({ ...tbFieldsFrom(newer.sent!.tb!), fromTrainerDocVersion: newer.version });
+            setNote("Brought in the trainer's changes. Check them; they save in a moment.");
+            window.setTimeout(() => setNote(''), 4000);
+          }}
+          onKeep={() => (locked
+            ? updateDoc(doc(db, 'teambuilding_proposals', p.id), { fromTrainerDocVersion: newer.version }).then(() => setP(x => ({ ...x, fromTrainerDocVersion: newer.version }))).catch(e => setError(friendlyError(e)))
+            : set({ fromTrainerDocVersion: newer.version }))} />
+      )}
+      {peekNewer && newer && <TbTrainerPreview tb={newer.sent!.tb!} trainers={sources.trainers} who={newer.trainerName} onClose={() => setPeekNewer(false)} />}
+
       {!locked && p.refAuto && (
         <CustomerCodeBox client={r.client} clients={sources.clients} refNumber={p.refNumber}
           onSaved={msg => { setNote(msg); window.setTimeout(() => setNote(''), 3000); }} />
@@ -751,28 +802,6 @@ function SectionsCard({ sections, onChange }: { sections: ReturnType<typeof sect
   );
 }
 
-function Points({ list, onChange, prefix, titlePh, textPh }: { list: TbPoint[]; onChange: (l: TbPoint[]) => void; prefix: string; titlePh: string; textPh: string }) {
-  const setAt = (i: number, c: Partial<TbPoint>) => onChange(list.map((x, k) => (k === i ? { ...x, ...c } : x)));
-  return (
-    <div className="space-y-3">
-      {list.map((o, i) => (
-        <div key={o.id} className="flex gap-2 rounded-xl border border-line p-3">
-          <span className="mt-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-bold text-accent">{i + 1}</span>
-          <div className="min-w-0 flex-1 space-y-2">
-            <input value={o.title} onChange={e => setAt(i, { title: e.target.value })} className={`${input} font-semibold`} placeholder={titlePh} aria-label="Heading" />
-            <textarea value={o.text} onChange={e => setAt(i, { text: e.target.value })} rows={2} className={`${input} resize-y`} placeholder={textPh} aria-label="Text" />
-          </div>
-          <span className="flex flex-col">
-            <UpDown i={i} n={list.length} onMove={by => onChange(move(list, i, by))} />
-            <button type="button" className={iconBtn} onClick={() => onChange(list.filter((_, k) => k !== i))} aria-label="Remove"><Trash2 className="h-4 w-4" /></button>
-          </span>
-        </div>
-      ))}
-      <button type="button" className={btnSecondary} onClick={() => onChange([...list, { id: newTbId(prefix), title: '', text: '' }])}><Plus className="h-4 w-4" /> Add</button>
-    </div>
-  );
-}
-
 function Trainers({ list, trainers, me, onChange }: { list: TbTrainer[]; trainers: any[]; me: Viewer; onChange: (l: TbTrainer[]) => void }) {
   const setAt = (i: number, c: Partial<TbTrainer>) => onChange(list.map((x, k) => (k === i ? { ...x, ...c } : x)));
   const sorted = [...trainers].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
@@ -816,40 +845,6 @@ function Trainers({ list, trainers, me, onChange }: { list: TbTrainer[]; trainer
         );
       })}
       <button type="button" className={btnSecondary} onClick={() => onChange([...list, { id: newTbId('tr'), role: 'Accredited HRDC Trainer' }])}><Plus className="h-4 w-4" /> Add trainer</button>
-    </div>
-  );
-}
-
-function Agenda({ days, onChange }: { days: TbAgendaDay[]; onChange: (d: TbAgendaDay[]) => void }) {
-  const setDay = (i: number, c: Partial<TbAgendaDay>) => onChange(days.map((d, k) => (k === i ? { ...d, ...c } : d)));
-  return (
-    <div className="space-y-4">
-      {days.map((d, i) => (
-        <div key={d.id} className="rounded-xl border border-line p-3">
-          <div className="mb-2 flex items-center gap-2">
-            <input value={d.title} onChange={e => setDay(i, { title: e.target.value })} className={`${input} font-semibold`} placeholder={`Day ${i + 1}: Leadership alignment and recognition`} aria-label="Day heading" />
-            <UpDown i={i} n={days.length} onMove={by => onChange(move(days, i, by))} />
-            <button type="button" className={iconBtn} onClick={() => { if (!d.rows.some(x => x.text.trim()) || window.confirm('Remove this day and its rows?')) onChange(days.filter((_, k) => k !== i)); }} aria-label="Remove day"><Trash2 className="h-4 w-4" /></button>
-          </div>
-          <div className="space-y-2">
-            {d.rows.map((row, k) => (
-              <div key={row.id} className="flex flex-wrap items-center gap-2 border-b border-line pb-2 last:border-0 sm:flex-nowrap sm:border-0 sm:pb-0">
-                <input value={row.time} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, time: e.target.value } : x)) })} className={`${input} min-w-0 flex-1 sm:w-44 sm:flex-none`} placeholder="2:00pm - 2:30pm" aria-label="Time" />
-                <select value={row.tag || ''} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, tag: e.target.value as AgendaTag } : x)) })} className={`${input} shrink-0 sm:w-44! sm:order-3`} aria-label="Where">
-                  {AGENDA_TAGS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-                </select>
-                <input value={row.text} onChange={e => setDay(i, { rows: d.rows.map((x, j) => (j === k ? { ...x, text: e.target.value } : x)) })} className={`${input} min-w-0 basis-full sm:order-2 sm:basis-auto sm:flex-1`} placeholder="Ice breaker and energizer" aria-label="What happens" />
-                <span className="ml-auto flex sm:order-4 sm:ml-0">
-                  <UpDown i={k} n={d.rows.length} onMove={by => setDay(i, { rows: move(d.rows, k, by) })} />
-                  <button type="button" className={iconBtn} onClick={() => setDay(i, { rows: d.rows.filter((_, j) => j !== k) })} aria-label="Remove row"><Trash2 className="h-4 w-4" /></button>
-                </span>
-              </div>
-            ))}
-          </div>
-          <button type="button" className={`${linkBtn} mt-2`} onClick={() => setDay(i, { rows: [...d.rows, { id: newTbId('ar'), time: '', text: '', tag: '' }] })}><Plus className="mr-1 inline h-4 w-4" />Add a time slot</button>
-        </div>
-      ))}
-      <button type="button" className={btnSecondary} onClick={() => onChange([...days, { id: newTbId('day'), title: `Day ${days.length + 1}`, rows: [{ id: newTbId('ar'), time: '', text: '', tag: '' }] }])}><Plus className="h-4 w-4" /> Add day</button>
     </div>
   );
 }

@@ -247,6 +247,8 @@ export interface CourseOutline {
   useProgrammeName?: boolean;   // course title = the programme's name (else courseTitle as typed)
   programmeId?: string;         // the programme this outline is for (optional; else the linked deal's programme)
   trainerId?: string;           // the trainer who wrote / will deliver it (trainers_directory)
+  fromTrainerDocId?: string;    // made from a trainer's own outline in the portal (trainer_docs, lib/trainerDocs.ts)
+  fromTrainerDocVersion?: number;   // which version of it we have
   status?: 'draft' | 'sent';
   sentAt?: string;
   sentById?: string;

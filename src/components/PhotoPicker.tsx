@@ -66,9 +66,13 @@ export async function uploadPhoto(file: File, folder: PhotoFolder, me: Viewer, o
   return getDownloadURL(r);
 }
 
+// Someone outside the team (the trainer portal, 2026-10-21) uploads to their own place instead: upload returns the link.
+export type PhotoUpload = (file: File, onProgress: (pct: number) => void) => Promise<string>;
+
 // A row of photos with "Add photos", remove (×) and move left/right. The first photo is the main one.
-export default function PhotoPicker({ photos, onChange, folder, me, max = 8, label = 'Photos', disabled, single }: {
+export default function PhotoPicker({ photos, onChange, folder, me, max = 8, label = 'Photos', disabled, single, upload }: {
   photos: string[]; onChange: (next: string[]) => void; folder: PhotoFolder; me: Viewer; max?: number; label?: string; disabled?: boolean; single?: boolean;
+  upload?: PhotoUpload;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<number | null>(null);
@@ -89,7 +93,7 @@ export default function PhotoPicker({ photos, onChange, folder, me, max = 8, lab
     try {
       for (const f of chosen) {
         setBusy(0);
-        added.push(await uploadPhoto(f, folder, me, setBusy));
+        added.push(await (upload ? upload(f, setBusy) : uploadPhoto(f, folder, me, setBusy)));
       }
     } catch (e: any) {
       setError(e?.code ? storageError(e) : String(e?.message || e));

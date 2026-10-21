@@ -4,7 +4,7 @@ import { User, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut 
 import { sendPortalPasswordEmail } from '../lib/portalEmail';
 import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
 import {
-  BadgeCheck, CalendarCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Star, Upload, User as UserIcon, X,
+  BadgeCheck, BookOpen, CalendarCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Star, Upload, User as UserIcon, Users, X,
 } from 'lucide-react';
 import firebaseConfig from '../../firebase-applet-config.json';
 import Logo from './Logo';
@@ -22,6 +22,7 @@ import { COMPANY } from '../lib/company';
 import { TrainingReport, reportGaps, revisionWhen } from '../lib/trainingReport';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import TrainingReportForm, { RevisionList } from './TrainingReportForm';
+import DocsTab from './TrainerPortalDocs';
 
 // The trainer portal (Joel, 2026-10-21), at /trainer. A trainer whom Admin or Management gave access logs in with
 // their email and password (Firebase's own email + password login; "Forgot password" is Firebase's reset email).
@@ -116,6 +117,7 @@ const FEATURES: { icon: React.ReactNode; title: string; text: string }[] = [
   { icon: <UserIcon className="h-5 w-5" />, title: 'Your profile', text: 'Keep your profile, topics and HRDC biodata up to date in one place.' },
   { icon: <Landmark className="h-5 w-5" />, title: 'Payment details', text: 'Your bank account, tax number (TIN) and address, kept safely.' },
   { icon: <Star className="h-5 w-5" />, title: 'Your rating', text: 'See how NEXT Academy rated each training, with comments.' },
+  { icon: <BookOpen className="h-5 w-5" />, title: 'Course outlines and teambuilding', text: 'Write your course outlines and teambuilding proposals, preview them, and send them to NEXT Academy.' },
 ];
 
 function Landing() {
@@ -255,11 +257,13 @@ function LoginBox() {
 }
 
 // ---------- After logging in ----------
-type Tab = 'home' | 'trainings' | 'calendar' | 'profile' | 'payment';
+type Tab = 'home' | 'trainings' | 'calendar' | 'outlines' | 'teambuilding' | 'profile' | 'payment';
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
   { id: 'trainings', label: 'My trainings', icon: <CalendarDays className="h-4 w-4" /> },
   { id: 'calendar', label: 'My calendar', icon: <CalendarCheck className="h-4 w-4" /> },
+  { id: 'outlines', label: 'Course outlines', icon: <BookOpen className="h-4 w-4" /> },
+  { id: 'teambuilding', label: 'Teambuilding', icon: <Users className="h-4 w-4" /> },
   { id: 'profile', label: 'My profile', icon: <UserIcon className="h-4 w-4" /> },
   { id: 'payment', label: 'Payment details', icon: <Landmark className="h-4 w-4" /> },
 ];
@@ -297,6 +301,7 @@ function Portal({ user }: { user: User }) {
       {tab === 'home' && <HomeTab info={info} go={go} onPassword={passwordEmail} />}
       {tab === 'trainings' && <TrainingsTab info={info} reload={load} />}
       {tab === 'calendar' && <CalendarTab info={info} />}
+      {(tab === 'outlines' || tab === 'teambuilding') && <DocsTab key={tab} kind={tab === 'outlines' ? 'outline' : 'teambuilding'} info={info} api={api} upload={uploadTo} />}
       {tab === 'profile' && <ProfileTab info={info} reload={load} />}
       {tab === 'payment' && <PaymentTab info={info} reload={load} />}
     </div>,
