@@ -11,6 +11,8 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { VendorForm } from './VendorsPage';
 import { ReceiptDrop, ReceiptList } from './PaymentReceipts';
+import { isTrainerFee } from '../lib/feeChecks';
+import { ApproveFeeDialog } from './FeeChecks';
 
 // Costs on a before-training checklist step (Joel, 2026-10-20: "able to key in amount, e.g. bus RM 5,000 + upload
 // document; all these amounts automated into the training P&L and into payment requests, payable to different
@@ -92,6 +94,7 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [fixing, setFixing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const vendor = vendors.find(v => v.id === o.vendorId);
   const run = async (fn: () => Promise<void>) => {
     setBusy(true); setError('');
@@ -99,7 +102,9 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
   };
   const decide = canDecide(o, viewer);
   const mine = o.requestedById === viewer.id;
-  const approve = () => run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' }));
+  const approveNow = () => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' });
+  // A trainer fee first shows "Are you sure?" with the T3, photos and report checks (lib/feeChecks.ts).
+  const approve = () => (isTrainerFee(o) ? setConfirming(true) : run(approveNow));
   const reject = () => {
     const reason = window.prompt('Why is it rejected?');
     if (!reason?.trim()) return;
@@ -155,6 +160,7 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
         </span>
       </div>
       {fixing && <FixRequest o={o} viewer={viewer} onDone={() => setFixing(false)} />}
+      {confirming && <ApproveFeeDialog o={o} payee={vendor ? vendorName(vendor, trainers, venues) : o.payee} onApprove={approveNow} onClose={() => setConfirming(false)} />}
       {o.status === 'paid' && (
         <>
           <ReceiptList receipts={receipts} viewer={viewer} />
