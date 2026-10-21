@@ -1,16 +1,24 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Clock, Loader2, Settings2, X } from 'lucide-react';
-import { collection, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import React, { useMemo, useState } from 'react';
+import { BarChart3, ChevronDown, ChevronRight, Clock, Grid3x3, List, Loader2, Settings2, X } from 'lucide-react';
+import { doc, setDoc } from 'firebase/firestore';
 import { db, friendlyError } from '../lib/firebase';
 import { KPI_LIGHT_BADGE, KPI_LIGHT_BG, KpiLight } from '../lib/kpi';
 import {
-  DEFAULT_LOGIN_RULES, IDLE_MINUTES, LoginDay, LoginRules, addDays, dayKey, formatMinutes, lastWorkDays,
-  loginLight, parseDay, readLoginRules, weekStart, workDaysOfWeek,
+  DEFAULT_LOGIN_RULES, IDLE_MINUTES, LoginDay, LoginRules, addDays, dayKey, formatMinutes, graphSeries, heatColumns,
+  lastWorkDays, loginLight, parseDay, useLoginData, weekStart, workDaysOfWeek,
 } from '../lib/loginActivity';
+import { LoginGraph, LoginHeatmap } from './LoginCharts';
 import { TeamMember, ROLE_LABELS } from '../types';
 
 // Team → Login log (Management only): each person's daily time in the CRM and a green / amber / red light.
-const WEEKS_SHOWN = 8;
+const HISTORY_WEEKS = [4, 8, 12, 26];
+type View = 'table' | 'heatmap' | 'graph';
+const PREF_KEY = 'next_login_log_view';
+const readPref = (): { view?: View; weeks?: number; who?: string; by?: 'day' | 'week' } => {
+  try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); } catch { return {}; }
+};
+const segBtn = (on: boolean) =>
+  `inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold transition-colors ${on ? 'bg-accent-soft text-accent' : 'bg-white text-ink-soft hover:bg-surface'}`;
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const LIGHT_LABEL: Record<KpiLight, string> = { green: 'Green', amber: 'Amber', red: 'Red' };
 
@@ -129,36 +137,27 @@ function RulesDialog({ rules, viewer, onClose }: { rules: LoginRules; viewer: Te
 }
 
 export default function LoginLog({ currentMember, members }: { currentMember: TeamMember; members: TeamMember[] }) {
-  const [rules, setRules] = useState<LoginRules>(DEFAULT_LOGIN_RULES);
-  const [days, setDays] = useState<LoginDay[] | null>(null);
-  const [error, setError] = useState('');
+  const saved = useMemo(readPref, []);
+  const [view, setView] = useState<View>(saved.view || 'table');
+  const [weeksShown, setWeeksShown] = useState<number>(HISTORY_WEEKS.includes(saved.weeks || 0) ? saved.weeks! : 8);
+  const [who, setWho] = useState<string>(saved.who || 'team');
+  const [by, setBy] = useState<'day' | 'week'>(saved.by || 'day');
+  const remember = (p: { view?: View; weeks?: number; who?: string; by?: 'day' | 'week' }) => {
+    try { localStorage.setItem(PREF_KEY, JSON.stringify({ view, weeks: weeksShown, who, by, ...p })); } catch { /* not kept */ }
+  };
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const todayKey = dayKey(today);
-  const fromKey = dayKey(addDays(weekStart(today), -7 * (WEEKS_SHOWN - 1)));
-
-  useEffect(() => onSnapshot(doc(db, 'config', 'login_rules'), d => setRules(readLoginRules(d.data())), () => setRules(DEFAULT_LOGIN_RULES)), []);
-  useEffect(
-    () =>
-      onSnapshot(
-        query(collection(db, 'login_days'), where('date', '>=', fromKey)),
-        snap => setDays(snap.docs.map(d => d.data() as LoginDay)),
-        e => { setError(friendlyError(e)); setDays([]); }
-      ),
-    [fromKey]
-  );
-
-  const byKey = useMemo(() => {
-    const m = new Map<string, LoginDay>();
-    (days || []).forEach(d => m.set(`${d.memberId}_${d.date}`, d));
-    return m;
-  }, [days]);
-  const minutesOf = (memberId: string) => (day: string) => byKey.get(`${memberId}_${day}`)?.minutes || 0;
+  const fromKey = dayKey(addDays(weekStart(today), -7 * (weeksShown - 1)));
+  const { rules, days, error, byKey, minutesOf: minutesAt } = useLoginData(fromKey);
+  const minutesOf = (memberId: string) => (day: string) => minutesAt(memberId, day);
 
   const recentDays = lastWorkDays(today, rules, rules.workDays.length);
-  const weeks = Array.from({ length: WEEKS_SHOWN }, (_, i) => addDays(weekStart(today), -7 * i));
+  const weeks = Array.from({ length: weeksShown }, (_, i) => addDays(weekStart(today), -7 * i));
+  const graphPerson = members.some(m => m.id === who) ? who : 'team';
+  const graphBy = weeksShown > 12 ? 'week' : by;
   const summary = rulesSummary(rules);
 
   const lastSeen = (memberId: string) => {
@@ -173,7 +172,7 @@ export default function LoginLog({ currentMember, members }: { currentMember: Te
         <div>
           <h3 className="flex items-center gap-2 font-bold"><Clock className="h-4 w-4 text-accent" /> Login log</h3>
           <p className="mt-1 text-sm text-ink-soft">
-            Time each person spent in the CRM on the last {recentDays.length} working days (today not counted yet).
+            Time each person spent in the CRM. The light is for the last {recentDays.length} working days (today not counted yet).
           </p>
         </div>
         <button type="button" className={secondaryBtn} onClick={() => setEditing(true)}>
@@ -188,9 +187,55 @@ export default function LoginLog({ currentMember, members }: { currentMember: Te
         <span>Working days: {summary.days}</span>
       </div>
 
+      <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3">
+        <div className="inline-flex overflow-hidden rounded-lg border border-line" role="tablist" aria-label="View">
+          {([['table', 'Table', List], ['heatmap', 'Heatmap', Grid3x3], ['graph', 'Graph', BarChart3]] as const).map(([k, label, Icon]) => (
+            <button key={k} type="button" role="tab" aria-selected={view === k} className={segBtn(view === k)} onClick={() => { setView(k); remember({ view: k }); }}>
+              <Icon className="h-4 w-4" /> {label}
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 text-sm text-ink-soft">
+          History
+          <select value={weeksShown} onChange={e => { const w = Number(e.target.value); setWeeksShown(w); remember({ weeks: w }); }} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink">
+            {HISTORY_WEEKS.map(w => <option key={w} value={w}>Last {w} weeks</option>)}
+          </select>
+        </label>
+        {view === 'graph' && (
+          <>
+            <select value={graphPerson} onChange={e => { setWho(e.target.value); remember({ who: e.target.value }); }} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm text-ink" aria-label="Whose time">
+              <option value="team">Whole team (average per person)</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <div className="inline-flex overflow-hidden rounded-lg border border-line">
+              {(['day', 'week'] as const).map(b => (
+                <button key={b} type="button" disabled={b === 'day' && weeksShown > 12} className={`${segBtn(graphBy === b)} disabled:opacity-40`} onClick={() => { setBy(b); remember({ by: b }); }}>
+                  {b === 'day' ? 'Per day' : 'Per week'}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
       {error && <p role="alert" className="m-5 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       {days === null ? (
         <p className="flex items-center gap-2 px-5 py-4 text-sm text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
+      ) : view === 'heatmap' ? (
+        <div className="px-5 py-4">
+          <p className="mb-3 text-sm text-ink-soft">
+            {weeksShown <= 4 ? 'Each working day, coloured by its time.' : 'Each week (Monday to Sunday), coloured by that week\'s light; the number is the week\'s total.'} Point at a square for the exact time.
+          </p>
+          <LoginHeatmap people={members} columns={heatColumns(today, rules, weeksShown)} minutesOf={minutesAt} rules={rules} todayKey={todayKey} />
+        </div>
+      ) : view === 'graph' ? (
+        <div className="px-5 py-4">
+          <p className="mb-2 text-sm text-ink-soft">
+            {graphBy === 'day' ? 'Hours on each working day' : 'Average hours per working day, each week'}
+            {graphPerson === 'team' ? ', averaged over everyone in the team' : `, ${members.find(m => m.id === graphPerson)?.name}`}. Grey = still in progress.
+          </p>
+          <LoginGraph data={graphSeries(graphPerson === 'team' ? members.map(m => m.id) : [graphPerson], minutesAt, rules, today, weeksShown, graphBy)} rules={rules} />
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[44rem] text-[15px]">
@@ -227,7 +272,7 @@ export default function LoginLog({ currentMember, members }: { currentMember: Te
                       })}
                       <td className="px-3 py-3 text-center text-ink">{mins(todayKey) ? formatMinutes(mins(todayKey)) : '–'}</td>
                       <td className="px-5 py-3 text-sm text-ink-soft">
-                        {seen ? new Date(seen).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : 'Not in the last 8 weeks'}
+                        {seen ? new Date(seen).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : `Not in the last ${weeksShown} weeks`}
                       </td>
                     </tr>
                     {isOpen && (

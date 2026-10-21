@@ -12,6 +12,8 @@ import {
   trainingsIn, trendBuckets, wonBy,
 } from '../lib/present';
 import { ProjectionSlide } from './SalesProjection';
+import { LoginHeatmap } from './LoginCharts';
+import { LoginRules, formatMinutes, heatColumns, lastWorkDays, loginLight } from '../lib/loginActivity';
 import { metricsFor } from '../lib/kpi';
 import { Bars, compactRM, Donut, DayHeatmap, Empty, Funnel, MatrixHeatmap, Panel, Ring, StatCard } from './PresentCharts';
 
@@ -285,8 +287,9 @@ function dayOfSaved(v: any): string {
 export function companySlides(args: {
   keys: CompanySlide[]; data: PresentData; period: Period; today: string; month: string; animate: boolean;
   reps: Representative[]; people: { id: string; name: string }[]; settings: MoneySettings; plRows: ProjectRow[];
+  logins?: { rules: LoginRules; days: unknown[] | null; minutesOf: (memberId: string, day: string) => number; people: { id: string; name: string }[] };
 }): Slide[] {
-  const { keys, data, period, today, month, animate, reps, people, settings, plRows } = args;
+  const { keys, data, period, today, month, animate, reps, people, settings, plRows, logins } = args;
   const nameOf = (id: string) => people.find(r => r.id === id)?.name || 'Former team member';
   const now = headline(data, period);
   const before = period.prev ? headline(data, period.prev) : null;
@@ -450,6 +453,30 @@ export function companySlides(args: {
             <Panel title={`Clients not contacted in 60 days (${quiet.length})`}>
               <List items={quiet.slice(0, 8).map(q => ({ key: q.client.id, main: q.client.companyName, side: <span className="text-sm font-normal text-ink-soft">last {formatDate(q.last)}</span> }))} empty="Every active client was contacted lately." />
             </Panel>
+          </div>
+        ),
+      });
+    } else if (key === 'logins' && logins) {
+      // Team → Login log: last working days' light per person, and the last 4 weeks day by day.
+      const now = new Date();
+      const recent = lastWorkDays(now, logins.rules, logins.rules.workDays.length);
+      const rows = logins.people.map(p => {
+        const mins = (d: string) => logins.minutesOf(p.id, d);
+        const total = recent.reduce((s, d) => s + mins(d), 0);
+        return { p, light: loginLight(recent, mins, logins.rules), avg: Math.round(total / Math.max(1, recent.length)) };
+      }).sort((a, b) => b.avg - a.avg);
+      out.push({
+        key, title: 'Login log', subtitle: `Time in the CRM · light for the last ${recent.length} working days, heatmap for the last 4 weeks`,
+        body: logins.days === null ? <Empty text="Loading…" /> : (
+          <div className="grid gap-4 lg:grid-cols-[2fr_3fr]">
+            <Panel title="Light per person">
+              <List items={rows.map(r => ({
+                key: r.p.id,
+                main: <><strong>{r.p.name}</strong><span className="block text-sm text-ink-soft">{formatMinutes(r.avg)} a working day on average</span></>,
+                side: <span className={`rounded-full px-2.5 py-0.5 text-sm font-semibold ${KPI_LIGHT_BADGE[r.light]}`}>{r.light === 'green' ? 'Green' : r.light === 'amber' ? 'Amber' : 'Red'}</span>,
+              }))} empty="Nobody on the team yet." />
+            </Panel>
+            <Panel><LoginHeatmap people={logins.people} columns={heatColumns(now, logins.rules, 4)} minutesOf={logins.minutesOf} rules={logins.rules} todayKey={today} /></Panel>
           </div>
         ),
       });

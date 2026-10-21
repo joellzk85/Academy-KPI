@@ -81,9 +81,9 @@ export function trendBuckets(p: Period, today: string, earliest = ''): Bucket[] 
 
 // ---------- Slide lists ----------
 export type PersonSlide = 'scorecard' | 'numbers' | 'checkin' | 'won' | 'pipeline' | 'next' | 'touch' | 'heatmap' | 'lost' | 'admin' | 'actions' | 'projection';
-export type CompanySlide = 'headline' | 'trend' | 'team' | 'funnel' | 'clients' | 'funding' | 'programmes' | 'collect' | 'profit' | 'touch' | 'lost' | 'trainings' | 'actions' | 'projection';
+export type CompanySlide = 'headline' | 'trend' | 'team' | 'funnel' | 'clients' | 'funding' | 'programmes' | 'collect' | 'profit' | 'touch' | 'lost' | 'trainings' | 'actions' | 'projection' | 'logins';
 
-export interface SlideInfo<K> { key: K; label: string; hint: string; admin?: boolean }
+export interface SlideInfo<K> { key: K; label: string; hint: string; admin?: boolean; manager?: boolean }
 
 export const PERSON_SLIDES: SlideInfo<PersonSlide>[] = [
   { key: 'scorecard', label: 'KPI scorecard', hint: 'Score ring and each KPI against its target this month' },
@@ -110,11 +110,12 @@ export const COMPANY_SLIDES: SlideInfo<CompanySlide>[] = [
   { key: 'funding', label: 'Funding mix', hint: 'HRDC, Direct pay and HRDC + top-up, by RM' },
   { key: 'programmes', label: 'Top programmes', hint: 'Programmes that sold the most' },
   { key: 'collect', label: 'Money not collected', hint: 'What clients and HRDC still owe, by how overdue' },
-  { key: 'profit', label: 'Profit', hint: 'Income, costs and profit from trainings in the period (Project P&L)' },
+  { key: 'profit', label: 'Profit', hint: 'Income, costs and profit from trainings in the period (Project P&L)', manager: true },
   { key: 'touch', label: 'Client contact heatmap', hint: 'Touch points per person per week, and clients nobody contacted in 60 days' },
   { key: 'lost', label: 'Why we lost deals', hint: 'Lost deals by reason, with RM' },
   { key: 'trainings', label: 'Trainings', hint: 'Trainings delivered in the period and coming up in the next 30 days' },
   { key: 'actions', label: 'Open action points', hint: 'Every meeting action point not done yet, overdue first' },
+  { key: 'logins', label: 'Login log', hint: 'Time each person spent in the CRM: lights for the last working days and a 4-week heatmap (Team → Login log)', manager: true },
 ];
 
 export function defaultPersonSlides(role?: string): PersonSlide[] {

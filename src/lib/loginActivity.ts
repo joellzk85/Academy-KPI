@@ -5,9 +5,9 @@
 // The database rules let each person add only their own minutes, one at a time and at most once a minute,
 // and only Management can read them (Team → Login log).
 // The green / amber / red rules live in config/login_rules, editable by Management only.
-import { useEffect } from 'react';
-import { doc, increment, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
-import { db } from './firebase';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { collection, doc, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { db, friendlyError } from './firebase';
 import type { KpiLight } from './kpi';
 
 export const IDLE_MINUTES = 10;
@@ -76,6 +76,76 @@ export function loginLight(days: string[], minutesOn: (day: string) => number, r
   if (mins.filter(m => m >= rules.greenMinutes).length >= rules.greenDays) return 'green';
   if (mins.filter(m => m >= rules.amberMinutes).length >= rules.amberDays) return 'amber';
   return 'red';
+}
+
+/** A single day's colour: green / amber at the rule's minutes, red for less, null for no time at all. */
+export function dayLight(minutes: number, rules: LoginRules): KpiLight | null {
+  if (!minutes) return null;
+  return minutes >= rules.greenMinutes ? 'green' : minutes >= rules.amberMinutes ? 'amber' : 'red';
+}
+
+const dm = (key: string) => parseDay(key).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
+
+/** Heatmap columns: each working day for up to 4 weeks, otherwise one column per week (Monday to Sunday). */
+export function heatColumns(today: Date, rules: LoginRules, weeks: number) {
+  const mondays = Array.from({ length: weeks }, (_, i) => addDays(weekStart(today), -7 * (weeks - 1 - i)));
+  if (weeks <= 4) {
+    return mondays.flatMap(m => workDaysOfWeek(m, rules)).map(d => ({
+      key: d, days: [d], week: false,
+      label: `${['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][parseDay(d).getDay()]} ${parseDay(d).getDate()}`,
+    }));
+  }
+  return mondays.map(m => ({ key: dayKey(m), days: workDaysOfWeek(m, rules), week: true, label: dm(dayKey(m)) }));
+}
+
+/**
+ * Graph bars for one person or the team (average per person): each working day so far, or each week as the
+ * average per working day. Today and this week have no colour yet (still in progress).
+ */
+export function graphSeries(memberIds: string[], minutesOf: (id: string, day: string) => number, rules: LoginRules, today: Date, weeks: number, by: 'day' | 'week') {
+  const todayKey = dayKey(today);
+  const n = Math.max(1, memberIds.length);
+  const avgOn = (day: string) => Math.round(memberIds.reduce((s, id) => s + minutesOf(id, day), 0) / n);
+  const mondays = Array.from({ length: weeks }, (_, i) => addDays(weekStart(today), -7 * (weeks - 1 - i)));
+  if (by === 'day') {
+    return mondays.flatMap(m => workDaysOfWeek(m, rules)).filter(d => d <= todayKey).map(d => {
+      const minutes = avgOn(d);
+      return { label: dm(d), minutes, light: d === todayKey ? null : dayLight(minutes, rules) || 'red' as KpiLight };
+    });
+  }
+  return mondays.map(m => {
+    const days = workDaysOfWeek(m, rules);
+    const past = days.filter(d => d <= todayKey);
+    const minutes = past.length ? Math.round(past.reduce((s, d) => s + avgOn(d), 0) / past.length) : 0;
+    const current = days.some(d => d >= todayKey);
+    return { label: dm(dayKey(m)), minutes, light: current ? null : loginLight(days, avgOn, rules) };
+  });
+}
+
+/** Days and rules for Team → Login log and the Present slide (Management only; `enabled` false loads nothing). */
+export function useLoginData(fromKey: string, enabled = true) {
+  const [rules, setRules] = useState<LoginRules>(DEFAULT_LOGIN_RULES);
+  const [days, setDays] = useState<LoginDay[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!enabled) return;
+    return onSnapshot(doc(db, 'config', 'login_rules'), d => setRules(readLoginRules(d.data())), () => setRules(DEFAULT_LOGIN_RULES));
+  }, [enabled]);
+  useEffect(() => {
+    if (!enabled) return;
+    return onSnapshot(
+      query(collection(db, 'login_days'), where('date', '>=', fromKey)),
+      snap => { setDays(snap.docs.map(d => d.data() as LoginDay)); setError(''); },
+      e => { setError(friendlyError(e)); setDays([]); }
+    );
+  }, [fromKey, enabled]);
+  const byKey = useMemo(() => {
+    const m = new Map<string, LoginDay>();
+    (days || []).forEach(d => m.set(`${d.memberId}_${d.date}`, d));
+    return m;
+  }, [days]);
+  const minutesOf = useCallback((memberId: string, day: string) => byKey.get(`${memberId}_${day}`)?.minutes || 0, [byKey]);
+  return { rules, days, error, byKey, minutesOf };
 }
 
 export function formatMinutes(m: number): string {
