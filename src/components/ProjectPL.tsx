@@ -62,7 +62,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
   const passesShow = (r: ProjectRow) =>
     show === 'all' ? true
       : show === 'done' ? r.training === 'done'
-        : show === 'upcoming' ? r.training !== 'done'
+        : show === 'upcoming' ? r.training !== 'done' && r.training !== 'cancelled'
           : r.money !== 'settled';
   const shown = rows.filter(r => inPeriod(r, year, from, to) && passesShow(r));
   const totals = projectTotals(shown);

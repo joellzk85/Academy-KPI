@@ -316,6 +316,7 @@ function Stars({ n, size = 'h-4 w-4' }: { n: number; size?: string }) {
 function todos(info: any) {
   const out: { text: string; tab: Tab }[] = [];
   info.trainings.forEach((t: any) => {
+    if (t.cancelled) return;
     if ((t.po.length || t.poAuto) && !t.poAcceptedAt && !t.poDeclined && !t.ended) out.push({ text: `Accept the PO for ${t.programme} (${when(t)})`, tab: 'trainings' });
     const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
     if (t.started && !allPaid && (!t.claim || t.claim.status === 'returned')) out.push({ text: `${t.claim ? 'Fix and resend' : 'Request'} your fee for ${t.programme} (${when(t)})`, tab: 'trainings' });
@@ -328,7 +329,7 @@ function todos(info: any) {
 function HomeTab({ info, go, onPassword }: { info: any; go: (t: Tab) => void; onPassword: () => void }) {
   const p = info.profile;
   const pct = Math.round(((PROFILE_PARTS - profileGaps({ ...p, icOnFile: info.icOnFile }).length) / PROFILE_PARTS) * 100);
-  const next = info.trainings.filter((t: any) => !t.ended)[0];
+  const next = info.trainings.filter((t: any) => !t.ended && !t.cancelled)[0];
   const rated = info.trainings.filter((t: any) => t.rating);
   const avg = rated.length ? Math.round((rated.reduce((s: number, t: any) => s + t.rating.stars, 0) / rated.length) * 10) / 10 : 0;
   const list = todos(info);
@@ -430,12 +431,14 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
           <h3 className="text-lg font-bold">{t.programme}</h3>
           {t.client && <p className="text-[15px]">{t.client}</p>}
           <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-soft"><CalendarDays className="h-4 w-4" /> {when(t)}</p>
+          {t.movedFrom && !t.cancelled && <p className="text-sm font-semibold text-attention">Date changed (was {isoDay(t.movedFrom)})</p>}
           {t.venue && <p className="flex items-center gap-1.5 text-sm text-ink-soft"><MapPin className="h-4 w-4" /> {t.venue.name}{t.venue.region ? `, ${t.venue.region}` : ''}</p>}
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${t.poDeclined ? 'bg-danger-soft text-danger' : t.confirmed ? 'bg-accent-soft text-accent' : 'bg-attention-soft text-ink'}`}>
-          {t.poDeclined ? 'You declined' : t.confirmed ? 'Confirmed' : 'Being arranged'}
+        <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${t.cancelled || t.poDeclined ? 'bg-danger-soft text-danger' : t.confirmed ? 'bg-accent-soft text-accent' : 'bg-attention-soft text-ink'}`}>
+          {t.cancelled ? 'Cancelled' : t.poDeclined ? 'You declined' : t.confirmed ? 'Confirmed' : 'Being arranged'}
         </span>
       </div>
+      {t.cancelled && <p className={alertBox}>This training was cancelled, so its PO no longer applies. NEXT Academy will contact you about it.</p>}
 
       {/* PO */}
       <div className="rounded-xl border border-line p-3">
@@ -459,13 +462,13 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
             ) : t.poAcceptedAt ? (
               <p className="flex items-center gap-1.5 text-sm text-accent"><BadgeCheck className="h-4 w-4" /> You accepted this PO on {isoDay(t.poAcceptedAt)}. These dates are blocked in My calendar.</p>
             ) : null}
-            {!t.poAcceptedAt && !declining && (
+            {!t.cancelled && !t.poAcceptedAt && !declining && (
               <div className="flex flex-wrap gap-2">
                 <button type="button" className={btnPrimary} disabled={!!busy} onClick={acceptPo}>{busy === 'accept' && <Loader2 className="h-4 w-4 animate-spin" />} Accept the PO</button>
                 {!t.poDeclined && !t.started && <button type="button" className={btnSecondary} disabled={!!busy} onClick={() => setDeclining(true)}>Decline</button>}
               </div>
             )}
-            {t.poAcceptedAt && !t.started && !declining && (
+            {!t.cancelled && t.poAcceptedAt && !t.started && !declining && (
               <button type="button" className="text-sm font-semibold text-ink-soft hover:text-danger hover:underline" onClick={() => setDeclining(true)}>Can't do it after all? Decline</button>
             )}
             {declining && (
@@ -498,7 +501,7 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
         ) : <p className="mt-1 text-sm text-ink-soft">NEXT Academy will set up your fee from the PO.</p>}
         {t.claim?.status === 'submitted' && <p className="mt-2 flex items-center gap-1.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4" /> Fee requested on {isoDay(t.claim.submittedAt)} ({t.claim.photos.length} photo{t.claim.photos.length === 1 ? '' : 's'}, T3). NEXT Academy is checking it.</p>}
         {t.claim?.status === 'returned' && <p className="mt-2 rounded-lg bg-attention-soft px-3 py-2 text-sm"><strong>Please fix and send again:</strong> {t.claim.returnNote || 'NEXT Academy asked for changes.'}</p>}
-        {!allPaid && (t.started
+        {!allPaid && !t.cancelled && (t.started
           ? !claiming && <button type="button" className={`${t.claim?.status === 'submitted' ? btnSecondary : btnPrimary} mt-3`} onClick={() => setClaiming(true)}>{t.claim?.status === 'returned' ? 'Fix and send again' : t.claim ? 'Change what I sent' : 'Request training fee'}</button>
           : <p className="mt-2 text-sm text-ink-soft">You can request your fee once the training has started.</p>)}
         {claiming && <ClaimForm t={t} trainerId={trainerId} onCancel={() => setClaiming(false)} onDone={async () => { setClaiming(false); await reload(); }} />}
@@ -524,7 +527,7 @@ const isoOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSta
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 function CalendarTab({ info }: { info: any }) {
-  const blocked = info.trainings.filter((t: any) => t.start && !t.poDeclined);
+  const blocked = info.trainings.filter((t: any) => t.start && !t.poDeclined && !t.cancelled);
   const today = isoOf(new Date());
   const firstUpcoming = blocked.find((t: any) => (t.end || t.start) >= today)?.start || today;
   const [month, setMonth] = useState(() => new Date(Number(firstUpcoming.slice(0, 4)), Number(firstUpcoming.slice(5, 7)) - 1, 1));
