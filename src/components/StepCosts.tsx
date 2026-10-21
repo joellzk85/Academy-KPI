@@ -4,7 +4,7 @@ import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'l
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
 import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, paidViaLink } from '../lib/money';
-import { ChecklistTask, costCategory, materialItems } from '../lib/checklist';
+import { ChecklistTask, costCategory, isCoTrainer, materialItems } from '../lib/checklist';
 import { STEP_VENDOR_TYPE, Vendor, bankText, hasBank, vendorName } from '../lib/vendors';
 import { Receipt } from '../lib/postTraining';
 import { useFormDraft } from '../lib/useFormDraft';
@@ -46,7 +46,7 @@ const num = (s: string) => Number(String(s).replace(/[^0-9.]/g, ''));
 // Quick descriptions per step (Joel: "Booking and final payment").
 function quickWords(t: ChecklistTask): string[] {
   if (t.kind === 'venue' || t.kind === 'bus') return ['Booking', 'Final payment'];
-  if (t.kind === 'trainer') return ['Trainer fee'];
+  if (t.kind === 'trainer') return [isCoTrainer(t) ? 'Co-trainer fee' : 'Trainer fee'];
   if (t.kind === 'facilitator') return ['Facilitator fee'];
   if (t.kind === 'materials') return materialItems(t).map(i => i.label);
   return [];

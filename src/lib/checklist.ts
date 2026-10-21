@@ -56,6 +56,7 @@ export interface ChecklistTask {
   busCount?: number;
   busSeats?: number;        // seats per bus
   facilitatorCount?: number;
+  facilitatorDays?: string[]; // the training days they're needed (none ticked = every day), Joel 2026-10-22
   // Materials: lines to tick (undefined = the standard T-shirt, Banner, Print-out, none ticked)
   items?: MaterialItem[];
 }
@@ -65,9 +66,45 @@ export const DEFAULT_MATERIALS = ['T-shirt', 'Banner', 'Print-out'];
 export const materialItems = (t: Partial<ChecklistTask>): MaterialItem[] =>
   Array.isArray(t.items) ? t.items : DEFAULT_MATERIALS.map((label, i) => ({ id: `m${i + 1}`, label, done: false }));
 
-// Steps that ask "Needed for this training?" first.
+// Steps that ask "Needed for this training?" first (and the co-trainer steps).
 export const ASKS_NEEDED: TaskKind[] = ['venue', 'bus', 'facilitator'];
-export const asksNeeded = (t: { kind?: string }) => ASKS_NEEDED.includes(t.kind as TaskKind);
+export const asksNeeded = (t: { kind?: string; id?: string }) => ASKS_NEEDED.includes(t.kind as TaskKind) || isCoTrainer(t);
+
+// ---------- Co-trainer (Joel, 2026-10-22) ----------
+// HRDC allows 50 participants per trainer: 51 to 100 pax needs a co-trainer, 101 to 150 two, and so on. It's a
+// reminder only, never a block (sometimes the team counts 100 to save the client money), and a co-trainer can be
+// added to any deal. A co-trainer step is a Trainer step (kind "trainer") with id "cotrainer" ("cotrainer_2"... for
+// more), so the PO, fee, clash warning and trainer portal work as for the lead trainer; only the fee differs. The lead
+// trainer (the "trainer" step) writes the training report. "Not needed" on a co-trainer step stops the reminder.
+export const HRDC_PAX_PER_TRAINER = 50;
+export const isCoTrainer = (t: { kind?: string; id?: string } | undefined) => t?.kind === 'trainer' && /^cotrainer/.test(t.id || '');
+export const isLeadTrainer = (t: { kind?: string; id?: string } | undefined) => t?.kind === 'trainer' && !isCoTrainer(t);
+export const leadTrainerTask = <T extends { kind?: string; id?: string }>(tasks: T[] | undefined): T | undefined => (tasks || []).find(isLeadTrainer);
+const hasName = (t: Partial<ChecklistTask>) => !!(t.trainerId || String(t.trainerName || '').trim());
+// Every trainer picked on the checklist: the lead first, then the co-trainers.
+export const namedTrainerTasks = <T extends Partial<ChecklistTask>>(tasks: T[] | undefined): T[] =>
+  (tasks || []).filter(t => t.kind === 'trainer' && hasName(t)).sort((a, b) => Number(isCoTrainer(a)) - Number(isCoTrainer(b)));
+
+// Trainers in all that HRDC needs for this deal's participants (1 for direct-pay deals).
+export function trainersNeeded(deal: any): number {
+  const pax = Math.max(0, Math.round(Number(deal?.participants) || 0));
+  return isHrdc(deal?.fundingType) && pax > HRDC_PAX_PER_TRAINER ? Math.ceil(pax / HRDC_PAX_PER_TRAINER) : 1;
+}
+
+// HRDC needs more trainers than are planned: pax, trainers needed in all, co-trainers chosen. Else null.
+export function coTrainerShort(deal: any, tasks: ChecklistTask[] | undefined): { pax: number; need: number; have: number } | null {
+  const need = trainersNeeded(deal);
+  if (need < 2) return null;
+  const co = (tasks || []).filter(isCoTrainer);
+  if (co.some(t => t.needed === false)) return null;
+  const have = co.filter(t => t.needed === true && hasName(t)).length;
+  if (1 + have >= need) return null;
+  return { pax: Math.round(Number(deal.participants)), need, have };
+}
+export function coTrainerText(s: { pax: number; need: number; have: number }): string {
+  const co = s.need - 1;
+  return `${s.pax} pax: HRDC needs ${s.need} trainers (1 lead + ${co} co-trainer${co === 1 ? '' : 's'}). ${s.have ? `${s.have} co-trainer${s.have === 1 ? '' : 's'} chosen so far.` : 'No co-trainer chosen yet.'}`;
+}
 export const notNeeded = (t: Partial<ChecklistTask>) => asksNeeded(t) && t.needed === false;
 
 // What a step's payment requests are filed under (money_out.category), so the P&L shows them by kind.
@@ -116,6 +153,7 @@ export const DEFAULT_SETTINGS: ChecklistSettings = {
     { id: 'bus', label: 'Bus', kind: 'bus', appliesTo: 'all' },
     { id: 'facilitator', label: 'Facilitator', kind: 'facilitator', appliesTo: 'all' },
     { id: 'trainer', label: 'Trainer', kind: 'trainer', appliesTo: 'all' },
+    { id: 'cotrainer', label: 'Co-trainer', kind: 'trainer', appliesTo: 'all', optional: true },
     { id: 'output_qr', label: 'Output assessment QR', kind: 'basic', appliesTo: 'all', files: true },
     { id: 'materials', label: 'Materials', kind: 'materials', appliesTo: 'all' },
     // After training day, in Joel's order (2026-10-20): the invoice comes first (recorded in the deal's
@@ -151,9 +189,10 @@ export function upgradeTask<T extends { id: string; label: string; kind: TaskKin
 }
 export const upgradeTasks = (tasks: ChecklistTask[] | undefined): ChecklistTask[] => (tasks || []).map(upgradeTask);
 
-// Steps added in the 2026-10-20 update. A won deal whose training hasn't ended gets them on its checklist
-// (DealChecklist.tsx), placed after the built-in step before them.
-export const NEW_STEPS_2026_10_20 = ['bus', 'facilitator', 'output_qr'];
+// Steps added in later updates (Bus, Facilitator, Output assessment QR on 2026-10-20; Co-trainer on 2026-10-22).
+// A won deal whose training hasn't ended gets them on its checklist (DealChecklist.tsx), placed after the built-in
+// step before them.
+export const NEW_STEPS = ['bus', 'facilitator', 'output_qr', 'cotrainer'];
 export function withSteps(tasks: ChecklistTask[], add: TaskTemplate[]): ChecklistTask[] {
   const next = [...tasks];
   add.forEach(m => {
@@ -248,6 +287,7 @@ export function effectiveTrainer(t: Partial<ChecklistTask> | undefined, quotes: 
   if (t?.trainerId || t?.trainerName?.trim()) {
     return { id: t.trainerId || '', name: nameIn(trainers, t.trainerId) || (t.trainerName || '').trim() || 'Trainer chosen', from: 'checklist' };
   }
+  if (isCoTrainer(t)) return null;   // the quotation's trainers are the lead's
   const q = mainQuote(quotes);
   // Every trainer on the quotation's programme lines (other items have none).
   const found: { id: string; name: string }[] = [];
@@ -318,6 +358,10 @@ export function grantNotAppliedFlag(deal: any, tasks: ChecklistTask[] | undefine
 export function checklistFlags(deal: any, tasks: ChecklistTask[] | undefined, settings: ChecklistSettings, today: string, wonDate = ''): Flag[] {
   const g = grantNotAppliedFlag(deal, tasks, settings, today, wonDate);
   const rest = trainingFlags(deal, tasks, settings, today);
+  // Co-trainer reminder (amber, never a block) until the training is over.
+  const co = coTrainerShort(deal, tasks);
+  const end = daysUntil(trainingEndDate(deal), today);
+  if (co && !(end !== null && end < 0)) rest.push({ level: 'attention', text: `${co.pax} pax, HRDC needs ${co.need} trainers: co-trainer not chosen` });
   // "Not applied" already says more than "not approved", so only one shows.
   return g ? [g, ...rest.filter(f => !/grant not approved$/.test(f.text))] : rest;
 }

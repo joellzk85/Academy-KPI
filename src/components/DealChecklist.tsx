@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, FileText, ListChecks, Loader2, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { formatDate, todayIso, trainingDateText, trainingEndDate } from '../lib/deals';
+import { formatDate, todayIso, trainingDateText, trainingDayList, trainingEndDate } from '../lib/deals';
 import { TrainingReportBox } from './TrainingReportAdmin';
 import {
-  ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS_2026_10_20, Picked, applicableTasks, asksNeeded, buildChecklist,
-  effectiveTrainer, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
+  ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS, Picked, applicableTasks, asksNeeded, buildChecklist,
+  coTrainerShort, coTrainerText, effectiveTrainer, isCoTrainer, leadTrainerTask, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
   upgradeTasks, withSteps,
 } from '../lib/checklist';
 import { ChecklistFile } from '../lib/checklistFiles';
@@ -141,12 +141,12 @@ export default function DealChecklist({
     }
   };
 
-  // The 2026-10-20 steps (Bus, Facilitator, Output assessment QR) are added once to a won deal whose training
+  // Newer steps (Bus, Facilitator, Output assessment QR, Co-trainer: NEW_STEPS in lib/checklist.ts) are added once to a won deal whose training
   // hasn't ended yet. Trainings already over are left as they were ("Add new steps from the master list" adds them).
   const added = useRef('');
   const end = trainingEndDate(deal);
   const ended = !!end && end < todayIso();
-  const missingNew = settings.tasks.filter(m => NEW_STEPS_2026_10_20.includes(m.id) && !m.retired && !allTasks.some(t => t.id === m.id));
+  const missingNew = settings.tasks.filter(m => NEW_STEPS.includes(m.id) && !m.retired && !allTasks.some(t => t.id === m.id));
   useEffect(() => {
     if (!editable || !checklist || ended || part === 'after' || !missingNew.length || added.current === deal.id) return;
     added.current = deal.id;
@@ -227,7 +227,21 @@ export default function DealChecklist({
   const missing = settings.tasks.filter(m => !m.retired && inPart(m) && !allTasks.some(t => t.id === m.id));
   const addMissing = () => save(withSteps(allTasks, missing), `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
   // Optional steps (Certificates) show last, except while arranging (the arrows move the saved order).
-  const shown = arranging ? tasks : [...tasks.filter(t => !isOptional(t)), ...tasks.filter(t => isOptional(t))];
+  const last = (t: ChecklistTask) => isOptional(t) && !isCoTrainer(t);   // co-trainers stay next to the trainer
+  const shown = arranging ? tasks : [...tasks.filter(t => !last(t)), ...tasks.filter(last)];
+
+  // Co-trainer (2026-10-22): another one after the last co-trainer ("cotrainer_2", "Co-trainer 2"...).
+  const coTasks = allTasks.filter(isCoTrainer);
+  const addCoTrainer = () => {
+    let n = coTasks.length + 1;
+    while (allTasks.some(x => x.id === `cotrainer_${n}`)) n++;
+    const at = allTasks.findIndex(x => x.id === coTasks[coTasks.length - 1]?.id) + 1 || allTasks.findIndex(x => x.id === leadTrainerTask(allTasks)?.id) + 1 || allTasks.length;
+    const next = [...allTasks];
+    next.splice(at, 0, { id: `cotrainer_${n}`, label: `Co-trainer ${n}`, kind: 'trainer', appliesTo: 'all', optional: true, needed: true, done: false });
+    return save(next, `Co-trainer ${n}: added`);
+  };
+  const short = coTrainerShort(deal, allTasks);
+  const days = trainingDayList(deal);
 
   const begin = async () => {
     setBusy(true);
@@ -266,6 +280,9 @@ export default function DealChecklist({
   return (
     <div className="space-y-3">
       {!hideProgress && <ProgressBar done={done} total={total} />}
+      {short && part !== 'after' && (
+        <p className="rounded-lg bg-attention-soft px-3 py-2.5 text-sm"><strong>Co-trainer reminder.</strong> {coTrainerText(short)} Choose one on the Co-trainer step, or answer No if it isn't needed.</p>
+      )}
       {!isHrdc(deal.fundingType) && allTasks.some(t => t.appliesTo === 'hrdc' && inPart(t)) && (
         <p className="text-sm text-ink-soft">HRDC-only steps are hidden because this deal isn't HRDC funded.</p>
       )}
@@ -279,7 +296,7 @@ export default function DealChecklist({
               {t.done ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-accent" /> : <Circle className="mt-0.5 h-5 w-5 shrink-0 text-ink-soft/50" />}
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">{t.label}{t.after && !part && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">After training</span>}{isOptional(t) && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">Optional</span>}{t.oneOff && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">This deal only</span>}{notNeeded(t) && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">Not needed</span>}</p>
-                <TaskSummary t={t} venues={venues} trainers={trainers} quotes={quotes} withNote={!(editable && !t.done && !arranging)} />
+                <TaskSummary t={t} days={days} venues={venues} trainers={trainers} quotes={quotes} withNote={!(editable && !t.done && !arranging)} />
                 {t.done && <p className="text-sm text-ink-soft">Done {formatDate(t.doneAt || '')} by {t.doneByName}</p>}
                 {t.kind === 'grant' && !t.done && grantBlock && <p className="mt-1 text-sm font-semibold text-attention">{grantBlock}</p>}
               </div>
@@ -311,7 +328,7 @@ export default function DealChecklist({
                 )}
 
                 {editable && !t.done && t.kind !== 'basic' && (
-                  <TaskFields t={t} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
+                  <TaskFields t={t} days={days} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
                     onPatch={(c, a) => patch(t.id, c, a)} />
                 )}
 
@@ -323,7 +340,7 @@ export default function DealChecklist({
                 )}
                 {/* HRDC deals: HR's name list fills the T3 attendance form (T3Maker.tsx) */}
                 {t.id === 'attendance' && t3Shown && <T3Maker deal={deal} saved={checklist.t3} viewer={viewer} incoming={nameList} />}
-                {DOCS_WORD[t.kind] && (t.kind === 'trainer' || t.needed === true) && (
+                {DOCS_WORD[t.kind] && ((t.kind === 'trainer' && !asksNeeded(t)) || t.needed === true) && (
                   <div className="mt-2">
                     <p className="text-sm font-semibold">{t.kind === 'trainer' ? 'PO' : 'Documents'}</p>
                     <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable} what={DOCS_WORD[t.kind]} ticks={false}
@@ -342,7 +359,7 @@ export default function DealChecklist({
                 )}
 
                 {editable && !t.done && t.kind === 'basic' && (
-                  <TaskFields t={t} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
+                  <TaskFields t={t} days={days} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
                     onPatch={(c, a) => patch(t.id, c, a)} />
                 )}
 
@@ -356,7 +373,7 @@ export default function DealChecklist({
                 })()}
                 {/* Training report (2026-10-21): written in the trainer portal or here, checked, PDF for HR */}
                 {t.id === 'training_report' && (() => {
-                  const trainerTask = allTasks.find(x => x.kind === 'trainer');
+                  const trainerTask = leadTrainerTask(allTasks);
                   const tr = effectiveTrainer(trainerTask, quotes, trainers);
                   const grant = allTasks.find(x => x.kind === 'grant');
                   const outputFiles = files.filter(f => f.taskId === 'output_assessment').map(f => f.name);
@@ -371,6 +388,9 @@ export default function DealChecklist({
                 {/* Trainer portal (2026-10-21): rating, PO accepted or declined, the trainer's fee request */}
                 {t.kind === 'trainer' && t.trainerId && (
                   <TrainerJobBox deal={deal} task={t} trainerName={effectiveTrainer(t, quotes, trainers)?.name || 'The trainer'} viewer={viewer} outs={outs} />
+                )}
+                {editable && isCoTrainer(t) && t.needed === true && t.id === coTasks[coTasks.length - 1]?.id && (
+                  <button type="button" disabled={busy} onClick={addCoTrainer} className={`${btnSecondary} mt-3 py-1.5`}><Plus className="h-3.5 w-3.5" /> Add another co-trainer</button>
                 )}
               </div>
             )}
@@ -466,7 +486,7 @@ function MaterialsList({ t, busy, editable, onChange }: { t: ChecklistTask; busy
 }
 
 // One line of detail under each task title.
-function TaskSummary({ t, venues, trainers, quotes, withNote }: { t: ChecklistTask; venues: any[]; trainers: any[]; quotes: any[]; withNote: boolean }) {
+function TaskSummary({ t, days, venues, trainers, quotes, withNote }: { t: ChecklistTask; days: string[]; venues: any[]; trainers: any[]; quotes: any[]; withNote: boolean }) {
   const bits: string[] = [];
   if (t.kind === 'grant' && t.grantNumber) bits.push(`Grant no. ${t.grantNumber}`);
   const fromQuote = (p: Picked) => (p.from === 'quotation' ? ' (from quotation)' : '');
@@ -474,6 +494,8 @@ function TaskSummary({ t, venues, trainers, quotes, withNote }: { t: ChecklistTa
   if (venue) bits.push(`${venue.name}${fromQuote(venue)}`);
   if (t.kind === 'bus' && t.needed && Number(t.busCount) > 0) bits.push(`${t.busCount} bus${Number(t.busCount) === 1 ? '' : 'es'}${Number(t.busSeats) > 0 ? ` × ${t.busSeats} seats` : ''}`);
   if (t.kind === 'facilitator' && t.needed && Number(t.facilitatorCount) > 0) bits.push(`${t.facilitatorCount} facilitator${Number(t.facilitatorCount) === 1 ? '' : 's'}`);
+  const fd = facilitatorDaysOf(t, days);
+  if (t.kind === 'facilitator' && t.needed && days.length > 1) bits.push(fd.length ? `on ${fd.map(shortDay).join(', ')}` : 'every day');
   if (asksNeeded(t) && t.needed === undefined) bits.push('Needed? Not answered yet');
   const trainer = t.kind === 'trainer' ? effectiveTrainer(t, quotes, trainers) : null;
   if (trainer) bits.push(`${trainer.name}${fromQuote(trainer)}`);
@@ -519,6 +541,10 @@ function ChosenBox({ id, busy, options, picked, fromQuote, what, onSave }: {
   );
 }
 
+// Facilitator days (2026-10-22): the ticked days still in the training (a date change can move it). None = every day.
+const facilitatorDaysOf = (t: ChecklistTask, days: string[]) => (t.facilitatorDays || []).filter(d => days.includes(d)).sort();
+const shortDay = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); };
+
 // A number box that saves when you leave it.
 function NumberBox({ id, label, value, busy, onSave }: { id: string; label: string; value?: number; busy: boolean; onSave: (n: number) => void }) {
   const [v, setV] = useState(value ? String(value) : '');
@@ -533,8 +559,8 @@ function NumberBox({ id, label, value, busy, onSave }: { id: string; label: stri
 }
 
 // The inputs each kind of task needs before it can be ticked.
-function TaskFields({ t, busy, venues, trainers, quotes, onPatch, programmeId }: {
-  t: ChecklistTask; busy: boolean; venues: any[]; trainers: any[]; quotes: any[]; programmeId?: string;
+function TaskFields({ t, days, busy, venues, trainers, quotes, onPatch, programmeId }: {
+  t: ChecklistTask; days: string[]; busy: boolean; venues: any[]; trainers: any[]; quotes: any[]; programmeId?: string;
   onPatch: (c: Partial<ChecklistTask>, action: string) => void;
 }) {
   const [note, setNote] = useState(t.note || '');
@@ -558,15 +584,36 @@ function TaskFields({ t, busy, venues, trainers, quotes, onPatch, programmeId }:
         </div>
       )}
       {t.kind === 'facilitator' && !waiting && (
-        <div className="sm:w-1/2">
-          <NumberBox id={`fc-${t.id}`} label="How many facilitators" value={t.facilitatorCount} busy={busy} onSave={n => onPatch({ facilitatorCount: n }, `${t.label}: ${n} facilitator${n === 1 ? '' : 's'}`)} />
+        <div className="space-y-3">
+          <div className="sm:w-1/2">
+            <NumberBox id={`fc-${t.id}`} label="How many facilitators (pax)" value={t.facilitatorCount} busy={busy} onSave={n => onPatch({ facilitatorCount: n }, `${t.label}: ${n} facilitator${n === 1 ? '' : 's'}`)} />
+          </div>
+          {days.length > 1 && (() => {
+            const on = facilitatorDaysOf(t, days);
+            const toggle = (d: string) => {
+              const next = on.includes(d) ? on.filter(x => x !== d) : [...on, d].sort();
+              const all = !next.length || next.length === days.length;
+              onPatch({ facilitatorDays: all ? [] : next }, `${t.label}: ${all ? 'every day' : `on ${next.map(shortDay).join(', ')}`}`);
+            };
+            return (
+              <div>
+                <p className={small}>Which days? <span className="font-normal">(none ticked = every day)</span></p>
+                <div className="flex flex-wrap gap-2">
+                  {days.map(d => (
+                    <button key={d} type="button" disabled={busy} aria-pressed={on.includes(d)} onClick={() => toggle(d)}
+                      className={`rounded-lg border px-3 py-1 text-sm font-semibold ${on.includes(d) ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{shortDay(d)}</button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
-      {t.kind === 'trainer' && (
+      {t.kind === 'trainer' && !waiting && (
         <div>
-          <label className={small} htmlFor={`tr-${t.id}`}>Trainer</label>
+          <label className={small} htmlFor={`tr-${t.id}`}>{isCoTrainer(t) ? 'Co-trainer' : 'Trainer'}</label>
           <ChosenBox id={`tr-${t.id}`} busy={busy} options={trainerOptions(trainers, programmeId)} picked={effectiveTrainer(t, quotes, trainers)}
-            fromQuote={effectiveTrainer(undefined, quotes, trainers)} what="trainer"
+            fromQuote={isCoTrainer(t) ? null : effectiveTrainer(undefined, quotes, trainers)} what="trainer"
             onSave={(v, action) => onPatch({ trainerId: v.id, trainerName: v.text }, `${t.label}: ${action}`)} />
         </div>
       )}

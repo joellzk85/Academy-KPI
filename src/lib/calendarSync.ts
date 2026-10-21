@@ -9,7 +9,7 @@
 import { addDays, dealOwnerId, dealStage, trainingDays } from './deals';
 import { dealContact } from './contacts';
 import { MODE_LABELS } from './appointments';
-import { ChecklistTask, dealVenue, effectiveTrainer } from './checklist';
+import { ChecklistTask, dealVenue, effectiveTrainer, leadTrainerTask } from './checklist';
 import { parseTimeRange, trainingTimeOf } from './trainingTime';
 
 export const TIME_ZONE = 'Asia/Kuala_Lumpur';
@@ -126,7 +126,7 @@ export function buildDesired(s: SyncData): GoogleItem[] {
       const quotes = s.quotes.filter(q => q.pipelineId === d.id);
       const cl = s.checklists[d.id] || null;
       const venue = dealVenue(cl, quotes, s.venues);
-      const trainerTask = (cl?.tasks || []).find((x: ChecklistTask) => x.kind === 'trainer');
+      const trainerTask = leadTrainerTask<ChecklistTask>(cl?.tasks);
       const trainer = effectiveTrainer(trainerTask, quotes, s.trainers);
       // The time comes from the quotation, or the deal if it was changed there; unreadable = all day.
       const time = trainingTimeOf(d, quotes);

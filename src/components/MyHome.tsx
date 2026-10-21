@@ -18,7 +18,7 @@ import { useKpiSources } from '../lib/useKpiSources';
 import { periodFor } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
 import SalesProjection from './SalesProjection';
-import { checklistFlags, daysUntil, grantNotAppliedFlag, progress, Flag } from '../lib/checklist';
+import { checklistFlags, daysUntil, grantNotAppliedFlag, isCoTrainer, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
 import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags } from '../lib/money';
 import { TrainerJob, claimFlag, jobId } from '../lib/trainerPortal';
@@ -796,15 +796,16 @@ type CardCtx = {
 
 // Trainers who asked for their fee in the portal and aren't approved yet (Admin and Management's notification,
 // 2026-10-21). taskId: the deal's Trainer step, so the fee lines waiting on it aren't listed twice.
+// Co-trainers (2026-10-22) ask for their fee the same way, on their own step.
 function feeRequestItems(c: CardCtx, deal: (p: any) => string): (Item & { dealId: string; taskId: string })[] {
   const out: (Item & { dealId: string; taskId: string })[] = [];
   c.wonDeals.forEach(p => {
-    const task = (c.checklists[p.id]?.tasks || []).find((t: any) => t.kind === 'trainer' && t.trainerId);
-    if (!task) return;
-    const flag = claimFlag(c.trainerJobs.find(j => j.id === jobId(p.id, task.trainerId)), c.moneyOut.filter(o => o.checklistTaskId === task.id), task.trainerName || 'The trainer');
-    if (flag) out.push({
-      key: `${p.id}_fee`, dealId: p.id, taskId: task.id, title: `Trainer fee · ${deal(p)}`, level: 'attention',
-      sub: flag, onClick: () => c.openDeal(p),
+    (c.checklists[p.id]?.tasks || []).filter((t: any) => t.kind === 'trainer' && t.trainerId).forEach((task: any) => {
+      const flag = claimFlag(c.trainerJobs.find(j => j.id === jobId(p.id, task.trainerId)), c.moneyOut.filter(o => o.dealId === p.id && o.checklistTaskId === task.id), task.trainerName || 'The trainer');
+      if (flag) out.push({
+        key: `${p.id}_${task.id}_fee`, dealId: p.id, taskId: task.id, title: `${isCoTrainer(task) ? 'Co-trainer' : 'Trainer'} fee · ${deal(p)}`, level: 'attention',
+        sub: flag, onClick: () => c.openDeal(p),
+      });
     });
   });
   return out;
@@ -1136,7 +1137,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     case 'approvals': {
       // Trainers asking for their fee (2026-10-21) replace their fee lines here: approved on the deal, after the checks.
       const fees = feeRequestItems(c, deal);
-      const list = c.moneyOut.filter(o => canDecide(o, c.viewer) && !fees.some(f => f.taskId === o.checklistTaskId));
+      const list = c.moneyOut.filter(o => canDecide(o, c.viewer) && !fees.some(f => f.dealId === o.dealId && f.taskId === o.checklistTaskId));
       // Training date changes and cancellations (2026-10-21) come first: nothing moves until they're decided.
       const changes = c.deals.filter(p => canDecideChange(pendingChange(p), c.viewer));
       return {

@@ -228,6 +228,12 @@ export function trainingEndDate(p: any): string {
   return start ? addDays(start, Math.max(1, Math.ceil(trainingDays(p))) - 1) : '';
 }
 
+// Every day of the training, first to last ([] with no training date).
+export function trainingDayList(p: any): string[] {
+  const start = validDate(p?.trainingDate);
+  return start ? Array.from({ length: Math.max(1, Math.ceil(trainingDays(p))) }, (_, i) => addDays(start, i)) : [];
+}
+
 // "21 Oct 2026", "21 – 22 Oct 2026", "30 Oct – 2 Nov 2026", "30 Dec 2026 – 2 Jan 2027".
 export function formatDateRange(start: string, end: string): string {
   const a = validDate(start), b = validDate(end);

@@ -118,7 +118,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `deals.md` | Deal journey, appointments, smoother sales flow, No proposal needed, Repeat / Duplicate deal, follow-ups, lost and deleted, on hold, training days, employer name |
 | `quotations-outlines.md` | Quotations, sending (PDF, email, WhatsApp, client links, link limits), proposal files, Fill in, Shared with me, course outlines, several quotations per deal, customer codes, drafts |
 | `teambuilding-client-links.md` | Teambuilding proposals (A1), proposal links (B), client link tracking and protection |
-| `admin-checklist.md` | Phase 2B checklist, flags, checklist files, pre-training flow with costs, vendors and the payment summary (2026-10-21) |
+| `admin-checklist.md` | Phase 2B checklist, flags, checklist files, pre-training flow with costs, vendors and the payment summary (2026-10-21), co-trainer and facilitator days (2026-10-22) |
 | `hrdc-programmes-trainers.md` | Phase 2C programmes, HRDC queries, trainer links, trainer profile and HRDC biodata |
 | `trainer-portal.md` | Trainer portal (/trainer): email login for trainers given access, profile, bank, TIN, trainings, PO, fee request, rating |
 | `training-report.md` | Training report: trainer writes it in the portal (or Admin on the deal), can change it after sending (change list), pax from the deal, checked, Management picks HR's sections, PDF or link for HR |
@@ -145,7 +145,8 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Login log (2026-10-22):** publish `firestore.rules` (`login_days`, `login_rules`); go-live checklist item 43.
 - **KPI library (2026-10-22):** publish `firestore.rules` (`kpi_library`); go-live checklist item 44.
 - **Trainer KPIs and activity approval (2026-10-22):** publish `firestore.rules` (`tb_activities`); go-live checklist item 45.
-- **360 rating (2026-10-22):** publish `firestore.rules` (`rating_rounds`, `ratings_360`); go-live checklist item 46.
+- **360 rating (2026-10-22):** publish `firestore.rules` (`rating_rounds`, `ratings_360`); go-live checklist item 47.
+- **Co-trainer and facilitator days (2026-10-22):** nothing to publish; go-live checklist item 46.
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.

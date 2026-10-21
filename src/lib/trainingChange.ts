@@ -12,6 +12,7 @@
 // than the requester approves a pending request in the same write.
 // Pure logic (no database code), shared with the server (trainer portal).
 import { dealOwnerId, dealStage, formatDate, trainingDateText, trainingDays } from './deals';
+import { namedTrainerTasks } from './checklist';
 
 export type ChangeKind = 'date' | 'cancel';
 export type ChangeStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn';
@@ -99,7 +100,9 @@ export function todoFor(kind: ChangeKind, deal: any, tasks: any[] | undefined, q
   const hrdc = deal?.fundingType === 'hrdc' || deal?.fundingType === 'hrdc_topup';
   const grant = list.find(t => t.kind === 'grant');
   const grantStarted = !!(grant && (grant.done || grant.grantAppliedDate || grant.grantNumber));
-  const trainer = list.find(t => t.kind === 'trainer' && (t.trainerId || String(t.trainerName || '').trim()));
+  // The lead trainer and any co-trainers (2026-10-22), by name.
+  const trainerNames = namedTrainerTasks(list).map(t => String(t.trainerName || '').trim() || 'the trainer');
+  const trainer = trainerNames.length ? trainerNames.join(' and ') : '';
   const venue = list.find(t => t.kind === 'venue');
   const venueBooked = !!(venue && venue.needed !== false && (venue.venueId || String(venue.venueName || '').trim() || venue.done));
   const extras = list.some(t => (t.kind === 'bus' || t.kind === 'facilitator') && t.needed === true);
@@ -109,13 +112,13 @@ export function todoFor(kind: ChangeKind, deal: any, tasks: any[] | undefined, q
   if (kind === 'date') {
     if (sent) out.push(item('quote', 'Send the client a revised quotation with the new date'));
     if (hrdc && grantStarted) out.push(item('grant', 'Update the training dates on the HRDC grant'));
-    if (trainer) out.push(item('trainer', `Confirm the new date with ${trainer.trainerName || 'the trainer'} and make a new PO (Trainer step)`));
+    if (trainer) out.push(item('trainer', `Confirm the new date with ${trainer} and make a new PO (${trainerNames.length > 1 ? 'Trainer and Co-trainer steps' : 'Trainer step'})`));
     if (venueBooked) out.push(item('venue', 'Move the venue booking'));
     if (extras) out.push(item('extras', 'Move the bus and facilitator bookings'));
     out.push(item('client', 'Confirm the new date with the client (HR and participants)'));
   } else {
     if (hrdc && grantStarted) out.push(item('grant', 'Cancel the grant with HRDC'));
-    if (trainer) out.push(item('trainer', `Tell ${trainer.trainerName || 'the trainer'} (the trainer portal shows it cancelled)`));
+    if (trainer) out.push(item('trainer', `Tell ${trainer} (the trainer portal shows it cancelled)`));
     if (venueBooked) out.push(item('venue', 'Cancel the venue booking'));
     if (extras) out.push(item('extras', 'Cancel the bus and facilitator bookings'));
     if (paidCosts > 0) out.push(item('refunds', 'Ask for refunds of payments already made, where possible'));

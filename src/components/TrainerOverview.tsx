@@ -3,6 +3,7 @@ import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { AlertTriangle, BadgeCheck, CheckCircle2, MessageCircle } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
+import { leadTrainerTask } from '../lib/checklist';
 import { whatsappShare } from '../lib/trainerLinks';
 import { Attention, TrainerRow, overview } from '../lib/trainerOverview';
 import { useBankRequests, usePortalInvites, useTrainerAccounts, useTrainerJobs, portalUrl, Stars } from './TrainerPortalAdmin';
@@ -48,7 +49,7 @@ export default function TrainerOverview({ viewer, people, trainers, deals, check
     const set = new Set<string>();
     s.docs.forEach(d => {
       const f: any = d.data();
-      const task = (checklists[f.dealId]?.tasks || []).find((t: any) => t.kind === 'trainer');
+      const task: any = leadTrainerTask(checklists[f.dealId]?.tasks);
       if (task && f.taskId === task.id) set.add(f.dealId);
     });
     setPoDeals(set);

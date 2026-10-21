@@ -65,7 +65,8 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
     - **Teambuilding → Activity library:** as that person add a test activity; it shows "Waiting for approval".
     - **As the other manager:** open it, click Not approved with a reason. The creator changes it and saves; it waits again. Approve it.
     - **Their KPI page:** Design new activity shows 1 (red). After a training they taught ends, check the feedback days and, once Admin types the participants' rating on the report, the output rating.
-46. **360 rating (2026-10-22):** after it is live, **publish `firestore.rules`** (`rating_rounds`, `ratings_360`; until then rounds and ratings can't be saved).
+46. **Co-trainer and facilitator days (2026-10-22):** nothing to publish. On a won HRDC test deal set Participants to 60: the deal panel and Before training checklist show the co-trainer reminder and Admin work an amber flag. Co-trainer step → Yes → pick a trainer → add a fee (PO made) → reminder and flag go. Set 120 pax → reminder says 3 trainers → Add another co-trainer. Answer No on one → reminder stops. If the co-trainer has portal access: the training shows "Co-trainer" with PO and fee request but no training report. Facilitator on a 3-day test deal → Yes → 2 facilitators → tick two days → the step shows those days.
+47. **360 rating (2026-10-22):** after it is live, **publish `firestore.rules`** (`rating_rounds`, `ratings_360`; until then rounds and ratings can't be saved).
     - **As Management:** user menu → 360 rating → Rounds → New round (everyone, closed view, this month) → Open round.
     - **As a rep:** the top bar shows Rate teammates. Try sending with no reason (refused), then rate properly.
     - **As the other manager:** Rounds shows the rating with the rep's name and who is still to rate. Close round.
