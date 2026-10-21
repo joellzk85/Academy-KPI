@@ -361,7 +361,7 @@ export default function QuotationDocument({ q }: { q: Quotation }) {
       {/* Signatures: NEXT Academy's signatory on the left (QUOTE_SIGNATORY), the client's on the right. */}
       <div className="pt-12 flex justify-between items-end gap-8 text-sm font-sans" data-track="sign">
         <div className="w-56">
-          <p className="font-bold text-slate-500">Prepared By:</p>
+          <p className="font-bold text-slate-500">Approved By:</p>
           <p className="h-16 flex items-end pl-2 pb-1 text-[40px] leading-none text-[#1e3a8a] -rotate-3 origin-bottom-left" style={{ fontFamily: SIGNATURE_FONT }}>
             {QUOTE_SIGNATORY.name}
           </p>
