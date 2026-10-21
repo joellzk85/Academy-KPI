@@ -277,7 +277,7 @@ export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = 
   if (t.kind === 'bus' && !(Number(t.busCount) > 0)) return 'Enter how many buses first.';
   if (t.kind === 'facilitator' && !(Number(t.facilitatorCount) > 0)) return 'Enter how many facilitators first.';
   if (t.kind === 'trainer' && !hasTrainer) return 'Choose or type the trainer first.';
-  if (t.kind === 'trainer' && fileCount === 0) return "Upload the trainer's PO first.";
+  if (t.kind === 'trainer' && fileCount === 0) return "Add the trainer's fee below first (the PO is made from it), or upload a PO.";
   if (t.kind === 'materials') {
     const items = materialItems(t);
     if (!items.length) return 'Add at least one item to the materials list.';

@@ -4,7 +4,7 @@ import { User, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut 
 import { sendPortalPasswordEmail } from '../lib/portalEmail';
 import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
 import {
-  BadgeCheck, CalendarDays, CheckCircle2, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Star, Upload, User as UserIcon, X,
+  BadgeCheck, CalendarCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Star, Upload, User as UserIcon, X,
 } from 'lucide-react';
 import firebaseConfig from '../../firebase-applet-config.json';
 import Logo from './Logo';
@@ -15,7 +15,7 @@ import { sizeText } from './TrainerExtrasFields';
 import { ProfileSubmission, cleanProfile, profileProblem } from '../lib/trainerLinks';
 import { PROFILE_PARTS, emptyExtras, profileGaps, safeName, trainerFileProblem, trainerFileType } from '../lib/trainerProfile';
 import {
-  MIN_PORTAL_PASSWORD, PORTAL_PATH, PortalFile, STAR_WORDS, bankProblem, claimFolder, cleanBank, cleanEmail, cleanTin, emailProblem, passwordProblem, portalFolder,
+  MIN_PORTAL_PASSWORD, PORTAL_PATH, PortalFile, STAR_WORDS, bankProblem, calendarLinks, claimFolder, cleanBank, cleanEmail, cleanTin, emailProblem, passwordProblem, portalFolder,
 } from '../lib/trainerPortal';
 import { formatDateRange, formatRM, daysText } from '../lib/deals';
 import { COMPANY } from '../lib/company';
@@ -252,10 +252,11 @@ function LoginBox() {
 }
 
 // ---------- After logging in ----------
-type Tab = 'home' | 'trainings' | 'profile' | 'payment';
+type Tab = 'home' | 'trainings' | 'calendar' | 'profile' | 'payment';
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
   { id: 'trainings', label: 'My trainings', icon: <CalendarDays className="h-4 w-4" /> },
+  { id: 'calendar', label: 'My calendar', icon: <CalendarCheck className="h-4 w-4" /> },
   { id: 'profile', label: 'My profile', icon: <UserIcon className="h-4 w-4" /> },
   { id: 'payment', label: 'Payment details', icon: <Landmark className="h-4 w-4" /> },
 ];
@@ -292,6 +293,7 @@ function Portal({ user }: { user: User }) {
       {note && <p className="flex items-start justify-between gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent">{note}<button type="button" onClick={() => setNote('')} aria-label="Close"><X className="h-4 w-4" /></button></p>}
       {tab === 'home' && <HomeTab info={info} go={go} onPassword={passwordEmail} />}
       {tab === 'trainings' && <TrainingsTab info={info} reload={load} />}
+      {tab === 'calendar' && <CalendarTab info={info} />}
       {tab === 'profile' && <ProfileTab info={info} reload={load} />}
       {tab === 'payment' && <PaymentTab info={info} reload={load} />}
     </div>,
@@ -314,7 +316,7 @@ function Stars({ n, size = 'h-4 w-4' }: { n: number; size?: string }) {
 function todos(info: any) {
   const out: { text: string; tab: Tab }[] = [];
   info.trainings.forEach((t: any) => {
-    if (t.po.length && !t.poAcceptedAt) out.push({ text: `Accept the PO for ${t.programme} (${when(t)})`, tab: 'trainings' });
+    if ((t.po.length || t.poAuto) && !t.poAcceptedAt && !t.poDeclined && !t.ended) out.push({ text: `Accept the PO for ${t.programme} (${when(t)})`, tab: 'trainings' });
     const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
     if (t.started && !allPaid && (!t.claim || t.claim.status === 'returned')) out.push({ text: `${t.claim ? 'Fix and resend' : 'Request'} your fee for ${t.programme} (${when(t)})`, tab: 'trainings' });
   });
@@ -401,7 +403,24 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
     const a = document.createElement('a'); a.href = url; a.download = f.name || 'PO'; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 30_000);
   });
+  // The PO made automatically (or the copy kept when accepted): the PDF is made here, in the browser.
+  const autoPo = t.po.length ? null : t.poAccepted || t.poAuto;
+  const downloadAutoPo = () => run('po-auto', async () => {
+    const [{ default: TrainerPoDocument }, { makeDocumentPdf }] = await Promise.all([import('./TrainerPoDocument'), import('../lib/quotePdf')]);
+    const blob = await makeDocumentPdf(React.createElement(TrainerPoDocument, { po: autoPo }), `PO ${autoPo.number}`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `${autoPo.number}.pdf`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  });
   const acceptPo = () => run('accept', async () => { await api('/api/portal/accept-po', { dealId: t.dealId }); await reload(); });
+  const [declining, setDeclining] = useState(false);
+  const [reason, setReason] = useState('');
+  const declinePo = () => run('decline', async () => {
+    if (!reason.trim()) throw new Error('Tell NEXT Academy why, so they can arrange things.');
+    await api('/api/portal/decline-po', { dealId: t.dealId, reason: reason.trim() });
+    setDeclining(false); await reload();
+  });
+  const hasPo = t.po.length > 0 || !!autoPo;
   const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
 
   return (
@@ -413,24 +432,55 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
           <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-soft"><CalendarDays className="h-4 w-4" /> {when(t)}</p>
           {t.venue && <p className="flex items-center gap-1.5 text-sm text-ink-soft"><MapPin className="h-4 w-4" /> {t.venue.name}{t.venue.region ? `, ${t.venue.region}` : ''}</p>}
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${t.confirmed ? 'bg-accent-soft text-accent' : 'bg-attention-soft text-ink'}`}>{t.confirmed ? 'Confirmed' : 'Being arranged'}</span>
+        <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${t.poDeclined ? 'bg-danger-soft text-danger' : t.confirmed ? 'bg-accent-soft text-accent' : 'bg-attention-soft text-ink'}`}>
+          {t.poDeclined ? 'You declined' : t.confirmed ? 'Confirmed' : 'Being arranged'}
+        </span>
       </div>
 
       {/* PO */}
       <div className="rounded-xl border border-line p-3">
         <p className="text-sm font-semibold">Purchase order (PO)</p>
-        {t.po.length ? (
+        {hasPo ? (
           <div className="mt-2 space-y-2">
-            {t.po.map((f: any) => (
-              <button key={f.id} type="button" className={btnSecondary} disabled={!!busy} onClick={() => downloadPo(f)}>
-                {busy === `po-${f.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {f.name}
-              </button>
-            ))}
-            {t.poAcceptedAt
-              ? <p className="flex items-center gap-1.5 text-sm text-accent"><BadgeCheck className="h-4 w-4" /> You accepted this PO on {isoDay(t.poAcceptedAt)}.</p>
-              : <div><button type="button" className={btnPrimary} disabled={!!busy} onClick={acceptPo}>{busy === 'accept' && <Loader2 className="h-4 w-4 animate-spin" />} Accept the PO</button></div>}
+            <div className="flex flex-wrap gap-2">
+              {t.po.map((f: any) => (
+                <button key={f.id} type="button" className={btnSecondary} disabled={!!busy} onClick={() => downloadPo(f)}>
+                  {busy === `po-${f.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {f.name}
+                </button>
+              ))}
+              {autoPo && (
+                <button type="button" className={btnSecondary} disabled={!!busy} onClick={downloadAutoPo}>
+                  {busy === 'po-auto' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {autoPo.number} (PDF)
+                </button>
+              )}
+            </div>
+            {t.poDeclined ? (
+              <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">You declined this PO on {isoDay(t.poDeclined.at)}: {t.poDeclined.reason}. NEXT Academy has been told. Changed your mind? Accept it below.</p>
+            ) : t.poAcceptedAt ? (
+              <p className="flex items-center gap-1.5 text-sm text-accent"><BadgeCheck className="h-4 w-4" /> You accepted this PO on {isoDay(t.poAcceptedAt)}. These dates are blocked in My calendar.</p>
+            ) : null}
+            {!t.poAcceptedAt && !declining && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className={btnPrimary} disabled={!!busy} onClick={acceptPo}>{busy === 'accept' && <Loader2 className="h-4 w-4 animate-spin" />} Accept the PO</button>
+                {!t.poDeclined && !t.started && <button type="button" className={btnSecondary} disabled={!!busy} onClick={() => setDeclining(true)}>Decline</button>}
+              </div>
+            )}
+            {t.poAcceptedAt && !t.started && !declining && (
+              <button type="button" className="text-sm font-semibold text-ink-soft hover:text-danger hover:underline" onClick={() => setDeclining(true)}>Can't do it after all? Decline</button>
+            )}
+            {declining && (
+              <div className="space-y-2 rounded-lg bg-surface p-3">
+                <label className={label} htmlFor={`why-${t.dealId}`}>Why can't you take this training?</label>
+                <textarea id={`why-${t.dealId}`} className={input} rows={2} maxLength={500} value={reason} onChange={e => setReason(e.target.value)} placeholder="For example: I'm already booked on these dates" />
+                <p className="text-sm text-ink-soft">NEXT Academy is told straight away and will arrange another trainer. The dates are freed in your calendar.</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={btnPrimary} disabled={!!busy} onClick={declinePo}>{busy === 'decline' && <Loader2 className="h-4 w-4 animate-spin" />} Decline the PO</button>
+                  <button type="button" className={btnSecondary} disabled={!!busy} onClick={() => setDeclining(false)}>Keep it</button>
+                </div>
+              </div>
+            )}
           </div>
-        ) : <p className="mt-1 text-sm text-ink-soft">Your PO will appear here once NEXT Academy confirms this training.</p>}
+        ) : <p className="mt-1 text-sm text-ink-soft">Your PO will appear here once NEXT Academy sets up your fee for this training.</p>}
       </div>
 
       {/* Fee */}
@@ -464,6 +514,115 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
       )}
       {error && <p role="alert" className={alertBox}>{error}</p>}
     </article>
+  );
+}
+
+// ---------- My calendar (2026-10-21) ----------
+// Dates blocked for NEXT Academy: every training on My trainings, except a PO the trainer declined. "Link to my
+// calendar" gives a private address that Google, Outlook or Apple calendar reads by itself every few hours.
+const isoOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function CalendarTab({ info }: { info: any }) {
+  const blocked = info.trainings.filter((t: any) => t.start && !t.poDeclined);
+  const today = isoOf(new Date());
+  const firstUpcoming = blocked.find((t: any) => (t.end || t.start) >= today)?.start || today;
+  const [month, setMonth] = useState(() => new Date(Number(firstUpcoming.slice(0, 4)), Number(firstUpcoming.slice(5, 7)) - 1, 1));
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const lead = (first.getDay() + 6) % 7;   // Monday first
+  const daysIn = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells = [...Array(lead).fill(null), ...Array.from({ length: daysIn }, (_, i) => isoOf(new Date(month.getFullYear(), month.getMonth(), i + 1)))];
+  const on = (iso: string) => blocked.filter((t: any) => iso >= t.start && iso <= (t.end || t.start));
+  const monthKey = isoOf(first).slice(0, 7);
+  const inMonth = blocked.filter((t: any) => t.start.slice(0, 7) <= monthKey && (t.end || t.start).slice(0, 7) >= monthKey);
+  const shift = (n: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + n, 1));
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-xl font-bold">My calendar</h1>
+        <p className="text-[15px] text-ink-soft">Your dates booked for NEXT Academy trainings. They're blocked as soon as a training is on your list.</p>
+      </div>
+      <section className={card}>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <button type="button" className={btnSecondary} onClick={() => shift(-1)} aria-label="Previous month"><ChevronLeft className="h-4 w-4" /></button>
+          <h2 className="font-bold">{first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</h2>
+          <button type="button" className={btnSecondary} onClick={() => shift(1)} aria-label="Next month"><ChevronRight className="h-4 w-4" /></button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {WEEKDAYS.map(d => <div key={d} className="pb-1 text-xs font-semibold text-ink-soft">{d}</div>)}
+          {cells.map((iso, i) => {
+            if (!iso) return <div key={`x${i}`} />;
+            const here = on(iso);
+            const confirmed = here.some((t: any) => t.confirmed);
+            return (
+              <div key={iso} title={here.map((t: any) => t.programme).join(', ')}
+                className={`flex aspect-square flex-col items-center justify-center rounded-lg text-sm ${here.length ? (confirmed ? 'bg-accent font-bold text-white' : 'bg-attention-soft font-bold text-ink') : 'text-ink'} ${iso === today ? 'ring-2 ring-ink/40' : ''}`}>
+                {Number(iso.slice(8))}
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-4 text-sm text-ink-soft">
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-accent" /> Confirmed</span>
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-attention-soft ring-1 ring-attention/40" /> Being arranged</span>
+        </div>
+        {inMonth.length > 0 && (
+          <ul className="mt-4 divide-y divide-line border-t border-line">
+            {inMonth.map((t: any) => (
+              <li key={t.dealId} className="py-2 text-[15px]">
+                <span className="font-semibold">{t.programme}</span>{t.client ? ` · ${t.client}` : ''}
+                <span className="block text-sm text-ink-soft">{when(t)}{t.venue ? ` · ${t.venue.name}` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <CalendarLinkBox />
+    </div>
+  );
+}
+
+function CalendarLinkBox() {
+  const [path, setPath] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const get = async (fresh = false) => {
+    if (fresh && !window.confirm('Make a new link? The old link stops working, so you will need to add the new one to your calendar again.')) return;
+    setBusy(true); setError('');
+    try { setPath((await api('/api/portal/calendar-link', { fresh })).path); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  };
+  const url = path ? `${window.location.origin}${path}` : '';
+  const links = url ? calendarLinks(url) : null;
+  const copy = async () => { try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { setError('Copy didn\'t work. Select the link and copy it.'); } };
+  return (
+    <section className={`${card} space-y-3`}>
+      <div>
+        <h2 className="font-bold">Link to my own calendar</h2>
+        <p className="text-[15px] text-ink-soft">Show your NEXT Academy trainings in Google Calendar, Outlook or your iPhone calendar. It updates by itself (your calendar app checks every few hours), so new or changed trainings appear without doing anything.</p>
+      </div>
+      {!links ? (
+        <button type="button" className={btnPrimary} disabled={busy} onClick={() => get()}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Link to my calendar</button>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <a className={btnSecondary} href={links.google} target="_blank" rel="noreferrer">Add to Google Calendar</a>
+            <a className={btnSecondary} href={links.outlook} target="_blank" rel="noreferrer">Add to Outlook</a>
+            <a className={btnSecondary} href={links.apple}>Add to Apple / iPhone calendar</a>
+          </div>
+          <div>
+            <p className="mb-1 text-sm text-ink-soft">Other calendar apps: subscribe to this address ("add calendar from URL").</p>
+            <div className="flex gap-2">
+              <input readOnly value={url} className={`${input} text-sm`} onFocus={e => e.currentTarget.select()} aria-label="Your calendar link" />
+              <button type="button" className={btnSecondary} onClick={copy}><Copy className="h-4 w-4" /> {copied ? 'Copied' : 'Copy'}</button>
+            </div>
+          </div>
+          <p className="text-sm text-ink-soft">Keep this link private: anyone with it can see your training dates. <button type="button" className="font-semibold text-accent hover:underline" disabled={busy} onClick={() => get(true)}>Make a new link</button> if you shared it by mistake.</p>
+        </div>
+      )}
+      {error && <p role="alert" className={alertBox}>{error}</p>}
+    </section>
   );
 }
 

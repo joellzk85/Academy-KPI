@@ -17,8 +17,9 @@ import T3Maker from './T3Maker';
 import StepCosts, { VendorHint } from './StepCosts';
 import { useVendors } from './VendorsPage';
 import { useReceipts } from './PaymentReceipts';
-import { TrainerJobBox } from './TrainerPortalAdmin';
+import { TrainerClash, TrainerJobBox } from './TrainerPortalAdmin';
 import { MakePoButton } from './TrainerPoDocument';
+import { hasAutoPo } from '../lib/trainerPortal';
 import { vendorForTrainer } from '../lib/vendors';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -159,7 +160,9 @@ export default function DealChecklist({
   const markDone = (t: ChecklistTask) => {
     const venue = t.kind === 'venue' ? effectiveVenue(t, quotes, venues) : null;
     const trainer = t.kind === 'trainer' ? effectiveTrainer(t, quotes, trainers) : null;
-    const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer, filesOf(t).length);
+    // The trainer's PO is made automatically once the trainer is picked from the list and has a fee line (2026-10-21).
+    const autoPo = t.kind === 'trainer' && hasAutoPo({ id: t.id, trainerId: trainer?.id }, outs, deal.id) ? 1 : 0;
+    const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer, filesOf(t).length + autoPo);
     if (gate) return setError(gate);
     // A venue or trainer still coming from the quotation is saved on the checklist when ticked,
     // so later changes to the quotation don't change what Admin confirmed.
@@ -345,7 +348,12 @@ export default function DealChecklist({
                 {money && hasCosts(t) && !notNeeded(t) && (t.needed === true || !asksNeeded(t)) && (
                   <StepCosts deal={deal} task={t} viewer={viewer} outs={outs} receipts={receipts} vendors={vendors} trainers={trainers} venues={venues} hint={hintFor(t)} />
                 )}
-                {/* Trainer portal (2026-10-21): rating, PO accepted, the trainer's fee request */}
+                {/* Blocked dates (2026-10-21): warn when the trainer is already booked on these dates */}
+                {t.kind === 'trainer' && editable && (() => {
+                  const tr = effectiveTrainer(t, quotes, trainers);
+                  return tr?.id ? <TrainerClash deal={deal} trainerId={tr.id} trainerName={tr.name} /> : null;
+                })()}
+                {/* Trainer portal (2026-10-21): rating, PO accepted or declined, the trainer's fee request */}
                 {t.kind === 'trainer' && t.trainerId && (
                   <TrainerJobBox deal={deal} task={t} trainerName={effectiveTrainer(t, quotes, trainers)?.name || 'The trainer'} viewer={viewer} outs={outs} />
                 )}

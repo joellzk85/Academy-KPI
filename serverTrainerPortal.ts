@@ -15,13 +15,14 @@ import { UserError, admin, callerFrom, route } from './serverAuth';
 import { addDealHistory } from './serverDocLinks';
 import { cleanProfile, profileProblem } from './src/lib/trainerLinks';
 import { DOC_KINDS } from './src/lib/trainerProfile';
-import { dealStage, todayIso, trainingDays, trainingEndDate } from './src/lib/deals';
+import { dealStage, todayIso, trainingDateText, trainingDays, trainingEndDate } from './src/lib/deals';
 import { effectiveVenue } from './src/lib/checklist';
 import { isDeletedRecord, ownedByTeam } from './src/lib/linked';
 import {
-  bankProblem, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeStatusText,
-  inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
+  bankProblem, buildPo, calendarPath, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeStatusText,
+  icsCalendar, inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
+import { FieldValue } from 'firebase-admin/firestore';
 
 const BUCKET = String((firebaseConfig as any).storageBucket || '');
 const nowIso = () => new Date().toISOString();
@@ -108,6 +109,63 @@ async function assigned(db: Firestore, trainerId: string, dealId: any) {
 async function poFiles(db: Firestore, dealId: string, taskId: string) {
   const snap = await db.collection('checklist_files').where('dealId', '==', dealId).get();
   return snap.docs.map(d => ({ ...(d.data() as any), id: d.id })).filter(f => f.taskId === taskId);
+}
+
+// Everything the portal shows about each training (My trainings, My calendar and the calendar link).
+// The PO: files uploaded on the Trainer step if any; else, once there's a fee line, the PO made automatically
+// (poAuto); once accepted, the copy kept on trainer_jobs.po.
+async function trainingDetails(db: Firestore, trainerId: string, trainer: any, pre?: { progs?: any; venues?: any; clients?: any; vendor?: any }) {
+  const [progs, venues, clients, vendor] = await Promise.all([
+    pre?.progs || db.collection('programmes').get(), pre?.venues || db.collection('venues_directory').get(), pre?.clients || db.collection('clients').get(),
+    pre?.vendor !== undefined ? pre.vendor : trainerVendor(db, trainerId).then(d => d?.data() || null),
+  ]);
+  const progName = (id?: string) => String(progs.docs.find((d: any) => d.id === id)?.data().name || '').trim();
+  const today = todayIso();
+  const trainings = [];
+  for (const { deal, task, checklist } of await myTrainings(db, trainerId)) {
+    const quotes = (await db.collection('quotations').where('pipelineId', '==', deal.id).get()).docs.map(d => ({ ...d.data(), id: d.id }));
+    const venue = effectiveVenue((checklist.tasks || []).find((x: any) => x.kind === 'venue'), quotes, venues.docs.map((d: any) => ({ ...d.data(), id: d.id })));
+    const venueRec: any = venue?.id ? venues.docs.find((d: any) => d.id === venue.id)?.data() : null;
+    const job: any = (await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data() || {};
+    const lines = (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected');
+    const files = await poFiles(db, deal.id, task.id);
+    const start = String(deal.trainingDate || '').slice(0, 10);
+    const client = String(clients.docs.find((d: any) => d.id === deal.clientId)?.data().companyName || deal.client || '');
+    const venueOn = venue && !(checklist.tasks || []).some((x: any) => x.kind === 'venue' && x.needed === false);
+    const programme = progName(deal.programmeId) || deal.courseName || 'Training';
+    trainings.push({
+      dealId: deal.id,
+      programme, client,
+      start, end: trainingEndDate(deal), days: trainingDays(deal),
+      venue: venueOn ? { name: venue.name, region: venueRec?.region || '' } : null,
+      confirmed: !!task.done,
+      po: files.map(f => ({ id: f.id, name: f.name, at: f.at })),
+      poAuto: !files.length && lines.length
+        ? buildPo({ deal: { ...deal, courseName: deal.courseName || programme }, dates: trainingDateText(deal, true), date: today, trainer, client, venue: venueOn ? venue.name : '',
+            lines: lines.map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 })), vendor })
+        : null,
+      poAccepted: job.po || null,
+      poAcceptedAt: job.poAcceptedAt || '',
+      poDeclined: job.poDeclined || null,
+      fee: lines.map(o => ({ id: o.id, description: o.description || '', amount: Number(o.amount) || 0, status: o.status, statusText: feeStatusText(o) })),
+      claim: job.claim ? { status: job.claim.status, submittedAt: job.claim.submittedAt, returnNote: job.claim.returnNote || '', photos: job.claim.photos || [], t3: job.claim.t3 || [] } : null,
+      rating: job.rating ? { stars: job.rating.stars, note: job.rating.note || '', at: job.rating.at } : null,
+      started: !!start && start <= today,
+      ended: !!trainingEndDate(deal) && trainingEndDate(deal) < today,
+    });
+  }
+  trainings.sort((a, b) => (a.start || '9999').localeCompare(b.start || '9999'));
+  return trainings;
+}
+
+// The trainer's private calendar link (trainer_calendars/{token}, server only). A new one stops the old one.
+async function calendarToken(db: Firestore, trainerId: string, fresh: boolean) {
+  const mine = await db.collection('trainer_calendars').where('trainerId', '==', trainerId).get();
+  if (!fresh && !mine.empty) return mine.docs[0].id;
+  await Promise.all(mine.docs.map(d => d.ref.delete()));
+  const token = crypto.randomBytes(20).toString('hex');
+  await db.collection('trainer_calendars').doc(token).set({ trainerId, at: nowIso() });
+  return token;
 }
 
 // Makes or updates a trainer's Firebase email login (id tr_<trainerId>). With no password, a random one is set
@@ -245,34 +303,8 @@ export function registerTrainerPortalRoutes(app: Express) {
       db.collection('programmes').get(), db.collection('venues_directory').get(), db.collection('clients').get(),
       trainerVendor(db, trainerId), db.collection('trainer_bank_requests').doc(trainerId).get(), db.collection('trainer_private').doc(trainerId).get(),
     ]);
-    const progName = (id?: string) => String(progs.docs.find(d => d.id === id)?.data().name || '').trim();
     const vendor: any = vendorDoc?.data() || null;
-    const today = todayIso();
-    const trainings = [];
-    for (const { deal, task, checklist } of await myTrainings(db, trainerId)) {
-      const quotes = (await db.collection('quotations').where('pipelineId', '==', deal.id).get()).docs.map(d => ({ ...d.data(), id: d.id }));
-      const venue = effectiveVenue((checklist.tasks || []).find((x: any) => x.kind === 'venue'), quotes, venues.docs.map(d => ({ ...d.data(), id: d.id })));
-      const venueRec: any = venue?.id ? venues.docs.find(d => d.id === venue.id)?.data() : null;
-      const job: any = (await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data() || {};
-      const lines = await feeLines(db, deal.id, task.id, trainerId);
-      const start = String(deal.trainingDate || '').slice(0, 10);
-      trainings.push({
-        dealId: deal.id,
-        programme: progName(deal.programmeId) || deal.courseName || 'Training',
-        client: String(clients.docs.find(d => d.id === deal.clientId)?.data().companyName || deal.client || ''),
-        start, end: trainingEndDate(deal), days: trainingDays(deal),
-        venue: venue && !(checklist.tasks || []).some((x: any) => x.kind === 'venue' && x.needed === false) ? { name: venue.name, region: venueRec?.region || '' } : null,
-        confirmed: !!task.done,
-        po: (await poFiles(db, deal.id, task.id)).map(f => ({ id: f.id, name: f.name, at: f.at })),
-        poAcceptedAt: job.poAcceptedAt || '',
-        fee: lines.filter(o => o.status !== 'rejected').map(o => ({ id: o.id, description: o.description || '', amount: Number(o.amount) || 0, status: o.status, statusText: feeStatusText(o) })),
-        claim: job.claim ? { status: job.claim.status, submittedAt: job.claim.submittedAt, returnNote: job.claim.returnNote || '', photos: job.claim.photos || [], t3: job.claim.t3 || [] } : null,
-        rating: job.rating ? { stars: job.rating.stars, note: job.rating.note || '', at: job.rating.at } : null,
-        started: !!start && start <= today,
-        ended: !!trainingEndDate(deal) && trainingEndDate(deal) < today,
-      });
-    }
-    trainings.sort((a, b) => (a.start || '9999').localeCompare(b.start || '9999'));
+    const trainings = await trainingDetails(db, trainerId, t, { progs, venues, clients, vendor });
     return {
       trainerId, email: account.email,
       programmes: progs.docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name)),
@@ -361,12 +393,65 @@ export function registerTrainerPortalRoutes(app: Express) {
 
   app.post('/api/portal/accept-po', route(async req => {
     const { db, trainerId, trainer: t } = await trainerFrom(req);
-    const { deal, task } = await assigned(db, trainerId, req.body?.dealId);
-    if (!(await poFiles(db, deal.id, task.id)).length) throw new UserError(400, 'no-po', "There's no PO on this training yet.");
-    await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).set({ dealId: deal.id, trainerId, poAcceptedAt: nowIso() }, { merge: true });
-    await addDealHistory(db, deal.id, '', (t.name || 'Trainer') + PORTAL, 'Trainer accepted the PO');
+    const { deal } = await assigned(db, trainerId, req.body?.dealId);
+    const mine = (await trainingDetails(db, trainerId, t)).find(x => x.dealId === deal.id)!;
+    if (!mine.po.length && !mine.poAuto) throw new UserError(400, 'no-po', "There's no PO on this training yet.");
+    // A PO made automatically is kept as accepted, so later changes don't change what the trainer agreed to.
+    await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).set({
+      dealId: deal.id, trainerId, poAcceptedAt: nowIso(), po: mine.po.length ? null : mine.poAuto, poDeclined: null,
+    }, { merge: true });
+    await addDealHistory(db, deal.id, '', (t.name || 'Trainer') + PORTAL, `Trainer accepted the PO${mine.poAuto && !mine.po.length ? ` (${mine.poAuto.number})` : ''}`);
     return {};
   }));
+
+  // Decline the PO (Joel, 2026-10-21: "trainer can reject - it notifies in Admin work"): a reason is needed. The
+  // dates are no longer blocked, and Admin work shows a red flag until another trainer is picked or Admin clears it.
+  app.post('/api/portal/decline-po', route(async req => {
+    const { db, trainerId, trainer: t } = await trainerFrom(req);
+    const { deal } = await assigned(db, trainerId, req.body?.dealId);
+    const reason = String(req.body?.reason ?? '').replace(/\u0000/g, '').trim().slice(0, 500);
+    if (!reason) throw new UserError(400, 'invalid', 'Tell NEXT Academy why, so they can arrange things.');
+    const start = String(deal.trainingDate || '').slice(0, 10);
+    if (start && start <= todayIso()) throw new UserError(400, 'started', 'This training has already started. Call NEXT Academy instead.');
+    await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).set({
+      dealId: deal.id, trainerId, poDeclined: { reason, at: nowIso() }, poAcceptedAt: FieldValue.delete(), po: null,
+    }, { merge: true });
+    await addDealHistory(db, deal.id, '', (t.name || 'Trainer') + PORTAL, `Trainer declined the PO: ${reason}`);
+    return {};
+  }));
+
+  // "Link to my calendar": the private address for Google, Outlook or Apple calendar. { fresh: true } makes a new one.
+  app.post('/api/portal/calendar-link', route(async req => {
+    const { db, trainerId } = await trainerFrom(req);
+    return { path: calendarPath(await calendarToken(db, trainerId, req.body?.fresh === true)) };
+  }));
+
+  // The calendar itself (no login: the calendar app fetches it every few hours). Blocked dates only, not money.
+  app.get('/api/portal/calendar/:file', async (req: Request, res: Response) => {
+    try {
+      slowDown(req);
+      const token = String(req.params.file || '').replace(/\.ics$/, '');
+      if (!/^[a-f0-9]{40}$/.test(token)) throw new UserError(404, 'not-found', 'Not found');
+      const { db } = admin();
+      const cal: any = (await db.collection('trainer_calendars').doc(token).get()).data();
+      if (!cal?.trainerId) throw new UserError(404, 'not-found', 'Not found');
+      const [acc, tr] = await Promise.all([db.collection('trainer_accounts').doc(cal.trainerId).get(), db.collection('trainers_directory').doc(cal.trainerId).get()]);
+      if (!acc.data()?.active || !tr.exists) throw new UserError(404, 'not-found', 'Not found');
+      const list = (await trainingDetails(db, cal.trainerId, { ...tr.data(), id: cal.trainerId })).filter(x => x.start && !x.poDeclined);
+      const host = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.headers.host}`;
+      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+      res.setHeader('Cache-Control', 'private, max-age=900');
+      res.send(icsCalendar('NEXT Academy trainings', list.map(x => ({
+        uid: `${x.dealId}-${cal.trainerId}@nextacademy`, start: x.start, end: x.end,
+        summary: `NEXT Academy: ${x.programme}${x.client ? ` (${x.client})` : ''}`,
+        location: x.venue ? [x.venue.name, x.venue.region].filter(Boolean).join(', ') : '',
+        description: `${x.confirmed ? 'Confirmed' : 'Being arranged'}. Details and PO: ${host}/trainer`,
+      }))));
+    } catch (err: any) {
+      if (!(err instanceof UserError)) console.error('[portal] calendar', err);
+      res.status(err instanceof UserError ? err.status : 500).type('text/plain').send(err instanceof UserError ? err.message : 'Try again later');
+    }
+  });
 
   // Request training fee: photos + T3 (the training report comes later). Saved once, on trainer_jobs (one per
   // trainer per training); the fee lines Admin raised on the Trainer step are not copied or changed, and the red

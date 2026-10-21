@@ -17,7 +17,7 @@ import { MoneyIn, MoneyOut, moneyFlags } from '../lib/money';
 import AfterTraining from './AfterTraining';
 import { useReceipts } from './PaymentReceipts';
 import { postTraining, postTrainingFlags } from '../lib/postTraining';
-import { claimFlag, jobId } from '../lib/trainerPortal';
+import { claimFlag, jobId, poDeclinedFlag } from '../lib/trainerPortal';
 import { useTrainerJobs } from './TrainerPortalAdmin';
 const PaymentTracking = React.lazy(() => import('./PaymentTracking'));
 import ProgrammesManager, { StatusChip } from './Programmes';
@@ -160,6 +160,9 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     if (trainerTask) {
       const fee = claimFlag(trainerJobs.find(j => j.id === jobId(p.id, trainerTask.trainerId)), mOut.filter(o => o.checklistTaskId === trainerTask.id), trainerTask.trainerName || 'The trainer');
       if (fee) flags.unshift({ level: 'danger', text: fee });
+      // The trainer declined the PO in the portal (2026-10-21): pick another trainer.
+      const declined = poDeclinedFlag(trainerJobs.find(j => j.id === jobId(p.id, trainerTask.trainerId)), trainerTask.trainerName || 'The trainer');
+      if (declined) flags.unshift({ level: 'danger', text: declined });
     }
     const post = postTraining(p, cl.tasks, mIn, mOut, rc, today);
     // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).

@@ -33,7 +33,7 @@ export interface TrainerRow {
 
 export interface Attention {
   level: 'danger' | 'attention';
-  kind: 'no-trainer' | 'no-po' | 'po-not-accepted' | 'no-bank' | 'no-claim' | 'claim-waiting' | 'bank-check' | 'not-rated' | 'low-rating' | 'programme';
+  kind: 'no-trainer' | 'po-declined' | 'no-po' | 'po-not-accepted' | 'no-bank' | 'no-claim' | 'claim-waiting' | 'bank-check' | 'not-rated' | 'low-rating' | 'programme';
   text: string;
   dealId?: string;
   trainerId?: string;
@@ -114,7 +114,10 @@ export function overview(i: OverviewInput): { rows: TrainerRow[]; attention: Att
     // Coming up: trainer, PO, PO accepted, bank.
     if (x.start >= i.today && x.start <= soon) {
       if (!x.named) { att.push({ level: 'danger', kind: 'no-trainer', text: `No trainer confirmed: ${label} (${when})`, dealId: x.deal.id, when: x.start }); continue; }
-      if (!i.poDeals.has(x.deal.id)) att.push({ level: left <= 7 ? 'danger' : 'attention', kind: 'no-po', text: `No trainer PO uploaded: ${label} (${when})`, dealId: x.deal.id, trainerId: x.trainerId, when: x.start });
+      // The PO is made automatically once the trainer has a fee line on the Trainer step (2026-10-21).
+      const declined = x.trainerId ? jobOf(x.deal.id, x.trainerId)?.poDeclined : null;
+      if (declined) att.push({ level: 'danger', kind: 'po-declined', text: `${name(x.trainerId)} declined the PO (${declined.reason}): ${label} (${when})`, dealId: x.deal.id, trainerId: x.trainerId, when: x.start });
+      else if (!i.poDeals.has(x.deal.id) && !(x.trainerId && feeLines(x.deal.id, x.task?.id).length)) att.push({ level: left <= 7 ? 'danger' : 'attention', kind: 'no-po', text: `No trainer PO yet (add the trainer fee on the Trainer step): ${label} (${when})`, dealId: x.deal.id, trainerId: x.trainerId, when: x.start });
       else if (x.trainerId && i.accounts[x.trainerId]?.active && !jobOf(x.deal.id, x.trainerId)?.poAcceptedAt) att.push({ level: 'attention', kind: 'po-not-accepted', text: `${name(x.trainerId)} hasn't accepted the PO yet: ${label} (${when})`, dealId: x.deal.id, trainerId: x.trainerId, when: x.start });
       if (x.trainerId && i.vendors && !rows.find(r => r.trainer.id === x.trainerId)?.hasBank) att.push({ level: 'attention', kind: 'no-bank', text: `${name(x.trainerId)} has no bank details on record, training ${when}`, trainerId: x.trainerId, when: x.start });
     }
@@ -145,7 +148,7 @@ export function overview(i: OverviewInput): { rows: TrainerRow[]; attention: Att
     .sort((a, b) => a.trainers - b.trainers || b.deals - a.deals || a.name.localeCompare(b.name));
   programmes.filter(p => p.deals > 0 && p.trainers === 0).forEach(p => att.push({ level: 'attention', kind: 'programme', text: `No trainer teaches "${p.name}" (used on ${p.deals} deal${s(p.deals)})` }));
 
-  const order: Attention['kind'][] = ['no-trainer', 'no-claim', 'claim-waiting', 'no-po', 'po-not-accepted', 'no-bank', 'bank-check', 'not-rated', 'low-rating', 'programme'];
+  const order: Attention['kind'][] = ['no-trainer', 'po-declined', 'no-claim', 'claim-waiting', 'no-po', 'po-not-accepted', 'no-bank', 'bank-check', 'not-rated', 'low-rating', 'programme'];
   att.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : 1) || order.indexOf(a.kind) - order.indexOf(b.kind) || String(a.when || '').localeCompare(String(b.when || '')));
   return { rows, attention: att, programmes };
 }

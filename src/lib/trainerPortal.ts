@@ -11,6 +11,9 @@
 // trainer_jobs/{dealId}_{trainerId}: one per trainer per training.
 //   rating { stars, note, byId, byName, at }      Admin and Management, on the deal's Trainer step; everyone sees it
 //   poAcceptedAt                                    the trainer clicked Accept on the PO in the portal
+//   po                                              the made-automatically PO as accepted (buildPo), so it doesn't change
+//   poDeclined { reason, at }                       the trainer declined the PO (red flag in Admin work)
+// trainer_calendars/{token}: { trainerId, at }: the trainer's private calendar link (server only).
 //   claim { status, photos[], t3[], submittedAt, returnNote?, returnedByName?, history[] }   "Request training fee"
 // trainer_bank_requests/{trainerId}: a bank account change typed by the trainer, waiting for Admin or Management.
 //   Accepting copies it onto the trainer's vendor record (Admin work → Vendors), where payments read it.
@@ -46,6 +49,8 @@ export interface TrainerJob {
   trainerId: string;
   rating?: TrainerRating | null;
   poAcceptedAt?: string;
+  po?: PoInput | null;                              // the made-automatically PO as the trainer accepted it
+  poDeclined?: { reason: string; at: string } | null;
   claim?: TrainerClaim | null;
 }
 
@@ -151,6 +156,85 @@ export const poNumber = (deal: { id: string; trainingDate?: string }) =>
 export const poLines = (outs: { dealId?: string; checklistTaskId?: string; status?: string; description?: string; amount?: number }[], dealId: string, taskId: string) =>
   outs.filter(o => o.dealId === dealId && o.checklistTaskId === taskId && o.status !== 'rejected')
     .map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 }));
+
+export interface PoInput {
+  number: string;
+  date: string;
+  trainer: { name: string; contact?: string; email?: string; address?: string };
+  programme: string;
+  client: string;
+  dates: string;
+  venue: string;
+  lines: { description: string; amount: number }[];
+  bank: string;
+}
+// The PO, made automatically (Joel, 2026-10-21: "PO for trainer should auto generate"): a won deal with the trainer
+// picked from the list on the Trainer step and at least one fee line has its PO, with nothing to click. The portal
+// shows it (as a PDF); when the trainer accepts, the server keeps a copy on trainer_jobs.po so it doesn't change.
+// "Make PO" on the Trainer step still saves a PDF copy there, e.g. to WhatsApp a trainer without portal access.
+export function buildPo(i: {
+  deal: { id: string; trainingDate?: string; courseName?: string }; dates: string; date: string; trainer: any; client: string; venue: string;
+  lines: { description: string; amount: number }[]; vendor: any | null;
+}): PoInput {
+  return {
+    number: poNumber(i.deal), date: i.date,
+    trainer: { name: i.trainer?.name || '', contact: i.trainer?.contact || '', email: i.trainer?.email || '', address: i.trainer?.address || '' },
+    programme: i.deal.courseName || '', client: i.client, dates: i.dates, venue: i.venue, lines: i.lines,
+    bank: i.vendor ? [i.vendor.bankName, i.vendor.accountNo, i.vendor.accountName].filter(Boolean).join(' · ') : '',
+  };
+}
+// A Trainer step with the trainer picked from the list and a fee line has its PO (so the step can be ticked).
+export const hasAutoPo = (task: { id: string; trainerId?: string } | undefined, outs: any[], dealId: string) =>
+  !!task?.trainerId && poLines(outs, dealId, task.id).length > 0;
+
+// The trainer declined the PO in the portal: a red flag in Admin work until another trainer is picked, or Admin
+// clears it on the Trainer step (they agreed after all).
+export function poDeclinedFlag(job: TrainerJob | undefined, trainerName = 'The trainer'): string {
+  return job?.poDeclined ? `${trainerName} declined the PO${job.poDeclined.reason ? ` ("${job.poDeclined.reason}")` : ''}: pick another trainer on the Trainer step` : '';
+}
+
+// ---------- Blocked dates and the trainer's own calendar (2026-10-21) ----------
+// A trainer's dates are blocked by every won deal with them picked on the Trainer step, unless they declined the PO.
+// The portal shows them in My calendar, and the CRM warns when a trainer is picked for dates already blocked.
+export interface Booking { dealId: string; start: string; end: string; title: string }
+export const overlaps = (a: { start: string; end?: string }, b: { start: string; end?: string }) =>
+  !!a.start && !!b.start && a.start <= (b.end || b.start) && b.start <= (a.end || a.start);
+export const clashesWith = <B extends Booking>(bookings: B[], mine: { dealId: string; start: string; end?: string }) =>
+  bookings.filter(b => b.dealId !== mine.dealId && overlaps(b, mine));
+
+// "Link to my calendar": a private address (trainer_calendars/{token}, server only) that Google, Outlook or Apple
+// calendar reads every few hours. Making a new link stops the old one.
+export const calendarPath = (token: string) => `/api/portal/calendar/${token}.ics`;
+export interface IcsEvent { uid: string; start: string; end: string; summary: string; location?: string; description?: string }
+const icsText = (s: string) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+const icsDay = (iso: string) => iso.replace(/-/g, '');
+const nextDay = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
+// Lines longer than 75 characters are folded (a new line starting with a space), as calendars expect.
+const fold = (line: string) => line.length <= 74 ? line : line.match(/.{1,73}/g)!.join('\r\n ');
+export function icsCalendar(name: string, events: IcsEvent[], stamp = new Date()): string {
+  const ts = stamp.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const lines = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//NEXT Academy//Trainer portal//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    `X-WR-CALNAME:${icsText(name)}`, 'X-WR-TIMEZONE:Asia/Kuala_Lumpur', 'REFRESH-INTERVAL;VALUE=DURATION:PT6H', 'X-PUBLISHED-TTL:PT6H',
+  ];
+  for (const e of events) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.start)) continue;
+    lines.push('BEGIN:VEVENT', `UID:${e.uid}`, `DTSTAMP:${ts}`, `DTSTART;VALUE=DATE:${icsDay(e.start)}`, `DTEND;VALUE=DATE:${icsDay(nextDay(e.end && e.end >= e.start ? e.end : e.start))}`,
+      `SUMMARY:${icsText(e.summary)}`, ...(e.location ? [`LOCATION:${icsText(e.location)}`] : []), ...(e.description ? [`DESCRIPTION:${icsText(e.description)}`] : []),
+      'TRANSP:OPAQUE', 'END:VEVENT');
+  }
+  lines.push('END:VCALENDAR');
+  return lines.map(fold).join('\r\n') + '\r\n';
+}
+// Buttons in the portal: Google and Outlook subscribe from the web address; Apple (iPhone, Mac) opens webcal://.
+export function calendarLinks(httpsUrl: string) {
+  const webcal = httpsUrl.replace(/^https?:\/\//, 'webcal://');
+  return {
+    google: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`,
+    outlook: `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(httpsUrl)}&name=${encodeURIComponent('NEXT Academy trainings')}`,
+    apple: webcal,
+  };
+}
 
 // ---------- Ratings ----------
 export const STARS = [1, 2, 3, 4, 5];

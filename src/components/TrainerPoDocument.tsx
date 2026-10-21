@@ -2,6 +2,8 @@
 // line(s) Admin raised on the deal's Trainer step, so nothing is typed twice. "Make PO" on the Trainer step saves the
 // PDF as that step's PO file (checklist_files), the one place the CRM, the Overview and the trainer portal read it.
 // The sheet has the class "print-paper" so makeDocumentPdf can find it.
+// Since 2026-10-21 the PO is also made automatically (buildPo, lib/trainerPortal.ts): the portal makes the PDF from
+// it, so "Make PO" is optional (a saved copy, e.g. for a trainer without portal access).
 
 import React, { useState } from 'react';
 import { getDoc, doc } from 'firebase/firestore';
@@ -10,22 +12,12 @@ import { db } from '../lib/firebase';
 import { COMPANY, QUOTE_SIGNATORY } from '../lib/company';
 import { formatDate, formatRM, todayIso, trainingDateText } from '../lib/deals';
 import { ChecklistFile } from '../lib/checklistFiles';
-import { poLines, poNumber } from '../lib/trainerPortal';
+import { PoInput, buildPo, poLines } from '../lib/trainerPortal';
 import { uploadOne } from './ChecklistFiles';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
-export interface PoInput {
-  number: string;
-  date: string;
-  trainer: { name: string; contact?: string; email?: string; address?: string };
-  programme: string;
-  client: string;
-  dates: string;
-  venue: string;
-  lines: { description: string; amount: number }[];
-  bank: string;
-}
+export type { PoInput };
 
 export default function TrainerPoDocument({ po }: { po: PoInput }) {
   const cell = 'border border-slate-300 px-3 py-2 align-top';
@@ -104,12 +96,7 @@ export function MakePoButton({ deal, task, trainer, venueName, outs, vendor, vie
     setBusy(true);
     try {
       const client = deal.clientId ? (await getDoc(doc(db, 'clients', deal.clientId))).data() : null;
-      const po: PoInput = {
-        number: poNumber(deal), date: todayIso(),
-        trainer: { name: trainer.name || '', contact: trainer.contact || '', email: trainer.email || '', address: trainer.address || '' },
-        programme: deal.courseName || '', client: String(client?.companyName || deal.client || ''), dates: trainingDateText(deal, true), venue: venueName,
-        lines, bank: vendor ? [vendor.bankName, vendor.accountNo, vendor.accountName].filter(Boolean).join(' · ') : '',
-      };
+      const po = buildPo({ deal, dates: trainingDateText(deal, true), date: todayIso(), trainer, client: String(client?.companyName || deal.client || ''), venue: venueName, lines, vendor });
       const { makeDocumentPdf } = await import('../lib/quotePdf');
       const blob = await makeDocumentPdf(React.createElement(TrainerPoDocument, { po }), `PO ${po.number}`);
       const file = new File([blob], `${po.number} ${trainer.name}.pdf`.replace(/[\\/:*?"<>|]+/g, ''), { type: 'application/pdf' });
@@ -125,7 +112,7 @@ export function MakePoButton({ deal, task, trainer, venueName, outs, vendor, vie
         className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface disabled:opacity-60">
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Make PO (PDF)
       </button>
-      <p className="text-xs text-ink-soft">Made from this deal and the trainer fee below, saved here as the PO. The trainer downloads it in the portal.</p>
+      <p className="text-xs text-ink-soft">Portal trainers get their PO automatically once the trainer fee below is added. This saves a PDF copy here, e.g. to WhatsApp a trainer without portal access.</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
     </div>
   );

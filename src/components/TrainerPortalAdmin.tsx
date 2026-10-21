@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { collection, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, deleteField, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { BadgeCheck, Check, Copy, FileText, KeyRound, Landmark, Loader2, MessageCircle, Star, X } from 'lucide-react';
 import { auth, callServer, db, friendlyError } from '../lib/firebase';
 import { sendPortalPasswordEmail } from '../lib/portalEmail';
-import { formatDate } from '../lib/deals';
+import { dealStage, formatDate, formatDateRange, trainingEndDate } from '../lib/deals';
+import { linkedOnly } from '../lib/linked';
 import { MoneyOut } from '../lib/money';
 import { newToken, whatsappShare } from '../lib/trainerLinks';
 import {
-  BankRequest, INVITE_DAYS, PORTAL_PATH, PortalInvite, STARS, STAR_WORDS, TrainerAccount, TrainerJob, claimFlag, cleanEmail, emailProblem, inviteLive, invitePath, jobId, ratingAverage,
+  BankRequest, Booking, INVITE_DAYS, PORTAL_PATH, PortalInvite, STARS, STAR_WORDS, TrainerAccount, TrainerJob, claimFlag, clashesWith, cleanEmail, emailProblem, inviteLive, invitePath,
+  jobId, poDeclinedFlag, poLines, ratingAverage,
 } from '../lib/trainerPortal';
 
 // The CRM side of the trainer portal (2026-10-21, lib/trainerPortal.ts): giving a trainer access (Trainers panel),
@@ -347,7 +349,38 @@ export function TrainerRatings({ trainerId, dealLabel }: { trainerId: string; de
   );
 }
 
-// ---------- A deal's Trainer step: rating, PO accepted, the trainer's fee request ----------
+// ---------- A deal's Trainer step: already booked on these dates? (2026-10-21) ----------
+// A trainer's dates are blocked by every other won deal with them picked on the Trainer step, unless they declined it.
+export function TrainerClash({ deal, trainerId, trainerName }: { deal: any; trainerId: string; trainerName: string }) {
+  const [bookings, setBookings] = useState<(Booking & { client: string })[]>([]);
+  const jobs = useTrainerJobs({ trainerId });
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const lists = await getDocs(collection(db, 'deal_checklists'));
+      const ids = lists.docs.filter(d => d.id !== deal.id && (d.data().tasks || []).some((t: any) => t.kind === 'trainer' && t.trainerId === trainerId)).map(d => d.id);
+      const deals = (await Promise.all(ids.map(id => getDoc(doc(db, 'pipelines', id))))).filter(s => s.exists()).map(s => ({ ...(s.data() as any), id: s.id }));
+      if (live) setBookings(linkedOnly(deals).filter(d => dealStage(d) === 'won' && d.trainingDate)
+        .map(d => ({ dealId: d.id, start: String(d.trainingDate).slice(0, 10), end: trainingEndDate(d), title: d.courseName || 'Training', client: d.client || '' })));
+    })().catch(() => live && setBookings([]));
+    return () => { live = false; };
+  }, [trainerId, deal.id]);
+  const start = String(deal.trainingDate || '').slice(0, 10);
+  if (!start) return null;
+  const clash = clashesWith(bookings, { dealId: deal.id, start, end: trainingEndDate(deal) })
+    .filter(b => !jobs.find(j => j.dealId === b.dealId)?.poDeclined);
+  if (!clash.length) return null;
+  return (
+    <div role="alert" className="mt-3 rounded-lg bg-attention-soft px-3 py-2 text-sm">
+      <p className="font-semibold">{trainerName} is already booked on these dates:</p>
+      <ul className="mt-1 list-disc pl-5">
+        {clash.map(b => <li key={b.dealId}>{formatDateRange(b.start, b.end)}: {b.title}{b.client ? ` (${b.client})` : ''}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+// ---------- A deal's Trainer step: rating, PO accepted or declined, the trainer's fee request ----------
 export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
   deal: any; task: { id: string; trainerId?: string }; trainerName: string; viewer: Viewer; outs: MoneyOut[];
 }) {
@@ -381,13 +414,32 @@ export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
     }));
   };
   const hasPortal = !!accounts[trainerId]?.active;
+  const declined = poDeclinedFlag(job, trainerName);
+  const autoPo = poLines(outs, deal.id, task.id).length > 0;
+  // They agreed after all (talked it over): the flag goes and the dates are blocked again.
+  const clearDecline = () => run(() => updateDoc(ref, { poDeclined: null }));
+  // The fee changed after they accepted the PO made automatically: they accept the new one.
+  const newPo = () => window.confirm(`Send ${trainerName} a new PO? Their acceptance is cleared and the portal shows the PO made from the fee lines now.`)
+    && run(() => updateDoc(ref, { poAcceptedAt: deleteField(), po: null }));
 
   return (
     <div className="mt-3 space-y-3 rounded-lg border border-line bg-surface/60 p-3">
       <p className="text-sm font-semibold">Trainer portal</p>
       {!hasPortal && !job && <p className="text-sm text-ink-soft">{trainerName} has no portal access. Give it in Trainers if they should see this training, the PO and request their fee there.</p>}
-      {hasPortal && <p className="text-sm text-ink-soft">{trainerName} sees this training in the portal{job?.poAcceptedAt ? '' : '; the PO shows there once uploaded above'}.</p>}
-      {job?.poAcceptedAt && <p className="flex items-center gap-1.5 text-sm text-accent"><BadgeCheck className="h-4 w-4" /> {trainerName} accepted the PO on {isoDay(job.poAcceptedAt)}.</p>}
+      {hasPortal && !job?.poAcceptedAt && !declined && (
+        <p className="text-sm text-ink-soft">{trainerName} sees this training in the portal; {autoPo ? 'their PO is made automatically from the trainer fee, waiting for them to accept' : 'their PO is made automatically once the trainer fee is added'}.</p>
+      )}
+      {job?.poAcceptedAt && (
+        <p className="flex flex-wrap items-center gap-1.5 text-sm text-accent"><BadgeCheck className="h-4 w-4" /> {trainerName} accepted the PO{job.po ? ` ${job.po.number}` : ''} on {isoDay(job.poAcceptedAt)}.
+          {job.po && staff && <button type="button" disabled={busy} className="font-semibold text-ink-soft hover:text-accent hover:underline" onClick={newPo}>Fee changed? Send a new PO</button>}</p>
+      )}
+      {declined && (
+        <div className="space-y-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+          <p className="font-semibold">{declined}</p>
+          <p>Declined on {isoDay(job?.poDeclined?.at)}. Their dates are no longer blocked.</p>
+          {staff && <button type="button" disabled={busy} className={btnSecondary} onClick={clearDecline}>They agreed after all: clear this</button>}
+        </div>
+      )}
 
       {claim && (
         <div className="space-y-2">
