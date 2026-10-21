@@ -17,6 +17,7 @@ import { cleanProfile, profileProblem } from './src/lib/trainerLinks';
 import { DOC_KINDS } from './src/lib/trainerProfile';
 import { dealStage, todayIso, trainingDays, trainingEndDate } from './src/lib/deals';
 import { effectiveVenue } from './src/lib/checklist';
+import { cancelledTraining, lastMove } from './src/lib/trainingChange';
 import { isDeletedRecord, ownedByTeam } from './src/lib/linked';
 import {
   bankProblem, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeStatusText,
@@ -66,6 +67,7 @@ async function logAccount(db: Firestore, trainerId: string, byName: string, acti
 
 // ---------- The trainer's trainings ----------
 // A training is a won deal (not deleted, owner on the Team list) whose checklist Trainer step names this trainer.
+// A training cancelled in the last 60 days stays on the list, marked cancelled (2026-10-21).
 async function myTrainings(db: Firestore, trainerId: string) {
   const [lists, team] = await Promise.all([db.collection('deal_checklists').get(), db.collection('team').get()]);
   const teamIds = new Set(team.docs.map(d => d.id));
@@ -77,7 +79,9 @@ async function myTrainings(db: Firestore, trainerId: string) {
   for (const c of mine) {
     const snap = await db.collection('pipelines').doc(c.dealId).get();
     const deal: any = snap.exists ? { ...snap.data(), id: snap.id } : null;
-    if (!deal || dealStage(deal) !== 'won' || !ownedByTeam(deal, teamIds)) continue;
+    if (!deal || !ownedByTeam(deal, teamIds)) continue;
+    const cancel = cancelledTraining(deal);
+    if (dealStage(deal) !== 'won' && !(cancel && Date.now() - Date.parse(cancel.at) < 60 * 86_400_000)) continue;
     out.push({ deal, checklist: c.data, task: c.task });
   }
   return out;
@@ -102,6 +106,13 @@ async function assigned(db: Firestore, trainerId: string, dealId: any) {
   const id = String(dealId || '');
   const found = (await myTrainings(db, trainerId)).find(x => x.deal.id === id);
   if (!found) throw new UserError(404, 'not-yours', "That training isn't on your list. Refresh the page.");
+  return found;
+}
+
+// Accepting a PO or requesting a fee: not on a cancelled training.
+async function assignedLive(db: Firestore, trainerId: string, dealId: any) {
+  const found = await assigned(db, trainerId, dealId);
+  if (cancelledTraining(found.deal)) throw new UserError(400, 'cancelled', 'This training was cancelled. NEXT Academy will contact you about it.');
   return found;
 }
 
@@ -256,6 +267,9 @@ export function registerTrainerPortalRoutes(app: Express) {
       const job: any = (await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data() || {};
       const lines = await feeLines(db, deal.id, task.id, trainerId);
       const start = String(deal.trainingDate || '').slice(0, 10);
+      // A PO accepted before the date moved counts as not accepted: the new PO needs accepting.
+      const moved = lastMove(deal);
+      const poAcceptedAt = job.poAcceptedAt && !(moved && moved.at > job.poAcceptedAt) ? job.poAcceptedAt : '';
       trainings.push({
         dealId: deal.id,
         programme: progName(deal.programmeId) || deal.courseName || 'Training',
@@ -264,7 +278,9 @@ export function registerTrainerPortalRoutes(app: Express) {
         venue: venue && !(checklist.tasks || []).some((x: any) => x.kind === 'venue' && x.needed === false) ? { name: venue.name, region: venueRec?.region || '' } : null,
         confirmed: !!task.done,
         po: (await poFiles(db, deal.id, task.id)).map(f => ({ id: f.id, name: f.name, at: f.at })),
-        poAcceptedAt: job.poAcceptedAt || '',
+        poAcceptedAt,
+        cancelled: !!cancelledTraining(deal),
+        movedFrom: moved?.from || '',
         fee: lines.filter(o => o.status !== 'rejected').map(o => ({ id: o.id, description: o.description || '', amount: Number(o.amount) || 0, status: o.status, statusText: feeStatusText(o) })),
         claim: job.claim ? { status: job.claim.status, submittedAt: job.claim.submittedAt, returnNote: job.claim.returnNote || '', photos: job.claim.photos || [], t3: job.claim.t3 || [] } : null,
         rating: job.rating ? { stars: job.rating.stars, note: job.rating.note || '', at: job.rating.at } : null,
@@ -361,7 +377,7 @@ export function registerTrainerPortalRoutes(app: Express) {
 
   app.post('/api/portal/accept-po', route(async req => {
     const { db, trainerId, trainer: t } = await trainerFrom(req);
-    const { deal, task } = await assigned(db, trainerId, req.body?.dealId);
+    const { deal, task } = await assignedLive(db, trainerId, req.body?.dealId);
     if (!(await poFiles(db, deal.id, task.id)).length) throw new UserError(400, 'no-po', "There's no PO on this training yet.");
     await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).set({ dealId: deal.id, trainerId, poAcceptedAt: nowIso() }, { merge: true });
     await addDealHistory(db, deal.id, '', (t.name || 'Trainer') + PORTAL, 'Trainer accepted the PO');
@@ -373,7 +389,7 @@ export function registerTrainerPortalRoutes(app: Express) {
   // flag in Admin work reads both. No amount is typed here, and no payment request is made.
   app.post('/api/portal/claim', route(async req => {
     const { db, trainerId, trainer: t } = await trainerFrom(req);
-    const { deal, task } = await assigned(db, trainerId, req.body?.dealId);
+    const { deal, task } = await assignedLive(db, trainerId, req.body?.dealId);
     const start = String(deal.trainingDate || '').slice(0, 10);
     if (!start || start > todayIso()) throw new UserError(400, 'too-early', 'You can request your fee once the training has started.');
     const folder = claimFolder(trainerId, deal.id);

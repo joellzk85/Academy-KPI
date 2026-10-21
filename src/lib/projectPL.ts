@@ -16,8 +16,9 @@ import { dealOwnerId, dealStage, dealValue, todayIso, trainingEndDate } from './
 import { MoneyIn, MoneyOut, MoneySettings, dealMoneySums, inPL, moneySettled } from './money';
 import { mainQuote } from './checklist';
 import { quoteSst } from './quoteSst';
+import { cancelledTraining } from './trainingChange';
 
-export type TrainingStatus = 'done' | 'today' | 'upcoming' | 'no_date';
+export type TrainingStatus = 'done' | 'today' | 'upcoming' | 'no_date' | 'cancelled';
 export type MoneyStatus = 'settled' | 'waiting' | 'not_invoiced';
 
 export const TRAINING_STATUS_LABELS: Record<TrainingStatus, string> = {
@@ -25,6 +26,7 @@ export const TRAINING_STATUS_LABELS: Record<TrainingStatus, string> = {
   today: 'Training today',
   upcoming: 'Upcoming',
   no_date: 'No training date',
+  cancelled: 'Training cancelled',
 };
 
 export const MONEY_STATUS_LABELS: Record<MoneyStatus, string> = {
@@ -75,18 +77,20 @@ export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], s:
   const pl = dealMoneySums(ins, outs, s);
   const trainingDate = isoDate(deal?.trainingDate);
   const lastDay = trainingEndDate(deal) || trainingDate;   // a training of several days is done after its last day
-  const training: TrainingStatus = !trainingDate ? 'no_date' : lastDay < today ? 'done' : trainingDate <= today ? 'today' : 'upcoming';
+  // A cancelled training (2026-10-21) keeps only real money: costs already paid or kept, and any cancellation fee invoiced.
+  const cancelled = !!cancelledTraining(deal);
+  const training: TrainingStatus = cancelled ? 'cancelled' : !trainingDate ? 'no_date' : lastDay < today ? 'done' : trainingDate <= today ? 'today' : 'upcoming';
 
   const { rate: sstRate, mode: sstMode } = quoteSst(mainQuote(x.quotes.filter(q => q.pipelineId === deal.id)) || {});
   const typed = x.plDocs[deal.id]?.sstAmount;
   const sstTyped = typeof typed === 'number' && Number.isFinite(typed);
-  const estimate = ins.length === 0;
+  const estimate = ins.length === 0 && !cancelled;
   // The estimate adds the quotation's SST on top of the deal value, unless its price already includes SST.
   const income = estimate ? dealValue(deal) * (sstMode === 'added' ? 1 + sstRate / 100 : 1) : pl.invoiced;
   const sst = sstTyped ? (typed as number) : (income * sstRate) / (100 + sstRate);
   const hrdcFee = estimate ? (isHrdc(deal) ? income * (s.hrdcDeductionPct / 100) : 0) : pl.hrdcFee + pl.shortfall;
   const beforeSst = income - sst;
-  const commission = Math.round(Math.max(0, beforeSst) * (s.commissionPct || 0)) / 100;
+  const commission = cancelled ? 0 : Math.round(Math.max(0, beforeSst) * (s.commissionPct || 0)) / 100;
   const profit = income - sst - hrdcFee - commission - pl.costs;
 
   return {
@@ -101,10 +105,10 @@ export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], s:
   };
 }
 
-// Every won deal, newest training first; deals without a date last.
+// Every won deal, newest training first; deals without a date last. Cancelled trainings stay while they have money on them.
 export function projectRows(deals: any[], ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings, today = todayIso(), x: PLExtras = NO_EXTRAS): ProjectRow[] {
   return deals
-    .filter(d => dealStage(d) === 'won')
+    .filter(d => dealStage(d) === 'won' || (cancelledTraining(d) && (ins.some(m => m.dealId === d.id) || outs.some(o => o.dealId === d.id && (o.status === 'approved' || o.status === 'paid') && inPL(o)))))
     .map(d => projectRow(d, ins, outs, s, today, x))
     .sort((a, b) => (b.trainingDate || '0').localeCompare(a.trainingDate || '0'));
 }

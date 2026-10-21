@@ -45,6 +45,8 @@ import { HoldBox, ResumeBox } from './DealHold';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import CostEstimator from './CostEstimator';
+import TrainingChangePanel from './TrainingChange';
+import { cancelledTraining, dateLocked } from '../lib/trainingChange';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -291,6 +293,9 @@ export default function DealsBoard({
     setEditing(p.id);
   };
 
+  // A won deal's training date changes only through Change date / Cancel training (Management approves; 2026-10-21).
+  const formDateLocked = !!editing && editing !== 'new' && dateLocked(deals.find(p => p.id === editing));
+
   const saveForm = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
@@ -355,6 +360,7 @@ export default function DealsBoard({
         tagNote: form.tagNote.trim(),
         notes: form.notes.trim(),
       };
+      if (existing && dateLocked(existing)) { delete data.trainingDate; delete data.trainingDays; }
       if (!existing) {
         Object.assign(data, {
           stage: 'lead', status: 'Pending', proposalSentDate: 'not yet', creatorId: viewer.id, creatorName: viewer.name,
@@ -890,19 +896,23 @@ export default function DealsBoard({
                 </div>
                 <div>
                   <label htmlFor="d-train" className={label}>Training date</label>
-                  <input id="d-train" type="date" value={form.trainingDate} onChange={e => setForm(f => ({ ...f, trainingDate: e.target.value }))} className={input} />
+                  <input id="d-train" type="date" value={form.trainingDate} disabled={formDateLocked} onChange={e => setForm(f => ({ ...f, trainingDate: e.target.value }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} />
                 </div>
                 <div>
                   <label htmlFor="d-fu" className={label}>Next follow-up</label>
                   <input id="d-fu" type="date" value={form.followUpDate} onChange={e => setForm(f => ({ ...f, followUpDate: e.target.value }))} className={input} />
                 </div>
               </div>
-              <div>
-                <TrainingDaysPicker id="d-days" label="How long is the training?" value={form.trainingDays} onChange={v => setForm(f => ({ ...f, trainingDays: v }))} />
-                {form.trainingDate && parseTrainingDays(form.trainingDays) && (
-                  <p className="mt-1.5 text-sm text-ink-soft">Training: {trainingDateText({ trainingDate: form.trainingDate, trainingDays: parseTrainingDays(form.trainingDays) }, true)}</p>
-                )}
-              </div>
+              {formDateLocked ? (
+                <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">This deal is won, so its training date ({trainingDateText(deals.find(p => p.id === editing), true)}) changes through "Change date / Cancel training" on the deal, which Management approves.</p>
+              ) : (
+                <div>
+                  <TrainingDaysPicker id="d-days" label="How long is the training?" value={form.trainingDays} onChange={v => setForm(f => ({ ...f, trainingDays: v }))} />
+                  {form.trainingDate && parseTrainingDays(form.trainingDays) && (
+                    <p className="mt-1.5 text-sm text-ink-soft">Training: {trainingDateText({ trainingDate: form.trainingDate, trainingDays: parseTrainingDays(form.trainingDays) }, true)}</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label htmlFor="d-owner" className={label}>Deal owner</label>
                 <select
@@ -1129,6 +1139,10 @@ function DealPanel(props: {
           </>
         )}
         {props.alert && OPEN_STAGES.includes(st) && <AlertLine alert={props.alert} />}
+        {/* Change date / Cancel training (2026-10-21): request, Management approval, then what Admin still has to update */}
+        {(st === 'won' || cancelledTraining(p)) && (
+          <div className="mt-3"><TrainingChangePanel deal={p} viewer={props.viewer} onDone={props.onApptDone} /></div>
+        )}
         {props.editable ? (
           <div className="mt-3 space-y-3">
             {props.alert && OPEN_STAGES.includes(st) && props.stagePanel !== 'followup' && props.stagePanel !== 'lost' && props.stagePanel !== 'hold' && (
@@ -1235,7 +1249,7 @@ function DealPanel(props: {
               )}
               {OPEN_STAGES.includes(st) && !props.alert && props.stagePanel !== 'followup' && <button type="button" className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('followup')}><Plus className="h-3.5 w-3.5" /> Log follow-up</button>}
               {OPEN_STAGES.includes(st) && !holdable && props.stagePanel !== 'lost' && props.stagePanel !== 'followup' && !props.alert?.decision && <button type="button" className={`${smallLink} text-danger`} onClick={() => props.setStagePanel('lost')}><XCircle className="h-3.5 w-3.5" /> Mark lost</button>}
-              {st === 'lost' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Reopen deal</button>}
+              {st === 'lost' && (!cancelledTraining(p) || props.viewer.role === 'management') && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Reopen deal</button>}
               {st === 'won' && canUndoWin && <button type="button" disabled={props.busy} className={`${smallLink} text-ink-soft`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Undo win</button>}
               {props.stagePanel !== 'duplicate' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('duplicate')}><Copy className="h-3.5 w-3.5" /> Duplicate deal</button>}
             </div>
@@ -1366,8 +1380,8 @@ function DealPanel(props: {
           </Fold>
         )}
 
-        {/* Money out and P&L (won deals): Admin and Management */}
-        {st === 'won' && props.viewer.role !== 'rep' && (
+        {/* Money out and P&L (won deals, and cancelled trainings: costs already paid, a cancellation fee): Admin and Management */}
+        {(st === 'won' || cancelledTraining(p)) && props.viewer.role !== 'rep' && (
           <Fold title="Money out and P&L" defaultOpen={def === 'money'} id={p.id}>
             <MoneyPanel deal={p} viewer={props.viewer} ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} quotes={props.quotes} />
           </Fold>

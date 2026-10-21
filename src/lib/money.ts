@@ -91,6 +91,9 @@ export interface MoneyOut {
   summaryToken?: string;
   // Include in P&L (Joel, 2026-10-21): new cost lines start unticked (false); older requests without it count.
   inPL?: boolean;
+  // Stopped (status 'rejected', reason "Training cancelled") when Management approved the training's cancellation
+  // (2026-10-21, lib/trainingChange.ts); not shown to the requester as a rejection to redo.
+  trainingCancelled?: boolean;
 }
 
 /** Counted in the training's P&L? Missing = yes (requests made before the tick existed). Company payments never are. */

@@ -18,6 +18,7 @@ import { useSalesTarget } from '../lib/useSalesTarget';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
 import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, moneyFlags } from '../lib/money';
+import { KIND_TEXT, canDecideChange, changeFlagText, changeSummary, pendingChange } from '../lib/trainingChange';
 import { projectRow } from '../lib/projectPL';
 import { useChecklistSettings } from './DealChecklist';
 import { useMoneySettings } from './Money';
@@ -1029,6 +1030,10 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     }
     case 'due_now': {
       const items: Item[] = [];
+      // Change date / Cancel training (2026-10-21): waiting for Management, or still to update after approval.
+      c.deals.filter(p => !p.deleted && changeFlagText(p)).forEach(p => items.push({
+        key: `${p.id}_tc`, title: deal(p), level: pendingChange(p) ? 'attention' : 'danger', sub: changeFlagText(p), onClick: () => c.nav.openAdminWork('queue', p.id),
+      }));
       c.wonDeals.forEach(p => {
         const cl = c.checklists[p.id];
         c.queries.filter(q => q.dealId === p.id && isQueryOpen(q)).forEach(q => items.push({
@@ -1057,17 +1062,25 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         }));
       });
       c.moneyOut.filter(o => o.status === 'approved').forEach(o => items.push({ key: o.id, title: `Pay ${o.payee}: ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment · ' : ''}${o.category}, approved by ${o.decidedByName}`, onClick: () => c.nav.openAdminWork('money') }));
-      c.moneyOut.filter(o => o.status === 'rejected' && o.requestedById === c.viewer.id).forEach(o => items.push({ key: o.id, title: `Rejected: ${o.payee} ${formatRM(o.amount)}`, sub: o.rejectReason || 'See the reason and send a new request', level: 'attention', onClick: () => c.nav.openAdminWork('money') }));
+      c.moneyOut.filter(o => o.status === 'rejected' && !o.trainingCancelled && o.requestedById === c.viewer.id).forEach(o => items.push({ key: o.id, title: `Rejected: ${o.payee} ${formatRM(o.amount)}`, sub: o.rejectReason || 'See the reason and send a new request', level: 'attention', onClick: () => c.nav.openAdminWork('money') }));
       items.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : b.level === 'danger' ? 1 : a.level ? -1 : 1));
       return { items, empty: 'No money jobs waiting.' };
     }
     case 'approvals': {
       const list = c.moneyOut.filter(o => canDecide(o, c.viewer));
+      // Training date changes and cancellations (2026-10-21) come first: nothing moves until they're decided.
+      const changes = c.deals.filter(p => canDecideChange(pendingChange(p), c.viewer));
       return {
-        items: list.map(o => {
-          const p = c.deals.find(d => d.id === o.dealId);
-          return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · requested by ${o.requestedByName}`, onClick: () => c.nav.openAdminWork('money') };
-        }),
+        items: [
+          ...changes.map(p => {
+            const tc = pendingChange(p)!;
+            return { key: `${p.id}_tc`, title: `${KIND_TEXT[tc.kind]} · ${deal(p)}`, level: (tc.kind === 'cancel' ? 'danger' : 'attention') as Item['level'], sub: `${changeSummary(tc)} · asked by ${tc.byName}`, onClick: () => c.openDeal(p) };
+          }),
+          ...list.map(o => {
+            const p = c.deals.find(d => d.id === o.dealId);
+            return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · requested by ${o.requestedByName}`, onClick: () => c.nav.openAdminWork('money') };
+          }),
+        ],
         empty: 'Nothing waiting for your approval.',
       };
     }

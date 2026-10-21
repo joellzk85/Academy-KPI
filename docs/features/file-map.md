@@ -50,3 +50,4 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
 - **Commits:** author `joellzk85 <lzk.joel@gmail.com>` is set for this repo. Joel pushes via PowerShell from `C:\Users\Joel\Documents\CRM` if your push needs his GitHub sign-in.
 
 - Costing estimator (2026-10-21; see money.md): `src/lib/costEstimate.ts`, `src/components/CostEstimator.tsx` (opened from the Deals page), collection `cost_estimates`.
+- Change date / Cancel training on won deals (2026-10-21; see deals.md): `src/lib/trainingChange.ts`, `src/components/TrainingChange.tsx`; fields `trainingChange`, `trainingTodo`, `trainingCancelled` on `pipelines`, `trainingCancelled` on `money_out`.

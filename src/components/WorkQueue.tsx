@@ -26,6 +26,8 @@ import { Flag } from '../lib/checklist';
 import { HrdcQuery, Programme, grantBlockReason, isQueryOpen, isQueryOverdue } from '../lib/programmes';
 import { ClientLastTouch } from './ClientContactDot';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
+import TrainingChangePanel from './TrainingChange';
+import { cancelledTraining, changeFlagText, dateLocked, openTodos, pendingChange } from '../lib/trainingChange';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -161,12 +163,17 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
       const fee = claimFlag(trainerJobs.find(j => j.id === jobId(p.id, trainerTask.trainerId)), mOut.filter(o => o.checklistTaskId === trainerTask.id), trainerTask.trainerName || 'The trainer');
       if (fee) flags.unshift({ level: 'danger', text: fee });
     }
+    // Change date / Cancel training (2026-10-21): a request waiting for Management, or things still to update after a new date.
+    const change = changeFlagText(p);
+    if (change) flags.unshift({ level: pendingChange(p) ? 'attention' : 'danger', text: change });
     const post = postTraining(p, cl.tasks, mIn, mOut, rc, today);
     // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).
     const complete = pr.done === pr.total && open.length === 0 && post.closed;
     return { deal: p, pr, overdue: overdue.length > 0, complete, after: post.ended && !complete, post, flags };
   }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts, trainerJobs]);
   const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
+  // Cancelled trainings with things still to wrap up (cancel the grant, the venue, refunds…).
+  const cancelled = useMemo(() => deals.filter(p => cancelledTraining(p) && openTodos(p).length > 0), [deals]);
 
   // Needs attention: any red flag, plus "grant not applied" even while it's amber (Joel, 2026-10-18).
   const needsAttention = (r: { flags: Flag[] }) => r.flags.some(f => f.level === 'danger' || f.grant);
@@ -189,7 +196,8 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
   }, [rows, filter, search, clients, people, programmes]);
 
   const openRow = rows.find(r => r.deal.id === openId);
-  const openDeal = openRow?.deal || won.find(p => p.id === openId) || null;
+  const openDeal = openRow?.deal || won.find(p => p.id === openId) || cancelled.find(p => p.id === openId) || null;
+  const openCancelled = !!openDeal && !!cancelledTraining(openDeal);
 
   const start = async (p: any) => {
     setBusyId(p.id);
@@ -245,6 +253,25 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, programme or rep" className={`${input} pl-9`} aria-label="Search the work queue" />
       </div>
+
+      {cancelled.length > 0 && (
+        <div className="rounded-2xl border border-danger/30 bg-white">
+          <p className="px-5 pt-3.5 font-semibold text-danger">Cancelled trainings to wrap up ({cancelled.length})</p>
+          <ul className="divide-y divide-line">
+            {cancelled.map(p => (
+              <li key={p.id}>
+                <button type="button" onClick={() => setOpenId(p.id)} className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-left hover:bg-surface">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-semibold">{clientName(p)}</span>
+                    <span className="block truncate text-sm text-ink-soft">{courseOf(p) || 'No programme'} · {personName(dealOwnerId(p))} · was {trainingDateText(p, true) || 'no date'}</span>
+                  </span>
+                  <span className="flex items-center gap-1 text-sm font-semibold text-danger"><AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {changeFlagText(p)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-2xl border border-line bg-white">
         {!loaded ? (
@@ -344,9 +371,11 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
                 <div><dt className="text-sm text-ink-soft">Programme</dt><dd className="flex flex-wrap items-center gap-2 font-semibold"><StatusChip programme={programmeOf(openDeal)} />{programmeOf(openDeal)?.hrdcCode && <span className="text-sm font-normal text-ink-soft">Code {programmeOf(openDeal)?.hrdcCode}</span>}</dd></div>
               )}
             </dl>
-            {!/^\d{4}-\d{2}-\d{2}/.test(openDeal.trainingDate || '') && (
+            <TrainingChangePanel deal={openDeal} viewer={viewer} onDone={flash} />
+            {!openCancelled && !/^\d{4}-\d{2}-\d{2}/.test(openDeal.trainingDate || '') && (
               <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">No training date yet. Click "Set" next to Training date to add it.</p>
             )}
+            {!openCancelled && (<>
             <section>
               <h4 className="mb-2 font-bold">Before training (admin checklist)</h4>
               <DealChecklist
@@ -371,6 +400,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
                 <HrdcQueries deal={openDeal} queries={queriesOf(openDeal)} viewer={viewer} people={people} />
               </section>
             )}
+            </>)}
             <section>
               <h4 className="mb-2 font-bold">Money out and P&amp;L</h4>
               <MoneyPanel deal={openDeal} viewer={viewer} settings={moneySettings} quotes={quotes.filter(q => q.pipelineId === openDeal.id)}
@@ -562,8 +592,10 @@ function TrainingDate({ deal, viewer, label }: { deal: any; viewer: Viewer; labe
       setError(friendlyError(e));
     }
   };
+  // Once won with a date, it changes through Change date / Cancel training (Management approves; 2026-10-21).
+  if (dateLocked(deal) || cancelledTraining(deal)) return <span>{label}</span>;
   if (!editing) {
-    return <span>{label} <button type="button" className="ml-1 text-sm font-semibold text-accent hover:underline" onClick={() => setEditing(true)}>{iso(deal.trainingDate) ? 'Change' : 'Set'}</button></span>;
+    return <span>{label} <button type="button" className="ml-1 text-sm font-semibold text-accent hover:underline" onClick={() => setEditing(true)}>Set</button></span>;
   }
   return (
     <div className="space-y-2 font-normal">
