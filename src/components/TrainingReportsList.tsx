@@ -7,7 +7,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { FileText, Search } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { dealStage, formatDate, isDeletedDeal, todayIso, trainingDateText } from '../lib/deals';
-import { effectiveTrainer, effectiveVenue } from '../lib/checklist';
+import { effectiveTrainer, effectiveVenue, leadTrainerTask } from '../lib/checklist';
 import { STATUS_TEXT, ReportStatus, TrainingReport } from '../lib/trainingReport';
 import { ReportPanel, setReportStep, useTrainingReport, useTrainingReports } from './TrainingReportAdmin';
 import type { ReportHeader } from './TrainingReportDocument';
@@ -50,7 +50,7 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
       // No report yet: only won trainings with the step that have started.
       if (!report && !(hasStep && started && dealStage(d) === 'won')) return null;
       const dealQuotes = quotes.filter(q => q.pipelineId === d.id);
-      const tr = effectiveTrainer(tasks.find(t => t.kind === 'trainer'), dealQuotes, trainers);
+      const tr = effectiveTrainer(leadTrainerTask(tasks), dealQuotes, trainers);
       const trainerName = report?.trainerName || tr?.name || '';
       const header: ReportHeader = {
         programme: d.courseName || '', client: d.client || '', dates: trainingDateText(d, true),

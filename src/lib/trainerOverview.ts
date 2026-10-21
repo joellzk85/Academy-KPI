@@ -4,7 +4,7 @@
 // Pure, so it can be tested.
 
 import { addDays, dealStage, isDeletedDeal, trainingEndDate } from './deals';
-import { isHrdc } from './checklist';
+import { isHrdc, leadTrainerTask } from './checklist';
 import { PROFILE_PARTS, profileGaps } from './trainerProfile';
 import { inviteLive, ratingAverage } from './trainerPortal';
 import type { BankRequest, PortalInvite, TrainerAccount, TrainerJob } from './trainerPortal';
@@ -68,7 +68,7 @@ export function trainingsOf(deals: any[], checklists: Record<string, any>) {
   return deals
     .filter(d => dealStage(d) === 'won' && !isDeletedDeal(d))
     .map(d => {
-      const task = (checklists[d.id]?.tasks || []).find((t: any) => t.kind === 'trainer');
+      const task: any = leadTrainerTask(checklists[d.id]?.tasks);
       return { deal: d, task, trainerId: String(task?.trainerId || ''), named: !!(task?.trainerId || String(task?.trainerName || '').trim()), start: day(d.trainingDate), end: trainingEndDate(d) };
     });
 }

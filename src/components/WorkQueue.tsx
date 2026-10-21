@@ -5,7 +5,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { FUNDING_LABELS, FundingType, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso, trainingDateText, trainingDays, trainingEndDate, parseTrainingDays, TRAINING_DAYS_PROBLEM } from '../lib/deals';
 import TrainingDaysPicker from './TrainingDaysPicker';
 import {
-  APPLIES_LABELS, AppliesTo, ChecklistSettings, KIND_LABELS, RETIRED_BUILTINS, TaskTemplate, checklistFlags, daysUntil, grantNotAppliedFlag, newTaskId, progress,
+  APPLIES_LABELS, AppliesTo, ChecklistSettings, KIND_LABELS, RETIRED_BUILTINS, TaskTemplate, checklistFlags, daysUntil, grantNotAppliedFlag, leadTrainerTask, newTaskId, progress,
 } from '../lib/checklist';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import DealChecklist, { ProgressBar, startChecklist, useChecklistSettings } from './DealChecklist';
@@ -163,14 +163,15 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
     flags.push(...prePaymentFlags(p, mOut, settings.flagDays, today));
     // A trainer asked for their fee in the trainer portal (2026-10-21) and it isn't approved yet.
-    const trainerTask = (cl.tasks || []).find((t: any) => t.kind === 'trainer' && t.trainerId);
-    if (trainerTask) {
-      const fee = claimFlag(trainerJobs.find(j => j.id === jobId(p.id, trainerTask.trainerId)), mOut.filter(o => o.checklistTaskId === trainerTask.id), trainerTask.trainerName || 'The trainer');
+    // Co-trainers (2026-10-22) the same, on their own steps.
+    (cl.tasks || []).filter((t: any) => t.kind === 'trainer' && t.trainerId).forEach((tt: any) => {
+      const fee = claimFlag(trainerJobs.find(j => j.id === jobId(p.id, tt.trainerId)), mOut.filter(o => o.checklistTaskId === tt.id), tt.trainerName || 'The trainer');
       if (fee) flags.unshift({ level: 'danger', text: fee });
       // The trainer declined the PO in the portal (2026-10-21): pick another trainer.
-      const declined = poDeclinedFlag(trainerJobs.find(j => j.id === jobId(p.id, trainerTask.trainerId)), trainerTask.trainerName || 'The trainer');
+      const declined = poDeclinedFlag(trainerJobs.find(j => j.id === jobId(p.id, tt.trainerId)), tt.trainerName || 'The trainer');
       if (declined) flags.unshift({ level: 'danger', text: declined });
-    }
+    });
+    const trainerTask = leadTrainerTask<any>(cl.tasks || []);
     // The trainer sent the training report (2026-10-21): check it and mark it ready for HR.
     const report = reportFlag(trainingReports.find(r => r.dealId === p.id), trainerTask?.trainerName || 'The trainer');
     if (report) flags.push({ level: 'attention', text: report });

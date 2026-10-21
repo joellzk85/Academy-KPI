@@ -350,7 +350,7 @@ function todos(info: any) {
     if ((t.po.length || t.poAuto) && !t.poAcceptedAt && !t.poDeclined && !t.ended) out.push({ text: `Accept the PO for ${t.programme} (${when(t)})`, tab: 'trainings' });
     const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
     if (t.started && !allPaid && (!t.claim || t.claim.status === 'returned')) out.push({ text: `${t.claim ? 'Fix and resend' : 'Request'} your fee for ${t.programme} (${when(t)})`, tab: 'trainings' });
-    if (t.ended && (!t.report || t.report.status === 'draft' || t.report.status === 'returned')) out.push({ text: `${t.report?.status === 'returned' ? 'Fix and resend' : 'Write'} the training report for ${t.programme} (${when(t)})`, tab: 'trainings' });
+    if (t.ended && !t.coTrainer && (!t.report || t.report.status === 'draft' || t.report.status === 'returned')) out.push({ text: `${t.report?.status === 'returned' ? 'Fix and resend' : 'Write'} the training report for ${t.programme} (${when(t)})`, tab: 'trainings' });
   });
   if (!info.payment.accountNo && !info.payment.pending) out.push({ text: 'Add your bank details so we can pay you', tab: 'payment' });
   if (!info.payment.tin) out.push({ text: 'Add your tax identification number (TIN)', tab: 'payment' });
@@ -460,7 +460,7 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
     <article className={`${card} space-y-4`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-lg font-bold">{t.programme}</h3>
+          <h3 className="text-lg font-bold">{t.programme}{t.coTrainer && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 align-middle text-xs font-medium text-ink-soft">Co-trainer</span>}</h3>
           {t.client && <p className="text-[15px]">{t.client}</p>}
           <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-soft"><CalendarDays className="h-4 w-4" /> {when(t)}</p>
           {t.movedFrom && !t.cancelled && <p className="text-sm font-semibold text-attention">Date changed (was {isoDay(t.movedFrom)})</p>}
@@ -539,8 +539,8 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
         {claiming && <ClaimForm t={t} trainerId={trainerId} onCancel={() => setClaiming(false)} onDone={async () => { setClaiming(false); await reload(); }} />}
       </div>
 
-      {/* Training report (2026-10-21) */}
-      {!t.cancelled && (
+      {/* Training report (2026-10-21); a co-trainer's lead trainer writes it (2026-10-22) */}
+      {!t.cancelled && !t.coTrainer && (
         <div className="rounded-xl border border-line p-3">
           <p className="text-sm font-semibold">Training report</p>
           {t.report?.status === 'returned' && <p className="mt-2 rounded-lg bg-attention-soft px-3 py-2 text-sm"><strong>Please fix and send again:</strong> {t.report.returnNote || 'NEXT Academy asked for changes.'}</p>}

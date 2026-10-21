@@ -16,7 +16,7 @@ import { addDealHistory } from './serverDocLinks';
 import { cleanProfile, profileProblem } from './src/lib/trainerLinks';
 import { DOC_KINDS } from './src/lib/trainerProfile';
 import { dealStage, todayIso, trainingDateText, trainingDays, trainingEndDate } from './src/lib/deals';
-import { effectiveVenue } from './src/lib/checklist';
+import { effectiveVenue, isCoTrainer, isLeadTrainer } from './src/lib/checklist';
 import { cancelledTraining, lastMove } from './src/lib/trainingChange';
 import { isDeletedRecord, ownedByTeam } from './src/lib/linked';
 import {
@@ -75,7 +75,11 @@ async function myTrainings(db: Firestore, trainerId: string) {
   const teamIds = new Set(team.docs.map(d => d.id));
   const mine = lists.docs
     .map(d => ({ dealId: d.id, data: d.data() as any }))
-    .map(c => ({ ...c, task: (c.data.tasks || []).find((t: any) => t.kind === 'trainer' && t.trainerId === trainerId) }))
+    .map(c => {
+      // A Co-trainer step (2026-10-22) counts the same; only the lead trainer writes the training report.
+      const steps = (c.data.tasks || []).filter((t: any) => t.kind === 'trainer' && t.trainerId === trainerId && !(isCoTrainer(t) && t.needed === false));
+      return { ...c, task: steps.find(isLeadTrainer) || steps[0] };
+    })
     .filter(c => c.task);
   const out: any[] = [];
   for (const c of mine) {
@@ -157,6 +161,7 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
       start, end: trainingEndDate(deal), days: trainingDays(deal),
       venue: venueOn ? { name: venue.name, region: venueRec?.region || '' } : null,
       confirmed: !!task.done,
+      coTrainer: isCoTrainer(task),
       po: files.map(f => ({ id: f.id, name: f.name, at: f.at })),
       poAuto: !files.length && lines.length && !cancelled
         ? buildPo({ deal: { ...deal, courseName: deal.courseName || programme }, dates: trainingDateText(deal, true), date: today, trainer, client, venue: venueOn ? venue.name : '',
@@ -509,7 +514,8 @@ export function registerTrainerPortalRoutes(app: Express) {
   // trainer sees their changes not sent yet (trainerDraft) on top of what they sent.
   app.post('/api/portal/report/get', route(async req => {
     const { db, trainerId, trainer: t } = await trainerFrom(req);
-    const { deal, checklist } = await assigned(db, trainerId, req.body?.dealId);
+    const { deal, checklist, task } = await assigned(db, trainerId, req.body?.dealId);
+    if (isCoTrainer(task)) throw new UserError(403, 'not-yours', 'The lead trainer writes the training report for this training.');
     const seed = await reportSeed(db, deal, checklist);
     const saved: any = (await db.collection('training_reports').doc(deal.id).get()).data();
     const mine = saved && saved.trainerId === trainerId ? saved : null;
@@ -529,7 +535,8 @@ export function registerTrainerPortalRoutes(app: Express) {
   // report goes back to "submitted" (its "Training report" step unticked) for the team to check again.
   app.post('/api/portal/report/save', route(async req => {
     const { db, trainerId, trainer: t } = await trainerFrom(req);
-    const { deal } = await assignedLive(db, trainerId, req.body?.dealId);
+    const { deal, task } = await assignedLive(db, trainerId, req.body?.dealId);
+    if (isCoTrainer(task)) throw new UserError(403, 'not-yours', 'The lead trainer writes the training report for this training.');
     const start = String(deal.trainingDate || '').slice(0, 10);
     if (!start || start > todayIso()) throw new UserError(400, 'too-early', 'You can write the report once the training has started.');
     const ref = db.collection('training_reports').doc(deal.id);

@@ -20,7 +20,7 @@ import TrainingDaysPicker from './TrainingDaysPicker';
 import { FollowUpAlert, alertText, followUpAlert, followUpNotes } from '../lib/followUps';
 import { AlertLine, FollowUpForm, FollowUpList, followUpCountText } from './FollowUps';
 import { GapsBox, MarkWonBox } from './DealGates';
-import { Picked, dealVenue, progress } from '../lib/checklist';
+import { Picked, coTrainerShort, coTrainerText, dealVenue, progress } from '../lib/checklist';
 import DealChecklist from './DealChecklist';
 import HrdcQueries from './HrdcQueries';
 import DealAppointmentBox from './DealAppointmentBox';
@@ -1041,6 +1041,7 @@ function DealPanel(props: {
   const canUndoWin = props.viewer.role !== 'rep';
   const isHrdcDeal = p.fundingType === 'hrdc' || p.fundingType === 'hrdc_topup';
   const grantBlock = grantBlockReason(p, props.programme);
+  const coShort = coTrainerShort(p, props.checklist?.tasks);
   const newest = (list: any[]) => [...list].sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)))[0];
   const sentQuote = newest(props.quotes.filter(q => q.status === 'sent'));
   const draftQuote = newest(props.quotes.filter(q => q.status !== 'sent'));
@@ -1284,6 +1285,12 @@ function DealPanel(props: {
 
       {st !== 'lost' && grantBlock && (
         <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">HRDC: {grantBlock}</p>
+      )}
+      {/* Co-trainer reminder (2026-10-22): HRDC allows 50 pax per trainer. A reminder only, never a block. */}
+      {st !== 'lost' && coShort && (
+        <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm">
+          <strong>Co-trainer reminder.</strong> {coTrainerText(coShort)} {st === 'won' ? 'Admin chooses the co-trainer on the Co-trainer step, or answers No if it isn\'t needed.' : 'Remember the co-trainer fee in the quotation.'}
+        </p>
       )}
 
       <div className="divide-y divide-line rounded-2xl border border-line">
