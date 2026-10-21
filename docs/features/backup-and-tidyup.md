@@ -1,0 +1,49 @@
+# Data backup and tidy-up
+
+Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agreed. Read only when working on this area.
+
+- **Tidy-up (done and pushed 2026-10-16):**
+  - Removed every fallback to made-up sample deals ("Petronas Digital", "Maybank HQ", ...). They were in Home, Management, the rep workspace and the "URGENT" notices in `App.tsx`. Deals now come only from the live database (`pipelinesSync`).
+  - Replaced hardcoded staff ids: Admin Records editing is now `rep.role === 'admin'` (it was two named ids, so new admins couldn't edit), and the quotation tag list uses the real team.
+  - Deleted the retired payment screens (`ClientPaymentManager.tsx`, the "Raise Payment" block, `payments` state and sync in `RepDetailDashboard.tsx`).
+  - `npm audit fix` cut the warnings from 13 to 4. The remaining 4 are `@grpc/grpc-js` inside the Firebase SDK, in a part used only on servers, not in the browser. npm's "fix" would downgrade Firebase to v9 and break the app, so don't apply `--force`.
+  - Faster loading: the big screens are `React.lazy` in `App.tsx`, and `vite.config.ts` splits firebase, react and vendor code into separate files. The login page now downloads about 1.08 MB instead of 1.75 MB (gzip about 293 KB instead of 430 KB). Firebase (527 KB) is the largest remaining file; the size warning for it is expected.
+  - Left on purpose: the hidden demo course-outline template owned by `'xin-ying'` in `CourseOutlineGenerator.tsx` (nobody can see it), and localStorage cache key names containing an email (they only name a browser cache).
+
+- **Data backup (built 2026-10-17; Joel chose a daily copy to a Google Sheet plus manual buttons, for Admin and Management):** Admin work → **Backup** (`src/components/BackupPanel.tsx`).
+  - **What is copied:** every list in the database, found automatically (`listCollections`), one tab per list with friendly names (`LIST_NAMES` in `src/lib/backup.ts`), plus a "Backup info" tab (when, who, why, records per list). One row per record, `id` first, then fields A–Z; dates as text; lists and nested details as JSON text.
+    - **Never copied:** `secrets`, `auth_map`, `calendar_sync`, `user_prefs`, config docs `passwords`, `google_calendar`, `backup_settings`, and any field whose name contains password, secret, token, hash or salt (wherever it appears, e.g. old `reps` records).
+  - **Google Sheet copy** (`serverBackup.ts`): the server uses the App Hosting service account (as the calendar does) with the Sheets scope. Each run adds missing tabs, sizes each tab to its data, clears it and rewrites it (values written as plain text, so nothing becomes a formula). Tabs from an earlier backup whose list is now empty say "No records at this backup". Earlier days are in the sheet's own **File → Version history**.
+  - **When:** once a Malaysian day, the first time Admin or Management opens the CRM (`runBackup(false)` in `App.tsx`; the server skips if already done that day, and waits an hour after a failed automatic try). **Back up to Google Sheet now** forces a run. A day nobody from Admin or Management opens the CRM has no copy.
+  - **Download Excel file:** the same tables as an `.xlsx` (`exceljs` 4.4.0, pinned), built on the server and downloaded straight away, named `NEXT-Academy-CRM-backup-YYYY-MM-DD_HHMM.xlsx` (Malaysia time). Works without the Google Sheet set up.
+  - Routes: `/api/backup/status`, `/api/backup/settings` (paste the sheet link; tested before saving; blank = disconnect), `/api/backup/run`, `/api/backup/download`. All Admin and Management only. Settings and last result are in `config/backup_settings`, written only by the server.
+  - **Joel's one-time setup:** 1) enable the **Google Sheets API** in project gen-lang-client-0779528352; 2) make a blank Google Sheet and share it as **Editor** with the service account address shown in the Backup tab (`firebase-app-hosting-compute@gen-lang-client-0779528352.iam.gserviceaccount.com`); 3) paste the sheet link and click Save and test. **Rules need publishing** (`backup_settings` added to the server-only config docs).
+  - It doesn't restore by itself: if data is ever lost, Claude can load it back from the sheet or the Excel file.
+  - `npm audit` now also lists `uuid` (moderate) inside exceljs. It only affects uuid v3/v5/v6 with a buffer, which exceljs doesn't use; `--force` would downgrade exceljs, so don't.
+- **Still open from the tidy-up:**
+  - **Old "P&L" tab retired** (Joel, 2026-10-16): its button, screen and demo-data writer were removed, and a saved 'pl' tab redirects to Deals. Its state and handlers (`projectPLs`, `getDefaultProjectPLs`, tabulation helpers) are still in `RepDetailDashboard.tsx` but can no longer be reached. Delete them during the screen redesign. Old `project_pls` data stays until cleared in Data tools. It was replaced on 2026-10-17 by Management → Project P&L (see above), which is calculated from the deals' money, not typed.
+  - **"Admin work" moved (Joel, 2026-10-16):** it is no longer in the top bar. It is a shortcut on My home, shown only to Admin and Management, with a "Back to My home" link.
+  - **Admin records removed (Joel, 2026-10-17: redundant with Admin work):** the "Admin records" item in an Admin's workspace menu is replaced by an **"Admin work"** link (`admin_work` in `WorkspaceMenu.tsx`, `onOpenAdminWork` from `App.tsx`) that opens Admin work. The old screen still showed once on Atiqa's page, so it was **deleted** (`AdminRecordManager.tsx` removed). Any retired tab (`RETIRED_TABS` in `RepDetailDashboard.tsx`: admin_record, pl, payment, client_payments, appointments) now shows Deals, however it was reached. Old `admin_records` data stays until cleared in Data tools.
+  - Redesign the remaining old cramped screens in the new style.
+
+- **Phase 4B:** ideas for more My home cards can come from how the team uses it.
+
+### Data policy (agreed)
+
+- **Keep:** clients, venues (`venues_directory`), trainers (`trainers_directory`), quotations, deals (`pipelines`), course outlines.
+- **Clear (only via the Data tools button, Joel clicks it himself):** appointments, admin_records, payments, client_payments, events, project_pls, links, and old `reps` docs from the previous login system.
+- **Decided 2026-10-17:** **tasks** were taken off the clear list because the new To-do screen uses them.
+- **Decided 2026-10-16:** Joel keeps only **KPI history (`month_kpis`)** from the old clear list, so it was removed from `DataTools.tsx`. Everything else on the list is cleared, including calendar events, tasks and saved links, even though those screens still exist; they just start empty.
+
+## 5. Status
+
+### Done
+- **Phase 1:** repair of damaged files, roles, Team tab, removal of template screens.
+- **Login update:** server-checked passwords, no emails.
+- **Phase 2A** (commit `5c241f7`): Deals screen with stages and gates, client picker with quick add, funding type, quotations and outlines created from deals, KPI templates, deal-based KPIs counted by won date, per-person-per-month KPI storage, Data tools, and deal-ownership database rules (published).
+
+- **Phase 2B** (pushed 2026-10-16, see section 6): admin checklist on won deals (including after-training steps JD14, certificates, training report, output assessment), Admin work queue with red flags, editable master task list, Admin can see and edit all quotations, new rules. Live, rules published, tested OK by Joel. Reps see checklists read-only (Joel confirmed, see section 6).
+
+- **Phase 3** (pushed 2026-10-16, see section 6b): money in and out per deal, cross-approval, P&L per deal, money flags, Admin work → Money. Live, rules published, tested OK by Joel ("all okay").
+- **Phase 2C** (pushed 2026-10-16, see section 6a): programme list with HRDC registration, HRDC queries, grant gate. Live, rules published, tested OK by Joel ("ok can").
+

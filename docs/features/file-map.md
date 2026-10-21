@@ -1,0 +1,48 @@
+# Where things live (full file map)
+
+Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agreed. Read only when working on this area.
+
+## 4. Where things live
+
+- `src/lib/deals.ts`: deal stages, funding types, date and value helpers. Deals are stored in the `pipelines` collection. Fields added in 2A: `stage`, `appointmentDate`, `wonDate`, `lostDate`, `lostReason`, `fundingType`, `clientId`, `history[]`. Old `status` (Pending/Won/Lost) is kept in step for the older screens.
+- `src/lib/kpi.ts`: KPI templates and counting. **Closing RM counts in the month a deal is won**, and only for the deal owner (not tagged helpers).
+- `src/components/DealsBoard.tsx`: the Deals screen (in each workspace's "Deals" tab).
+- `src/components/TeamManager.tsx`: Team tab, including the KPI set and targets per person.
+- `src/components/DataTools.tsx`: Management → Data tools (link old records, clear old data).
+- `src/App.tsx`: login gate and the main app; `representatives` are built from Team plus `reps/{id}` (KPI template and targets) plus `month_kpis/{id}_{MMM-YY}` (typed weekly numbers).
+- `src/components/RepDetailDashboard.tsx`: the rep workspace, about 6,700 lines of older code. Edit surgically.
+- `src/lib/checklist.ts`: admin checklist rules (default tasks, which tasks apply, gates before ticking, red flags).
+- `src/components/DealChecklist.tsx`: the checklist on a won deal (used in the Deals panel and the work queue).
+- `src/components/WorkQueue.tsx`: the "Admin work" top tab (Admin and Management): work queue and the master "Checklist tasks" list.
+- `src/components/DealGates.tsx`: the "missing details" box (`GapsBox`) and the mark-won box (`MarkWonBox`, `markDealWon`), shared by the deal panel, the Deals list and the quotation editor.
+- `src/lib/followUps.ts`, `src/lib/useFollowUpRules.ts`, `src/components/FollowUps.tsx`, `FollowUpAlerts.tsx`, `FollowUpRulesPage.tsx`, `LostDeletedPage.tsx`: follow-up rules, notes and alerts, and Management → Lost and deleted (see "Follow-ups, lost reasons and deleted deals").
+- `src/lib/dealHold.ts`, `src/components/DealHold.tsx`: putting a deal on hold (see "On hold" in Later phases).
+- `src/lib/dealDocs.ts`: builds a draft quotation from a deal (shared by the rep workspace and the work queue).
+- `src/lib/useAutoSave.ts` (documents save themselves as drafts), `src/lib/useFormDraft.ts` and `src/components/DraftBar.tsx` (unfinished forms kept in the browser): see "Drafts save themselves" in Later phases. **Any new editor or form should use one of them.**
+- `src/lib/docRefs.ts`, `src/components/CustomerCodeBox.tsx`: customer codes and reference numbers (see "Customer codes and reference numbers" in Later phases).
+- `src/lib/dealQuotes.ts`: several quotations per deal and "other items" quotations (`isItemsOnly`, `quoteDealAmount`, `countedTotal`; see "Several quotations per deal" in Later phases).
+- `src/lib/touchPoints.ts`, `src/lib/useClientHistory.ts`, `src/components/ClientContactDot.tsx`: client history (touch points timeline, last touch point, colour dot, client follow-ups; see "Client history").
+- `serverBackup.ts`, `src/lib/backup.ts`, `src/lib/backupApi.ts`, `src/components/BackupPanel.tsx`: the data backup (Admin work → Backup; daily Google Sheet copy and Excel download).
+- Collections added in 2B: `deal_checklists/{dealId}` (one per won deal: `tasks[]`, `history[]`), and `config/checklist_tasks` (master task list and `flagDays`).
+- `src/lib/programmes.ts`: programme HRDC status, HRDC query helpers, and `grantBlockReason` (an HRDC deal's grant can't be ticked until its programme is HRDC approved).
+- `src/components/Programmes.tsx`: the programme picker on the deal form (with quick add) and Admin work → Programmes.
+- `src/components/HrdcQueries.tsx`: HRDC queries on a deal (Deals panel and work queue).
+- Teambuilding proposal (push A1, 2026-10-19; see "Teambuilding proposal" in Later phases): `src/lib/teambuilding.ts` (types, defaults, price bands, `resolveTb`), `src/components/TeambuildingPage.tsx` (list, editor, preview), `TeambuildingSite.tsx` (the website), `TeambuildingLibrary.tsx` (Activity library, Package template), `TeambuildingParts.tsx` (package editor, activity form), `PhotoPicker.tsx` (photo uploads), `src/lib/tbPdf.ts` (PDF), `serverPhotos.ts` (photos for the PDF). Collections `teambuilding_proposals/{id}`, `tb_activities/{id}`, `tb_settings/package_template`; storage `photos/{activities|trainers|venues|covers}/{id}.jpg`.
+- Teambuilding proposal links (push B, 2026-10-19; see "Teambuilding proposal links" in Later phases): `serverProposalLinks.ts` (the client page's routes), `serverDocLinks.ts` (make / extend / revoke, shared with quotation and outline links), `src/lib/proposalTracking.ts` (expiry, visits, summaries, who sees tracking), `src/lib/useProposalLinks.ts`, `src/lib/useProposalSettings.ts`, `src/components/ProposalLinkPage.tsx` (the client's page, /p/<token>), `ProposalTracking.tsx` (deal panel), `ProposalActivity.tsx` (My home card), `DocLinkBox.tsx` (link box, `ExpiryPicker`). Collections `doc_links` (kind `teambuilding`) and `proposal_views/{visitId}`; setting `config/proposal_settings`.
+- Client link tracking and protection (2026-10-20; see "Client link tracking" in Later phases): `src/lib/linkTracker.ts` (the tracker on every client page), `src/components/LinkGuard.tsx` (no print / copy / download, watermark, blur), `serverLinkVisits.ts` (`/api/link-visit`, `/api/link-preview`), `src/lib/proposalTracking.ts` (cleaning, merging, summaries, Hot / Warm / Cold, who sees it), `ProposalTracking.tsx` (deal panel "Client links", `LinkUsage`), `LinkHeatmap.tsx` (heatmap), `PhoneFrame.tsx` (phone-width preview, shared with the teambuilding Preview).
+- After training to Case closed (2026-10-20; see "After training, one journey" in Later phases): `src/lib/postTraining.ts` (the journey, Case closed, reminders), `src/components/AfterTraining.tsx` (the deal's "After training" section), `src/components/PaymentReceipts.tsx` (receipt upload, list, `useReceipts`). Collection `payment_receipts/{id}`; storage `receipts/{id}_{name}`.
+- Blueprint import and Payment tracking (2026-10-20; see "Blueprint import and Payment tracking" in Later phases): `serverBlueprint.ts` (reads the Excel file), `src/lib/blueprint.ts` (reading the sheets, matching, the import plan), `src/components/BlueprintImport.tsx` (Management → Data tools), `src/lib/paymentTracking.ts`, `src/components/PaymentTracking.tsx` (Management → Payment tracking). Collection `payment_records/{id}`; programmes gained `category`, `days`; venues gained `region`, `quotationDate`.
+- Collections added in 2C: `programmes/{id}` (name, `hrdcStatus` not_registered/submitted/approved, `hrdcCode`, dates, notes) and `hrdc_queries/{id}` (`dealId`, `phase` before/during/after, question, received date, `replyBy`, handler, `answeredDate`, answer). Deals gained `programmeId`; `courseName` is kept in step with the programme name (including after a rename) for older screens.
+
+
+
+## 3. Technical setup
+
+- **Code:** React 19 + Vite + Tailwind v4 front end in `src/`; Express server in `server.ts` with login routes in `serverAuth.ts` (renamed from `.tsx` in Phase 2A).
+- **Database:** Firebase Firestore, project `gen-lang-client-0779528352`, default database.
+- **Hosting:** Firebase App Hosting, backend `nextacademy2`. It **builds and deploys automatically from GitHub `main`**. Live site: https://nextacademy2--gen-lang-client-0779528352.asia-southeast1.hosted.app
+- **GitHub is the master copy:** https://github.com/joellzk85/Academy-KPI. Google AI Studio is no longer used and must never be used to edit again (it can't pull, and saving from it would overwrite newer work).
+- **Build check:** `npm install` then `npm run build`. Since 2026-10-17 `@types/react` is installed (through `@types/react-grid-layout`), so the old `key` prop type errors are gone. `npx tsc --noEmit` now shows only 2 warnings, in the unused old `handleCellChange` in `RepDetailDashboard.tsx` (delete it in a tidy-up). Vite ignores type errors.
+- **Database rules:** `firestore.rules` in the repo must be **published manually** in the Firebase console (Firestore Database, Rules, paste, Publish) after the matching code is live. Walk Joel through it, and remind him whenever rules change. Rules changes must be published after the new build is live, never before.
+- **Commits:** author `joellzk85 <lzk.joel@gmail.com>` is set for this repo. Joel pushes via PowerShell from `C:\Users\Joel\Documents\CRM` if your push needs his GitHub sign-in.
+
