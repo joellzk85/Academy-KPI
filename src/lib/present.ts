@@ -11,6 +11,7 @@ import {
   FUNDING_LABELS, FundingType, OPEN_STAGES, DealStage, trainingEndDate,
 } from './deals';
 import { followUpNotes } from './followUps';
+import type { KpiSources } from './kpi';
 import { expectedFor, isPaid, MoneyIn, MoneySettings } from './money';
 
 // ---------- Periods ----------
@@ -145,6 +146,7 @@ export interface PresentData {
   tasks: any[];
   ins: MoneyIn[];
   venues: any[];
+  kpi?: KpiSources;          // everything the KPI scorecard counts from (lib/useKpiSources.ts)
 }
 
 const ymd = (v: any): string => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : '');

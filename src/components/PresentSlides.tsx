@@ -1,7 +1,8 @@
 import React from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, GraduationCap, ListTodo, PhoneCall, UserCheck } from 'lucide-react';
 import { Representative } from '../types';
-import { KPI_LIGHT_BADGE, kpiBarClass, kpiLight, monthKpi, monthLabel, monthPrefix, weekIndexOf } from '../lib/kpi';
+import { closingMetric, KPI_LIGHT_BADGE, kpiLight, kpiValueText, LIGHT_BADGE, monthKpi, monthLabel, monthPrefix, rowBarClass, weekIndexOf } from '../lib/kpi';
+import { LIGHT_LABELS } from '../lib/kpiLibrary';
 import { addDays, dealAppointmentDate, dealNeedsAttention, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, trainingDateText } from '../lib/deals';
 import { HOW_LABELS } from '../lib/followUps';
 import { MoneySettings } from '../lib/money';
@@ -14,7 +15,6 @@ import {
 import { ProjectionSlide } from './SalesProjection';
 import { LoginHeatmap } from './LoginCharts';
 import { LoginRules, formatMinutes, heatColumns, lastWorkDays, loginLight } from '../lib/loginActivity';
-import { metricsFor } from '../lib/kpi';
 import { Bars, compactRM, Donut, DayHeatmap, Empty, Funnel, MatrixHeatmap, Panel, Ring, StatCard } from './PresentCharts';
 
 // The slides of the weekly presentation (lib/present.ts has the counting and the slide lists).
@@ -96,22 +96,29 @@ export function personSlides(args: {
 
   for (const key of keys) {
     if (key === 'scorecard') {
-      const { rows, score } = monthKpi(rep, data.deals, month, { claims: data.ins, venues: data.venues });
+      const { rows, score } = monthKpi(rep, data.deals, month, data.kpi || { claims: data.ins, venues: data.venues });
       out.push({
         key, title: 'KPI scorecard', subtitle: monthLabel(month),
         body: (
           <div className="grid items-center gap-6 lg:grid-cols-[auto_1fr]">
             <div className="flex justify-center"><Ring pct={score} label={`${score}%`} sub="KPI score" size={220} /></div>
             <div className="space-y-4">
-              {rows.map(({ m, total, pct }) => (
-                <div key={m.key}>
-                  <div className="flex flex-wrap justify-between gap-2 text-[15px]">
-                    <span className="font-bold">{m.label} <span className="font-normal text-ink-soft">({Math.round(m.weight * 100)}%)</span></span>
-                    <span className="tabular-nums text-ink-soft"><strong className="text-ink">{m.isRM ? formatRM(total) : total}</strong> of {m.isRM ? formatRM(m.targetVal) : m.targetVal} · {pct}%</span>
+              {rows.map(row => {
+                const { m, total, pct, hasData, light } = row;
+                return (
+                  <div key={m.key}>
+                    <div className="flex flex-wrap justify-between gap-2 text-[15px]">
+                      <span className="font-bold">{m.label} <span className="font-normal text-ink-soft">({Math.round(m.weight * 100)}%)</span></span>
+                      <span className="tabular-nums text-ink-soft">
+                        {!hasData ? 'No data this month' : m.scoring === 'bands'
+                          ? <><strong className="text-ink">{kpiValueText(m, total, formatRM)}</strong> <span className={`ml-1 rounded-full px-2 py-0.5 text-sm font-bold ${LIGHT_BADGE[light]}`}>{LIGHT_LABELS[light]}</span></>
+                          : <><strong className="text-ink">{kpiValueText(m, total, formatRM)}</strong> of {kpiValueText(m, m.targetVal, formatRM)} · {pct}%</>}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 h-4 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${rowBarClass(row)}`} style={{ width: `${hasData ? Math.max(pct, 3) : 0}%` }} /></div>
                   </div>
-                  <div className="mt-1.5 h-4 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${kpiBarClass(pct)}`} style={{ width: `${pct}%` }} /></div>
-                </div>
-              ))}
+                );
+              })}
               {rows[0] && (
                 <Bars animate={animate} height={170} money={rows[0].m.isRM} data={rows[0].weeks.map((v, w) => ({ label: `Week ${w + 1}`, v }))} bars={[{ key: 'v', name: rows[0].m.label }]} />
               )}
@@ -189,7 +196,7 @@ export function personSlides(args: {
       out.push({
         key, title: 'Sales projection', subtitle: 'Won and expected, month by month',
         body: <ProjectionSlide deals={data.deals} ownerId={rep.id} today={today} clientName={p => clientNameOf(p, data.clients)} storeKey={`present:${rep.id}`}
-          monthlyTarget={metricsFor(rep).find(m => m.key === 'salesFigure' && m.auto === 'won')?.targetVal || 0} />,
+          monthlyTarget={closingMetric(rep)?.targetVal || 0} />,
       });
     } else if (key === 'next') {
       const until = addDays(today, 7);
@@ -324,7 +331,7 @@ export function companySlides(args: {
     } else if (key === 'team') {
       const rows = reps.map(r => {
         const n = personNumbers(data, r.id, period);
-        return { label: r.name, id: r.id, wonRM: n.wonRM, won: n.won, proposals: n.proposals, appointments: n.appointments, touches: n.touches, score: monthKpi(r, data.deals, month, { claims: data.ins, venues: data.venues }).score };
+        return { label: r.name, id: r.id, wonRM: n.wonRM, won: n.won, proposals: n.proposals, appointments: n.appointments, touches: n.touches, score: monthKpi(r, data.deals, month, data.kpi || { claims: data.ins, venues: data.venues }).score };
       }).sort((a, b) => b.wonRM - a.wonRM);
       out.push({
         key, title: 'Team leaderboard', subtitle: `${period.label} · KPI score for ${monthLabel(month)}`,
@@ -363,7 +370,7 @@ export function companySlides(args: {
       out.push({
         key, title: 'Sales projection', subtitle: 'The whole team: won and expected, month by month',
         body: <ProjectionSlide deals={data.deals} today={today} clientName={p => clientNameOf(p, data.clients)} storeKey="present:company"
-          monthlyTarget={reps.reduce((t, r) => t + (metricsFor(r).find(m => m.key === 'salesFigure' && m.auto === 'won')?.targetVal || 0), 0)} />,
+          monthlyTarget={reps.reduce((t, r) => t + (closingMetric(r)?.targetVal || 0), 0)} />,
       });
     } else if (key === 'clients') {
       const top = wonBy(data.deals, period, p => clientNameOf(p, data.clients)).slice(0, 8);

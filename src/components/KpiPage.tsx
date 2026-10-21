@@ -4,7 +4,8 @@ import { Check, HandHelping, Loader2, Pencil, Presentation, UserCheck } from 'lu
 import PresentPage from './PresentPage';
 import { db } from '../lib/firebase';
 import { Representative } from '../types';
-import { AUTO_SOURCE_LABELS, kpiBarClass, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, takesTyped, weekIndexOf } from '../lib/kpi';
+import { KpiRow, kpiValueText, LIGHT_BADGE, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, ResolvedMetric, rowBarClass, takesTyped, weekIndexOf } from '../lib/kpi';
+import { bandsText, LIGHT_LABELS, MEASURE_INFO } from '../lib/kpiLibrary';
 import { useKpiSources } from '../lib/useKpiSources';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 import { linkedOnly } from '../lib/linked';
@@ -61,7 +62,7 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
   const [deals, setDeals] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => onSnapshot(query(collection(db, 'pipelines')), s => { setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))); setLoaded(true); }, () => setLoaded(true)), []);
-  const sources = useKpiSources();
+  const sources = useKpiSources({ months: [selectedMonth], people: reps });
 
   const isMe = !viewer || viewer.id === rep.id;
   const canEdit = isMe || (viewer && viewer.role !== 'rep');
@@ -70,11 +71,11 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
   const thisMonth = monthPrefix(selectedMonth) === todayIso().slice(0, 7);
 
   // Shared with Management's Team performance (lib/kpi.ts), so both show the same numbers.
-  const { rows, score } = monthKpi(rep, deals, selectedMonth, sources);
+  const { rows, score } = monthKpi(rep, deals, selectedMonth, { ...sources, people: reps });
   const typed = metrics.filter(takesTyped);
 
   const save = (changes: Record<string, any>) => onUpdateRepKpi(rep.id, { ...JSON.parse(JSON.stringify(rep.kpi || {})), ...changes });
-  const fmt = (isRM: boolean, v: number) => (isRM ? formatRM(v) : String(Math.round(v * 10) / 10));
+  const fmt = (m: ResolvedMetric, v: number) => kpiValueText(m, v, formatRM);
 
   // Present tab (2026-10-21): the weekly presentation, built from these same numbers.
   const [tab, setTab] = useState<'numbers' | 'present'>('numbers');
@@ -127,18 +128,7 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
           <p className="mt-4 flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Counting from deals…</p>
         ) : (
           <ul className="mt-4 space-y-3">
-            {rows.map(({ m, total, pct, autoTotal, typedTotal }) => (
-              <li key={m.key}>
-                <div className="flex flex-wrap justify-between gap-2 text-[15px]">
-                  <span className="font-semibold">{m.label} <span className="text-sm font-normal text-ink-soft">({!m.auto ? 'typed in weekly' : m.plusTyped ? `${AUTO_SOURCE_LABELS[m.auto]}, plus any typed` : AUTO_SOURCE_LABELS[m.auto]})</span></span>
-                  <span className="tabular-nums text-ink-soft">
-                    <strong className="text-ink">{fmt(m.isRM, total)}</strong> of {fmt(m.isRM, m.targetVal)} · {pct}%
-                    {m.plusTyped && typedTotal > 0 && <span className="block text-right text-xs">{fmt(m.isRM, autoTotal)} automatic + {fmt(m.isRM, typedTotal)} typed</span>}
-                  </span>
-                </div>
-                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${kpiBarClass(pct)}`} style={{ width: `${pct}%` }} /></div>
-              </li>
-            ))}
+            {rows.map(row => <KpiLine key={row.m.key} row={row} fmt={fmt} />)}
           </ul>
         )}
       </section>
@@ -150,10 +140,39 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
   );
 }
 
+// ---------- One KPI this month ----------
+// Target KPIs: "12 of 20 · 60%". Band KPIs (lib/kpiLibrary.ts): the figure and its colour, with the bands.
+function KpiLine({ row, fmt }: { row: KpiRow; fmt: (m: ResolvedMetric, v: number) => string }) {
+  const { m, total, pct, autoTotal, typedTotal, hasData, light } = row;
+  const how = !m.auto ? 'typed in weekly' : `${MEASURE_INFO[m.auto]?.label || 'automatic'}${m.plusTyped ? ', plus any typed' : ''}`;
+  return (
+    <li>
+      <div className="flex flex-wrap justify-between gap-2 text-[15px]">
+        <span className="font-semibold">{m.label} <span className="text-sm font-normal text-ink-soft">({how}) · {Math.round(m.weight * 100)}%</span></span>
+        {!hasData ? (
+          <span className="text-sm text-ink-soft">Nothing to count this month, left out of the score</span>
+        ) : m.scoring === 'bands' ? (
+          <span className="flex items-center gap-2 tabular-nums">
+            <strong>{fmt(m, total)}</strong>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LIGHT_BADGE[light]}`}>{LIGHT_LABELS[light]}</span>
+          </span>
+        ) : (
+          <span className="tabular-nums text-ink-soft">
+            <strong className="text-ink">{fmt(m, total)}</strong> of {fmt(m, m.targetVal)} · {pct}%
+            {m.plusTyped && typedTotal > 0 && <span className="block text-right text-xs">{fmt(m, autoTotal)} automatic + {fmt(m, typedTotal)} typed</span>}
+          </span>
+        )}
+      </div>
+      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${rowBarClass(row)}`} style={{ width: `${hasData ? Math.max(pct, 3) : 0}%` }} /></div>
+      {m.scoring === 'bands' && <p className="mt-1 text-xs text-ink-soft">{bandsText(m.bands, m.unit)}{m.perWeek ? ', per week' : ''}</p>}
+    </li>
+  );
+}
+
 // ---------- Weekly numbers ----------
 function WeeklyTable({ rows, typed, canEdit, kpi, fmt, onSave }: {
-  rows: { m: any; weeks: number[]; total: number }[]; typed: any[]; canEdit: boolean; kpi: any;
-  fmt: (isRM: boolean, v: number) => string; onSave: (c: Record<string, any>) => void;
+  rows: KpiRow[]; typed: ResolvedMetric[]; canEdit: boolean; kpi: any;
+  fmt: (m: ResolvedMetric, v: number) => string; onSave: (c: Record<string, any>) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, string[]>>({});
@@ -168,7 +187,7 @@ function WeeklyTable({ rows, typed, canEdit, kpi, fmt, onSave }: {
     typed.forEach(m => {
       changes[m.key] = WEEKS.map(w => {
         let v = parseFloat(draft[m.key]?.[w] || '') || 0;
-        if (/rating/i.test(m.label)) v = Math.max(0, Math.min(5, v));
+        if (m.unit === 'rating' || /rating/i.test(m.label)) v = Math.max(0, Math.min(5, v));
         return Math.max(0, v);
       });
     });
@@ -198,7 +217,7 @@ function WeeklyTable({ rows, typed, canEdit, kpi, fmt, onSave }: {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ m, weeks, total }) => {
+            {rows.map(({ m, weeks, total, weekly, hasData }) => {
               const editable = editing && takesTyped(m);
               return (
                 <tr key={m.key} className="border-b border-line last:border-0">
@@ -209,17 +228,17 @@ function WeeklyTable({ rows, typed, canEdit, kpi, fmt, onSave }: {
                         <input inputMode="decimal" value={draft[m.key]?.[w] ?? ''} aria-label={`${m.label}, week ${w + 1}`}
                           onChange={e => setDraft(d => ({ ...d, [m.key]: (d[m.key] || []).map((x, i) => (i === w ? e.target.value.replace(/[^0-9.]/g, '') : x)) }))}
                           className="w-20 rounded-md border border-line px-2 py-1 text-center focus:border-accent focus:outline-none" />
-                      ) : v ? fmt(m.isRM, v) : <span className="text-ink-soft/50">–</span>}
+                      ) : weekly && v ? (m.isRM ? formatRM(v) : String(Math.round(v * 10) / 10)) : <span className="text-ink-soft/50">–</span>}
                     </td>
                   ))}
-                  <td className="py-2.5 pl-3 text-right font-semibold tabular-nums">{fmt(m.isRM, total)}</td>
+                  <td className="py-2.5 pl-3 text-right font-semibold tabular-nums">{hasData ? fmt(m, total) : '–'}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      {editing && typed.some(m => /rating/i.test(m.label)) && <p className="mt-2 text-sm text-ink-soft">Ratings are from 1 to 5 each week.</p>}
+      {editing && typed.some(m => m.unit === 'rating' || /rating/i.test(m.label)) &&<p className="mt-2 text-sm text-ink-soft">Ratings are from 1 to 5 each week.</p>}
       {editing && typed.some(m => m.plusTyped) && (
         <p className="mt-1 text-sm text-ink-soft">
           {typed.filter(m => m.plusTyped).map(m => m.label).join(' and ')} {typed.filter(m => m.plusTyped).length > 1 ? 'are' : 'is'} counted automatically.

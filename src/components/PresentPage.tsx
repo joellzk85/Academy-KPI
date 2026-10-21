@@ -22,6 +22,7 @@ import {
   useGoogleFont, usePresentSettings,
 } from '../lib/presentTheme';
 import { useAutoSave } from '../lib/useAutoSave';
+import { useKpiSources } from '../lib/useKpiSources';
 import { addDays as addLoginDays, dayKey, useLoginData, weekStart } from '../lib/loginActivity';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
@@ -56,7 +57,8 @@ const btnPrimary = 'inline-flex items-center justify-center gap-2 rounded-lg bg-
 const btnSecondary = 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const input = 'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
 
-function usePresentData(withMoney: boolean) {
+function usePresentData(withMoney: boolean, month: string, reps: Representative[]) {
+  const kpi = useKpiSources({ months: [month], people: reps });
   const [deals, setDeals] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
@@ -92,7 +94,7 @@ function usePresentData(withMoney: boolean) {
     return () => subs.forEach(u => u());
   }, [withMoney]);
 
-  const data: PresentData = useMemo(() => ({ deals, clients, programmes, touchPoints, tasks, ins, venues }), [deals, clients, programmes, touchPoints, tasks, ins, venues]);
+  const data: PresentData = useMemo(() => ({ deals, clients, programmes, touchPoints, tasks, ins, venues, kpi: { ...kpi, people: reps } }), [deals, clients, programmes, touchPoints, tasks, ins, venues, kpi, reps]);
   return { data, loaded, outs, quotes, plDocs };
 }
 
@@ -119,7 +121,7 @@ export default function PresentPage({ viewer, person, reps, month, companyOnly }
   useGoogleFont(look.font);
   const meetings = useMeetingNotes();
   const [mode, setMode] = useState<Mode>(companyOnly || !person ? 'company' : 'me');
-  const { data, loaded, outs, quotes, plDocs } = usePresentData(isManager);
+  const { data, loaded, outs, quotes, plDocs } = usePresentData(isManager, month, reps);
   const settings = useMoneySettings();
   const prefsAll = usePresentPrefs();
   const today = todayIso();

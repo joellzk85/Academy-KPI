@@ -12,7 +12,9 @@ import { CalendarEvent, Representative } from '../types';
 import {
   OPEN_STAGES, STAGE_LABELS, DealStage, journeyStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
 } from '../lib/deals';
-import { metricsFor, countAuto, monthKpi, kpiBarClass, kpiHex } from '../lib/kpi';
+import { closingMetric, countAuto, monthKpi, kpiHex, kpiValueText, KpiSources, LIGHT_BADGE, rowBarClass } from '../lib/kpi';
+import { LIGHT_LABELS } from '../lib/kpiLibrary';
+import { useKpiSources } from '../lib/useKpiSources';
 import { periodFor } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
 import SalesProjection from './SalesProjection';
@@ -332,7 +334,14 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     return out.sort((a, b) => a.d - b.d);
   }, [clients, touchPoints, deals, quotes, viewer.id, today, people]);
 
+  // KPI sources for the My KPIs card (same counting as the KPI page).
+  const kpiSources = useKpiSources({
+    months: [`${MONTH_ABBR[Number(today.slice(5, 7)) - 1]}-${today.slice(2, 4)}`],
+    people: representatives.filter(r => r.id === viewer.id),
+  });
+
   const ctx: CardCtx = {
+    kpiSources,
     viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, receipts, programmes, representatives, venues,
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
@@ -512,8 +521,7 @@ function EditBar({ hidden, wide, onAdd, onReset, hiddenShortcuts, onAddShortcut 
 // company target is the sum of each person's (monthly target x months).
 // Inner (small) ring: sales won this month vs the monthly target.
 function salesTarget(rep: Representative): number | null {
-  const m = metricsFor(rep).find(x => x.key === 'salesFigure');
-  return m && m.auto === 'won' ? m.targetVal : null;
+  return closingMetric(rep)?.targetVal ?? null;
 }
 
 function wonBetween(deals: any[], from: string, to: string, ownerId?: string): number {
@@ -773,6 +781,7 @@ function CompactCalendar({ events, today, showFull, onToggleFull }: { events: Ca
 
 // ---------- Cards ----------
 type CardCtx = {
+  kpiSources: KpiSources;
   viewer: Viewer; today: string; deals: any[]; wonDeals: any[]; checklists: Record<string, any>; queries: HrdcQuery[];
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; receipts: Receipt[]; programmes: any[]; representatives: Representative[]; venues: any[];
   checklistSettings: any; moneySettings: any; nameOf: (id: string) => string; clientName: (p: any) => string;
@@ -993,16 +1002,20 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       if (!me) return { items: [], empty: 'You have no KPI set.' };
       const monthKey = `${MONTH_ABBR[Number(c.today.slice(5, 7)) - 1]}-${c.today.slice(2, 4)}`;
       // Same counting as the KPI page (lib/kpi.ts monthKpi).
-      const rows = monthKpi(me, c.deals, monthKey, { claims: c.moneyIn, venues: c.venues }).rows
-        .map(({ m, total }) => ({ m, value: total, p: pct(total, m.targetVal) }));
+      const rows = monthKpi(me, c.deals, monthKey, { ...c.kpiSources, people: c.representatives }).rows;
       return {
         items: [], empty: '',
         footer: (
           <ul className="space-y-3">
-            {rows.map(({ m, value, p }) => (
-              <li key={m.key}>
-                <div className="flex justify-between text-sm"><span className="font-semibold">{m.label}</span><span className="tabular-nums text-ink-soft">{m.isRM ? formatRM(value) : value} of {m.isRM ? formatRM(m.targetVal) : m.targetVal} ({p}%)</span></div>
-                <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${kpiBarClass(p)}`} style={{ width: `${Math.min(100, p)}%` }} /></div>
+            {rows.map(row => (
+              <li key={row.m.key}>
+                <div className="flex justify-between gap-2 text-sm"><span className="font-semibold">{row.m.label}</span>
+                  <span className="tabular-nums text-ink-soft">
+                    {!row.hasData ? 'No data this month' : row.m.scoring === 'bands'
+                      ? <>{kpiValueText(row.m, row.total, formatRM)} <span className={`ml-1 rounded-full px-1.5 py-0.5 text-xs font-bold ${LIGHT_BADGE[row.light]}`}>{LIGHT_LABELS[row.light]}</span></>
+                      : `${kpiValueText(row.m, row.total, formatRM)} of ${kpiValueText(row.m, row.m.targetVal, formatRM)} (${row.pct}%)`}
+                  </span></div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${rowBarClass(row)}`} style={{ width: `${row.hasData ? Math.max(row.pct, 3) : 0}%` }} /></div>
               </li>
             ))}
             <li><button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => c.nav.openWorkspace(c.viewer.id, 'kpi')}>Open my KPI page</button></li>

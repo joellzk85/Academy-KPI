@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Gauge, KeyRound, Loader2, Mail, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
 import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { AUTO_SOURCE_LABELS, KPI_TEMPLATES, templateById, defaultTemplateIdFor, metricsFor } from '../lib/kpi';
+import { defaultTemplateIdFor, hasKpis, templateById, metricsFor } from '../lib/kpi';
+import KpiSetEditor from './KpiSetEditor';
+import KpiLibraryPanel from './KpiLibraryPanel';
 import { db, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember, TeamRole, ROLE_LABELS } from '../types';
 import OutlookSetup from './OutlookSetup';
@@ -141,68 +143,23 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     }
   };
 
-  const [kpiTemplate, setKpiTemplate] = useState('');
-  const [kpiTargets, setKpiTargets] = useState<Record<string, string>>({});
-
+  // KPI set per person and the KPI library (Joel, 2026-10-22): side panels (KpiSetEditor, KpiLibraryPanel).
   // Management have no KPIs unless a KPI set is chosen for them (Joel, 2026-10-17).
-  const NO_KPIS = 'none';
+  const [kpiPerson, setKpiPerson] = useState<TeamMember | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const kpiSummary = (m: TeamMember) => {
-    const chosen = templateById(kpiDocs[m.id]?.kpiTemplate);
-    if (chosen) return chosen.name;
-    return m.role === 'management' ? 'None' : `${templateById(defaultTemplateIdFor(m.role))!.name} (default)`;
-  };
-
-  const openKpi = (m: TeamMember) => {
-    const saved = kpiDocs[m.id] || {};
-    const tplId = templateById(saved.kpiTemplate) ? saved.kpiTemplate : m.role === 'management' ? NO_KPIS : defaultTemplateIdFor(m.role);
-    const resolved = metricsFor({ id: m.id, role: m.role, kpiTemplate: saved.kpiTemplate, targets: saved.targets });
-    const t: Record<string, string> = {};
-    resolved.forEach(x => { t[x.key] = String(x.targetVal); });
-    setKpiTemplate(tplId);
-    setKpiTargets(t);
-    setDialogError('');
-    setDialog({ kind: 'kpi', member: m });
-  };
-
-  const chooseTemplate = (id: string) => {
-    setKpiTemplate(id);
-    const t: Record<string, string> = {};
-    templateById(id)?.metrics.forEach(x => { t[x.key] = String(x.defaultTarget); });
-    setKpiTargets(t);
-  };
-
-  const saveKpi = async () => {
-    if (!dialog || dialog.kind !== 'kpi') return;
-    if (kpiTemplate === NO_KPIS) {
-      setDialogBusy(true);
-      try {
-        await setDoc(doc(db, 'reps', dialog.member.id), { kpiTemplate: '' }, { merge: true });
-        flash('ok', `${dialog.member.name} has no KPIs.`);
-        closeDialog();
-      } catch (err) {
-        setDialogError(friendlyError(err));
-        setDialogBusy(false);
-      }
-      return;
+    const saved = kpiDocs[m.id];
+    if (!hasKpis(saved, m.role)) return 'None';
+    if (saved?.kpiSet?.items?.length) {
+      const n = metricsFor({ id: m.id, role: m.role, kpiSet: saved.kpiSet }).length;
+      return `Own set, ${n} KPI${n === 1 ? '' : 's'}`;
     }
-    const tpl = templateById(kpiTemplate);
-    if (!tpl) return setDialogError('Choose a KPI set.');
-    const targets: Record<string, number> = {};
-    for (const m of tpl.metrics) {
-      const v = Number(kpiTargets[m.key]);
-      if (!Number.isFinite(v) || v <= 0) return setDialogError(`Enter a target above 0 for ${m.label}.`);
-      targets[m.key] = v;
-    }
-    setDialogBusy(true);
-    try {
-      await setDoc(doc(db, 'reps', dialog.member.id), { kpiTemplate: tpl.id, targets }, { merge: true });
-      flash('ok', `${dialog.member.name}'s KPIs have been saved.`);
-      closeDialog();
-    } catch (err) {
-      setDialogError(friendlyError(err));
-      setDialogBusy(false);
-    }
+    const chosen = templateById(saved?.kpiTemplate);
+    return chosen ? chosen.name : `${templateById(defaultTemplateIdFor(m.role))!.name} (default)`;
   };
+  const usedBy = (kpiId: string) => activeMembers
+    .filter(m => (kpiDocs[m.id]?.kpiSet?.items || []).some((i: any) => i.kpiId === kpiId))
+    .map(m => m.name);
 
   const roleOrder: Record<TeamRole, number> = { management: 0, admin: 1, rep: 2 };
   const activeMembers = useMemo(
@@ -349,11 +306,16 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
 
   return (
     <div className="space-y-6 font-sans text-ink">
-      <div>
-        <h2 className="text-xl font-bold">Team</h2>
-        <p className="mt-1 max-w-2xl text-[15px] leading-relaxed text-ink-soft">
-          This is the only place people are added or removed. Names here appear on the login screen and in every dropdown across the CRM.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Team</h2>
+          <p className="mt-1 max-w-2xl text-[15px] leading-relaxed text-ink-soft">
+            This is the only place people are added or removed. Names here appear on the login screen and in every dropdown across the CRM.
+          </p>
+        </div>
+        <button type="button" className={secondaryBtn} onClick={() => setLibraryOpen(true)}>
+          <Gauge className="h-3.5 w-3.5" /> KPI library
+        </button>
       </div>
 
       {notice && (
@@ -408,7 +370,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                       <option value="admin">{ROLE_LABELS.admin}</option>
                       <option value="management">{ROLE_LABELS.management}</option>
                     </select>
-                    <button type="button" className={secondaryBtn} onClick={() => openKpi(m)}>
+                    <button type="button" className={secondaryBtn} onClick={() => setKpiPerson(m)}>
                       <Gauge className="h-3.5 w-3.5" /> KPIs
                     </button>
                     <button type="button" className={secondaryBtn} onClick={() => openEmail(m)}>
@@ -505,55 +467,13 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
       <LoginLog currentMember={currentMember} members={activeMembers} />
 
       {/* Dialogs */}
-      {dialog && dialog.kind === 'kpi' && (
-        <Dialog title={`KPIs for ${dialog.member.name}`} onClose={closeDialog}>
-          <p className="mb-3 text-[15px] leading-relaxed text-ink-soft">Choose the KPI set, then adjust the monthly targets. KPIs marked "from deals" are counted automatically.</p>
-          <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
-            {dialog.member.role === 'management' && (
-              <label className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 ${kpiTemplate === NO_KPIS ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface'}`}>
-                <input type="radio" name="kpi-tpl" checked={kpiTemplate === NO_KPIS} onChange={() => { setKpiTemplate(NO_KPIS); setKpiTargets({}); }} className="mt-1 accent-[#0E6E62]" />
-                <span>
-                  <span className="block text-[15px] font-semibold">No KPIs</span>
-                  <span className="block text-sm text-ink-soft">Management only. Choose a KPI set below to give them a KPI page and a performance ring.</span>
-                </span>
-              </label>
-            )}
-            {KPI_TEMPLATES.map(t => (
-              <label key={t.id} className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 ${kpiTemplate === t.id ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface'}`}>
-                <input type="radio" name="kpi-tpl" checked={kpiTemplate === t.id} onChange={() => chooseTemplate(t.id)} className="mt-1 accent-[#0E6E62]" />
-                <span>
-                  <span className="block text-[15px] font-semibold">{t.name}</span>
-                  <span className="block text-sm text-ink-soft">{t.description}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          <div className="mt-4 space-y-3">
-            {templateById(kpiTemplate)?.metrics.map(m => (
-              <div key={m.key} className="flex items-center justify-between gap-3">
-                <label htmlFor={`kt-${m.key}`} className="text-sm font-semibold">
-                  {m.label}
-                  <span className="block font-normal text-ink-soft">{m.targetLabel}{!m.auto ? ', typed in weekly' : m.plusTyped ? `, ${AUTO_SOURCE_LABELS[m.auto]} plus typed` : `, ${AUTO_SOURCE_LABELS[m.auto]}`}</span>
-                </label>
-                <input
-                  id={`kt-${m.key}`}
-                  inputMode="decimal"
-                  value={kpiTargets[m.key] || ''}
-                  onChange={e => { setKpiTargets(t => ({ ...t, [m.key]: e.target.value.replace(/[^0-9.]/g, '') })); setDialogError(''); }}
-                  className="w-32 rounded-lg border border-line bg-white px-3 py-2 text-right text-[15px] focus:border-accent focus:outline-none"
-                />
-              </div>
-            ))}
-          </div>
-          {dialogError && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{dialogError}</p>}
-          <div className="mt-5 flex justify-end gap-2">
-            <button type="button" className={secondaryBtn} onClick={closeDialog}>Cancel</button>
-            <button type="button" className={primaryBtn} disabled={dialogBusy} onClick={saveKpi}>
-              {dialogBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-              Save KPIs
-            </button>
-          </div>
-        </Dialog>
+      {kpiPerson && (
+        <KpiSetEditor member={kpiPerson} viewer={currentMember} saved={kpiDocs[kpiPerson.id]}
+          onClose={() => setKpiPerson(null)} onSaved={text => { flash('ok', text); setKpiPerson(null); }} />
+      )}
+      {libraryOpen && (
+        <KpiLibraryPanel viewer={currentMember} usedBy={usedBy}
+          onClose={() => setLibraryOpen(false)} onSaved={text => { flash('ok', text); setLibraryOpen(false); }} />
       )}
       {dialog && dialog.kind === 'email' && (
         <Dialog title={`Work email for ${dialog.member.name}`} onClose={closeDialog}>

@@ -2,6 +2,98 @@
 
 Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agreed. Read only when working on this area.
 
+### KPI library and editable weights (Joel, 2026-10-22; Part A of 3)
+
+Joel asked for every KPI to be selectable and editable for reps, Admin and Management, with editable weights and colour bands. The plan has three parts. **A** is the KPI library (built here). **B** is trainer KPIs: an Internal trainer pick in Team, output assessment, report speed, and new activities approved by Management. **C** is the 360 rating: a comment is required, open or closed view, and Management always sees who rated, with the option to let others see.
+
+**KPI library: what Management does**
+- **Where:** Team → **KPI library** (`KpiLibraryPanel.tsx`).
+- **Stored in:** `config/kpi_library`, Management only. It holds the changes to built-in KPIs (`overrides`), the KPIs Management made (`custom`), the points per colour and the company GP bands.
+- **Built-in KPIs:** `BUILT_IN_KPIS` in `lib/kpiLibrary.ts`. They include Joel's list and the suggestions he asked to keep:
+  - Sales: Closing RM, number of closings, proposals, appointments, follow-up on new customers, gross profit, win rate, new clients won, quotation speed, days to get paid, overdue follow-ups, pipeline cover, public programme, trainer opportunity day.
+  - Admin: performance rating, claims, claim submission speed, venues, HRDC grant on time, post-training documents, invoice speed, HRDC shortfall.
+  - Management: company gross profit, team average.
+- **Editing a KPI:** rename it, change the default target or bands, set its setting (e.g. "days before training"), or hide it.
+- **New KPIs** ("create as we go"): typed in weekly (added up, or the average week; a number, RM, %, days or a 1-5 rating), or counted by any existing automatic counter.
+- **Deleting:** a KPI Management made can't be deleted while it's in someone's set.
+
+**Scoring**
+- **Target KPIs:** score their % of target, with the usual 0-35 / 36-75 / 76+ light.
+- **Colour band KPIs:** earn points by colour: green 100, amber 60, red 30, grey 0, all editable.
+- **Which way is better:** bands can be "higher is better" or "lower is better" (days).
+- **Red with no grey:** red can be "everything past amber", so there is no grey.
+- **Nothing to count** (e.g. no claims this month): the KPI is left out of the score and shows "Nothing to count this month". The other weights then count for more.
+
+**Joel's bands, as built**
+- **GP:** 50%+ green, 40-49.9 amber, 30-39.9 red, below 30 grey.
+- **Claim submission speed:** 7 days or less green, 8-14 amber, 15+ red. It counts days from the last training day to the HRDC claim recorded, averaged over the month's claims, for the person who recorded them.
+- **Follow-up on new customers:** 10+ a week green, 5-9 amber, 1-4 red, 0 grey.
+  - It counts the **different** customers followed up each week (Joel), counting only clients with no won deal before that follow-up.
+  - The month figure is the average week over the weeks started so far. Days 29-31 count into week 4.
+
+**Company GP bands: one setting**
+- Used by the Gross profit and Company gross profit KPIs, the margin colours in Project P&L, and GP in the Costing estimator. The estimator's old 20% rule is gone. A loss is always red.
+- **GP for a person:** the overall margin of their own trainings held that month (by training date). It uses the same P&L as Project P&L.
+- **Why the server works it out:** reps and Admin can't read costs, so `serverKpi.ts` (`POST /api/kpi/gp`) returns only percentages.
+- **Who sees what:** your own GP %. The company figure goes to Management, or to whoever has the Company gross profit KPI.
+
+**Each person's KPI set**
+- **Where:** Team → KPIs (`KpiSetEditor.tsx`). Saved as `reps/{id}.kpiSet.items`: `kpiId`, `weight` %, `slot`, and optionally `target`, `bands`, `param`, `label`.
+- **Building a set:**
+  - Start from a ready-made set (the four old templates, `KPI_PRESETS`), add or remove KPIs, or reorder them.
+  - Set targets, or give the person their own bands. Gross profit always uses the company bands.
+  - Give a KPI a different name for this person.
+- **Weights must add up to 100%** before saving. "Spread evenly" helps.
+- **Management** can still pick No KPIs.
+- **Typed history is kept:** each item's `slot` is where its typed weekly numbers live in `month_kpis`. The old KPIs keep their old keys (`salesFigure`, `proposals`, `preview`, `extraMetric`), so typed history carries on. New ones use the KPI id.
+- **People not yet given a set** keep their old template, read as the matching ready-made set. Nothing changes for them until Management saves a set.
+- **Closing RM target:** rings, the company target and the sales projection use the person's Closing RM KPI (`closingMetric`).
+
+**Where it shows:** the KPI page, My home's My KPI card, Team performance and the presentation scorecard all use `monthKpi` (`lib/kpi.ts`). Band KPIs show the figure and a colour badge; target KPIs show "x of y".
+
+**Testing**
+- A script checked every band, the old templates, Management without KPIs, the weekly distinct follow-up count, the GP light, KPIs with no data left out, the weighted score, library changes and a custom averaged rating.
+- A temporary local page on a pretend database checked:
+  - Team: editing Ali's set (presets, add KPIs, weights refused at 110%, his own bands, saved shape kept his old targets).
+  - The KPI page: scores checked by hand.
+  - Team performance.
+  - The KPI library: GP bands changed, a custom rating KPI made, saved changes only.
+  - Phone width.
+- Still needs the live site: the GP server route and the rules.
+
+### Trainer KPIs and activity approval (Joel, 2026-10-22; Part B of 3)
+
+**Internal trainer**
+- **Where:** Team → KPIs has an **Internal trainer** drop-down listing records from Trainers. It's saved as `reps/{id}.kpiSet.trainerId`.
+- **Who gets trainer KPIs:** only people given a trainer record. Joel: some internal trainers focus on other KPIs for now.
+- **Save check:** a set with trainer KPIs can't be saved without one.
+- **Which trainings count:** trainings that ended this month where the person's trainer record is the training report's trainer, or the trainer ticked on the deal's checklist.
+
+**New KPIs in the library (Trainer group)**
+- **Output assessment rating:** the average participants' rating on the training reports (`participant.avg`, typed by Admin). 4.5+ green, 4.0-4.49 amber, below red.
+- **Trainer feedback speed:** average days from the last training day to the report sent (`submittedAt`, Malaysia date). A report not sent yet counts the days so far. 2 days or less green, 3-5 amber, 6-7 red, later grey.
+- **Design new activity:** new teambuilding activities this person added that Management approved this month, counted by approval date. 3+ green, 2 amber, 1 red, 0 grey.
+
+**Approving activities**
+- **Saved as:** `tb_activities.approval` = `{ status: pending | approved | rejected, at, byId, byName, note }`.
+- **New activities start pending.** That covers both Add activity and "save to library" from a proposal.
+- **Who decides:** any Management person except the one who added it clicks **Approve**, or **Not approved** with a short reason.
+- **Resending:** when the creator saves changes to a not-approved activity, it goes back to waiting.
+- **Older activities** (no `approval`) stay as they are and aren't counted.
+- **Library screen:** shows "Waiting for approval" and "Not approved" badges, plus a "Waiting for approval (N)" filter.
+
+**Rules:** `firestore.rules` `tb_activities` enforces all of this: only Management, never the creator, sets approved or not approved; the creator can only send it back to waiting. Anyone else's edit keeps the approval.
+
+**Testing**
+- A script checked: only the person's own trainings counted, report days including a report not sent yet, only approved activities counted, and no trainer record meaning no data.
+- A temporary local page checked:
+  - Joel can't approve his own activity.
+  - Not approved needs a reason; Amy saw the reason, changed the activity and it went back to waiting.
+  - Joel approved it.
+  - Amy's new activity started pending.
+  - The Team editor refused trainer KPIs without a trainer record, then saved with one.
+- The rules can't run here (no Java).
+
 ### KPI templates (follow the current KPIs; agreed)
 
 | Template | KPIs (weight) | Counted |

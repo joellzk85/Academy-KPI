@@ -98,8 +98,20 @@ export interface TbActivityContent {
   deliverables: string;        // expected deliverables (paragraphs; "- " lines are bullets)
   ratings: Partial<Record<RatingKey, number>>;   // 0-100
 }
+// Management approval of new activities (Joel, 2026-10-22: "Design new activity" KPI counts only approved ones).
+// New activities start pending; any Management person except the one who added it approves or says "Not approved"
+// (with a note). The creator's next save of a not-approved activity sends it back for approval. Activities from
+// before approvals have no `approval` and stay as they are (not counted).
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export interface ActivityApproval { status: ApprovalStatus; at?: string; byId?: string; byName?: string; note?: string }
+export const PENDING_APPROVAL: ActivityApproval = { status: 'pending' };
+export const APPROVAL_LABELS: Record<ApprovalStatus, string> = { pending: 'Waiting for approval', approved: 'Approved', rejected: 'Not approved' };
+export const canApproveActivity = (a: { createdById?: string; approval?: ActivityApproval | null }, viewer: { id: string; role: string }) =>
+  viewer.role === 'management' && !!a.approval && a.createdById !== viewer.id;
+
 export interface TbActivity extends TbActivityContent {
   id: string;
+  approval?: ActivityApproval | null;
   archived?: boolean;
   createdAt?: string; createdById?: string; createdByName?: string;
   updatedAt?: string; updatedById?: string; updatedByName?: string;

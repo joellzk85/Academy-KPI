@@ -8,7 +8,8 @@ import {
   dealWonDate, formatDate, formatRM, journeyStage, todayIso,
 } from '../lib/deals';
 import { activeHold } from '../lib/dealHold';
-import { kpiBarClass, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
+import { closingMetric, kpiBarClass, kpiValueText, LIGHT_TEXT, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
+import { LIGHT_LABELS } from '../lib/kpiLibrary';
 import { useKpiSources } from '../lib/useKpiSources';
 import { SalesTarget, monthsBetween, periodFor, ymLabel } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
@@ -52,8 +53,8 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
   const personName = (id: string) => reps.find(r => r.id === id)?.name || people.find(m => m.id === id)?.name || 'Former team member';
 
   // ---------- Tiles ----------
-  const sellers = reps.filter(r => metricsFor(r).some(m => m.key === 'salesFigure' && m.auto === 'won'));
-  const sumMonthly = sellers.reduce((t, r) => t + (metricsFor(r).find(m => m.key === 'salesFigure')?.targetVal || 0), 0);
+  const sellers = reps.filter(r => !!closingMetric(r));
+  const sumMonthly = sellers.reduce((t, r) => t + (closingMetric(r)?.targetVal || 0), 0);
   const monthTarget = target ? target.monthly : sumMonthly;
   const periodTarget = target ? target.total : sumMonthly * monthsSoFar;
   const tiles = useMemo(() => {
@@ -68,9 +69,9 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
   }, [deals, prefix, period.start, period.end]);
 
   // ---------- Team table ----------
-  const kpiSources = useKpiSources();
+  const kpiSources = useKpiSources({ months: [selectedMonth], people: reps });
   const team = useMemo(() => reps
-    .map(r => ({ rep: r, ...monthKpi(r, deals, selectedMonth, kpiSources) }))
+    .map(r => ({ rep: r, ...monthKpi(r, deals, selectedMonth, { ...kpiSources, people: reps }) }))
     .sort((a, b) => b.score - a.score || a.rep.name.localeCompare(b.rep.name)), [reps, deals, selectedMonth, kpiSources]);
 
   // ---------- Pipeline ----------
@@ -133,10 +134,11 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
                   </div>
                 </div>
                 <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  {rows.map(({ m, total, pct: p }) => (
+                  {rows.map(({ m, total, pct: p, light, hasData }) => (
                     <div key={m.key} className="rounded-lg bg-surface px-3 py-2">
-                      <p className="flex items-center justify-between gap-2 text-xs text-ink-soft"><span className="truncate">{m.label}{m.auto ? '' : ' (typed)'}</span><span className="tabular-nums">{p}%</span></p>
-                      <p className="text-sm"><strong className="tabular-nums">{fmtVal(m.isRM, total)}</strong> <span className="text-ink-soft">/ {fmtVal(m.isRM, m.targetVal)}</span></p>
+                      <p className="flex items-center justify-between gap-2 text-xs text-ink-soft"><span className="truncate">{m.label}{m.auto ? '' : ' (typed)'}</span>
+                        <span className={`tabular-nums ${hasData ? LIGHT_TEXT[light] : ''}`}>{!hasData ? 'no data' : m.scoring === 'bands' ? LIGHT_LABELS[light] : `${p}%`}</span></p>
+                      <p className="text-sm"><strong className="tabular-nums">{hasData ? kpiValueText(m, total, formatRM) : '–'}</strong>{m.scoring === 'target' && <span className="text-ink-soft"> / {kpiValueText(m, m.targetVal, formatRM)}</span>}</p>
                     </div>
                   ))}
                 </div>
@@ -154,7 +156,7 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
         <section className={card}>
           <h3 className="mb-3 flex items-center gap-2 font-bold"><TrendingUp className="h-4 w-4 text-accent" /> Sales projection</h3>
           <SalesProjection deals={deals} people={sellers.map(r => ({ id: r.id, name: r.name }))} viewer={viewer} today={today}
-            monthlyTargetFor={who => who === 'all' ? monthTarget : (metricsFor(reps.find(r => r.id === who) || { id: who }).find(m => m.key === 'salesFigure')?.targetVal || 0)}
+            monthlyTargetFor={who => who === 'all' ? monthTarget : (closingMetric(reps.find(r => r.id === who) || { id: who })?.targetVal || 0)}
             onOpenDeal={onOpenDeal} clientName={clientName} storeKey={`mgmt:${viewer.id}`} />
         </section>
       )}
