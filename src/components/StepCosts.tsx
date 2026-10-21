@@ -78,7 +78,7 @@ export default function StepCosts({ deal, task, viewer, outs, receipts, vendors,
         </ul>
       )}
       {adding ? (
-        <CostForm deal={deal} task={task} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} hint={hint} onDone={() => setAdding(false)} />
+        <CostForm deal={deal} task={task} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} hint={hint} lines={lines} onDone={() => setAdding(false)} />
       ) : (
         <button type="button" className={btnSmall} onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> Add a cost</button>
       )}
@@ -160,8 +160,8 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
   );
 }
 
-function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, onDone }: {
-  deal: any; task: ChecklistTask; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint; onDone: () => void;
+function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines = [], onDone }: {
+  deal: any; task: ChecklistTask; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint; lines?: MoneyOut[]; onDone: () => void;
 }) {
   const vType = STEP_VENDOR_TYPE[task.kind] || 'other';
   const hinted = hint && vendors.find(v => (hint.trainerId && v.trainerId === hint.trainerId) || (hint.venueId && v.venueId === hint.venueId));
@@ -185,7 +185,10 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, onDone 
     if (!f.description.trim()) return setError('Say what it is for, e.g. Booking.');
     if (!(amount > 0)) return setError('Enter the amount, for example 5000.');
     if (!vendor) return setError('Pick who is paid, or add a new vendor.');
-    const id = `out_${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
+    // No double payment by mistake (2026-10-21): this vendor already has a cost on this step?
+    const same = lines.filter(o => o.vendorId === vendor.id && o.status !== 'rejected');
+    if (same.length && !window.confirm(`${vendorName(vendor, trainers, venues)} already has ${same.length} cost line${same.length === 1 ? '' : 's'} on this step (${same.map(o => `${o.description || o.category} RM ${Number(o.amount).toFixed(2)}`).join(', ')}).\n\nAdd another one anyway (e.g. a balance payment)?`)) return;
+    const id =`out_${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
     setBusy(true); setError('');
     try {
       await setDoc(doc(db, 'money_out', id), {

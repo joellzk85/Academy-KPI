@@ -14,8 +14,8 @@ import { openProposalFile, storageError } from './ProposalFiles';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
-// Uploads one file and records it. Returns the record.
-async function uploadOne(dealId: string, task: { id: string; label: string }, file: File, viewer: Viewer, onProgress: (pct: number) => void): Promise<ChecklistFile> {
+// Uploads one file and records it. Returns the record. (Also used by "Make PO", TrainerPoDocument.tsx.)
+export async function uploadOne(dealId: string, task: { id: string; label: string }, file: File, viewer: Viewer, onProgress: (pct: number) => void): Promise<ChecklistFile> {
   const id = `cf_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const name = safeFileName(file.name);
   const path = `checklist_files/${dealId}/${id}_${name}`;

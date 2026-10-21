@@ -451,7 +451,8 @@ export function TrainerFeeRequests({ outs, dealLabel, onOpenDeal }: { outs: Mone
     .filter(j => j.claim?.status === 'submitted')
     .map(j => {
       const name = trainers.find(t => t.id === j.trainerId)?.name || 'Trainer';
-      return { j, name, flag: claimFlag(j, outs.filter(o => o.dealId === j.dealId && o.category === 'Trainer'), name) };
+      // Fee lines = cost lines on the deal's Trainer step (the same lines the Trainer step and the work queue use).
+      return { j, name, flag: claimFlag(j, outs.filter(o => o.dealId === j.dealId && !!o.checklistTaskId && o.category === 'Trainer'), name) };
     })
     .filter(x => x.flag && dealLabel(x.j.dealId) !== 'Deal no longer exists')
     .sort((a, b) => String(a.j.claim!.submittedAt).localeCompare(String(b.j.claim!.submittedAt)));

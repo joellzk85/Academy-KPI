@@ -18,6 +18,8 @@ import StepCosts, { VendorHint } from './StepCosts';
 import { useVendors } from './VendorsPage';
 import { useReceipts } from './PaymentReceipts';
 import { TrainerJobBox } from './TrainerPortalAdmin';
+import { MakePoButton } from './TrainerPoDocument';
+import { vendorForTrainer } from '../lib/vendors';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -322,6 +324,12 @@ export default function DealChecklist({
                     <p className="text-sm font-semibold">{t.kind === 'trainer' ? 'PO' : 'Documents'}</p>
                     <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable} what={DOCS_WORD[t.kind]} ticks={false}
                       onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)} />
+                    {/* Trainer PO as a PDF, made from the deal and the fee line(s) below (2026-10-21) */}
+                    {t.kind === 'trainer' && money && (() => {
+                      const tr = t.trainerId ? trainers.find(x => x.id === t.trainerId) || null : null;
+                      return <MakePoButton deal={deal} task={t} trainer={tr} venueName={effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || ''}
+                        outs={outs} vendor={vendorForTrainer(vendors, t.trainerId) || null} viewer={viewer} onSaved={list => fileUploaded(t, list)} />;
+                    })()}
                   </div>
                 )}
 

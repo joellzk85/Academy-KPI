@@ -368,8 +368,9 @@ export function registerTrainerPortalRoutes(app: Express) {
     return {};
   }));
 
-  // Request training fee: photos + T3 (the training report comes later). Marks the deal's trainer fee lines
-  // (raised by Admin on the Trainer step) and puts a red flag in Admin work. No amount is typed here.
+  // Request training fee: photos + T3 (the training report comes later). Saved once, on trainer_jobs (one per
+  // trainer per training); the fee lines Admin raised on the Trainer step are not copied or changed, and the red
+  // flag in Admin work reads both. No amount is typed here, and no payment request is made.
   app.post('/api/portal/claim', route(async req => {
     const { db, trainerId, trainer: t } = await trainerFrom(req);
     const { deal, task } = await assigned(db, trainerId, req.body?.dealId);
@@ -391,7 +392,6 @@ export function registerTrainerPortalRoutes(app: Express) {
       dealId: deal.id, trainerId,
       claim: { status: 'submitted', photos, t3, submittedAt: at, returnNote: '', history: [...(before?.history || []), { at, byName: by, action: before ? 'Sent again' : 'Fee requested' }].slice(-20) },
     }, { merge: true });
-    await Promise.all(live.filter(o => o.status !== 'paid').map(o => o.ref.update({ trainerClaimAt: at })));
     await addDealHistory(db, deal.id, '', by, `Trainer requested their fee (${photos.length} photo${photos.length === 1 ? '' : 's'}, T3 attached)`);
     return {};
   }));

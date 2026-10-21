@@ -143,6 +143,15 @@ export function claimProblem(photos: PortalFile[], t3: PortalFile[]): string {
   return '';
 }
 
+// ---------- The trainer's PO (TrainerPoDocument.tsx) ----------
+// The same number every time for a training: PO-<training year+month>-<last 5 of the deal id>.
+export const poNumber = (deal: { id: string; trainingDate?: string }) =>
+  `PO-${(/^\d{4}-\d{2}/.test(deal.trainingDate || '') ? deal.trainingDate!.slice(0, 7) : new Date().toISOString().slice(0, 7)).replace('-', '')}-${String(deal.id).slice(-5).toUpperCase()}`;
+// Its lines: the fee lines on the deal's Trainer step (not rejected).
+export const poLines = (outs: { dealId?: string; checklistTaskId?: string; status?: string; description?: string; amount?: number }[], dealId: string, taskId: string) =>
+  outs.filter(o => o.dealId === dealId && o.checklistTaskId === taskId && o.status !== 'rejected')
+    .map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 }));
+
 // ---------- Ratings ----------
 export const STARS = [1, 2, 3, 4, 5];
 export const STAR_WORDS = ['', 'Poor', 'Below expectations', 'Good', 'Very good', 'Excellent'];

@@ -824,6 +824,7 @@ function TrainerPanel(props: {
 
       <section>
         <h4 className="text-[15px] font-bold">Upcoming trainings ({upcoming.length})</h4>
+        <p className="text-sm text-ink-soft">Includes deals where they're only named on the quotation. The trainer portal shows only won deals with this trainer picked on the checklist's Trainer step.</p>
         {upcoming.length === 0
           ? <p className="mt-1 text-[15px] text-ink-soft">Nothing booked.</p>
           : <ul className="mt-2 divide-y divide-line rounded-xl border border-line">{upcoming.map(row)}</ul>}
