@@ -388,6 +388,25 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Trainer portal (2026-10-21). Trainers log in by email, but their logins have no auth_map record, so none of
+    // these rules let them in: the portal goes only through the CRM server (serverTrainerPortal.ts).
+    // trainer_accounts: who has portal access (written only by the server). trainer_jobs: one per trainer per
+    // training (rating, PO accepted, fee request); Admin and Management write. trainer_bank_requests: a bank
+    // account typed by a trainer, written by the server, accepted or rejected by Admin and Management.
+    match /trainer_accounts/{trainerId} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+    match /trainer_jobs/{jobId} {
+      allow read: if isMember();
+      allow create, update: if isStaff();
+      allow delete: if isManagement();
+    }
+    match /trainer_bank_requests/{trainerId} {
+      allow read, update, delete: if isStaff();
+      allow create: if false;
+    }
+
     // Client links for quotations and course outlines (2026-10-19): members see them (and how often the client
     // opened them); only the server makes, stops and counts them (serverDocLinks.ts).
     match /doc_links/{token} {

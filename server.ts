@@ -7,6 +7,7 @@ import { registerCalendarRoutes } from "./serverCalendar";
 import { registerBackupRoutes } from "./serverBackup";
 import { registerTrainerLinkRoutes } from "./serverTrainerLinks";
 import { registerMailRoutes } from "./serverMail";
+import { registerTrainerPortalRoutes } from "./serverTrainerPortal";
 import { registerDocLinkRoutes } from "./serverDocLinks";
 import { registerPhotoRoutes } from "./serverPhotos";
 import { registerProposalLinkRoutes } from "./serverProposalLinks";
@@ -49,6 +50,9 @@ async function startServer() {
 
   // Client links: a client opens a sent quotation or course outline as a web page, without logging in
   registerDocLinkRoutes(app);
+
+  // Trainer portal (/trainer): trainers with access log in by email; Admin and Management give access
+  registerTrainerPortalRoutes(app);
 
   // Teambuilding proposal links: the client's page (/p/<token>), visit tracking and "Accept proposal"
   registerProposalLinkRoutes(app);

@@ -1,0 +1,579 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { initializeApp, getApps } from 'firebase/app';
+import { User, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { sendPortalPasswordEmail } from '../lib/portalEmail';
+import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
+import {
+  BadgeCheck, CalendarDays, CheckCircle2, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Star, Upload, User as UserIcon, X,
+} from 'lucide-react';
+import firebaseConfig from '../../firebase-applet-config.json';
+import Logo from './Logo';
+import TrainerProfileFields from './TrainerProfileFields';
+import TrainerBiodataDocument from './TrainerBiodataDocument';
+import { shrink } from './PhotoPicker';
+import { sizeText } from './TrainerExtrasFields';
+import { ProfileSubmission, cleanProfile, profileProblem } from '../lib/trainerLinks';
+import { PROFILE_PARTS, emptyExtras, profileGaps, safeName, trainerFileProblem, trainerFileType } from '../lib/trainerProfile';
+import { PortalFile, STAR_WORDS, bankProblem, claimFolder, cleanBank, cleanTin, portalFolder } from '../lib/trainerPortal';
+import { formatDateRange, formatRM, daysText } from '../lib/deals';
+import { COMPANY } from '../lib/company';
+
+// The trainer portal (Joel, 2026-10-21), at /trainer. A trainer whom Admin or Management gave access logs in with
+// their email and password (Firebase's own email + password login; "Forgot password" is Firebase's reset email).
+// It uses its own Firebase connection, so a team member logged in to the CRM in the same browser stays logged in.
+// Everything goes through the CRM server (serverTrainerPortal.ts); only uploads go straight to the trainer's own
+// storage folder (storage.rules: trainer_portal/{trainerId}/).
+
+const portalApp = getApps().find(a => a.name === 'trainer-portal') || initializeApp(firebaseConfig, 'trainer-portal');
+const pAuth = getAuth(portalApp);
+const pStorage = getStorage(portalApp);
+pStorage.maxUploadRetryTime = 60_000;
+
+const input =
+  'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
+const label = 'mb-1 block text-sm font-semibold text-ink';
+const btnPrimary =
+  'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-[15px] font-semibold text-white hover:bg-[#0B5A50] disabled:opacity-60';
+const btnSecondary =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-surface disabled:opacity-60';
+const card = 'rounded-2xl border border-line bg-white p-5';
+const alertBox = 'rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger';
+
+class PortalError extends Error { code: string; constructor(code: string, m: string) { super(m); this.code = code; } }
+
+async function token() {
+  const u = pAuth.currentUser;
+  if (!u) throw new PortalError('not-logged-in', 'You are logged out. Log in again.');
+  return u.getIdToken();
+}
+async function api(path: string, body: any = {}) {
+  let res: Response;
+  try {
+    res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token()}` }, body: JSON.stringify(body) });
+  } catch (e: any) {
+    if (e instanceof PortalError) throw e;
+    throw new PortalError('network', 'No internet connection. Check it and try again.');
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) throw new PortalError(data?.code || 'server-error', data?.error || 'Something went wrong. Please try again in a minute.');
+  return data;
+}
+
+function loginError(e: any): string {
+  const c = String(e?.code || '');
+  if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials'].includes(c)) return 'That email or password is not correct.';
+  if (c === 'auth/invalid-email') return "That email address doesn't look right.";
+  if (c === 'auth/user-disabled') return 'Your portal access is turned off. Contact NEXT Academy if you think this is a mistake.';
+  if (c === 'auth/too-many-requests') return 'Too many tries. Wait a few minutes, then try again.';
+  if (c === 'auth/network-request-failed') return 'No internet connection. Check it and try again.';
+  if (c === 'auth/operation-not-allowed' || c === 'auth/configuration-not-found') return "Trainer login isn't switched on yet. Please let NEXT Academy know.";
+  return e?.message || 'Something went wrong. Try again.';
+}
+
+async function uploadTo(path: string, data: Blob, type: string, onProgress: (p: number) => void): Promise<string> {
+  const r = ref(pStorage, path);
+  const task = uploadBytesResumable(r, data, { contentType: type });
+  await new Promise<void>((resolve, reject) => task.on('state_changed', s => onProgress(s.totalBytes ? Math.round((s.bytesTransferred / s.totalBytes) * 100) : 0), reject, () => resolve()));
+  return getDownloadURL(r);
+}
+function uploadError(e: any): string {
+  const c = String(e?.code || '');
+  if (c === 'storage/unauthorized') return "The file couldn't be saved (no permission). Log out and in again; if it keeps happening, let NEXT Academy know.";
+  if (c.startsWith('storage/')) return "The file didn't go through. Check your internet and try again.";
+  return e?.message || 'The upload failed. Try again.';
+}
+
+const shell = (children: React.ReactNode, right?: React.ReactNode) => (
+  <div className="min-h-screen bg-surface font-sans text-ink">
+    <header className="border-b border-line bg-white">
+      <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-3"><Logo />{right}</div>
+    </header>
+    <main className="mx-auto max-w-4xl px-4 py-6">{children}</main>
+  </div>
+);
+
+export default function TrainerPortal() {
+  const [user, setUser] = useState<User | null | undefined>(undefined);
+  useEffect(() => { document.title = 'NEXT Academy trainer portal'; return onAuthStateChanged(pAuth, setUser); }, []);
+  if (user === undefined) return shell(<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>);
+  if (!user) return <LoginScreen />;
+  return <Portal user={user} />;
+}
+
+// ---------- Log in / forgot password ----------
+function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<'login' | 'forgot' | 'sent'>('login');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const em = email.trim();
+    if (!em) return setError('Enter your email.');
+    setBusy(true);
+    try {
+      if (mode === 'forgot') { await sendPortalPasswordEmail(pAuth, em); setMode('sent'); }
+      else await signInWithEmailAndPassword(pAuth, em, password);
+    } catch (err: any) {
+      // A reset for an email with no access looks the same as one that worked, so nobody can test which emails have access.
+      if (mode === 'forgot' && err?.code === 'auth/user-not-found') setMode('sent');
+      else setError(loginError(err));
+    } finally { setBusy(false); }
+  };
+  return shell(
+    <div className="mx-auto max-w-md">
+      <form onSubmit={submit} className={`${card} space-y-4`}>
+        <div>
+          <h1 className="text-xl font-bold">{mode === 'login' ? 'Trainer portal' : 'Reset your password'}</h1>
+          <p className="mt-1 text-[15px] text-ink-soft">{mode === 'login' ? 'Log in with the email NEXT Academy registered for you.' : mode === 'forgot' ? "Type your email and we'll send you a link to choose a new password." : ''}</p>
+        </div>
+        {mode === 'sent' ? (
+          <>
+            <p className="flex items-start gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-[15px] text-accent"><CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" /> If {email.trim()} has portal access, a link to choose a new password is on its way. Check your spam folder too.</p>
+            <button type="button" className={btnSecondary} onClick={() => { setMode('login'); setPassword(''); }}>Back to log in</button>
+          </>
+        ) : (
+          <>
+            <div><label className={label} htmlFor="tp-email">Email</label><input id="tp-email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} className={input} /></div>
+            {mode === 'login' && <div><label className={label} htmlFor="tp-pw">Password</label><input id="tp-pw" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} className={input} /></div>}
+            {error && <p role="alert" className={alertBox}>{error}</p>}
+            <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} {mode === 'login' ? 'Log in' : 'Send me the link'}</button>
+            <button type="button" className="w-full text-center text-sm font-semibold text-accent hover:underline" onClick={() => { setError(''); setMode(mode === 'login' ? 'forgot' : 'login'); }}>
+              {mode === 'login' ? 'Forgot password? / First time here?' : 'Back to log in'}
+            </button>
+          </>
+        )}
+      </form>
+      <p className="mt-4 text-center text-sm text-ink-soft">No access yet? Ask NEXT Academy: {COMPANY.phone} · {COMPANY.email}</p>
+    </div>
+  );
+}
+
+// ---------- After logging in ----------
+type Tab = 'home' | 'trainings' | 'profile' | 'payment';
+const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
+  { id: 'trainings', label: 'My trainings', icon: <CalendarDays className="h-4 w-4" /> },
+  { id: 'profile', label: 'My profile', icon: <UserIcon className="h-4 w-4" /> },
+  { id: 'payment', label: 'Payment details', icon: <Landmark className="h-4 w-4" /> },
+];
+
+function Portal({ user }: { user: User }) {
+  const [info, setInfo] = useState<any>(null);
+  const [error, setError] = useState('');
+  const [tab, setTab] = useState<Tab>('home');
+  const [note, setNote] = useState('');
+  const load = () => api('/api/portal/me').then(setInfo).catch(e => setError(e.message));
+  useEffect(() => { load(); }, [user.uid]);
+  const go = (t: Tab) => { setTab(t); window.scrollTo(0, 0); };
+  const passwordEmail = async () => {
+    try { await sendPortalPasswordEmail(pAuth, user.email || ''); setNote(`We've emailed ${user.email} a link to choose a new password.`); }
+    catch (e: any) { setNote(loginError(e)); }
+  };
+  const right = (
+    <div className="flex items-center gap-2">
+      <span className="hidden text-sm text-ink-soft sm:inline">{info?.profile?.name || user.email}</span>
+      <button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}><LogOut className="h-4 w-4" /> Log out</button>
+    </div>
+  );
+  if (error) return shell(<div className={`${card} space-y-3`}><p className="text-[15px]">{error}</p><button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}>Log out</button></div>, right);
+  if (!info) return shell(<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading your portal…</p>, right);
+
+  return shell(
+    <div className="space-y-5">
+      <nav className="flex gap-1 overflow-x-auto rounded-xl border border-line bg-white p-1" aria-label="Portal sections">
+        {TABS.map(t => (
+          <button key={t.id} type="button" onClick={() => go(t.id)} aria-current={tab === t.id ? 'page' : undefined}
+            className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold ${tab === t.id ? 'bg-accent-soft text-accent' : 'text-ink-soft hover:bg-surface'}`}>{t.icon} {t.label}</button>
+        ))}
+      </nav>
+      {note && <p className="flex items-start justify-between gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent">{note}<button type="button" onClick={() => setNote('')} aria-label="Close"><X className="h-4 w-4" /></button></p>}
+      {tab === 'home' && <HomeTab info={info} go={go} onPassword={passwordEmail} />}
+      {tab === 'trainings' && <TrainingsTab info={info} reload={load} />}
+      {tab === 'profile' && <ProfileTab info={info} reload={load} />}
+      {tab === 'payment' && <PaymentTab info={info} reload={load} />}
+    </div>,
+    right,
+  );
+}
+
+const when = (t: any) => (t.start ? `${formatDateRange(t.start, t.end)}${t.days ? ` · ${daysText(t.days)}` : ''}` : 'Date not set yet');
+const isoDay = (s: string) => (s ? new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+
+function Stars({ n, size = 'h-4 w-4' }: { n: number; size?: string }) {
+  return (
+    <span className="inline-flex items-center" aria-label={`${n} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map(i => <Star key={i} className={`${size} ${i <= n ? 'fill-[#E2A400] text-[#E2A400]' : 'text-line'}`} />)}
+    </span>
+  );
+}
+
+// What the trainer still needs to do, from their trainings and profile.
+function todos(info: any) {
+  const out: { text: string; tab: Tab }[] = [];
+  info.trainings.forEach((t: any) => {
+    if (t.po.length && !t.poAcceptedAt) out.push({ text: `Accept the PO for ${t.programme} (${when(t)})`, tab: 'trainings' });
+    const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
+    if (t.started && !allPaid && (!t.claim || t.claim.status === 'returned')) out.push({ text: `${t.claim ? 'Fix and resend' : 'Request'} your fee for ${t.programme} (${when(t)})`, tab: 'trainings' });
+  });
+  if (!info.payment.accountNo && !info.payment.pending) out.push({ text: 'Add your bank details so we can pay you', tab: 'payment' });
+  if (!info.payment.tin) out.push({ text: 'Add your tax identification number (TIN)', tab: 'payment' });
+  return out;
+}
+
+function HomeTab({ info, go, onPassword }: { info: any; go: (t: Tab) => void; onPassword: () => void }) {
+  const p = info.profile;
+  const pct = Math.round(((PROFILE_PARTS - profileGaps({ ...p, icOnFile: info.icOnFile }).length) / PROFILE_PARTS) * 100);
+  const next = info.trainings.filter((t: any) => !t.ended)[0];
+  const rated = info.trainings.filter((t: any) => t.rating);
+  const avg = rated.length ? Math.round((rated.reduce((s: number, t: any) => s + t.rating.stars, 0) / rated.length) * 10) / 10 : 0;
+  const list = todos(info);
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-xl font-bold">Hi {String(p.name || '').split(' ')[0] || 'there'}</h1>
+        <p className="text-[15px] text-ink-soft">Your trainings with NEXT Academy, your profile and your payments, in one place.</p>
+      </div>
+      <section className={card}>
+        <h2 className="font-bold">To do</h2>
+        {list.length ? (
+          <ul className="mt-2 space-y-1.5">
+            {list.map((x, i) => <li key={i}><button type="button" onClick={() => go(x.tab)} className="w-full rounded-lg border border-attention/40 bg-attention-soft/40 px-3 py-2 text-left text-[15px] hover:bg-attention-soft">{x.text}</button></li>)}
+          </ul>
+        ) : <p className="mt-1 flex items-center gap-2 text-[15px] text-ink-soft"><CheckCircle2 className="h-5 w-5 text-accent" /> Nothing waiting for you. Thank you!</p>}
+      </section>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <button type="button" onClick={() => go('trainings')} className={`${card} text-left hover:border-accent`}>
+          <p className="text-sm text-ink-soft">Next training</p>
+          {next ? <><p className="mt-1 font-bold">{next.programme}</p><p className="text-sm text-ink-soft">{when(next)}</p></> : <p className="mt-1 font-semibold">None scheduled</p>}
+        </button>
+        <div className={card}>
+          <p className="text-sm text-ink-soft">Your rating</p>
+          {rated.length ? <><p className="mt-1 flex items-center gap-2 text-lg font-bold">{avg} <Stars n={Math.round(avg)} /></p><p className="text-sm text-ink-soft">From {rated.length} training{rated.length === 1 ? '' : 's'}</p></> : <p className="mt-1 font-semibold">Not rated yet</p>}
+        </div>
+        <button type="button" onClick={() => go('profile')} className={`${card} text-left hover:border-accent`}>
+          <p className="text-sm text-ink-soft">Your profile</p>
+          <p className="mt-1 font-bold">{pct}% complete</p>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
+        </button>
+      </div>
+      <section className={`${card} text-sm text-ink-soft`}>
+        <p>Logged in as <strong className="text-ink">{info.email}</strong>. <button type="button" className="font-semibold text-accent hover:underline" onClick={onPassword}>Change my password</button> (we email you a link).</p>
+        <p className="mt-1">Questions? NEXT Academy: {COMPANY.phone} · {COMPANY.email}</p>
+      </section>
+    </div>
+  );
+}
+
+// ---------- My trainings ----------
+function TrainingsTab({ info, reload }: { info: any; reload: () => Promise<any> }) {
+  const upcoming = info.trainings.filter((t: any) => !t.ended);
+  const past = info.trainings.filter((t: any) => t.ended).reverse();
+  return (
+    <div className="space-y-5">
+      <h1 className="text-xl font-bold">My trainings</h1>
+      <section className="space-y-3">
+        <h2 className="font-bold text-ink-soft">Upcoming</h2>
+        {upcoming.length ? upcoming.map((t: any) => <TrainingCard key={t.dealId} t={t} reload={reload} trainerId={info.trainerId} />) : <p className={`${card} text-[15px] text-ink-soft`}>No upcoming trainings yet.</p>}
+      </section>
+      <section className="space-y-3">
+        <h2 className="font-bold text-ink-soft">Training history with NEXT Academy</h2>
+        {past.length ? past.map((t: any) => <TrainingCard key={t.dealId} t={t} reload={reload} trainerId={info.trainerId} />) : <p className={`${card} text-[15px] text-ink-soft`}>No past trainings yet.</p>}
+      </section>
+    </div>
+  );
+}
+
+function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<any>; trainerId: string }) {
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [claiming, setClaiming] = useState(false);
+  const run = async (key: string, fn: () => Promise<any>) => {
+    setBusy(key); setError('');
+    try { await fn(); } catch (e: any) { setError(e.message); } finally { setBusy(''); }
+  };
+  const downloadPo = (f: any) => run(`po-${f.id}`, async () => {
+    const res = await fetch('/api/portal/po', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token()}` }, body: JSON.stringify({ dealId: t.dealId, fileId: f.id }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || "The PO couldn't be downloaded. Try again.");
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a'); a.href = url; a.download = f.name || 'PO'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  });
+  const acceptPo = () => run('accept', async () => { await api('/api/portal/accept-po', { dealId: t.dealId }); await reload(); });
+  const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
+
+  return (
+    <article className={`${card} space-y-4`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-lg font-bold">{t.programme}</h3>
+          {t.client && <p className="text-[15px]">{t.client}</p>}
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-soft"><CalendarDays className="h-4 w-4" /> {when(t)}</p>
+          {t.venue && <p className="flex items-center gap-1.5 text-sm text-ink-soft"><MapPin className="h-4 w-4" /> {t.venue.name}{t.venue.region ? `, ${t.venue.region}` : ''}</p>}
+        </div>
+        <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${t.confirmed ? 'bg-accent-soft text-accent' : 'bg-attention-soft text-ink'}`}>{t.confirmed ? 'Confirmed' : 'Being arranged'}</span>
+      </div>
+
+      {/* PO */}
+      <div className="rounded-xl border border-line p-3">
+        <p className="text-sm font-semibold">Purchase order (PO)</p>
+        {t.po.length ? (
+          <div className="mt-2 space-y-2">
+            {t.po.map((f: any) => (
+              <button key={f.id} type="button" className={btnSecondary} disabled={!!busy} onClick={() => downloadPo(f)}>
+                {busy === `po-${f.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {f.name}
+              </button>
+            ))}
+            {t.poAcceptedAt
+              ? <p className="flex items-center gap-1.5 text-sm text-accent"><BadgeCheck className="h-4 w-4" /> You accepted this PO on {isoDay(t.poAcceptedAt)}.</p>
+              : <div><button type="button" className={btnPrimary} disabled={!!busy} onClick={acceptPo}>{busy === 'accept' && <Loader2 className="h-4 w-4 animate-spin" />} Accept the PO</button></div>}
+          </div>
+        ) : <p className="mt-1 text-sm text-ink-soft">Your PO will appear here once NEXT Academy confirms this training.</p>}
+      </div>
+
+      {/* Fee */}
+      <div className="rounded-xl border border-line p-3">
+        <p className="text-sm font-semibold">Training fee</p>
+        {t.fee.length ? (
+          <ul className="mt-1 divide-y divide-line">
+            {t.fee.map((f: any) => (
+              <li key={f.id} className="flex items-center justify-between gap-3 py-1.5 text-[15px]">
+                <span>{f.description || 'Trainer fee'} <span className="block text-sm text-ink-soft">{f.statusText}</span></span>
+                <span className="font-semibold tabular-nums">{formatRM(f.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-1 text-sm text-ink-soft">NEXT Academy will set up your fee from the PO.</p>}
+        {t.claim?.status === 'submitted' && <p className="mt-2 flex items-center gap-1.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4" /> Fee requested on {isoDay(t.claim.submittedAt)} ({t.claim.photos.length} photo{t.claim.photos.length === 1 ? '' : 's'}, T3). NEXT Academy is checking it.</p>}
+        {t.claim?.status === 'returned' && <p className="mt-2 rounded-lg bg-attention-soft px-3 py-2 text-sm"><strong>Please fix and send again:</strong> {t.claim.returnNote || 'NEXT Academy asked for changes.'}</p>}
+        {!allPaid && (t.started
+          ? !claiming && <button type="button" className={`${t.claim?.status === 'submitted' ? btnSecondary : btnPrimary} mt-3`} onClick={() => setClaiming(true)}>{t.claim?.status === 'returned' ? 'Fix and send again' : t.claim ? 'Change what I sent' : 'Request training fee'}</button>
+          : <p className="mt-2 text-sm text-ink-soft">You can request your fee once the training has started.</p>)}
+        {claiming && <ClaimForm t={t} trainerId={trainerId} onCancel={() => setClaiming(false)} onDone={async () => { setClaiming(false); await reload(); }} />}
+      </div>
+
+      {/* Rating */}
+      {t.rating && (
+        <div className="rounded-xl border border-line p-3">
+          <p className="text-sm font-semibold">NEXT Academy's rating</p>
+          <p className="mt-1 flex items-center gap-2"><Stars n={t.rating.stars} /> <span className="text-sm font-semibold">{STAR_WORDS[t.rating.stars]}</span></p>
+          {t.rating.note && <p className="mt-1 whitespace-pre-line text-[15px]">{t.rating.note}</p>}
+        </div>
+      )}
+      {error && <p role="alert" className={alertBox}>{error}</p>}
+    </article>
+  );
+}
+
+// Request training fee: training photos and the T3 form (the training report comes later).
+function ClaimForm({ t, trainerId, onCancel, onDone }: { t: any; trainerId: string; onCancel: () => void; onDone: () => void }) {
+  const [photos, setPhotos] = useState<PortalFile[]>(t.claim?.photos || []);
+  const [t3, setT3] = useState<PortalFile[]>(t.claim?.t3 || []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const send = async () => {
+    setError('');
+    if (!photos.length) return setError('Add at least one training photo.');
+    if (!t3.length) return setError('Add the T3 attendance form.');
+    setBusy(true);
+    try { await api('/api/portal/claim', { dealId: t.dealId, photos, t3 }); onDone(); }
+    catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  };
+  const folder = claimFolder(trainerId, t.dealId);
+  return (
+    <div className="mt-3 space-y-4 rounded-xl bg-surface p-4">
+      <p className="text-[15px]">Send us the training photos and the signed T3 attendance form. Your fee is then approved and paid by NEXT Academy as per your PO.</p>
+      <FileDrop title="Training photos" hint="Several photos of the training (JPG or PNG)." photo folder={folder} kind="photo" files={photos} setFiles={setPhotos} />
+      <FileDrop title="T3 attendance form" hint="The signed T3 form (PDF, JPG or PNG; a clear phone photo is fine)." folder={folder} kind="t3" files={t3} setFiles={setT3} />
+      <div className="rounded-xl border border-dashed border-line bg-white px-3 py-2 text-sm text-ink-soft">Training report: coming soon. Not needed for now.</div>
+      {error && <p role="alert" className={alertBox}>{error}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" className={btnSecondary} onClick={onCancel}>Cancel</button>
+        <button type="button" className={btnPrimary} disabled={busy} onClick={send}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Send to NEXT Academy</button>
+      </div>
+    </div>
+  );
+}
+
+function FileDrop({ title, hint, photo, folder, kind, files, setFiles }: {
+  title: string; hint: string; photo?: boolean; folder: string; kind: string; files: PortalFile[]; setFiles: React.Dispatch<React.SetStateAction<PortalFile[]>>;
+}) {
+  const pick = useRef<HTMLInputElement>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState('');
+  const [over, setOver] = useState(false);
+  const add = async (list: FileList | null) => {
+    if (!list?.length) return;
+    setError('');
+    for (const f of Array.from(list)) {
+      try {
+        setProgress(0);
+        let blob: Blob = f, type = trainerFileType(f.name), name = safeName(f.name);
+        if (photo || /^image\//.test(f.type)) {
+          if (!/^image\//.test(f.type) && !/\.(jpe?g|png|webp|heic)$/i.test(f.name)) throw new Error(`"${f.name}" isn't a photo.`);
+          blob = await shrink(f); type = 'image/jpeg'; name = safeName(f.name.replace(/\.[^.]+$/, '') + '.jpg');
+        } else {
+          const p = trainerFileProblem(f.name, f.size);
+          if (p) throw new Error(p);
+        }
+        const path = `${folder}${kind}_${Date.now()}_${name}`;
+        const url = await uploadTo(path, blob, type, setProgress);
+        setFiles(cur => [...cur, { name: f.name.slice(0, 200), size: blob.size, type, path, url, at: Date.now() }]);
+      } catch (e: any) { setError(e?.code ? uploadError(e) : String(e?.message || e)); }
+    }
+    setProgress(null);
+  };
+  return (
+    <div>
+      <p className={label}>{title}</p>
+      <p className="mb-2 text-sm text-ink-soft">{hint}</p>
+      {files.length > 0 && (
+        <ul className="mb-2 grid gap-2 sm:grid-cols-2">
+          {files.map(f => (
+            <li key={f.path} className="flex items-center gap-2 rounded-lg border border-line bg-white p-2 text-sm">
+              {/^image\//.test(f.type) ? <img src={f.url} alt="" className="h-10 w-10 shrink-0 rounded object-cover" /> : <FileText className="h-5 w-5 shrink-0 text-ink-soft" />}
+              <a href={f.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-medium hover:underline">{f.name}</a>
+              <span className="shrink-0 text-ink-soft">{sizeText(f.size)}</span>
+              <button type="button" className="rounded p-1 text-ink-soft hover:bg-surface hover:text-danger" aria-label={`Remove ${f.name}`} onClick={() => setFiles(cur => cur.filter(x => x.path !== f.path))}><X className="h-4 w-4" /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div role="button" tabIndex={0} onClick={() => pick.current?.click()} onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && pick.current?.click()}
+        onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); add(e.dataTransfer.files); }}
+        className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-5 text-[15px] ${over ? 'border-accent bg-accent-soft' : 'border-line bg-white hover:border-accent'}`}>
+        {progress !== null ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading… {progress}%</> : <>{photo ? <ImageIcon className="h-5 w-5 text-ink-soft" /> : <Upload className="h-5 w-5 text-ink-soft" />} Drop {photo ? 'photos' : 'the file'} here, or click to choose</>}
+      </div>
+      <input ref={pick} type="file" multiple className="hidden" accept={photo ? 'image/*' : '.pdf,.jpg,.jpeg,.png'} onChange={e => { add(e.target.files); e.target.value = ''; }} />
+      {error && <p role="alert" className={`${alertBox} mt-2`}>{error}</p>}
+    </div>
+  );
+}
+
+// ---------- My profile ----------
+function ProfileTab({ info, reload }: { info: any; reload: () => Promise<any> }) {
+  const ids = info.programmes.map((p: any) => p.id);
+  const [profile, setProfile] = useState<ProfileSubmission>(() => ({
+    ...emptyExtras(), ...cleanProfile({}, ids, ''), ...info.profile, icNumber: '',
+  }));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const pct = Math.round(((PROFILE_PARTS - profileGaps({ ...profile, icOnFile: info.icOnFile }).length) / PROFILE_PARTS) * 100);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setSaved(false);
+    const p = profileProblem(profile);
+    if (p) return setError(p);
+    setBusy(true);
+    try { await api('/api/portal/profile', { data: profile }); setSaved(true); setProfile(x => ({ ...x, icNumber: '' })); await reload(); }
+    catch (err: any) { setError(err.message); } finally { setBusy(false); }
+  };
+  const extrasProps = {
+    value: profile,
+    onChange: (p: any) => setProfile(cur => ({ ...cur, ...(typeof p === 'function' ? p(cur) : p) })),
+    uploader: { prefix: portalFolder(info.trainerId), byName: profile.name.trim() || 'Trainer', store: pStorage },
+    ic: {
+      value: profile.icNumber || '',
+      onChange: (v: string) => setProfile(p => ({ ...p, icNumber: v })),
+      note: info.icOnFile
+        ? 'We already have your IC / passport number. Type it again only if it has changed. Only NEXT Academy Admin and Management can see it.'
+        : 'Kept private: only NEXT Academy Admin and Management can see it.',
+    },
+    idPrefix: 'p',
+    wrap: (title: string, children: React.ReactNode, hint?: string) => (
+      <section className={`space-y-3 ${card}`}>
+        <div><h2 className="font-bold">{title}</h2>{hint && <p className="text-sm text-ink-soft">{hint}</p>}</div>
+        {children}
+      </section>
+    ),
+  };
+  return (
+    <form onSubmit={save} className="space-y-5">
+      <div>
+        <h1 className="text-xl font-bold">My profile</h1>
+        <p className="text-[15px] text-ink-soft">Your trainer profile, the programmes and topics you teach, and your HRDC biodata. Changes save straight to NEXT Academy's records.</p>
+        <div className={`mt-3 ${card} p-4`}>
+          <p className="text-sm font-semibold">Your profile is {pct}% complete</p>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${pct}%` }} /></div>
+        </div>
+      </div>
+      <TrainerProfileFields profile={profile} setProfile={setProfile} programmes={info.programmes} extrasProps={extrasProps} />
+      {error && <p role="alert" className={alertBox}>{error}</p>}
+      {saved && <p className="flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4" /> Saved. Thank you!</p>}
+      <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-line bg-surface/95 px-4 py-3">
+        <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview HRDC biodata</button>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Save my profile</button>
+      </div>
+      {preview && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-ink/50" role="dialog" aria-modal="true" aria-label="Preview of your HRDC biodata" onClick={() => setPreview(false)}>
+          <div className="flex items-center justify-between gap-3 bg-white px-4 py-3 shadow" onClick={e => e.stopPropagation()}>
+            <p className="text-[15px] font-semibold">Preview: your HRDC trainer biodata</p>
+            <button type="button" className={btnSecondary} onClick={() => setPreview(false)}><X className="h-4 w-4" /> Close</button>
+          </div>
+          <div className="flex-1 overflow-auto p-4" onClick={e => e.stopPropagation()} onContextMenu={e => e.preventDefault()}>
+            <div className="mx-auto max-w-[900px] overflow-x-auto rounded-lg shadow-lg"><div className="min-w-[640px]">
+              <TrainerBiodataDocument t={profile} icHidden={!profile.icNumber && !!info.icOnFile} />
+            </div></div>
+          </div>
+        </div>
+      )}
+    </form>
+  );
+}
+
+// ---------- Payment details: bank (checked by NEXT Academy first), TIN, address ----------
+function PaymentTab({ info, reload }: { info: any; reload: () => Promise<any> }) {
+  const pay = info.payment;
+  const start = pay.pending || pay;
+  const [bank, setBank] = useState({ bankName: start.bankName || '', accountNo: start.accountNo || '', accountName: start.accountName || '' });
+  const [tin, setTin] = useState(pay.tin || '');
+  const [address, setAddress] = useState(info.profile.address || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState('');
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setDone('');
+    const b = cleanBank(bank);
+    if ((b.bankName || b.accountNo || b.accountName)) { const p = bankProblem(b); if (p) return setError(p); }
+    setBusy(true);
+    try {
+      const r = await api('/api/portal/payment', { bank: b, tin: cleanTin(tin), address });
+      setDone(r.bankPending ? 'Saved. Your new bank account is with NEXT Academy for checking; we pay into it once it is approved.' : 'Saved. Thank you!');
+      await reload();
+    } catch (err: any) { setError(err.message); } finally { setBusy(false); }
+  };
+  return (
+    <form onSubmit={save} className="space-y-5">
+      <div>
+        <h1 className="text-xl font-bold">Payment details</h1>
+        <p className="text-[15px] text-ink-soft">Where we pay your training fees. For your safety, a new or changed bank account is checked by NEXT Academy before we use it.</p>
+      </div>
+      <section className={`${card} space-y-3`}>
+        <h2 className="font-bold">Bank account</h2>
+        {pay.accountNo && <p className="rounded-lg bg-surface px-3 py-2 text-sm"><span className="font-semibold">On record:</span> {[pay.bankName, pay.accountNo, pay.accountName].filter(Boolean).join(' · ')}</p>}
+        {pay.pending && <p className="rounded-lg bg-attention-soft px-3 py-2 text-sm"><span className="font-semibold">Waiting for NEXT Academy to check:</span> {[pay.pending.bankName, pay.pending.accountNo, pay.pending.accountName].join(' · ')}</p>}
+        {pay.rejected && !pay.pending && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">Your last bank change wasn't accepted{pay.rejected.reason ? `: ${pay.rejected.reason}` : '.'} Please check it and send it again.</p>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div><label className={label} htmlFor="b-bank">Bank</label><input id="b-bank" value={bank.bankName} onChange={e => setBank(b => ({ ...b, bankName: e.target.value }))} className={input} placeholder="e.g. Maybank" /></div>
+          <div><label className={label} htmlFor="b-no">Account number</label><input id="b-no" inputMode="numeric" value={bank.accountNo} onChange={e => setBank(b => ({ ...b, accountNo: e.target.value }))} className={input} /></div>
+        </div>
+        <div><label className={label} htmlFor="b-name">Name on the account</label><input id="b-name" value={bank.accountName} onChange={e => setBank(b => ({ ...b, accountName: e.target.value }))} className={input} placeholder="As printed on your bank statement" /></div>
+      </section>
+      <section className={`${card} space-y-3`}>
+        <h2 className="font-bold">Tax and address</h2>
+        <div><label className={label} htmlFor="b-tin">Tax identification number (TIN)</label><input id="b-tin" value={tin} onChange={e => setTin(e.target.value)} className={input} placeholder="e.g. IG12345678090" />
+          <p className="mt-1 text-sm text-ink-soft">Your LHDN income tax number, used for e-invoicing.</p></div>
+        <div><label className={label} htmlFor="b-addr">Address</label><textarea id="b-addr" rows={3} value={address} onChange={e => setAddress(e.target.value)} className={`${input} resize-y`} />
+          <p className="mt-1 text-sm text-ink-soft">The same address as on your profile.</p></div>
+      </section>
+      {error && <p role="alert" className={alertBox}>{error}</p>}
+      {done && <p className="flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4 shrink-0" /> {done}</p>}
+      <div className="flex justify-end"><button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Save payment details</button></div>
+    </form>
+  );
+}

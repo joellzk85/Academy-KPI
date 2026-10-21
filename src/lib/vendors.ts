@@ -27,6 +27,7 @@ export interface Vendor {
   accountName?: string;
   accountNo?: string;
   ssmNo?: string;          // company registration (optional)
+  tin?: string;            // tax identification number (LHDN); a trainer types it in the trainer portal (2026-10-21)
   notes?: string;
   createdAt?: string;
   createdById?: string;

@@ -18,6 +18,7 @@ import PaymentRequestDocument, { paymentRef, paymentStatusText } from './Payment
 import { Receipt, needsReceipt } from '../lib/postTraining';
 import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
 import PaymentSummaryPanel from './PaymentSummaryPanel';
+import { BankRequestsBox, TrainerFeeRequests } from './TrainerPortalAdmin';
 import { PLTick } from './StepCosts';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -749,6 +750,10 @@ export function MoneyOverview({ viewer, onOpenPayments }: { viewer: Viewer; onOp
           {onOpenPayments && <p className="text-xs font-semibold text-accent">See them in Payment tracking</p>}
         </button>
       </div>
+
+      {/* From the trainer portal (2026-10-21): fee requests with photos and T3, and bank accounts to check */}
+      <TrainerFeeRequests outs={outs} dealLabel={dealLabel} />
+      <BankRequestsBox viewer={viewer} trainers={[]} />
 
       {mine.length > 1 && (
         <div className="flex flex-wrap items-center gap-2">

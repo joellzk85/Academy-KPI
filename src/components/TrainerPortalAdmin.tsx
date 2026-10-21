@@ -1,0 +1,350 @@
+import React, { useEffect, useState } from 'react';
+import { collection, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { BadgeCheck, Check, Copy, FileText, KeyRound, Landmark, Loader2, MessageCircle, Star, X } from 'lucide-react';
+import { auth, callServer, db, friendlyError } from '../lib/firebase';
+import { sendPortalPasswordEmail } from '../lib/portalEmail';
+import { formatDate } from '../lib/deals';
+import { MoneyOut } from '../lib/money';
+import { whatsappShare } from '../lib/trainerLinks';
+import {
+  BankRequest, PORTAL_PATH, STARS, STAR_WORDS, TrainerAccount, TrainerJob, claimFlag, cleanEmail, emailProblem, jobId, ratingAverage,
+} from '../lib/trainerPortal';
+
+// The CRM side of the trainer portal (2026-10-21, lib/trainerPortal.ts): giving a trainer access (Trainers panel),
+// bank account changes to check, the rating, PO acceptance and fee request on a deal's Trainer step, and the
+// fee requests waiting in Admin work → Money.
+
+type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
+const isStaff = (v: Viewer) => v.role === 'admin' || v.role === 'management';
+
+const input =
+  'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
+const btnPrimary =
+  'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0B5A50] disabled:opacity-60';
+const btnSecondary =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
+const alertBox = 'rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger';
+const isoDay = (s?: string) => (s ? formatDate(s.slice(0, 10)) : '');
+
+export const portalUrl = () => `${window.location.origin}${PORTAL_PATH}`;
+
+function useRun() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async (fn: () => Promise<any>) => {
+    setBusy(true); setError('');
+    try { await fn(); return true; } catch (e) { setError(passwordEmailError(e)); return false; } finally { setBusy(false); }
+  };
+  return { busy, error, setError, run };
+}
+function passwordEmailError(e: any): string {
+  const c = String(e?.code || '');
+  if (c === 'auth/operation-not-allowed' || c === 'auth/configuration-not-found')
+    return 'Access is saved, but Firebase could not send the password email: Email/Password sign-in is not switched on yet (Firebase console → Authentication → Sign-in method). Switch it on, then click "Send password email again".';
+  if (c === 'auth/too-many-requests') return 'Firebase is limiting emails for now. Wait a few minutes and try again.';
+  return friendlyError(e);
+}
+
+// ---------- Live lists ----------
+export function useTrainerAccounts(enabled = true): Record<string, TrainerAccount> {
+  const [list, setList] = useState<Record<string, TrainerAccount>>({});
+  useEffect(() => {
+    if (!enabled) return;
+    return onSnapshot(collection(db, 'trainer_accounts'), s => setList(Object.fromEntries(s.docs.map(d => [d.id, { ...(d.data() as TrainerAccount), id: d.id }]))), () => setList({}));
+  }, [enabled]);
+  return list;
+}
+export function useTrainerJobs(filter?: { dealId?: string; trainerId?: string }): TrainerJob[] {
+  const [list, setList] = useState<TrainerJob[]>([]);
+  const key = `${filter?.dealId || ''}|${filter?.trainerId || ''}`;
+  useEffect(() => {
+    const base = collection(db, 'trainer_jobs');
+    const q = filter?.dealId ? query(base, where('dealId', '==', filter.dealId)) : filter?.trainerId ? query(base, where('trainerId', '==', filter.trainerId)) : query(base);
+    return onSnapshot(q, s => setList(s.docs.map(d => ({ ...(d.data() as TrainerJob), id: d.id }))), () => setList([]));
+  }, [key]);
+  return list;
+}
+export function useBankRequests(enabled: boolean): BankRequest[] {
+  const [list, setList] = useState<BankRequest[]>([]);
+  useEffect(() => {
+    if (!enabled) { setList([]); return; }
+    return onSnapshot(query(collection(db, 'trainer_bank_requests'), where('status', '==', 'pending')),
+      s => setList(s.docs.map(d => ({ ...(d.data() as BankRequest), id: d.id }))), () => setList([]));
+  }, [enabled]);
+  return list;
+}
+
+// ---------- Trainers panel: portal access (Admin and Management) ----------
+export function PortalAccessBox({ trainer, account, viewer }: { trainer: any; account?: TrainerAccount; viewer: Viewer }) {
+  const [email, setEmail] = useState(account?.email || trainer.email || '');
+  const [changing, setChanging] = useState(false);
+  const [sent, setSent] = useState('');
+  const { busy, error, setError, run } = useRun();
+  useEffect(() => { setEmail(account?.email || trainer.email || ''); setChanging(false); setSent(''); setError(''); }, [trainer.id]);
+  if (!isStaff(viewer)) {
+    return account?.active ? <p className="text-sm text-ink-soft">{trainer.name} has trainer portal access.</p> : null;
+  }
+
+  const give = () => {
+    const em = cleanEmail(email);
+    const bad = emailProblem(em);
+    if (bad) return setError(bad);
+    return run(async () => {
+      await callServer('/api/trainer-portal/access', { trainerId: trainer.id, email: em }, true);
+      setChanging(false);
+      await sendPortalPasswordEmail(auth, em);
+      setSent(em);
+    });
+  };
+  const resend = () => run(async () => {
+    await callServer('/api/trainer-portal/access', { trainerId: trainer.id, email: account!.email }, true);
+    await sendPortalPasswordEmail(auth, account!.email);
+    setSent(account!.email);
+  });
+  const turnOff = () => {
+    if (!window.confirm(`Turn off ${trainer.name}'s portal access? They can no longer log in. Their profile link and records stay as they are.`)) return;
+    return run(() => callServer('/api/trainer-portal/off', { trainerId: trainer.id }, true));
+  };
+  const message = `Hi ${trainer.name}, you now have access to the NEXT Academy trainer portal: ${portalUrl()}\nWe've emailed you a link to choose your password. Log in with ${sent || account?.email || ''}.`;
+
+  const emailForm = (
+    <div className="flex flex-wrap gap-2">
+      <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={`${input} min-w-[14rem] flex-1`} placeholder="Trainer's email" aria-label="Trainer's login email" />
+      <button type="button" disabled={busy} className={btnPrimary} onClick={give}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />} {account ? 'Save and send password email' : 'Give portal access'}</button>
+      {changing && <button type="button" className={btnSecondary} onClick={() => setChanging(false)}>Cancel</button>}
+    </div>
+  );
+
+  return (
+    <div className="space-y-2">
+      {account?.active ? (
+        <>
+          <p className="flex items-center gap-1.5 text-[15px]"><BadgeCheck className="h-4 w-4 text-accent" /> Has access · logs in with <strong>{account.email}</strong></p>
+          <p className="text-sm text-ink-soft">{account.lastSeenAt ? `Last used ${isoDay(account.lastSeenAt)}` : 'Not logged in yet'}{account.createdByName ? ` · given by ${account.createdByName}${account.createdAt ? ` on ${isoDay(account.createdAt)}` : ''}` : ''}</p>
+          {changing ? emailForm : (
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={busy} className={btnSecondary} onClick={resend}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Send password email again</button>
+              <button type="button" className={btnSecondary} onClick={() => setChanging(true)}>Change login email</button>
+              <button type="button" disabled={busy} className={`${btnSecondary} text-danger`} onClick={turnOff}>Turn off access</button>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-ink-soft">
+            {account ? 'Portal access is turned off.' : 'No portal access yet. Not every trainer needs it; their profile link keeps working either way.'}
+            {' '}With access, {trainer.name} logs in at {portalUrl()} to update their profile, biodata and bank details, see their trainings, PO and rating, and request their fee.
+          </p>
+          {emailForm}
+        </>
+      )}
+      {error && <p role="alert" className={alertBox}>{error}</p>}
+      {sent && (
+        <div className="space-y-2 rounded-lg bg-accent-soft p-3 text-sm">
+          <p className="text-accent">Done. Firebase has emailed {sent} a link to choose a password (it may land in spam). Let them know by WhatsApp too:</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={btnSecondary} onClick={() => navigator.clipboard?.writeText(message)}><Copy className="h-4 w-4" /> Copy message</button>
+            <a href={whatsappShare(portalUrl(), message.replace(`: ${portalUrl()}`, ':'), trainer.contact)} target="_blank" rel="noreferrer" className={btnSecondary}><MessageCircle className="h-4 w-4" /> WhatsApp</a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Bank account changes from trainers (Admin and Management) ----------
+export function BankRequestsBox({ viewer, trainers }: { viewer: Viewer; trainers: any[] }) {
+  const list = useBankRequests(isStaff(viewer));
+  const { busy, error, run } = useRun();
+  if (!isStaff(viewer) || !list.length) return null;
+  const nameOf = (r: BankRequest) => trainers.find(t => t.id === r.trainerId)?.name || r.trainerName || 'Trainer';
+
+  const accept = (r: BankRequest) => run(async () => {
+    const now = new Date().toISOString();
+    const found = await getDocs(query(collection(db, 'vendors'), where('trainerId', '==', r.trainerId)));
+    const bank = { bankName: r.bankName, accountNo: r.accountNo, accountName: r.accountName, updatedAt: now, updatedByName: viewer.name };
+    if (!found.empty) await updateDoc(found.docs[0].ref, bank);
+    else {
+      const id = `vd_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      await setDoc(doc(db, 'vendors', id), { id, type: 'trainer', name: nameOf(r), trainerId: r.trainerId, ...bank, createdAt: now, createdById: viewer.id, createdByName: viewer.name });
+    }
+    await updateDoc(doc(db, 'trainer_bank_requests', r.id), { status: 'accepted', decidedByName: viewer.name, decidedAt: now });
+  });
+  const reject = (r: BankRequest) => {
+    const reason = window.prompt(`Why isn't ${nameOf(r)}'s bank account accepted? They will see this in the portal.`, '');
+    if (reason === null) return;
+    return run(() => updateDoc(doc(db, 'trainer_bank_requests', r.id), { status: 'rejected', rejectReason: reason.trim(), decidedByName: viewer.name, decidedAt: new Date().toISOString() }));
+  };
+
+  return (
+    <section className="space-y-2 rounded-xl border border-attention/40 bg-attention-soft/40 p-4">
+      <h3 className="flex items-center gap-2 font-bold"><Landmark className="h-4 w-4" /> Bank accounts from trainers, to check ({list.length})</h3>
+      <p className="text-sm text-ink-soft">Typed by the trainer in the portal. Check it with them (a call, or their bank statement) before accepting: payments go to this account.</p>
+      <ul className="space-y-2">
+        {list.map(r => (
+          <li key={r.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-white px-3 py-2">
+            <span className="min-w-0 flex-1 text-[15px]"><strong>{nameOf(r)}</strong> · {r.bankName} · {r.accountNo} · {r.accountName}<span className="block text-sm text-ink-soft">Sent {isoDay(r.at)}</span></span>
+            <button type="button" disabled={busy} className={btnPrimary} onClick={() => accept(r)}><Check className="h-4 w-4" /> Accept</button>
+            <button type="button" disabled={busy} className={btnSecondary} onClick={() => reject(r)}><X className="h-4 w-4" /> Reject</button>
+          </li>
+        ))}
+      </ul>
+      {error && <p role="alert" className={alertBox}>{error}</p>}
+    </section>
+  );
+}
+
+// ---------- Stars ----------
+export function Stars({ n, size = 'h-4 w-4' }: { n: number; size?: string }) {
+  return (
+    <span className="inline-flex items-center" aria-label={`${n} out of 5 stars`}>
+      {STARS.map(i => <Star key={i} className={`${size} ${i <= n ? 'fill-[#E2A400] text-[#E2A400]' : 'text-line'}`} />)}
+    </span>
+  );
+}
+
+// Trainers panel: ratings from every training.
+export function TrainerRatings({ trainerId, dealLabel }: { trainerId: string; dealLabel: (dealId: string) => string }) {
+  const jobs = useTrainerJobs({ trainerId }).filter(j => j.rating);
+  const { avg, count } = ratingAverage(jobs);
+  if (!count) return <p className="text-[15px] text-ink-soft">Not rated yet. Admin rates the trainer on each deal's Trainer step.</p>;
+  return (
+    <div className="space-y-2">
+      <p className="flex items-center gap-2 text-lg font-bold">{avg} <Stars n={Math.round(avg)} /> <span className="text-sm font-normal text-ink-soft">from {count} training{count === 1 ? '' : 's'}</span></p>
+      <ul className="divide-y divide-line">
+        {[...jobs].sort((a, b) => String(b.rating!.at).localeCompare(String(a.rating!.at))).map(j => (
+          <li key={j.id} className="py-1.5 text-sm">
+            <span className="flex items-center gap-2"><Stars n={j.rating!.stars} size="h-3.5 w-3.5" /> <span className="truncate">{dealLabel(j.dealId)}</span></span>
+            {j.rating!.note && <span className="block whitespace-pre-line text-ink-soft">{j.rating!.note}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ---------- A deal's Trainer step: rating, PO accepted, the trainer's fee request ----------
+export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
+  deal: any; task: { id: string; trainerId?: string }; trainerName: string; viewer: Viewer; outs: MoneyOut[];
+}) {
+  const trainerId = task.trainerId || '';
+  const job = useTrainerJobs({ dealId: deal.id }).find(j => j.trainerId === trainerId);
+  const accounts = useTrainerAccounts(!!trainerId);
+  const staff = isStaff(viewer);
+  const [stars, setStars] = useState(0);
+  const [note, setNote] = useState('');
+  const [rating, setRating] = useState(false);
+  const { busy, error, run } = useRun();
+  if (!trainerId) return null;
+  const ref = doc(db, 'trainer_jobs', jobId(deal.id, trainerId));
+  const claim = job?.claim;
+  const lines = outs.filter(o => o.dealId === deal.id && o.checklistTaskId === task.id);
+  const flag = claimFlag(job, lines, trainerName);
+
+  const startRating = () => { setStars(job?.rating?.stars || 0); setNote(job?.rating?.note || ''); setRating(true); };
+  const saveRating = () => run(async () => {
+    if (!stars) throw new Error('Choose 1 to 5 stars.');
+    await setDoc(ref, { dealId: deal.id, trainerId, rating: { stars, note: note.trim(), byId: viewer.id, byName: viewer.name, at: new Date().toISOString() } }, { merge: true });
+    setRating(false);
+  });
+  const sendBack = () => {
+    const why = window.prompt(`What should ${trainerName} fix or add? They will see this in the portal.`, '');
+    if (!why?.trim() || !claim) return;
+    const at = new Date().toISOString();
+    return run(() => updateDoc(ref, {
+      'claim.status': 'returned', 'claim.returnNote': why.trim(), 'claim.returnedByName': viewer.name, 'claim.returnedAt': at,
+      'claim.history': [...(claim.history || []), { at, byName: viewer.name, action: `Sent back: ${why.trim()}` }].slice(-20),
+    }));
+  };
+  const hasPortal = !!accounts[trainerId]?.active;
+
+  return (
+    <div className="mt-3 space-y-3 rounded-lg border border-line bg-surface/60 p-3">
+      <p className="text-sm font-semibold">Trainer portal</p>
+      {!hasPortal && !job && <p className="text-sm text-ink-soft">{trainerName} has no portal access. Give it in Trainers if they should see this training, the PO and request their fee there.</p>}
+      {hasPortal && <p className="text-sm text-ink-soft">{trainerName} sees this training in the portal{job?.poAcceptedAt ? '' : '; the PO shows there once uploaded above'}.</p>}
+      {job?.poAcceptedAt && <p className="flex items-center gap-1.5 text-sm text-accent"><BadgeCheck className="h-4 w-4" /> {trainerName} accepted the PO on {isoDay(job.poAcceptedAt)}.</p>}
+
+      {claim && (
+        <div className="space-y-2">
+          <p className="text-sm">
+            <strong>Fee requested</strong> on {isoDay(claim.submittedAt)}
+            {claim.status === 'returned' && <span className="text-attention"> · sent back to the trainer: {claim.returnNote}</span>}
+          </p>
+          {flag && staff && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm font-semibold text-danger">{flag}</p>}
+          <div className="flex flex-wrap gap-2">
+            {(claim.photos || []).map(f => (
+              <a key={f.path} href={f.url} target="_blank" rel="noreferrer" title={f.name}><img src={f.url} alt={f.name} className="h-16 w-16 rounded-lg border border-line object-cover hover:opacity-80" /></a>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(claim.t3 || []).map(f => (
+              <a key={f.path} href={f.url} target="_blank" rel="noreferrer" className={btnSecondary}><FileText className="h-4 w-4" /> T3: {f.name}</a>
+            ))}
+          </div>
+          {staff && claim.status === 'submitted' && <button type="button" disabled={busy} className={btnSecondary} onClick={sendBack}>Ask the trainer to fix something</button>}
+        </div>
+      )}
+
+      <div>
+        {rating ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-1" role="radiogroup" aria-label="Rating">
+              {STARS.map(i => (
+                <button key={i} type="button" role="radio" aria-checked={stars === i} aria-label={`${i} star${i === 1 ? '' : 's'}`} onClick={() => setStars(i)} className="rounded p-0.5 hover:bg-white">
+                  <Star className={`h-6 w-6 ${i <= stars ? 'fill-[#E2A400] text-[#E2A400]' : 'text-ink-soft/40'}`} />
+                </button>
+              ))}
+              <span className="ml-2 text-sm font-semibold">{STAR_WORDS[stars]}</span>
+            </div>
+            <textarea rows={2} value={note} onChange={e => setNote(e.target.value)} className={`${input} resize-y`} placeholder="Comments (the trainer sees these too): client feedback, punctuality, delivery…" aria-label="Rating comments" />
+            <div className="flex gap-2">
+              <button type="button" className={btnSecondary} onClick={() => setRating(false)}>Cancel</button>
+              <button type="button" disabled={busy} className={btnPrimary} onClick={saveRating}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Save rating</button>
+            </div>
+          </div>
+        ) : job?.rating ? (
+          <div className="text-sm">
+            <p className="flex flex-wrap items-center gap-2"><span className="font-semibold">Rating</span> <Stars n={job.rating.stars} /> {STAR_WORDS[job.rating.stars]} <span className="text-ink-soft">· by {job.rating.byName}, {isoDay(job.rating.at)}</span>
+              {staff && <button type="button" className="font-semibold text-accent hover:underline" onClick={startRating}>Change</button>}</p>
+            {job.rating.note && <p className="mt-0.5 whitespace-pre-line text-ink-soft">{job.rating.note}</p>}
+          </div>
+        ) : staff ? (
+          <button type="button" className={btnSecondary} onClick={startRating}><Star className="h-4 w-4" /> Rate {trainerName} for this training</button>
+        ) : <p className="text-sm text-ink-soft">Not rated yet.</p>}
+      </div>
+      {error && <p role="alert" className={alertBox}>{error}</p>}
+    </div>
+  );
+}
+
+// ---------- Admin work → Money: trainers asking for their fee ----------
+export function TrainerFeeRequests({ outs, dealLabel, onOpenDeal }: { outs: MoneyOut[]; dealLabel: (dealId: string) => string; onOpenDeal?: (dealId: string) => void }) {
+  const jobs = useTrainerJobs();
+  const [trainers, setTrainers] = useState<any[]>([]);
+  useEffect(() => onSnapshot(collection(db, 'trainers_directory'), s => setTrainers(s.docs.map(d => ({ ...d.data(), id: d.id }))), () => setTrainers([])), []);
+  const waiting = jobs
+    .filter(j => j.claim?.status === 'submitted')
+    .map(j => {
+      const name = trainers.find(t => t.id === j.trainerId)?.name || 'Trainer';
+      return { j, name, flag: claimFlag(j, outs.filter(o => o.dealId === j.dealId && o.category === 'Trainer'), name) };
+    })
+    .filter(x => x.flag && dealLabel(x.j.dealId) !== 'Deal no longer exists')
+    .sort((a, b) => String(a.j.claim!.submittedAt).localeCompare(String(b.j.claim!.submittedAt)));
+  if (!waiting.length) return null;
+  return (
+    <section className="space-y-2 rounded-xl border border-danger/30 bg-danger-soft/40 p-4">
+      <h3 className="font-bold">Trainers asking for their fee ({waiting.length})</h3>
+      <p className="text-sm text-ink-soft">Sent from the trainer portal with photos and T3. Check them on the deal's Trainer step, then approve the fee line as usual.</p>
+      <ul className="space-y-1.5">
+        {waiting.map(({ j, name, flag }) => (
+          <li key={j.id} className="rounded-lg border border-line bg-white px-3 py-2 text-[15px]">
+            <strong>{name}</strong> · {dealLabel(j.dealId)}
+            <span className="block text-sm text-danger">{flag} (sent {isoDay(j.claim!.submittedAt)})</span>
+            {onOpenDeal && <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => onOpenDeal(j.dealId)}>Open the deal</button>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

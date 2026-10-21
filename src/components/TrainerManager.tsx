@@ -14,6 +14,7 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
 import { downloadBiodataPdf } from './TrainerBiodataDocument';
+import { BankRequestsBox, PortalAccessBox, TrainerRatings, useTrainerAccounts } from './TrainerPortalAdmin';
 import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
 import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel } from '../lib/trainerProfile';
@@ -184,6 +185,12 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   };
 
   const bookingsOf = (t: Trainer) => trainerBookings(t, deals, checklists, quotes, trainers);
+  const accounts = useTrainerAccounts();
+  const dealLabel = (dealId: string) => {
+    const d = deals.find(x => x.id === dealId);
+    if (!d) return 'Deal no longer exists';
+    return `${clients.find(c => c.id === d.clientId)?.companyName || d.client || 'No client'} · ${d.courseName || 'No programme'}${d.trainingDate ? ` · ${formatDate(d.trainingDate)}` : ''}`;
+  };
   const nextTraining = useMemo(() => {
     const out: Record<string, string> = {};
     trainers.forEach(t => {
@@ -351,6 +358,9 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         </section>
       )}
 
+      {/* Bank accounts typed by trainers in the portal, to check (Admin and Management) */}
+      <BankRequestsBox viewer={viewer} trainers={trainers} />
+
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, topic, language, phone or email" className={`${input} pl-9`} aria-label="Search trainers" />
@@ -387,6 +397,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                       <span className="flex items-center gap-2">
                         <span className="truncate font-semibold">{t.name}</span>
                         {t.status === 'On Leave' && <span className="shrink-0 rounded-md bg-attention-soft px-2 py-0.5 text-xs font-semibold text-attention">On leave</span>}
+                        {accounts[t.id]?.active && <span className="hidden shrink-0 rounded-md bg-surface px-2 py-0.5 text-xs font-semibold text-ink-soft sm:inline">Portal</span>}
                         {(t.trainingTypes || []).map(x => <span key={x} className="hidden shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent sm:inline">{trainingTypeLabel(x)}</span>)}
                       </span>
                       <span className="block truncate text-sm text-ink-soft">{sub || 'No programmes or phone yet'}</span>
@@ -429,6 +440,15 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
               ) : (
                 <button type="button" className={btnSecondary} onClick={() => sendProfileLink(openTrainer)}>Send profile link</button>
               )}
+            </section>
+            {/* Trainer portal (2026-10-21): access by email, for the trainers who need it */}
+            <section className="mt-4 space-y-2 rounded-xl border border-line p-4">
+              <h4 className="text-sm font-semibold text-ink-soft">Trainer portal</h4>
+              <PortalAccessBox trainer={openTrainer} account={accounts[openTrainer.id]} viewer={viewer} />
+            </section>
+            <section className="mt-4 space-y-2 rounded-xl border border-line p-4">
+              <h4 className="text-sm font-semibold text-ink-soft">Rating</h4>
+              <TrainerRatings trainerId={openTrainer.id} dealLabel={dealLabel} />
             </section>
           </div>
         </div>

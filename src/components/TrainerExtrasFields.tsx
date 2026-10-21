@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
+import { FirebaseStorage, getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import { FileText, Loader2, Plus, Upload, X } from 'lucide-react';
 import { storage } from '../lib/firebase';
 import { shrink } from './PhotoPicker';
@@ -24,12 +24,13 @@ export interface Uploader {
   prefix: string;        // storage folder, ending in "/": trainer_uploads/<token>/ or trainer_files/<trainerId>/
   byName: string;
   uploadedBy?: string;   // the team member's id (the storage rule checks it for trainer_files)
+  store?: FirebaseStorage; // the trainer portal's own login (TrainerPortal.tsx); else the CRM's
 }
 
 export const sizeText = (b: number) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 
 async function put(path: string, data: Blob, type: string, u: Uploader, onProgress: (pct: number) => void): Promise<string> {
-  const r = ref(storage, path);
+  const r = ref(u.store || storage, path);
   const task = uploadBytesResumable(r, data, { contentType: type, customMetadata: u.uploadedBy ? { uploadedBy: u.uploadedBy, uploadedByName: u.byName } : { uploadedByName: u.byName } });
   await new Promise<void>((resolve, reject) => {
     task.on('state_changed', s => onProgress(s.totalBytes ? Math.round((s.bytesTransferred / s.totalBytes) * 100) : 0), reject, () => resolve());

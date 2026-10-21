@@ -17,6 +17,7 @@ import T3Maker from './T3Maker';
 import StepCosts, { VendorHint } from './StepCosts';
 import { useVendors } from './VendorsPage';
 import { useReceipts } from './PaymentReceipts';
+import { TrainerJobBox } from './TrainerPortalAdmin';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -335,6 +336,10 @@ export default function DealChecklist({
 
                 {money && hasCosts(t) && !notNeeded(t) && (t.needed === true || !asksNeeded(t)) && (
                   <StepCosts deal={deal} task={t} viewer={viewer} outs={outs} receipts={receipts} vendors={vendors} trainers={trainers} venues={venues} hint={hintFor(t)} />
+                )}
+                {/* Trainer portal (2026-10-21): rating, PO accepted, the trainer's fee request */}
+                {t.kind === 'trainer' && t.trainerId && (
+                  <TrainerJobBox deal={deal} task={t} trainerName={effectiveTrainer(t, quotes, trainers)?.name || 'The trainer'} viewer={viewer} outs={outs} />
                 )}
               </div>
             )}

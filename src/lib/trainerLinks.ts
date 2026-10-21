@@ -143,9 +143,10 @@ export function outlineSummary(s: OutlineSubmission): string {
 }
 
 // `token`: the link's own token; files must be in that link's upload folder (trainer_uploads/<token>/).
-export function cleanProfile(d: any, programmeIds: string[], token: string): ProfileSubmission {
+// The trainer portal passes its own folder instead (`prefixes`, trainer_portal/<trainerId>/).
+export function cleanProfile(d: any, programmeIds: string[], token: string, prefixes = [`trainer_uploads/${token}/`]): ProfileSubmission {
   return {
-    ...cleanExtras(d, [`trainer_uploads/${token}/`]),
+    ...cleanExtras(d, prefixes),
     icNumber: cleanIc(d?.icNumber), icSent: !!d?.icSent,
     name: str(d?.name, 100), contact: str(d?.contact, 40), email: str(d?.email, 120),
     bio: str(d?.bio, 3000), experienceYears: num(d?.experienceYears, 0, 80),

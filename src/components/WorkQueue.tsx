@@ -17,6 +17,8 @@ import { MoneyIn, MoneyOut, moneyFlags } from '../lib/money';
 import AfterTraining from './AfterTraining';
 import { useReceipts } from './PaymentReceipts';
 import { postTraining, postTrainingFlags } from '../lib/postTraining';
+import { claimFlag, jobId } from '../lib/trainerPortal';
+import { useTrainerJobs } from './TrainerPortalAdmin';
 const PaymentTracking = React.lazy(() => import('./PaymentTracking'));
 import ProgrammesManager, { StatusChip } from './Programmes';
 import BackupPanel from './BackupPanel';
@@ -96,6 +98,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
   const moneySettings = useMoneySettings();
   const [loaded, setLoaded] = useState(false);
   const receipts = useReceipts(true);
+  const trainerJobs = useTrainerJobs();
   const [filter, setFilter] = useState<'open' | 'flagged' | 'after' | 'done'>('open');
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(initialOpenId || null);
@@ -152,11 +155,17 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     // Up to training day: money reminders; from the day after: one after-training journey (lib/postTraining.ts).
     flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, moneySettings, today));
     flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
+    // A trainer asked for their fee in the trainer portal (2026-10-21) and it isn't approved yet.
+    const trainerTask = (cl.tasks || []).find((t: any) => t.kind === 'trainer' && t.trainerId);
+    if (trainerTask) {
+      const fee = claimFlag(trainerJobs.find(j => j.id === jobId(p.id, trainerTask.trainerId)), mOut.filter(o => o.checklistTaskId === trainerTask.id), trainerTask.trainerName || 'The trainer');
+      if (fee) flags.unshift({ level: 'danger', text: fee });
+    }
     const post = postTraining(p, cl.tasks, mIn, mOut, rc, today);
     // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).
     const complete = pr.done === pr.total && open.length === 0 && post.closed;
     return { deal: p, pr, overdue: overdue.length > 0, complete, after: post.ended && !complete, post, flags };
-  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts]);
+  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts, trainerJobs]);
   const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
 
   // Needs attention: any red flag, plus "grant not applied" even while it's amber (Joel, 2026-10-18).

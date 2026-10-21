@@ -44,12 +44,12 @@ export function useTrainersVenues(): { trainers: any[]; venues: any[] } {
   return { trainers, venues };
 }
 
-type Draft = { name: string; type: VendorType; trainerId: string; venueId: string; contactName: string; phone: string; email: string; bankName: string; accountName: string; accountNo: string; ssmNo: string; notes: string };
+type Draft = { name: string; type: VendorType; trainerId: string; venueId: string; contactName: string; phone: string; email: string; bankName: string; accountName: string; accountNo: string; ssmNo: string; tin: string; notes: string };
 
 const toDraft = (v: Partial<Vendor>): Draft => ({
   name: v.name || '', type: v.type || 'other', trainerId: v.trainerId || '', venueId: v.venueId || '',
   contactName: v.contactName || '', phone: v.phone || '', email: v.email || '', bankName: v.bankName || '',
-  accountName: v.accountName || '', accountNo: v.accountNo || '', ssmNo: v.ssmNo || '', notes: v.notes || '',
+  accountName: v.accountName || '', accountNo: v.accountNo || '', ssmNo: v.ssmNo || '', tin: v.tin || '', notes: v.notes || '',
 });
 
 /** Add or edit a vendor. `start` prefills a new one (e.g. a trainer picked on a checklist). Calls onSaved with the record. */
@@ -75,7 +75,7 @@ export function VendorForm({ vendor, start, vendors, trainers, venues, viewer, o
       trainerId: f.type === 'trainer' ? f.trainerId : '', venueId: f.type === 'venue' ? f.venueId : '',
       contactName: f.contactName.trim(), phone: f.phone.trim(), email: f.email.trim(),
       bankName: f.bankName.trim(), accountName: f.accountName.trim(), accountNo: f.accountNo.replace(/[^0-9A-Za-z -]/g, '').trim(),
-      ssmNo: f.ssmNo.trim(), notes: f.notes.trim(),
+      ssmNo: f.ssmNo.trim(), tin: (f.tin || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), notes: f.notes.trim(),
       ...(vendor ? {} : { createdAt: new Date().toISOString(), createdById: viewer.id, createdByName: viewer.name }),
       updatedAt: new Date().toISOString(), updatedByName: viewer.name,
     };
@@ -123,6 +123,7 @@ export function VendorForm({ vendor, start, vendors, trainers, venues, viewer, o
         <div><label className={small} htmlFor="vd-ph">Phone</label><input id="vd-ph" value={f.phone} onChange={e => set('phone', e.target.value)} className={input} inputMode="tel" /></div>
         <div><label className={small} htmlFor="vd-em">Email</label><input id="vd-em" value={f.email} onChange={e => set('email', e.target.value)} className={input} inputMode="email" /></div>
         <div><label className={small} htmlFor="vd-ssm">SSM / company no. (optional)</label><input id="vd-ssm" value={f.ssmNo} onChange={e => set('ssmNo', e.target.value)} className={input} /></div>
+        <div><label className={small} htmlFor="vd-tin">Tax number, TIN (optional)</label><input id="vd-tin" value={f.tin || ''} onChange={e => set('tin', e.target.value)} className={input} placeholder="e.g. IG12345678090" /></div>
       </div>
       <div className="rounded-lg border border-line bg-white p-3">
         <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><Landmark className="h-4 w-4 text-accent" /> Bank details, for accounts</p>

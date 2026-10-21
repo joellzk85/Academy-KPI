@@ -96,6 +96,20 @@ service firebase.storage {
       allow update, delete: if false;
     }
 
+    // Trainer portal (2026-10-21): a trainer logged in at /trainer (login id "tr_<trainerId>", with active
+    // trainer_accounts/{trainerId}) uploads their profile files, training photos and T3 into their own folder:
+    // trainer_portal/{trainerId}/... The team reads them; never changed or deleted.
+    function portalTrainer(trainerId) {
+      let a = /databases/(default)/documents/trainer_accounts/$(trainerId);
+      return request.auth != null && request.auth.uid == 'tr_' + trainerId
+        && firestore.exists(a) && firestore.get(a).data.active == true;
+    }
+    match /trainer_portal/{trainerId}/{rest=**} {
+      allow read: if isMember() || portalTrainer(trainerId);
+      allow create: if portalTrainer(trainerId) && trainerFileOk();
+      allow update, delete: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

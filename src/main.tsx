@@ -18,9 +18,15 @@ const proposalToken = window.location.pathname.match(/^\/p\/([a-f0-9]{32})\/?$/)
 const PaymentLinkPage = lazy(() => import('./components/PaymentLinkPage'));
 const paymentToken = window.location.pathname.match(/^\/pay\/([a-f0-9]{32})\/?$/)?.[1];
 
+// The trainer portal (/trainer): trainers with access log in by email (TrainerPortal.tsx, 2026-10-21).
+const TrainerPortal = lazy(() => import('./components/TrainerPortal'));
+const trainerPortal = /^\/trainer\/?$/.test(window.location.pathname);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {paymentToken ? (
+    {trainerPortal ? (
+      <Suspense fallback={null}><TrainerPortal /></Suspense>
+    ) : paymentToken ? (
       <Suspense fallback={null}><PaymentLinkPage token={paymentToken} /></Suspense>
     ) : trainerToken ? (
       <Suspense fallback={null}><TrainerLinkPage token={trainerToken} /></Suspense>

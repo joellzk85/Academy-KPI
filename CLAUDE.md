@@ -76,7 +76,7 @@ Every piece of information is typed once, in one home; everything else points to
 
 ### Login design (no emails, by Joel's explicit choice)
 
-- People pick their name and type a password. **No emails anywhere** for login, and the Firebase Email/Password sign-in method stays **off**. (Since 2026-10-18 each person can have a **work email** in Team, used only as the "From" address when sending quotations by Outlook; it plays no part in login.)
+- People pick their name and type a password. **No emails anywhere** for staff login. (Since 2026-10-21 the Firebase Email/Password sign-in method is **on for the trainer portal only**: trainers given access log in by email at `/trainer`; their logins have no `auth_map` record, so the database rules give them nothing. See `docs/features/trainer-portal.md`.) (Since 2026-10-18 each person can have a **work email** in Team, used only as the "From" address when sending quotations by Outlook; it plays no part in login.)
 - The server checks passwords (scrypt hash and salt in the `secrets` collection, which no browser can read) and returns a Firebase custom token; the browser then calls `signInWithCustomToken`. The login user ID equals the team member ID.
 - `team/{memberId}`: name, role, active, mustChangePassword. Public read (login list); written only by the server.
 - `auth_map/{memberId}`: role and active; used by the database rules; written only by the server.
@@ -118,6 +118,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `teambuilding-client-links.md` | Teambuilding proposals (A1), proposal links (B), client link tracking and protection |
 | `admin-checklist.md` | Phase 2B checklist, flags, checklist files, pre-training flow with costs, vendors and the payment summary (2026-10-21) |
 | `hrdc-programmes-trainers.md` | Phase 2C programmes, HRDC queries, trainer links, trainer profile and HRDC biodata |
+| `trainer-portal.md` | Trainer portal (/trainer): email login for trainers given access, profile, bank, TIN, trainings, PO, fee request, rating |
 | `money.md` | Phase 3 money, company payments, Link for accounts, Project P&L, manager deletes, Blueprint import, Payment tracking, After training to Case closed |
 | `home-kpi-dashboards.md` | KPI templates, My home, rings, cards, workspace menu, KPI page, Team performance |
 | `clients-directories-calendar.md` | Client history, Clients, Trainers, Venues, To-do, Google Calendar |
@@ -132,6 +133,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Rules to publish** (if not yet): `firestore.rules` and `storage.rules` as of the latest push.
 - **Data:** link old records in Data tools (ask for a screenshot of the matches first), then clear old data (Joel clicks; KPI history kept); both managers change passwords once; adjust KPI templates and targets; Blueprint import (check HRDC code 1000168564, the duplicate Valmont August line, and the 16 unknown trainer names).
 - **To confirm with Joel:** team-building terms if they differ from course-outline terms; whether HRDC gives a programme code on approval; who usually handles HRDC queries.
+- **Trainer portal (2026-10-21):** switch on Firebase Email/Password sign-in; publish both rules; go-live checklist item 32.
 - **Go-live tests:** items 6 to 31 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
