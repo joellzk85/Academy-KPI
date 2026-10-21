@@ -4,7 +4,7 @@ import { User, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut 
 import { sendPortalPasswordEmail } from '../lib/portalEmail';
 import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
 import {
-  BadgeCheck, BookOpen, CalendarCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Star, Upload, User as UserIcon, Users, X,
+  BadgeCheck, BookOpen, CalendarCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Menu, Wallet, Star, Upload, User as UserIcon, Users, X,
 } from 'lucide-react';
 import firebaseConfig from '../../firebase-applet-config.json';
 import Logo from './Logo';
@@ -89,12 +89,12 @@ function uploadError(e: any): string {
   return e?.message || 'The upload failed. Try again.';
 }
 
-const shell = (children: React.ReactNode, right?: React.ReactNode) => (
+const shell = (children: React.ReactNode, right?: React.ReactNode, wide = false) => (
   <div className="min-h-screen bg-surface font-sans text-ink">
     <header className="border-b border-line bg-white">
-      <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-3"><Logo />{right}</div>
+      <div className={`mx-auto flex ${wide ? 'max-w-6xl' : 'max-w-4xl'} items-center justify-between gap-3 px-4 py-3`}><Logo />{right}</div>
     </header>
-    <main className="mx-auto max-w-4xl px-4 py-6">{children}</main>
+    <main className={`mx-auto ${wide ? 'max-w-6xl' : 'max-w-4xl'} px-4 py-6`}>{children}</main>
   </div>
 );
 
@@ -257,10 +257,11 @@ function LoginBox() {
 }
 
 // ---------- After logging in ----------
-type Tab = 'home' | 'trainings' | 'calendar' | 'outlines' | 'teambuilding' | 'profile' | 'payment';
+type Tab = 'home' | 'trainings' | 'fees' | 'calendar' | 'outlines' | 'teambuilding' | 'profile' | 'payment';
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'home', label: 'Home', icon: <Home className="h-4 w-4" /> },
   { id: 'trainings', label: 'My trainings', icon: <CalendarDays className="h-4 w-4" /> },
+  { id: 'fees', label: 'Fee claims', icon: <Wallet className="h-4 w-4" /> },
   { id: 'calendar', label: 'My calendar', icon: <CalendarCheck className="h-4 w-4" /> },
   { id: 'outlines', label: 'Course outlines', icon: <BookOpen className="h-4 w-4" /> },
   { id: 'teambuilding', label: 'Teambuilding', icon: <Users className="h-4 w-4" /> },
@@ -272,10 +273,11 @@ function Portal({ user }: { user: User }) {
   const [info, setInfo] = useState<any>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('home');
+  const [menuOpen, setMenuOpen] = useState(false);
   const [note, setNote] = useState('');
   const load = () => api('/api/portal/me').then(setInfo).catch(e => setError(e.message));
   useEffect(() => { load(); }, [user.uid]);
-  const go = (t: Tab) => { setTab(t); window.scrollTo(0, 0); };
+  const go = (t: Tab) => { setTab(t); setMenuOpen(false); window.scrollTo(0, 0); };
   const passwordEmail = async () => {
     try { await sendPortalPasswordEmail(pAuth, user.email || ''); setNote(`We've emailed ${user.email} a link to choose a new password.`); }
     catch (e: any) { setNote(loginError(e)); }
@@ -289,23 +291,43 @@ function Portal({ user }: { user: User }) {
   if (error) return shell(<div className={`${card} space-y-3`}><p className="text-[15px]">{error}</p><button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}>Log out</button></div>, right);
   if (!info) return shell(<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading your portal…</p>, right);
 
+  // Side menu like the CRM's (Joel, 2026-10-21); on phones a Menu button opens the same list.
+  const menu = (
+    <ul className="space-y-0.5">
+      {TABS.map(t => (
+        <li key={t.id}>
+          <button type="button" onClick={() => go(t.id)} aria-current={tab === t.id ? 'page' : undefined}
+            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[15px] font-semibold ${tab === t.id ? 'bg-accent-soft text-accent' : 'text-ink-soft hover:bg-surface'}`}>{t.icon} {t.label}</button>
+        </li>
+      ))}
+    </ul>
+  );
+  const here = TABS.find(t => t.id === tab);
+
   return shell(
-    <div className="space-y-5">
-      <nav className="flex gap-1 overflow-x-auto rounded-xl border border-line bg-white p-1" aria-label="Portal sections">
-        {TABS.map(t => (
-          <button key={t.id} type="button" onClick={() => go(t.id)} aria-current={tab === t.id ? 'page' : undefined}
-            className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold ${tab === t.id ? 'bg-accent-soft text-accent' : 'text-ink-soft hover:bg-surface'}`}>{t.icon} {t.label}</button>
-        ))}
+    <div className="md:flex md:items-start md:gap-6">
+      <nav className="mb-4 md:hidden" aria-label="Portal sections">
+        <button type="button" onClick={() => setMenuOpen(o => !o)} aria-expanded={menuOpen}
+          className="flex w-full items-center justify-between gap-2 rounded-xl border border-line bg-white px-4 py-2.5 text-[15px] font-semibold">
+          <span className="flex items-center gap-2 text-accent">{here?.icon} {here?.label}</span>
+          <span className="flex items-center gap-1.5 text-ink-soft"><Menu className="h-4 w-4" /> Menu</span>
+        </button>
+        {menuOpen && <div className="mt-1 rounded-xl border border-line bg-white p-1">{menu}</div>}
       </nav>
+      <nav className="sticky top-4 hidden w-56 shrink-0 rounded-xl border border-line bg-white p-2 md:block" aria-label="Portal sections">{menu}</nav>
+      <div className="min-w-0 flex-1 space-y-5">
       {note && <p className="flex items-start justify-between gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent">{note}<button type="button" onClick={() => setNote('')} aria-label="Close"><X className="h-4 w-4" /></button></p>}
       {tab === 'home' && <HomeTab info={info} go={go} onPassword={passwordEmail} />}
       {tab === 'trainings' && <TrainingsTab info={info} reload={load} />}
       {tab === 'calendar' && <CalendarTab info={info} />}
       {(tab === 'outlines' || tab === 'teambuilding') && <DocsTab key={tab} kind={tab === 'outlines' ? 'outline' : 'teambuilding'} info={info} api={api} upload={uploadTo} />}
       {tab === 'profile' && <ProfileTab info={info} reload={load} />}
+      {tab === 'fees' && <FeesTab info={info} go={go} />}
       {tab === 'payment' && <PaymentTab info={info} reload={load} />}
+      </div>
     </div>,
     right,
+    true,
   );
 }
 
@@ -893,6 +915,54 @@ function ProfileTab({ info, reload }: { info: any; reload: () => Promise<any> })
 }
 
 // ---------- Payment details: bank (checked by NEXT Academy first), TIN, address ----------
+// Fee claims (Joel, 2026-10-21): every fee line across the trainer's trainings. Paid so far, pending
+// (waiting for approval, or approved and not paid yet), and the total of both. Not approved lines are left out.
+function FeesTab({ info, go }: { info: any; go: (t: Tab) => void }) {
+  const rows = (info.trainings as any[]).flatMap(t => t.fee.filter((f: any) => f.status !== 'rejected').map((f: any) => ({ ...f, t })));
+  const paid = rows.filter(r => r.status === 'paid').sort((a, b) => (b.paidDate || b.t.start || '').localeCompare(a.paidDate || a.t.start || ''));
+  const pending = rows.filter(r => r.status !== 'paid');
+  const sum = (list: any[]) => list.reduce((n, r) => n + r.amount, 0);
+  const box = (label: string, amount: number, note: string, accent = false) => (
+    <div className="rounded-2xl border border-line bg-white p-4">
+      <p className="text-sm text-ink-soft">{label}</p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums ${accent ? 'text-accent' : ''}`}>{formatRM(amount)}</p>
+      <p className="mt-0.5 text-sm text-ink-soft">{note}</p>
+    </div>
+  );
+  const list = (items: any[], empty: string) => items.length ? (
+    <ul className="divide-y divide-line">
+      {items.map(r => (
+        <li key={`${r.t.dealId}-${r.id}`} className="flex items-start justify-between gap-3 py-2.5">
+          <span className="min-w-0 text-[15px]">
+            <span className="font-semibold">{r.t.programme}</span>{r.t.client ? ` · ${r.t.client}` : ''}
+            <span className="block text-sm text-ink-soft">{when(r.t)} · {r.description || 'Trainer fee'}</span>
+            <span className={`block text-sm ${r.status === 'paid' ? 'text-accent' : 'text-ink-soft'}`}>{r.statusText}</span>
+          </span>
+          <span className="shrink-0 font-semibold tabular-nums">{formatRM(r.amount)}</span>
+        </li>
+      ))}
+    </ul>
+  ) : <p className="text-[15px] text-ink-soft">{empty}</p>;
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-3">
+        {box('Paid so far', sum(paid), `${paid.length} payment${paid.length === 1 ? '' : 's'}`, true)}
+        {box('Pending', sum(pending), `${pending.length} fee${pending.length === 1 ? '' : 's'} not paid yet`)}
+        {box('Total', sum(paid) + sum(pending), 'Paid and pending')}
+      </div>
+      <section className={card}>
+        <h2 className="text-lg font-bold">Pending</h2>
+        <p className="mb-2 text-sm text-ink-soft">Fees waiting for approval, or approved and being paid. To request a fee, open <button type="button" className="font-semibold text-accent underline" onClick={() => go('trainings')}>My trainings</button>.</p>
+        {list(pending, 'Nothing pending.')}
+      </section>
+      <section className={card}>
+        <h2 className="mb-2 text-lg font-bold">Past payments</h2>
+        {list(paid, 'No payments yet.')}
+      </section>
+    </div>
+  );
+}
+
 function PaymentTab({ info, reload }: { info: any; reload: () => Promise<any> }) {
   const pay = info.payment;
   const start = pay.pending || pay;

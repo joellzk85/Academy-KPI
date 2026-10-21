@@ -167,7 +167,7 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
       poDeclined: job.poDeclined || null,
       cancelled,
       movedFrom: moved?.from || '',
-      fee: lines.map(o => ({ id: o.id, description: o.description || '', amount: Number(o.amount) || 0, status: o.status, statusText: feeStatusText(o) })),
+      fee: lines.map(o => ({ id: o.id, description: o.description || '', amount: Number(o.amount) || 0, status: o.status, paidDate: o.paidDate || '', statusText: feeStatusText(o) })),
       claim: job.claim ? { status: job.claim.status, submittedAt: job.claim.submittedAt, returnNote: job.claim.returnNote || '', photos: job.claim.photos || [], t3: job.claim.t3 || [] } : null,
       rating: job.rating ? { stars: job.rating.stars, note: job.rating.note || '', at: job.rating.at } : null,
       report,
