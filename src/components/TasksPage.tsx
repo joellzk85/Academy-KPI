@@ -11,6 +11,7 @@ import { useTeamList } from '../lib/useClientHistory';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { ClientTouchPoint, TOUCH_HOW_LABELS, TouchHow, newTouchPointId } from '../lib/touchPoints';
+import PanelResizer from './PanelResizer';
 
 // To-do (redesigned 2026-10-17). One shared task per job (no copies): quick add at the top,
 // "My to-do" / "I asked others" / "Everyone's" (Management), grouped by when it's due.
@@ -274,7 +275,8 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenClient
 
       {openTask && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
-          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+          <PanelResizer />
+          <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <TaskPanel key={openTask.id} t={openTask} team={team} clients={clientRefs} nameOf={nameOf} dealChoices={dealChoices} deals={deals} dealLabel={dealLabel}
               canChange={canChange(openTask)} canDelete={canDelete(openTask)} me={me} onOpenDeals={onOpenDeals} onOpenClient={onOpenClient}
               onClose={() => setOpenId(null)} onToggle={() => toggleDone(openTask)} onSaved={() => flash('Task saved')} onDeleted={() => { setOpenId(null); flash('Task deleted'); }} />

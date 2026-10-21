@@ -15,6 +15,7 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt, useReceipts } from './PaymentReceipts';
 import { needsReceipt } from '../lib/postTraining';
+import PanelResizer from './PanelResizer';
 
 // Payment tracking (2026-10-20). Logic and sources: lib/paymentTracking.ts.
 // Management: Management → Payment tracking, everything. Admin (2026-10-20): Admin work → Payment tracking, to mark
@@ -348,7 +349,8 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
       {/* Line panel */}
       {open && !editing && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
-          <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-1/2 md:min-w-[40rem]" onClick={e => e.stopPropagation()}>
+          <PanelResizer />
+          <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw]" onClick={e => e.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <h3 className="text-lg font-bold">{open.programme}</h3>
@@ -435,7 +437,8 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
       {/* Add / edit form (Management only) */}
       {editing && seesProfit && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true">
-          <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-1/2 md:min-w-[40rem]">
+          <PanelResizer />
+          <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw]">
             <div className="mb-5 flex items-start justify-between gap-4">
               <h3 className="text-lg font-bold">{editing === 'new' ? 'Add a payment line' : 'Edit payment line'}</h3>
               <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>

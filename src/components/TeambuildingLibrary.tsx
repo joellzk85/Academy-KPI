@@ -7,6 +7,7 @@ import { TbActivity, TbActivityContent, TbPackages, blankActivity, defaultPackag
 import { ActivityForm, Card, PackageEditor, btnPrimary, btnSecondary, input, linkBtn } from './TeambuildingParts';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
+import PanelResizer from './PanelResizer';
 
 // Teambuilding → Activity library and Package template (Joel, 2026-10-19: "everyone can amend").
 // - Activities are typed once (photos, how it's played, takeaways…) and picked into proposals, where they can be
@@ -136,7 +137,8 @@ function ActivityPanel({ initial, isNew, me, onClose }: { initial: TbActivity; i
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" aria-label="Activity" onClick={close}>
-      <div className="flex h-full w-full flex-col bg-white font-sans text-ink shadow-xl md:w-1/2 md:min-w-[40rem]" onClick={e => e.stopPropagation()}>
+      <PanelResizer />
+      <div className="flex h-full w-full flex-col bg-white font-sans text-ink shadow-xl md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw]" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>
             <h3 className="text-lg font-bold">{isNew ? 'Add activity' : a.name || 'Activity'}</h3>

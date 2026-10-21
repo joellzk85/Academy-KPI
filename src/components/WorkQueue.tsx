@@ -28,6 +28,7 @@ import { ClientLastTouch } from './ClientContactDot';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import TrainingChangePanel from './TrainingChange';
 import { cancelledTraining, changeFlagText, dateLocked, openTodos, pendingChange } from '../lib/trainingChange';
+import PanelResizer from './PanelResizer';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -354,7 +355,8 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
 
       {openDeal && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
-          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] space-y-5 overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+          <PanelResizer />
+          <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] space-y-5 overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <h3 className="truncate text-lg font-bold">{clientName(openDeal)}</h3>

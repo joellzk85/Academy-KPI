@@ -19,6 +19,7 @@ import { BankRequestsBox, PortalAccessBox, PortalInviteDialog, TrainerRatings, u
 import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
 import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel } from '../lib/trainerProfile';
+import PanelResizer from './PanelResizer';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -436,7 +437,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       {/* Trainer panel */}
       {openTrainer && !editing && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
-          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+          <PanelResizer />
+          <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <TrainerPanel
               trainer={openTrainer}
               teaches={teaches(openTrainer)}
@@ -508,7 +510,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         );
         return (
           <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setReviewId(null)}>
-            <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-1/2 md:min-w-[40rem]" onClick={e => e.stopPropagation()}>
+            <PanelResizer />
+            <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw]" onClick={e => e.stopPropagation()}>
               <div className="mb-3 flex items-start justify-between gap-4">
                 <h3 className="text-lg font-bold">{cur ? `Profile update from ${cur.name}` : 'New trainer profile'}</h3>
                 <button type="button" onClick={() => setReviewId(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
@@ -565,7 +568,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       {/* Add / edit form */}
       {editing && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true">
-          <div className="h-full w-full md:w-1/2 md:min-w-[40rem] overflow-y-auto bg-white p-6 shadow-xl">
+          <PanelResizer />
+          <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] overflow-y-auto bg-white p-6 shadow-xl">
             <div className="mb-5 flex items-start justify-between gap-4">
               <h3 className="text-lg font-bold">{editing === 'new' ? 'Add trainer' : 'Edit trainer'}</h3>
               <button type="button" onClick={() => setEditing(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>

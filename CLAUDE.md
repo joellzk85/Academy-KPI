@@ -93,6 +93,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 - **Hidden records:** any screen that reads `pipelines`, `quotations`, `course_outlines` (or a deal's money, queries, teambuilding proposals) must filter with `linkedOnly` / `withoutDeleted` from `src/lib/linked.ts`. Records whose owner isn't on the Team list, and deleted deals with their documents, are hidden everywhere (Data tools and the backup still read everything).
 - **Drafts:** any new editor uses `useAutoSave`; any new form uses `useFormDraft` + `DraftBar`.
 - **Drop-down lists** close on an outside click with `useCloseOnOutside`.
+- **Side panels** put `<PanelResizer />` before the panel and use the width `md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw]` (drag to resize, remembered per person on that browser).
 - **Amounts** use `formatRM` (two decimals, sen shown).
 - **Company details** (address, phone, email, quotation signatory) live only in `src/lib/company.ts`.
 - **No hardcoded names or IDs.** People come from Team; clients, trainers, venues, programmes from their lists.
