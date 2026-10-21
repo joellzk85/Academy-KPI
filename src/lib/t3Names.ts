@@ -65,9 +65,10 @@ export function normaliseCitizenship(raw: string): string {
 
 // Fills in what can be worked out, and tidies the IC.
 export function completeTrainee(t: Trainee): Trainee {
-  const ic = formatIc(t.ic);
+  const ic = formatIc(t.ic.replace(/\s+/g, ' '));
   return {
-    name: t.name.replace(/\s+/g, ' ').trim(),
+    // HR's own numbering ("39. MUHAMMAD ...") is dropped; the form has its own No. column.
+    name: t.name.replace(/\s+/g, ' ').trim().replace(/^\d{1,3}\s*[.)]\s*(?=[a-z])/i, ''),
     employer: t.employer.replace(/\s+/g, ' ').trim(),
     ic,
     sex: normaliseSex(t.sex) || sexFromIc(ic),
@@ -146,8 +147,37 @@ function guessColumns(rows: string[][]): Partial<Record<Col, number>> {
 // Rows of cells → trainees. Lines without a name (blank lines, totals, notes) are skipped.
 // `wrapped`: in a PDF a long name runs onto a second line; a line with text but no IC or number then
 // belongs to the trainee above.
+// IC numbers in a piece of text ("900101-14-5678" or "900101145678").
+const IC_TOKENS = /\d{6}\s*-\s*\d{2}\s*-\s*\d{4}|(?<!\d)\d{11,12}(?!\d)/g;
+export const icCount = (s: string) => (s.match(IC_TOKENS) || []).length;
+
+// One row holding several people (Joel, 2026-10-21: HR typed 38 numbered names in one cell and their 38 ICs in
+// the next): one trainee per IC. Names are split by line, else by their numbering ("1. ALI 2. ABU");
+// a cell with one value (the employer) is copied to everyone; a single sex or citizenship is left for the IC to decide.
+export function splitStacked(t: Trainee): Trainee[] {
+  const ics = t.ic.match(IC_TOKENS) || [];
+  const n = ics.length;
+  if (n < 2) return [t];
+  const lines = (s: string) => s.split(/\n+/).map(x => x.trim()).filter(Boolean);
+  const icLines = lines(t.ic);
+  const icsEach = icLines.length === n && icLines.every(l => icCount(l) === 1) ? icLines : ics;
+  const numbered = (s: string) => s.split(/(?:^|\s)\d{1,3}\s*[.)]\s+(?=[a-z'@])/i).map(x => x.trim()).filter(Boolean);
+  const names = [lines(t.name), numbered(t.name.replace(/\n/g, ' '))].find(l => l.length === n)
+    || numbered(t.name.replace(/\n/g, ' '));
+  const spread = (s: string, copy: boolean) => {
+    const l = lines(s);
+    if (l.length === n) return l;
+    const words = s.split(/\s+/).filter(Boolean);
+    if (words.length === n) return words;
+    return Array(n).fill(copy ? s.replace(/\s+/g, ' ').trim() : '');
+  };
+  const employers = spread(t.employer, true), sexes = spread(t.sex, false), cits = spread(t.citizenship, false);
+  return icsEach.map((ic, i) => ({ name: names[i] || '', employer: employers[i], ic, sex: sexes[i], citizenship: cits[i] }));
+}
+
 export function rowsToTrainees(rows: string[][], wrapped = false): Trainee[] {
-  const clean = rows.map(r => r.map(c => String(c ?? '').replace(/\s+/g, ' ').trim())).filter(r => r.some(Boolean));
+  // Line breaks inside a cell are kept for now: they can separate several people typed in one cell.
+  const clean = rows.map(r => r.map(c => String(c ?? '').replace(/[^\S\n]+/g, ' ').replace(/ *\n[\s]*/g, '\n').trim())).filter(r => r.some(Boolean));
   const { map, headerRow } = findColumns(clean);
   if (map.name === undefined) return [];
   const get = (r: string[], c: Col) => (map[c] !== undefined ? r[map[c]!] || '' : '');
@@ -166,7 +196,7 @@ export function rowsToTrainees(rows: string[][], wrapped = false): Trainee[] {
     if (/^(total|jumlah|grand total)\b/i.test(name)) continue;
     out.push({ name, employer: get(r, 'employer'), ic: get(r, 'ic'), citizenship: get(r, 'citizenship'), sex: get(r, 'sex') });
   }
-  return out.map(completeTrainee);
+  return out.flatMap(splitStacked).map(completeTrainee);
 }
 
 // ---------- reading the files ----------
@@ -224,7 +254,11 @@ async function wordRows(buf: ArrayBuffer): Promise<{ rows: string[][]; table: bo
   const { value: html } = await (mammoth.default || mammoth).convertToHtml({ arrayBuffer: buf });
   const page = new DOMParser().parseFromString(html, 'text/html');
   const tables = Array.from(page.querySelectorAll('table'));
-  const rowsOf = (t: Element) => Array.from(t.querySelectorAll('tr')).map(tr => Array.from(tr.children).map(td => (td.textContent || '').trim()));
+  const rowsOf = (t: Element) => Array.from(t.querySelectorAll('tr')).map(tr => Array.from(tr.children).map(td => {
+    // Each paragraph in a cell on its own line (several people can be typed in one cell).
+    const paras = Array.from(td.querySelectorAll(td.querySelector('p') ? 'p' : 'li'));
+    return (paras.length ? paras.map(p => p.textContent || '').join('\n') : td.textContent || '').trim();
+  }));
   if (tables.length) {
     // All tables one after the other (a long list is often split over pages), the heading rows are skipped later.
     const best = tables.map(rowsOf).sort((a, b) => rowsToTrainees(b).length - rowsToTrainees(a).length)[0];

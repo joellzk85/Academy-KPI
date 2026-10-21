@@ -3,7 +3,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ChevronDown, ChevronUp, Download, FileUp, Loader2, Plus, Trash2 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { addDays, trainingDays } from '../lib/deals';
-import { NAME_LIST_ACCEPT, NAME_LIST_KINDS, Trainee, blankTrainee, completeTrainee, readNameList } from '../lib/t3Names';
+import { NAME_LIST_ACCEPT, NAME_LIST_KINDS, Trainee, blankTrainee, completeTrainee, icCount, readNameList, splitStacked } from '../lib/t3Names';
 import { T3_DAYS_PER_SHEET, makeT3Pdf } from '../lib/t3Pdf';
 import { pdfErrorText } from '../lib/oldTab';
 import { safeFileName } from '../lib/checklistFiles';
@@ -144,6 +144,10 @@ export default function T3Maker({ deal, saved, viewer, incoming }: {
     : dirty ? { t: 'Saves in a moment', c: 'text-attention' }
     : { t: data.updatedAt ? 'Saved' : '', c: 'text-ink-soft' };
   const oddNames = named.filter(t => NOT_ON_FORM.test(t.name + t.employer));
+  // Rows that hold several people (more than one IC), or text too long for its box on the form.
+  const stacked = data.trainees.map((t, i) => (icCount(t.ic) > 1 ? i + 1 : 0)).filter(Boolean);
+  const tooLong = data.trainees.map((t, i) => (t.name.length > 90 || t.employer.length > 70 ? i + 1 : 0)).filter(n => n && !stacked.includes(n));
+  const splitAll = () => change({ trainees: data.trainees.flatMap(t => (icCount(t.ic) > 1 ? splitStacked(t).map(x => ({ ...completeTrainee(x), employer: x.employer || employer })) : [t])) });
   const sets = Math.ceil(dates.length / T3_DAYS_PER_SHEET);
 
   return (
@@ -168,6 +172,18 @@ export default function T3Maker({ deal, saved, viewer, incoming }: {
       </div>
 
       {error && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+
+      {stacked.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-attention/30 bg-attention-soft px-3 py-2 text-sm text-attention">
+          <span className="flex-1">Row {stacked.join(', ')} has several IC numbers, so it looks like several people in one row.</span>
+          <button type="button" className={btnSecondary} onClick={splitAll}>Split into separate people</button>
+        </div>
+      )}
+      {tooLong.length > 0 && (
+        <p className="mt-2 rounded-lg bg-attention-soft px-3 py-2 text-sm text-attention">
+          Row {tooLong.join(', ')} is too long to fit its box on the form, so it will be cut off with "…". Check it in the list.
+        </p>
+      )}
 
       {found && (
         <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-attention/30 bg-attention-soft px-3 py-2 text-sm">

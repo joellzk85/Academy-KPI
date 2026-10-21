@@ -130,6 +130,14 @@ export async function makeT3Pdf(input: T3Input): Promise<Uint8Array> {
     }
     if (lines.some(l => f.widthOfTextAtSize(l, size) > width)) lines = wrap(t, f, size, width);
     const lead = size * 1.15;
+    // Still too much: cut it off with "…" so nothing spills out of its box (the panel warns about such rows).
+    const room = Math.max(1, Math.floor(height / lead));
+    if (lines.length > room) {
+      lines = lines.slice(0, room);
+      let last = `${lines[room - 1]}…`;
+      while (last.length > 1 && f.widthOfTextAtSize(last, size) > width) last = `${last.slice(0, -2)}…`;
+      lines[room - 1] = last;
+    }
     let y = (y0 + y1) / 2 + (lines.length * lead) / 2 - size * 0.85;
     for (const l of lines) {
       const lw = f.widthOfTextAtSize(l, size);
