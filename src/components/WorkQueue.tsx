@@ -19,6 +19,8 @@ import { useReceipts } from './PaymentReceipts';
 import { postTraining, postTrainingFlags } from '../lib/postTraining';
 import { claimFlag, jobId, poDeclinedFlag } from '../lib/trainerPortal';
 import { useTrainerJobs } from './TrainerPortalAdmin';
+import { useTrainingReports } from './TrainingReportAdmin';
+import { reportFlag } from '../lib/trainingReport';
 const PaymentTracking = React.lazy(() => import('./PaymentTracking'));
 import ProgrammesManager, { StatusChip } from './Programmes';
 import BackupPanel from './BackupPanel';
@@ -102,6 +104,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
   const [loaded, setLoaded] = useState(false);
   const receipts = useReceipts(true);
   const trainerJobs = useTrainerJobs();
+  const trainingReports = useTrainingReports();
   const [filter, setFilter] = useState<'open' | 'flagged' | 'after' | 'done'>('open');
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(initialOpenId || null);
@@ -168,6 +171,9 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
       const declined = poDeclinedFlag(trainerJobs.find(j => j.id === jobId(p.id, trainerTask.trainerId)), trainerTask.trainerName || 'The trainer');
       if (declined) flags.unshift({ level: 'danger', text: declined });
     }
+    // The trainer sent the training report (2026-10-21): check it and mark it ready for HR.
+    const report = reportFlag(trainingReports.find(r => r.dealId === p.id), trainerTask?.trainerName || 'The trainer');
+    if (report) flags.push({ level: 'attention', text: report });
     // Change date / Cancel training (2026-10-21): a request waiting for Management, or things still to update after a new date.
     const change = changeFlagText(p);
     if (change) flags.unshift({ level: pendingChange(p) ? 'attention' : 'danger', text: change });
@@ -175,7 +181,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).
     const complete = pr.done === pr.total && open.length === 0 && post.closed;
     return { deal: p, pr, overdue: overdue.length > 0, complete, after: post.ended && !complete, post, flags };
-  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts, trainerJobs]);
+  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts, trainerJobs, trainingReports]);
   const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
   // Cancelled trainings with things still to wrap up (cancel the grant, the venue, refunds…).
   const cancelled = useMemo(() => deals.filter(p => cancelledTraining(p) && openTodos(p).length > 0), [deals]);

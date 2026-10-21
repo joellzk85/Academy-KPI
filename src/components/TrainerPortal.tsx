@@ -19,6 +19,9 @@ import {
 } from '../lib/trainerPortal';
 import { formatDateRange, formatRM, daysText } from '../lib/deals';
 import { COMPANY } from '../lib/company';
+import { TrainingReport, reportGaps, trainerCanEdit } from '../lib/trainingReport';
+import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
+import TrainingReportForm from './TrainingReportForm';
 
 // The trainer portal (Joel, 2026-10-21), at /trainer. A trainer whom Admin or Management gave access logs in with
 // their email and password (Firebase's own email + password login; "Forgot password" is Firebase's reset email).
@@ -320,6 +323,7 @@ function todos(info: any) {
     if ((t.po.length || t.poAuto) && !t.poAcceptedAt && !t.poDeclined && !t.ended) out.push({ text: `Accept the PO for ${t.programme} (${when(t)})`, tab: 'trainings' });
     const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
     if (t.started && !allPaid && (!t.claim || t.claim.status === 'returned')) out.push({ text: `${t.claim ? 'Fix and resend' : 'Request'} your fee for ${t.programme} (${when(t)})`, tab: 'trainings' });
+    if (t.ended && (!t.report || t.report.status === 'draft' || t.report.status === 'returned')) out.push({ text: `${t.report?.status === 'returned' ? 'Fix and resend' : 'Write'} the training report for ${t.programme} (${when(t)})`, tab: 'trainings' });
   });
   if (!info.payment.accountNo && !info.payment.pending) out.push({ text: 'Add your bank details so we can pay you', tab: 'payment' });
   if (!info.payment.tin) out.push({ text: 'Add your tax identification number (TIN)', tab: 'payment' });
@@ -393,7 +397,8 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [claiming, setClaiming] = useState(false);
-  const run = async (key: string, fn: () => Promise<any>) => {
+  const [reporting, setReporting] = useState(false);
+  const run =async (key: string, fn: () => Promise<any>) => {
     setBusy(key); setError('');
     try { await fn(); } catch (e: any) { setError(e.message); } finally { setBusy(''); }
   };
@@ -506,6 +511,26 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
           : <p className="mt-2 text-sm text-ink-soft">You can request your fee once the training has started.</p>)}
         {claiming && <ClaimForm t={t} trainerId={trainerId} onCancel={() => setClaiming(false)} onDone={async () => { setClaiming(false); await reload(); }} />}
       </div>
+
+      {/* Training report (2026-10-21) */}
+      {!t.cancelled && (
+        <div className="rounded-xl border border-line p-3">
+          <p className="text-sm font-semibold">Training report</p>
+          {t.report?.status === 'returned' && <p className="mt-2 rounded-lg bg-attention-soft px-3 py-2 text-sm"><strong>Please fix and send again:</strong> {t.report.returnNote || 'NEXT Academy asked for changes.'}</p>}
+          {t.report && t.report.status !== 'returned' && (
+            <p className={`mt-1 flex items-center gap-1.5 text-sm ${t.report.status === 'draft' ? 'text-ink-soft' : 'text-accent'}`}>
+              {t.report.status !== 'draft' && <CheckCircle2 className="h-4 w-4" />}
+              {t.report.status === 'draft' ? 'Started, not sent yet.' : t.report.status === 'checked' ? 'Checked by NEXT Academy. Thank you!' : `Sent on ${isoDay(t.report.submittedAt)}. NEXT Academy is checking it.`}
+            </p>
+          )}
+          {t.started
+            ? <button type="button" className={`${!t.report || t.report.status === 'draft' || t.report.status === 'returned' ? btnPrimary : btnSecondary} mt-3`} onClick={() => setReporting(true)}>
+                {!t.report ? 'Write the training report' : t.report.status === 'checked' ? 'View the report' : t.report.status === 'returned' ? 'Fix and send again' : t.report.status === 'draft' ? 'Continue the report' : 'Change what I sent'}
+              </button>
+            : <p className="mt-1 text-sm text-ink-soft">You can write the report once the training has started.</p>}
+        </div>
+      )}
+      {reporting && <ReportEditor t={t} trainerId={trainerId} onClose={async () => { setReporting(false); await reload(); }} />}
 
       {/* Rating */}
       {t.rating && (
@@ -647,12 +672,79 @@ function ClaimForm({ t, trainerId, onCancel, onDone }: { t: any; trainerId: stri
       <p className="text-[15px]">Ask for your fee. Training photos and the signed T3 attendance form help us, but they are optional. Your fee is then approved and paid by NEXT Academy as per your PO.</p>
       <FileDrop title="Training photos (optional)" hint="Photos of the training (JPG or PNG)." photo folder={folder} kind="photo" files={photos} setFiles={setPhotos} />
       <FileDrop title="T3 attendance form (optional)" hint="The signed T3 form (PDF, JPG or PNG; a clear phone photo is fine)." folder={folder} kind="t3" files={t3} setFiles={setT3} />
-      <div className="rounded-xl border border-dashed border-line bg-white px-3 py-2 text-sm text-ink-soft">Training report: coming soon. Not needed for now.</div>
       {error && <p role="alert" className={alertBox}>{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         <button type="button" className={btnSecondary} onClick={onCancel}>Cancel</button>
         <button type="button" className={btnPrimary} disabled={busy} onClick={send}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Send to NEXT Academy</button>
       </div>
+    </div>
+  );
+}
+
+// The training report (2026-10-21; lib/trainingReport.ts), full screen. It saves itself as a draft as the trainer
+// types (useAutoSave); "Send to NEXT Academy" sends it to be checked. Locked once NEXT Academy has checked it.
+function ReportEditor({ t, trainerId, onClose }: { t: any; trainerId: string; onClose: () => void }) {
+  const [report, setReport] = useState<TrainingReport | null>(null);
+  const [extra, setExtra] = useState<{ names: string[]; programmes: { id: string; name: string }[] }>({ names: [], programmes: [] });
+  const [savedJson, setSavedJson] = useState('');
+  const [error, setError] = useState('');
+  const [sending, setSending] = useState(false);
+  useEffect(() => {
+    api('/api/portal/report/get', { dealId: t.dealId })
+      .then(d => { setReport(d.report); setSavedJson(JSON.stringify(d.report)); setExtra({ names: d.names || [], programmes: d.programmes || [] }); })
+      .catch(e => setError(e.message));
+  }, [t.dealId]);
+  const locked = !trainerCanEdit(report);
+  const json = report ? JSON.stringify(report) : '';
+  const { state, flush } = useAutoSave({
+    value: report, dirty: !!report && json !== savedJson, enabled: !!report && !locked,
+    write: async v => { await api('/api/portal/report/save', { dealId: t.dealId, report: v }); }, onSaved: setSavedJson,
+  });
+  const close = () => leaveAfterSave(flush, onClose);
+  const send = async () => {
+    if (!report) return;
+    setError('');
+    const gaps = reportGaps(report);
+    if (gaps.length) { setError(`Please fill in: ${gaps.join(', ')}.`); return; }
+    setSending(true);
+    try { await api('/api/portal/report/save', { dealId: t.dealId, report, submit: true }); setSavedJson(json); onClose(); }
+    catch (e: any) { setError(e.message); } finally { setSending(false); }
+  };
+  const setPhotos: React.Dispatch<React.SetStateAction<PortalFile[]>> = fn =>
+    setReport(r => (r ? { ...r, photos: typeof fn === 'function' ? fn(r.photos as PortalFile[]) : fn } : r));
+  const line = autoSaveText(state, !!report && json !== savedJson, locked);
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-surface" role="dialog" aria-modal="true" aria-label="Training report">
+      <header className="sticky top-0 z-10 border-b border-line bg-white">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <p className="truncate font-bold">Training report · {t.programme}</p>
+            <p className="truncate text-sm text-ink-soft">{[t.client, when(t)].filter(Boolean).join(' · ')}</p>
+          </div>
+          <button type="button" className={btnSecondary} onClick={close}><X className="h-4 w-4" /> Close</button>
+        </div>
+      </header>
+      <main className="mx-auto max-w-3xl space-y-4 px-4 py-5 pb-28">
+        {!report && !error && <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}
+        {report?.status === 'returned' && <p className="rounded-lg bg-attention-soft px-3 py-2.5 text-sm"><strong>NEXT Academy asked for changes:</strong> {report.returnNote || 'Please check the report and send it again.'}</p>}
+        {locked && <p className="rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent">NEXT Academy has checked this report, so it can't be changed any more. Contact them if something needs fixing.</p>}
+        {report && (
+          <TrainingReportForm value={report} onChange={setReport} names={extra.names} programmes={extra.programmes} disabled={locked}
+            photos={locked
+              ? <ul className="grid grid-cols-3 gap-2">{report.photos.map(p => <li key={p.path}><img src={p.url} alt="" className="aspect-square w-full rounded-lg object-cover" /></li>)}</ul>
+              : <FileDrop title="Photos" hint="JPG or PNG. Photos are made smaller before they upload." photo folder={claimFolder(trainerId, t.dealId)} kind="report" files={report.photos as PortalFile[]} setFiles={setPhotos} />} />
+        )}
+        {error && <p role="alert" className={alertBox}>{error}</p>}
+      </main>
+      {report && !locked && (
+        <div className="fixed inset-x-0 bottom-0 border-t border-line bg-white/95 backdrop-blur">
+          <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4 py-3">
+            <span className={`text-sm ${line.tone === 'danger' ? 'text-danger' : line.tone === 'attention' ? 'text-attention' : 'text-ink-soft'}`}>{line.text}</span>
+            <button type="button" className={btnPrimary} disabled={sending} onClick={send}>{sending && <Loader2 className="h-4 w-4 animate-spin" />} {report.status === 'draft' ? 'Send to NEXT Academy' : 'Send again'}</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

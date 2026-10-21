@@ -121,6 +121,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `admin-checklist.md` | Phase 2B checklist, flags, checklist files, pre-training flow with costs, vendors and the payment summary (2026-10-21) |
 | `hrdc-programmes-trainers.md` | Phase 2C programmes, HRDC queries, trainer links, trainer profile and HRDC biodata |
 | `trainer-portal.md` | Trainer portal (/trainer): email login for trainers given access, profile, bank, TIN, trainings, PO, fee request, rating |
+| `training-report.md` | Training report: trainer writes it in the portal (or Admin on the deal), checked, PDF for HR; internal notes shown to HR only when Management ticks |
 | `money.md` | Phase 3 money, company payments, Link for accounts, Project P&L, manager deletes, Blueprint import, Payment tracking, After training to Case closed |
 | `home-kpi-dashboards.md` | KPI templates, My home, rings, cards, workspace menu, KPI page, Team performance, weekly presentation (Present tab, action points) |
 | `clients-directories-calendar.md` | Client history, Clients, Trainers, Venues, To-do, Google Calendar |
@@ -137,6 +138,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **To confirm with Joel:** team-building terms if they differ from course-outline terms; whether HRDC gives a programme code on approval; who usually handles HRDC queries.
 - **Trainer portal (2026-10-21):** switch on Firebase Email/Password sign-in; publish both rules; go-live checklist item 32.
 - **Weekly presentation (2026-10-21):** publish `firestore.rules` (`present_prefs`); go-live checklist item 36.
+- **Training report (2026-10-21):** publish `firestore.rules` (`training_reports`); go-live checklist item 37. Later: read the Output assessment file by itself (needs a sample file from Joel).
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.

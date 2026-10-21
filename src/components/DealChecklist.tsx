@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, FileText, ListChecks, Loader2, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { formatDate, todayIso, trainingEndDate } from '../lib/deals';
+import { formatDate, todayIso, trainingDateText, trainingEndDate } from '../lib/deals';
+import { TrainingReportBox } from './TrainingReportAdmin';
 import {
   ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS_2026_10_20, Picked, applicableTasks, asksNeeded, buildChecklist,
   effectiveTrainer, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
@@ -352,6 +353,20 @@ export default function DealChecklist({
                 {t.kind === 'trainer' && editable && (() => {
                   const tr = effectiveTrainer(t, quotes, trainers);
                   return tr?.id ? <TrainerClash deal={deal} trainerId={tr.id} trainerName={tr.name} /> : null;
+                })()}
+                {/* Training report (2026-10-21): written in the trainer portal or here, checked, PDF for HR */}
+                {t.id === 'training_report' && (() => {
+                  const trainerTask = allTasks.find(x => x.kind === 'trainer');
+                  const tr = effectiveTrainer(trainerTask, quotes, trainers);
+                  const grant = allTasks.find(x => x.kind === 'grant');
+                  const outputFiles = files.filter(f => f.taskId === 'output_assessment').map(f => f.name);
+                  return (
+                    <TrainingReportBox deal={deal} viewer={viewer} trainerId={tr?.id || ''} trainerName={tr?.name || 'The trainer'}
+                      header={{ programme: deal.courseName || '', client: deal.client || '', dates: trainingDateText(deal, true), venue: effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || '', trainer: tr?.name || '', grantNumber: grant?.grantNumber || '' }}
+                      names={(checklist.t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
+                      onChecked={() => { if (!t.done) patch(t.id, doneBy(), `${t.label}: checked, done`); }}
+                      onReopened={() => { if (t.done) patch(t.id, openAgain, `${t.label}: reopened`); }} />
+                  );
                 })()}
                 {/* Trainer portal (2026-10-21): rating, PO accepted or declined, the trainer's fee request */}
                 {t.kind === 'trainer' && t.trainerId && (

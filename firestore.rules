@@ -458,6 +458,15 @@ service cloud.firestore {
       allow create, update: if isStaff();
       allow delete: if isManagement();
     }
+    // Training reports (2026-10-21), one per deal: the trainer writes theirs through the CRM server (portal);
+    // Admin and Management read, fix, check or write it. Only Management changes what HR sees (showToHr).
+    match /training_reports/{dealId} {
+      allow read: if isMember();
+      allow create: if isStaff() && (!('showToHr' in request.resource.data) || isManagement());
+      allow update: if isStaff()
+        && (request.resource.data.get('showToHr', {}) == resource.data.get('showToHr', {}) || isManagement());
+      allow delete: if isManagement();
+    }
     // Invite links to the trainer portal (/trainer/join/<token>): Admin and Management make and cancel them; the
     // trainer's side (open, accept) goes only through the CRM server.
     match /portal_invites/{token} {

@@ -24,6 +24,7 @@ import {
   icsCalendar, inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
 import { FieldValue } from 'firebase-admin/firestore';
+import { cleanTrainerPart, newReport, reportDates, reportGaps, trainerCanEdit, withDates } from './src/lib/trainingReport';
 
 const BUCKET = String((firebaseConfig as any).storageBucket || '');
 const nowIso = () => new Date().toISOString();
@@ -138,6 +139,8 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
     const venue = effectiveVenue((checklist.tasks || []).find((x: any) => x.kind === 'venue'), quotes, venues.docs.map((d: any) => ({ ...d.data(), id: d.id })));
     const venueRec: any = venue?.id ? venues.docs.find((d: any) => d.id === venue.id)?.data() : null;
     const job: any = (await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data() || {};
+    const rep: any = (await db.collection('training_reports').doc(deal.id).get()).data();
+    const report = rep && rep.trainerId === trainerId ? { status: rep.status, returnNote: rep.returnNote || '', submittedAt: rep.submittedAt || '' } : null;
     const lines = (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected');
     const files = await poFiles(db, deal.id, task.id);
     const start = String(deal.trainingDate || '').slice(0, 10);
@@ -167,6 +170,7 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
       fee: lines.map(o => ({ id: o.id, description: o.description || '', amount: Number(o.amount) || 0, status: o.status, statusText: feeStatusText(o) })),
       claim: job.claim ? { status: job.claim.status, submittedAt: job.claim.submittedAt, returnNote: job.claim.returnNote || '', photos: job.claim.photos || [], t3: job.claim.t3 || [] } : null,
       rating: job.rating ? { stars: job.rating.stars, note: job.rating.note || '', at: job.rating.at } : null,
+      report,
       started: !!start && start <= today,
       ended: !!trainingEndDate(deal) && trainingEndDate(deal) < today,
     });
@@ -497,4 +501,57 @@ export function registerTrainerPortalRoutes(app: Express) {
     await addDealHistory(db, deal.id, '', by, `Trainer requested their fee (${claimFilesText(photos, t3)})`);
     return {};
   }));
+
+  // ---------- Training report (2026-10-21; lib/trainingReport.ts) ----------
+  // The trainer's report for one training: what they wrote, plus what the deal already knows (dates, the course
+  // outline's objectives, the participants' names from the T3 list) to start a new one. The team's part
+  // (participant rating, what goes on HR's copy) isn't sent to the trainer.
+  app.post('/api/portal/report/get', route(async req => {
+    const { db, trainerId, trainer: t } = await trainerFrom(req);
+    const { deal, checklist } = await assigned(db, trainerId, req.body?.dealId);
+    const seed = await reportSeed(db, deal, checklist);
+    const saved: any = (await db.collection('training_reports').doc(deal.id).get()).data();
+    const mine = saved && saved.trainerId === trainerId ? saved : null;
+    const base = mine ? withDates({ ...newReport(deal.id, trainerId, t.name || '', seed), ...mine }, seed.dates) : newReport(deal.id, trainerId, t.name || '', seed);
+    const { participant, showToHr, history, ...report } = base as any;
+    return { report, names: seed.names, programmes: (await db.collection('programmes').get()).docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name) };
+  }));
+
+  // Save the trainer's part (the portal saves a draft by itself as they type; { submit: true } sends it to the team).
+  app.post('/api/portal/report/save', route(async req => {
+    const { db, trainerId, trainer: t } = await trainerFrom(req);
+    const { deal } = await assignedLive(db, trainerId, req.body?.dealId);
+    const start = String(deal.trainingDate || '').slice(0, 10);
+    if (!start || start > todayIso()) throw new UserError(400, 'too-early', 'You can write the report once the training has started.');
+    const ref = db.collection('training_reports').doc(deal.id);
+    const before: any = (await ref.get()).data();
+    if (before && before.trainerId && before.trainerId !== trainerId && before.status !== 'draft') throw new UserError(409, 'not-yours', 'Another trainer has already sent the report for this training.');
+    if (!trainerCanEdit(before)) throw new UserError(400, 'checked', 'NEXT Academy has already checked this report, so it can no longer be changed. Contact them if something needs fixing.');
+    const part = cleanTrainerPart(req.body?.report, list => cleanFiles(list, claimFolder(trainerId, deal.id), 12));
+    const submit = req.body?.submit === true;
+    if (submit) {
+      const gaps = reportGaps(part);
+      if (gaps.length) throw new UserError(400, 'invalid', `Please fill in: ${gaps.join(', ')}.`);
+    }
+    const at = nowIso();
+    const by = (t.name || 'Trainer') + PORTAL;
+    const status = submit ? 'submitted' : before?.status && before.trainerId === trainerId ? before.status : 'draft';
+    await ref.set({
+      ...part, dealId: deal.id, trainerId, trainerName: t.name || '', status, updatedAt: at, updatedByName: by,
+      ...(submit ? { submittedAt: at, submittedByName: by, history: [...(before?.history || []), { at, byName: by, action: before?.submittedAt ? 'Sent again' : 'Sent' }].slice(-30) } : {}),
+    }, { merge: true });
+    if (submit) await addDealHistory(db, deal.id, '', by, `Trainer ${before?.submittedAt ? 'sent the training report again' : 'sent the training report'}`);
+    return { status };
+  }));
+}
+
+// What the deal already knows, to start a report: the training days, the course outline's learning outcomes (the
+// sent outline first, else the latest) and the names on the T3 list (HRDC deals).
+async function reportSeed(db: Firestore, deal: any, checklist: any) {
+  const outlines = (await db.collection('course_outlines').where('pipelineId', '==', deal.id).get()).docs
+    .map(d => d.data() as any).filter(o => !isDeletedRecord(o))
+    .sort((a, b) => Number(b.status === 'sent') - Number(a.status === 'sent') || String(b.sentAt || b.date || '').localeCompare(String(a.sentAt || a.date || '')));
+  const objectives = ((outlines[0]?.outcomes || []) as any[]).map(x => String(x || '').trim()).filter(Boolean).slice(0, 40);
+  const names = ((checklist?.t3?.trainees || []) as any[]).map(x => String(x?.name || '').trim()).filter(Boolean).slice(0, 500);
+  return { dates: reportDates(String(deal.trainingDate || '').slice(0, 10), trainingDays(deal)), objectives, names };
 }
