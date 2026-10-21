@@ -105,7 +105,7 @@ export function personSlides(args: {
                     <span className="font-bold">{m.label} <span className="font-normal text-ink-soft">({Math.round(m.weight * 100)}%)</span></span>
                     <span className="tabular-nums text-ink-soft"><strong className="text-ink">{m.isRM ? formatRM(total) : total}</strong> of {m.isRM ? formatRM(m.targetVal) : m.targetVal} · {pct}%</span>
                   </div>
-                  <div className="mt-1.5 h-4 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${pct >= 100 ? 'bg-accent' : pct >= 50 ? 'bg-[#5DB3A6]' : 'bg-[#E0A458]'}`} style={{ width: `${pct}%` }} /></div>
+                  <div className="mt-1.5 h-4 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${pct >= 100 ? 'bg-accent' : pct >= 50 ? 'bg-accent/60' : 'bg-[#E0A458]'}`} style={{ width: `${pct}%` }} /></div>
                 </div>
               ))}
               {rows[0] && (
