@@ -17,7 +17,8 @@ import { periodFor } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
-import { MoneyIn, MoneyOut, canDecide, dealPL, isCompanyPayment, isPaid, moneyFlags } from '../lib/money';
+import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, moneyFlags } from '../lib/money';
+import { projectRow } from '../lib/projectPL';
 import { useChecklistSettings } from './DealChecklist';
 import { useMoneySettings } from './Money';
 import { useReceipts } from './PaymentReceipts';
@@ -149,6 +150,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const receipts = useReceipts(staff);   // payment receipts, for the After training card
   const [clients, setClients] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
+  const [plDocs, setPlDocs] = useState<Record<string, any>>({});
   const touchPoints = useTouchPoints();
   const [savedCards, setSavedCards] = useState<CardId[] | null>(null);
   const [savedShortcuts, setSavedShortcuts] = useState<ShortcutId[] | null>(null);
@@ -228,6 +230,10 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     if (staff) {
       subs.push(onSnapshot(query(collection(db, 'money_out')), s => setMoneyOut(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id }))))));
       subs.push(onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))));
+    }
+    // SST typed in Project P&L, for the Money position card's profit (Management only).
+    if (viewer.role === 'management') {
+      subs.push(onSnapshot(query(collection(db, 'project_pl')), s => setPlDocs(Object.fromEntries(s.docs.map(d => [d.id, d.data()]))), () => setPlDocs({})));
     }
     return () => subs.forEach(u => u());
   }, [viewer.id, staff]);
@@ -324,6 +330,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
+    quotes, plDocs,
   };
 
   return (
@@ -767,6 +774,7 @@ type CardCtx = {
   clientFollowUps: { clientId: string; title: string; date: string; d: number }[];
   docLinks: DocLink[];
   openedLinks: DocLink[];   // the links this person may see opens of
+  quotes: any[]; plDocs: Record<string, any>;   // for the one P&L (SST from the quotation, or typed in Project P&L)
 };
 
 type Item = { key: string; title: string; sub?: string; level?: 'danger' | 'attention'; onClick?: () => void };
@@ -1068,10 +1076,11 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       const month = c.today.slice(0, 7);
       c.wonDeals.forEach(p => {
         const ins = c.moneyIn.filter(m => m.dealId === p.id);
-        const outs = c.moneyOut.filter(o => o.dealId === p.id);
-        const pl = dealPL(ins, outs, c.moneySettings);
-        toComeIn += pl.toComeIn; toPay += pl.toPayOut; waiting += pl.pendingApproval;
-        if (ymd(p.trainingDate).startsWith(month)) profitMonth += pl.profit;
+        // The one P&L (projectRow, as in Project P&L and the deal): profit after SST, HRDC's %, commission and costs.
+        const row = projectRow(p, ins, c.moneyOut, c.moneySettings, c.today, { quotes: c.quotes, plDocs: c.plDocs });
+        if (!row.estimate) toComeIn += row.toComeIn;   // invoices and claims sent, not yet paid
+        toPay += row.toPayOut; waiting += row.pendingApproval;
+        if (ymd(p.trainingDate).startsWith(month)) profitMonth += row.profit;
         ins.filter(m => !isPaid(m) && ymd(m.invoiceDate) && -(daysUntil(ymd(m.invoiceDate), c.today) ?? 0) > c.moneySettings.overdueDays).forEach(() => { overdue++; });
       });
       // Company payments (not tied to a training) still need paying or approving.

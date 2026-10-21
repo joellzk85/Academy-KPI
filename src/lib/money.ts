@@ -160,11 +160,12 @@ export function shortfall(m: MoneyIn, s: MoneySettings): number {
   return gap > 1 ? gap : 0;
 }
 
-export interface DealPL {
+// The money sums for one deal. Profit is not here: the one P&L is projectRow in lib/projectPL.ts (SST, HRDC's %,
+// commission and costs), used by the deal screen, Project P&L and My home alike (Joel, 2026-10-21: no duplicate P&L).
+export interface DealMoneySums {
   invoiced: number;        // gross invoiced to the client + claimed from HRDC
   hrdcFee: number;         // HRDC's deduction
   costs: number;           // approved and paid money out
-  profit: number;
   received: number;
   toComeIn: number;
   toPayOut: number;        // approved, not yet paid
@@ -172,7 +173,7 @@ export interface DealPL {
   shortfall: number;
 }
 
-export function dealPL(ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings): DealPL {
+export function dealMoneySums(ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings): DealMoneySums {
   const invoiced = ins.reduce((t, m) => t + money(m.amount), 0);
   const hrdcFee = ins.filter(m => m.source === 'hrdc').reduce((t, m) => t + money(m.amount) * (s.hrdcDeductionPct / 100), 0);
   const received = ins.filter(isPaid).reduce((t, m) => t + money(m.paidAmount), 0);
@@ -183,7 +184,7 @@ export function dealPL(ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings): Deal
   const toPayOut = outs.filter(o => o.status === 'approved').reduce((t, o) => t + money(o.amount), 0);
   const pendingApproval = outs.filter(o => o.status === 'pending' && inPL(o)).reduce((t, o) => t + money(o.amount), 0);
   const short = ins.reduce((t, m) => t + shortfall(m, s), 0);
-  return { invoiced, hrdcFee, costs, profit: invoiced - hrdcFee - short - costs, received, toComeIn, toPayOut, pendingApproval, shortfall: short };
+  return { invoiced, hrdcFee, costs, received, toComeIn, toPayOut, pendingApproval, shortfall: short };
 }
 
 // Can this person approve or reject this request? Managers only, never their own.

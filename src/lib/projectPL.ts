@@ -1,6 +1,7 @@
 // Project P&L (Management → Project P&L, built 2026-10-17).
 // One row per won deal (one training session), calculated live from money_in, money_out
-// and config/money_settings by dealPL in lib/money.ts. Nothing is typed here.
+// and config/money_settings (sums from dealMoneySums in lib/money.ts). Nothing is typed here.
+// This is the only P&L: the deal's "Money out and P&L" section and My home use projectRow too (Joel, 2026-10-21).
 // Until a deal has an invoice or HRDC claim, its income is estimated from the deal value
 // (and, for HRDC deals, HRDC's % is taken off that estimate), so upcoming trainings
 // don't show a false loss.
@@ -12,7 +13,7 @@
 // and before HRDC's %, i.e. income minus SST. It comes off profit; it isn't a payment request (it's for payslips later).
 
 import { dealOwnerId, dealStage, dealValue, todayIso, trainingEndDate } from './deals';
-import { MoneyIn, MoneyOut, MoneySettings, dealPL, inPL, moneySettled } from './money';
+import { MoneyIn, MoneyOut, MoneySettings, dealMoneySums, inPL, moneySettled } from './money';
 import { mainQuote } from './checklist';
 import { quoteSst } from './quoteSst';
 
@@ -71,7 +72,7 @@ export function quoteSstRate(dealQuotes: any[]): number {
 export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], s: MoneySettings, today = todayIso(), x: PLExtras = NO_EXTRAS): ProjectRow {
   const ins = allIns.filter(m => m.dealId === deal.id);
   const outs = allOuts.filter(o => o.dealId === deal.id);
-  const pl = dealPL(ins, outs, s);
+  const pl = dealMoneySums(ins, outs, s);
   const trainingDate = isoDate(deal?.trainingDate);
   const lastDay = trainingEndDate(deal) || trainingDate;   // a training of several days is done after its last day
   const training: TrainingStatus = !trainingDate ? 'no_date' : lastDay < today ? 'done' : trainingDate <= today ? 'today' : 'upcoming';
