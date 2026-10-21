@@ -40,4 +40,29 @@ Joel's decisions:
   `TrainerPortal.tsx`. Backup includes "Training reports".
 
 ## Not built yet
-- Reading the Output assessment file by itself; a client link for HR (PDF only for now).
+- Reading the Output assessment file by itself.
+
+## Later the same day (2026-10-21): changes after sending, pax, HR's sections and link
+Joel's list: the trainer can edit after submitting, with the date, time and what changed recorded; number of pax from
+the deal; objectives from the course outline but editable by the trainer (already so); Management sees and edits the
+report, chooses what HR sees, and sends it by PDF or link. Joel's decisions: pax comes from the **deal's Participants**;
+a **checked report the trainer changes goes back to "submitted"** for Admin to check again.
+- **Changes after sending:** once sent, the trainer's typing is kept in `trainerDraft` (the team keeps seeing what was
+  sent; the CRM panel says the trainer is changing it). **Send changes** compares with what was sent
+  (`reportChanges`, plain words like "Day 2 absent: added Ali", "Objective …: 4 → 5 stars", "Observations changed"),
+  saves it as a revision `{ at, byName, changes }` in `revisions` (last 30), and sets status "submitted". A checked
+  report also unticks its Training report step. The list shows in the portal and in the CRM panel (date and time,
+  Malaysia); the box says "Changed N times after sending"; the Admin work flag says "changed … after sending".
+  Edits by Admin / Management on the deal are not listed as revisions (History keeps the status steps).
+- **Pax:** `registered` follows the deal's Participants (`dealPax`, `withPax`) in the portal, the CRM, the PDF and the
+  link; it can be typed only when the deal has none.
+- **HR's copy:** `showToHr` now covers every section (`PUBLIC_PARTS` on unless unticked, `INTERNAL_PARTS` off unless
+  ticked; `onHrCopy`). Only Management ticks (rule unchanged); on a checked report a tick is saved at once.
+- **Send to HR:** on a checked report, "Send to HR" has PDF for HR (Admin or Management) and **Make the link for HR**
+  (Management only). The link is a `doc_links` entry of kind `report` (docId = the deal id), opened at `/r/<token>`
+  with the same limits, Reopen, Stop and protection as quotation links (no visit tracking or heatmap). The server
+  sends only `hrCopy(...)` (ticked sections, no trainer id, history, revisions or notes) with `hrHeader`, the deal
+  details the CRM saves on the report. While the report is reopened, the link says it's being updated.
+- Code: `src/lib/trainingReport.ts` (revisions, pax, HR's copy), `serverTrainerPortal.ts` (report get / save),
+  `serverDocLinks.ts` (kind `report`), `DocLinkPage.tsx`, `TrainingReportAdmin.tsx`, `TrainingReportForm.tsx`
+  (`RevisionList`), `TrainingReportDocument.tsx`, `TrainerPortal.tsx`. No rule change.

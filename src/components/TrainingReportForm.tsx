@@ -5,7 +5,7 @@
 import React, { useId, useState } from 'react';
 import { Lock, Plus, Star, X } from 'lucide-react';
 import {
-  FollowUp, NamedReason, REVIEW_PARTS, ReportDay, TIME_LABELS, TimeKey, TrainingReport, absentCount, attendancePct, presentCount,
+  FollowUp, NamedReason, REVIEW_PARTS, ReportDay, Revision, TIME_LABELS, TimeKey, TrainingReport, absentCount, attendancePct, presentCount, revisionWhen,
 } from '../lib/trainingReport';
 
 const input =
@@ -91,10 +91,29 @@ function PeopleList({ rows, onChange, suggestions, disabled, reasonHint, what }:
   );
 }
 
-export default function TrainingReportForm({ value: r, onChange, names, programmes, disabled, photos, teamPart }: {
+// The trainer's changes after sending: when (date and time), who, and what changed. Newest first.
+export function RevisionList({ revisions, title = 'Changes after sending' }: { revisions: Revision[]; title?: string }) {
+  return (
+    <section className={card}>
+      <h3 className="text-base font-bold">{title}</h3>
+      <ol className="mt-2 space-y-3">
+        {[...revisions].reverse().map((v, i) => (
+          <li key={i} className="text-sm">
+            <p className="font-semibold">{revisionWhen(v.at)} · {v.byName}</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-soft">{v.changes.map((c, j) => <li key={j}>{c}</li>)}</ul>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+export default function TrainingReportForm({ value: r, onChange, names, pax = 0, paxNote = 'From the training details. Ask NEXT Academy if this number is wrong.', programmes, disabled, photos, teamPart }: {
   value: TrainingReport;
   onChange: (r: TrainingReport) => void;
   names: string[];                              // participants (T3 list), for suggestions
+  pax?: number;                                 // the deal's Participants: shown, not typed (0 = type it)
+  paxNote?: string;
   programmes: { id: string; name: string }[];   // for recommended follow-up training
   disabled?: boolean;
   photos?: React.ReactNode;                     // the photo picker (portal upload or the team's pick)
@@ -114,10 +133,20 @@ export default function TrainingReportForm({ value: r, onChange, names, programm
         <p className={hint}>Who wasn't there, day by day. The number absent and the attendance rate are counted for you.</p>
         <div className="max-w-xs">
           <label className={label} htmlFor="rep-registered">Participants registered</label>
-          <input id="rep-registered" type="number" min={0} inputMode="numeric" className={input} disabled={disabled} value={r.registered || ''}
-            onChange={e => set({ registered: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
-          {names.length > 0 && r.registered !== names.length && !disabled && (
-            <button type="button" className="mt-1 text-sm font-semibold text-accent hover:underline" onClick={() => set({ registered: names.length })}>Use {names.length} from the participants list</button>
+          {/* The deal's Participants (2026-10-21); typed here only when the deal has none */}
+          {pax > 0 ? (
+            <>
+              <p id="rep-registered" className="text-[15px]"><strong>{pax} pax</strong></p>
+              <p className={hint}>{paxNote}</p>
+            </>
+          ) : (
+            <>
+              <input id="rep-registered" type="number" min={0} inputMode="numeric" className={input} disabled={disabled} value={r.registered || ''}
+                onChange={e => set({ registered: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
+              {names.length > 0 && r.registered !== names.length && !disabled && (
+                <button type="button" className="mt-1 text-sm font-semibold text-accent hover:underline" onClick={() => set({ registered: names.length })}>Use {names.length} from the participants list</button>
+              )}
+            </>
           )}
         </div>
         <div className="mt-4 space-y-3">

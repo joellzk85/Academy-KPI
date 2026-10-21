@@ -6,7 +6,9 @@
 
 // Teambuilding proposals (push B, 2026-10-19) use the same list, opened at /p/<token>, with an expiry date set by the
 // person who makes the link, the live (latest saved) version, tracking and Accept (serverProposalLinks.ts).
-export type DocKind = 'quotation' | 'outline' | 'teambuilding';
+// Training reports for the client's HR (2026-10-21) use it too, opened at /r/<token> (docId = the deal id).
+export type DocKind = 'quotation' | 'outline' | 'teambuilding' | 'report';
+export const DOC_NOUN: Record<DocKind, string> = { quotation: 'quotation', outline: 'course outline', teambuilding: 'teambuilding proposal', report: 'training report' };
 
 export interface DocLink {
   token: string;            // the document id in doc_links (32 random hex characters)
@@ -41,11 +43,11 @@ export interface DocLink {
 
 export const isLinkToken = (t: unknown) => typeof t === 'string' && /^[a-f0-9]{32}$/.test(t);
 
-export const docLinkPath = (kind: DocKind, token: string) => `/${kind === 'quotation' ? 'q' : kind === 'teambuilding' ? 'p' : 'o'}/${token}`;
+export const docLinkPath = (kind: DocKind, token: string) => `/${kind === 'quotation' ? 'q' : kind === 'teambuilding' ? 'p' : kind === 'report' ? 'r' : 'o'}/${token}`;
 
-// /q/<token> or /o/<token> → the token, else ''.
+// /q/<token>, /o/<token> or /r/<token> → the token, else ''.
 export function tokenFromPath(path: string): string {
-  return path.match(/^\/[qo]\/([a-f0-9]{32})\/?$/)?.[1] || '';
+  return path.match(/^\/[qor]\/([a-f0-9]{32})\/?$/)?.[1] || '';
 }
 
 // Only what the printed document shows goes to the client's browser: people's ids, sharing, send logs and other

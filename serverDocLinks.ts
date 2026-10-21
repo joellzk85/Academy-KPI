@@ -11,15 +11,19 @@ import crypto from 'crypto';
 import { DocumentReference, FieldValue, Firestore } from 'firebase-admin/firestore';
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import { canSendQuotation } from './serverMail';
-import { DocKind, isLinkToken, publicDocFields } from './src/lib/docLinks';
+import { DOC_NOUN, DocKind, isLinkToken, publicDocFields } from './src/lib/docLinks';
+import { dealPax, hrCopy, withPax } from './src/lib/trainingReport';
+import { isDeletedRecord } from './src/lib/linked';
 import { endOfDayMY, expiryDateMY, expiryProblem, isExpired, plusDaysMY } from './src/lib/proposalTracking';
 import { COMPANY } from './src/lib/company';
 import { LinkSettings, REPEAT_WINDOW_MS, linkState, opensProblem, readLinkSettings } from './src/lib/linkLimits';
 
 // Teambuilding proposals (push B, 2026-10-19) share this list and these routes for make / stop / limits; their client
 // page has its own routes (serverProposalLinks.ts), which use admitOpen below.
-const COLLECTION: Record<DocKind, string> = { quotation: 'quotations', outline: 'course_outlines', teambuilding: 'teambuilding_proposals' };
-const NOUN: Record<DocKind, string> = { quotation: 'quotation', outline: 'course outline', teambuilding: 'teambuilding proposal' };
+// Training reports (2026-10-21): HR's copy, opened at /r/<token>; only Management makes, changes or stops these links.
+const COLLECTION: Record<DocKind, string> = { quotation: 'quotations', outline: 'course_outlines', teambuilding: 'teambuilding_proposals', report: 'training_reports' };
+const NOUN = DOC_NOUN;
+const canLink = (kind: DocKind, d: any, caller: { memberId: string; role: string }) => (kind === 'report' ? caller.role === 'management' : canSendQuotation(d, caller));
 
 // Light protection against someone hammering the links: 60 requests a minute per address.
 const hits = new Map<string, { n: number; since: number }>();
@@ -32,7 +36,7 @@ function slowDown(req: Request) {
 }
 
 const kindOf = (v: any): DocKind => {
-  if (v === 'quotation' || v === 'outline' || v === 'teambuilding') return v;
+  if (v === 'quotation' || v === 'outline' || v === 'teambuilding' || v === 'report') return v;
   throw new UserError(400, 'bad-kind', 'Unknown document.');
 };
 
@@ -107,7 +111,7 @@ async function linkAndDoc(db: Firestore, caller: { memberId: string; role: strin
   if (!link) throw new UserError(404, 'link-not-found', 'That link was not found.');
   const kind = kindOf(link.kind);
   const d: any = (await db.collection(COLLECTION[kind]).doc(link.docId).get()).data() || {};
-  if (!canSendQuotation(d, caller)) throw new UserError(403, 'not-yours', `Only the owner, people it is shared with, Admin or Management can ${verb} this link.`);
+  if (!canLink(kind, d, caller)) throw new UserError(403, 'not-yours', kind === 'report' ? `Only Management can ${verb} this link.` : `Only the owner, people it is shared with, Admin or Management can ${verb} this link.`);
   return { ref, link, kind };
 }
 
@@ -121,19 +125,22 @@ export function registerDocLinkRoutes(app: Express) {
     const snap = docId ? await db.collection(COLLECTION[kind]).doc(docId).get() : null;
     if (!snap?.exists) throw new UserError(404, 'not-found', `Save the ${NOUN[kind]} first.`);
     const d: any = snap.data();
-    if (!canSendQuotation(d, caller)) throw new UserError(403, 'not-yours', `You can only send ${NOUN[kind]}s you own or that are shared with you.`);
+    if (!canLink(kind, d, caller)) throw new UserError(403, 'not-yours', kind === 'report' ? 'Only Management can send the training report to HR by link.' : `You can only send ${NOUN[kind]}s you own or that are shared with you.`);
+    if (kind === 'report' && d.status !== 'checked') throw new UserError(409, 'not-checked', 'Mark the report "Checked, ready for HR" first.');
     const existing = await db.collection('doc_links').where('docId', '==', docId).get();
     const open = existing.docs.find(x => x.data().kind === kind && x.data().status === 'open');
     if (open) return { token: open.id };
     // Every link has a time and open limit, and keeps the deal owner and client name for alerts and the Management list.
     const lim = limitsFrom(req.body, await linkSettings(db));
+    const dealId = String(kind === 'report' ? docId : d.pipelineId || '');
     let company = String(d.company || d.preparedForCompany || '');
-    const deal: any = d.pipelineId ? (await db.collection('pipelines').doc(d.pipelineId).get()).data() : null;
+    const deal: any = dealId ? (await db.collection('pipelines').doc(dealId).get()).data() : null;
     const clientId = deal?.clientId || d.clientId || '';
     if (!company && clientId) company = String((await db.collection('clients').doc(clientId).get()).data()?.companyName || '');
+    if (!company) company = String(deal?.client || '');
     const token = crypto.randomBytes(16).toString('hex');
     await db.collection('doc_links').doc(token).set({
-      kind, docId, dealId: String(d.pipelineId || ''), refNumber: String(d.refNumber || ''),
+      kind, docId, dealId, refNumber: String(d.refNumber || ''),
       company, status: 'open',
       createdAt: Date.now(), byId: caller.memberId, byName: await memberName(db, caller.memberId), views: 0,
       expiresAt: lim.expiresAt, maxOpens: lim.opens,
@@ -218,11 +225,18 @@ export function registerDocLinkRoutes(app: Express) {
     if (link.status !== 'open') return { gone: { code: 'link-stopped', message: `This ${NOUN[kind]} link is no longer active.`, contact: await contactOf(db, link) } };
     const d: any = (await db.collection(COLLECTION[kind]).doc(link.docId).get()).data();
     if (!d || d.dealDeleted) throw new UserError(404, 'doc-gone', gone);
-    if (d.status !== 'sent') throw new UserError(409, 'being-revised', `NEXT Academy is updating this ${NOUN[kind]}. You'll receive the new version shortly.`);
+    if (d.status !== (kind === 'report' ? 'checked' : 'sent')) throw new UserError(409, 'being-revised', `NEXT Academy is updating this ${NOUN[kind]}. You'll receive the new version shortly.`);
+    // A training report: only the sections Management chose for HR, with the deal's number of participants.
+    let report: any = null;
+    if (kind === 'report') {
+      const deal: any = (await db.collection('pipelines').doc(link.docId).get()).data();
+      if (!deal || isDeletedRecord(deal)) throw new UserError(404, 'doc-gone', gone);
+      report = hrCopy(withPax(d, dealPax(deal)));
+    }
 
     // No "Client opened" History line (2026-10-20): History is seen by everyone on the deal, tracking only by Management.
     const { blocked } = await admitOpen(db, ref, link, { visit: req.body?.visit, team: !!req.body?.team });
     if (blocked) return { gone: { ...blocked, canRequest: true, requested: !!link.reopenRequest, contact: await contactOf(db, link) } };
-    return { kind, doc: { ...publicDocFields(d), id: link.docId }, expiresAt: link.expiresAt || 0 };
+    return { kind, doc: report || { ...publicDocFields(d), id: link.docId }, expiresAt: link.expiresAt || 0 };
   }));
 }

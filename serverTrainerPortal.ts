@@ -24,7 +24,7 @@ import {
   icsCalendar, inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
 import { FieldValue } from 'firebase-admin/firestore';
-import { cleanTrainerPart, newReport, reportDates, reportGaps, trainerCanEdit, withDates } from './src/lib/trainingReport';
+import { cleanTrainerPart, dealPax, newReport, reportChanges, reportDates, reportGaps, withDates, withPax } from './src/lib/trainingReport';
 
 const BUCKET = String((firebaseConfig as any).storageBucket || '');
 const nowIso = () => new Date().toISOString();
@@ -504,20 +504,29 @@ export function registerTrainerPortalRoutes(app: Express) {
 
   // ---------- Training report (2026-10-21; lib/trainingReport.ts) ----------
   // The trainer's report for one training: what they wrote, plus what the deal already knows (dates, the course
-  // outline's objectives, the participants' names from the T3 list) to start a new one. The team's part
-  // (participant rating, what goes on HR's copy) isn't sent to the trainer.
+  // outline's objectives, the participants' names from the T3 list, the deal's number of participants) to start a new
+  // one. The team's part (participant rating, what goes on HR's copy) isn't sent to the trainer. Once sent, the
+  // trainer sees their changes not sent yet (trainerDraft) on top of what they sent.
   app.post('/api/portal/report/get', route(async req => {
     const { db, trainerId, trainer: t } = await trainerFrom(req);
     const { deal, checklist } = await assigned(db, trainerId, req.body?.dealId);
     const seed = await reportSeed(db, deal, checklist);
     const saved: any = (await db.collection('training_reports').doc(deal.id).get()).data();
     const mine = saved && saved.trainerId === trainerId ? saved : null;
-    const base = mine ? withDates({ ...newReport(deal.id, trainerId, t.name || '', seed), ...mine }, seed.dates) : newReport(deal.id, trainerId, t.name || '', seed);
-    const { participant, showToHr, history, ...report } = base as any;
-    return { report, names: seed.names, programmes: (await db.collection('programmes').get()).docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name) };
+    const base = mine
+      ? withDates({ ...newReport(deal.id, trainerId, t.name || '', seed), ...mine, ...(mine.trainerDraft || {}) }, seed.dates)
+      : newReport(deal.id, trainerId, t.name || '', seed);
+    const { participant, showToHr, history, trainerDraft, hrHeader, ...report } = withPax(base, seed.pax) as any;
+    return {
+      report, names: seed.names, pax: seed.pax, pending: !!mine?.trainerDraft,
+      programmes: (await db.collection('programmes').get()).docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name),
+    };
   }));
 
   // Save the trainer's part (the portal saves a draft by itself as they type; { submit: true } sends it to the team).
+  // After the first send (Joel, 2026-10-21: "trainer can edit after submit"), typing is kept in trainerDraft and the
+  // team keeps seeing what was sent; sending again records the date, time and what changed (revisions), and a checked
+  // report goes back to "submitted" (its "Training report" step unticked) for the team to check again.
   app.post('/api/portal/report/save', route(async req => {
     const { db, trainerId, trainer: t } = await trainerFrom(req);
     const { deal } = await assignedLive(db, trainerId, req.body?.dealId);
@@ -526,8 +535,7 @@ export function registerTrainerPortalRoutes(app: Express) {
     const ref = db.collection('training_reports').doc(deal.id);
     const before: any = (await ref.get()).data();
     if (before && before.trainerId && before.trainerId !== trainerId && before.status !== 'draft') throw new UserError(409, 'not-yours', 'Another trainer has already sent the report for this training.');
-    if (!trainerCanEdit(before)) throw new UserError(400, 'checked', 'NEXT Academy has already checked this report, so it can no longer be changed. Contact them if something needs fixing.');
-    const part = cleanTrainerPart(req.body?.report, list => cleanFiles(list, claimFolder(trainerId, deal.id), 12));
+    const part = withPax(cleanTrainerPart(req.body?.report, list => cleanFiles(list, claimFolder(trainerId, deal.id), 12)), dealPax(deal));
     const submit = req.body?.submit === true;
     if (submit) {
       const gaps = reportGaps(part);
@@ -535,14 +543,53 @@ export function registerTrainerPortalRoutes(app: Express) {
     }
     const at = nowIso();
     const by = (t.name || 'Trainer') + PORTAL;
+
+    if (before?.submittedAt && before.trainerId === trainerId) {
+      if (!submit) {
+        await ref.update({ trainerDraft: part });
+        return { status: before.status, pending: true };
+      }
+      const changes = reportChanges(cleanTrainerPart(before, list => (Array.isArray(list) ? list : [])), part);
+      if (!changes.length && before.status !== 'returned') {
+        await ref.update({ trainerDraft: FieldValue.delete() });
+        return { status: before.status, nothing: true };
+      }
+      const wasChecked = before.status === 'checked';
+      await ref.set({
+        ...part, trainerName: t.name || '', status: 'submitted', submittedAt: at, submittedByName: by, updatedAt: at, updatedByName: by,
+        trainerDraft: FieldValue.delete(),
+        ...(wasChecked ? { checkedAt: '', checkedByName: '' } : {}),
+        ...(changes.length ? { revisions: [...(before.revisions || []), { at, byName: by, changes: changes.slice(0, 60) }].slice(-30) } : {}),
+        history: [...(before.history || []), { at, byName: by, action: wasChecked ? 'Changed after it was checked, sent again' : 'Sent again' }].slice(-30),
+      }, { merge: true });
+      if (wasChecked) await untickReportStep(db, deal.id, by);
+      await addDealHistory(db, deal.id, '', by, `Trainer sent the training report again (${changes.length} change${changes.length === 1 ? '' : 's'})${wasChecked ? ': it needs checking again' : ''}`);
+      return { status: 'submitted' };
+    }
+
     const status = submit ? 'submitted' : before?.status && before.trainerId === trainerId ? before.status : 'draft';
     await ref.set({
       ...part, dealId: deal.id, trainerId, trainerName: t.name || '', status, updatedAt: at, updatedByName: by,
-      ...(submit ? { submittedAt: at, submittedByName: by, history: [...(before?.history || []), { at, byName: by, action: before?.submittedAt ? 'Sent again' : 'Sent' }].slice(-30) } : {}),
+      ...(submit ? { submittedAt: at, submittedByName: by, history: [...(before?.history || []), { at, byName: by, action: 'Sent' }].slice(-30) } : {}),
     }, { merge: true });
-    if (submit) await addDealHistory(db, deal.id, '', by, `Trainer ${before?.submittedAt ? 'sent the training report again' : 'sent the training report'}`);
+    if (submit) await addDealHistory(db, deal.id, '', by, 'Trainer sent the training report');
     return { status };
   }));
+}
+
+// A checked report changed by the trainer: untick the deal's "Training report" step (as Reopen does in the CRM).
+async function untickReportStep(db: Firestore, dealId: string, byName: string) {
+  const ref = db.collection('deal_checklists').doc(dealId);
+  await db.runTransaction(async tx => {
+    const c: any = (await tx.get(ref)).data();
+    const tasks: any[] = c?.tasks || [];
+    if (!tasks.some(x => x.id === 'training_report' && x.done)) return;
+    tx.update(ref, {
+      tasks: tasks.map(x => (x.id === 'training_report' ? { ...x, done: false, doneAt: '', doneById: '', doneByName: '' } : x)),
+      updatedAt: Date.now(),
+      history: [...(c.history || []), { at: nowIso(), byId: '', byName, action: 'Training report: changed by the trainer, to check again' }].slice(-60),
+    });
+  }).catch(e => console.error('[portal] untick report step', e));
 }
 
 // What the deal already knows, to start a report: the training days, the course outline's learning outcomes (the
@@ -553,5 +600,5 @@ async function reportSeed(db: Firestore, deal: any, checklist: any) {
     .sort((a, b) => Number(b.status === 'sent') - Number(a.status === 'sent') || String(b.sentAt || b.date || '').localeCompare(String(a.sentAt || a.date || '')));
   const objectives = ((outlines[0]?.outcomes || []) as any[]).map(x => String(x || '').trim()).filter(Boolean).slice(0, 40);
   const names = ((checklist?.t3?.trainees || []) as any[]).map(x => String(x?.name || '').trim()).filter(Boolean).slice(0, 500);
-  return { dates: reportDates(String(deal.trainingDate || '').slice(0, 10), trainingDays(deal)), objectives, names };
+  return { dates: reportDates(String(deal.trainingDate || '').slice(0, 10), trainingDays(deal)), objectives, names, pax: dealPax(deal) };
 }

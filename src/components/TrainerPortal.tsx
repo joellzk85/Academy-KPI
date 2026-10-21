@@ -19,9 +19,9 @@ import {
 } from '../lib/trainerPortal';
 import { formatDateRange, formatRM, daysText } from '../lib/deals';
 import { COMPANY } from '../lib/company';
-import { TrainingReport, reportGaps, trainerCanEdit } from '../lib/trainingReport';
+import { TrainingReport, reportGaps, revisionWhen } from '../lib/trainingReport';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
-import TrainingReportForm from './TrainingReportForm';
+import TrainingReportForm, { RevisionList } from './TrainingReportForm';
 
 // The trainer portal (Joel, 2026-10-21), at /trainer. A trainer whom Admin or Management gave access logs in with
 // their email and password (Firebase's own email + password login; "Forgot password" is Firebase's reset email).
@@ -520,12 +520,12 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
           {t.report && t.report.status !== 'returned' && (
             <p className={`mt-1 flex items-center gap-1.5 text-sm ${t.report.status === 'draft' ? 'text-ink-soft' : 'text-accent'}`}>
               {t.report.status !== 'draft' && <CheckCircle2 className="h-4 w-4" />}
-              {t.report.status === 'draft' ? 'Started, not sent yet.' : t.report.status === 'checked' ? 'Checked by NEXT Academy. Thank you!' : `Sent on ${isoDay(t.report.submittedAt)}. NEXT Academy is checking it.`}
+              {t.report.status === 'draft' ? 'Started, not sent yet.' : t.report.status === 'checked' ? 'Checked by NEXT Academy. Thank you! You can still change it.' : `Sent on ${isoDay(t.report.submittedAt)}. NEXT Academy is checking it.`}
             </p>
           )}
           {t.started
             ? <button type="button" className={`${!t.report || t.report.status === 'draft' || t.report.status === 'returned' ? btnPrimary : btnSecondary} mt-3`} onClick={() => setReporting(true)}>
-                {!t.report ? 'Write the training report' : t.report.status === 'checked' ? 'View the report' : t.report.status === 'returned' ? 'Fix and send again' : t.report.status === 'draft' ? 'Continue the report' : 'Change what I sent'}
+                {!t.report ? 'Write the training report' : t.report.status === 'returned' ? 'Fix and send again' : t.report.status === 'draft' ? 'Continue the report' : 'Change what I sent'}
               </button>
             : <p className="mt-1 text-sm text-ink-soft">You can write the report once the training has started.</p>}
         </div>
@@ -682,23 +682,25 @@ function ClaimForm({ t, trainerId, onCancel, onDone }: { t: any; trainerId: stri
 }
 
 // The training report (2026-10-21; lib/trainingReport.ts), full screen. It saves itself as a draft as the trainer
-// types (useAutoSave); "Send to NEXT Academy" sends it to be checked. Locked once NEXT Academy has checked it.
+// types (useAutoSave); "Send to NEXT Academy" sends it to be checked. After sending they can still change it
+// (2026-10-21): their typing is kept aside until they click "Send changes", which records what changed.
 function ReportEditor({ t, trainerId, onClose }: { t: any; trainerId: string; onClose: () => void }) {
   const [report, setReport] = useState<TrainingReport | null>(null);
-  const [extra, setExtra] = useState<{ names: string[]; programmes: { id: string; name: string }[] }>({ names: [], programmes: [] });
+  const [extra, setExtra] = useState<{ names: string[]; pax: number; programmes: { id: string; name: string }[] }>({ names: [], pax: 0, programmes: [] });
   const [savedJson, setSavedJson] = useState('');
+  const [pending, setPending] = useState(false);   // changes kept aside, not sent yet
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   useEffect(() => {
     api('/api/portal/report/get', { dealId: t.dealId })
-      .then(d => { setReport(d.report); setSavedJson(JSON.stringify(d.report)); setExtra({ names: d.names || [], programmes: d.programmes || [] }); })
+      .then(d => { setReport(d.report); setSavedJson(JSON.stringify(d.report)); setPending(!!d.pending); setExtra({ names: d.names || [], pax: Number(d.pax) || 0, programmes: d.programmes || [] }); })
       .catch(e => setError(e.message));
   }, [t.dealId]);
-  const locked = !trainerCanEdit(report);
+  const sentBefore = !!report?.submittedAt;
   const json = report ? JSON.stringify(report) : '';
   const { state, flush } = useAutoSave({
-    value: report, dirty: !!report && json !== savedJson, enabled: !!report && !locked,
-    write: async v => { await api('/api/portal/report/save', { dealId: t.dealId, report: v }); }, onSaved: setSavedJson,
+    value: report, dirty: !!report && json !== savedJson, enabled: !!report,
+    write: async v => { const d = await api('/api/portal/report/save', { dealId: t.dealId, report: v }); if (d?.pending) setPending(true); }, onSaved: setSavedJson,
   });
   const close = () => leaveAfterSave(flush, onClose);
   const send = async () => {
@@ -707,12 +709,16 @@ function ReportEditor({ t, trainerId, onClose }: { t: any; trainerId: string; on
     const gaps = reportGaps(report);
     if (gaps.length) { setError(`Please fill in: ${gaps.join(', ')}.`); return; }
     setSending(true);
-    try { await api('/api/portal/report/save', { dealId: t.dealId, report, submit: true }); setSavedJson(json); onClose(); }
-    catch (e: any) { setError(e.message); } finally { setSending(false); }
+    try {
+      const d = await api('/api/portal/report/save', { dealId: t.dealId, report, submit: true });
+      setSavedJson(json);
+      if (d?.nothing) { setPending(false); setError('Nothing has changed since you sent it.'); return; }
+      onClose();
+    } catch (e: any) { setError(e.message); } finally { setSending(false); }
   };
   const setPhotos: React.Dispatch<React.SetStateAction<PortalFile[]>> = fn =>
     setReport(r => (r ? { ...r, photos: typeof fn === 'function' ? fn(r.photos as PortalFile[]) : fn } : r));
-  const line = autoSaveText(state, !!report && json !== savedJson, locked);
+  const line = autoSaveText(state, !!report && json !== savedJson, false);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-surface" role="dialog" aria-modal="true" aria-label="Training report">
@@ -728,20 +734,24 @@ function ReportEditor({ t, trainerId, onClose }: { t: any; trainerId: string; on
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-5 pb-28">
         {!report && !error && <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}
         {report?.status === 'returned' && <p className="rounded-lg bg-attention-soft px-3 py-2.5 text-sm"><strong>NEXT Academy asked for changes:</strong> {report.returnNote || 'Please check the report and send it again.'}</p>}
-        {locked && <p className="rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent">NEXT Academy has checked this report, so it can't be changed any more. Contact them if something needs fixing.</p>}
-        {report && (
-          <TrainingReportForm value={report} onChange={setReport} names={extra.names} programmes={extra.programmes} disabled={locked}
-            photos={locked
-              ? <ul className="grid grid-cols-3 gap-2">{report.photos.map(p => <li key={p.path}><img src={p.url} alt="" className="aspect-square w-full rounded-lg object-cover" /></li>)}</ul>
-              : <FileDrop title="Photos" hint="JPG or PNG. Photos are made smaller before they upload." photo folder={claimFolder(trainerId, t.dealId)} kind="report" files={report.photos as PortalFile[]} setFiles={setPhotos} />} />
+        {sentBefore && report?.status !== 'returned' && (
+          <p className="rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-ink">
+            {report?.status === 'checked' ? 'NEXT Academy has checked this report.' : `You sent this on ${revisionWhen(report?.submittedAt || '')}.`} You can still change it: your changes are kept as you type, and NEXT Academy sees them once you click <strong>Send changes</strong>{report?.status === 'checked' ? ' (they will check it again)' : ''}.
+          </p>
         )}
+        {pending && <p className="rounded-lg bg-attention-soft px-3 py-2.5 text-sm">You have changes that are not sent yet.</p>}
+        {report && (
+          <TrainingReportForm value={report} onChange={setReport} names={extra.names} pax={extra.pax} programmes={extra.programmes}
+            photos={<FileDrop title="Photos" hint="JPG or PNG. Photos are made smaller before they upload." photo folder={claimFolder(trainerId, t.dealId)} kind="report" files={report.photos as PortalFile[]} setFiles={setPhotos} />} />
+        )}
+        {report?.revisions?.length ? <RevisionList revisions={report.revisions} title="Your changes after sending" /> : null}
         {error && <p role="alert" className={alertBox}>{error}</p>}
       </main>
-      {report && !locked && (
+      {report && (
         <div className="fixed inset-x-0 bottom-0 border-t border-line bg-white/95 backdrop-blur">
           <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4 py-3">
             <span className={`text-sm ${line.tone === 'danger' ? 'text-danger' : line.tone === 'attention' ? 'text-attention' : 'text-ink-soft'}`}>{line.text}</span>
-            <button type="button" className={btnPrimary} disabled={sending} onClick={send}>{sending && <Loader2 className="h-4 w-4 animate-spin" />} {report.status === 'draft' ? 'Send to NEXT Academy' : 'Send again'}</button>
+            <button type="button" className={btnPrimary} disabled={sending} onClick={send}>{sending && <Loader2 className="h-4 w-4 animate-spin" />} {!sentBefore ? 'Send to NEXT Academy' : report.status === 'returned' ? 'Send again' : 'Send changes'}</button>
           </div>
         </div>
       )}

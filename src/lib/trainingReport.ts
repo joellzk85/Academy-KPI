@@ -13,6 +13,13 @@
 //     showToHr { <internal key>: true } (Management only: an internal section goes on HR's copy when ticked).
 //   status: draft → submitted → checked (ready for HR; ticks the deal's "Training report" step), or returned with a note.
 // The internal notes are for NEXT Academy only unless Management ticks them for HR (Joel, 2026-10-21).
+//
+// Later the same day (Joel): the trainer can change the report after sending it; each "Send changes" keeps the date,
+// time and what changed (revisions[]). Until they send, the trainer's edits wait in trainerDraft (the team keeps
+// seeing what was sent). A checked report that the trainer changes goes back to "submitted" for checking again.
+// The number of participants comes from the deal's Participants (typed only when the deal has none).
+// Management picks every section on HR's copy (showToHr: the main sections are on unless unticked, the internal
+// notes off unless ticked) and can send it to HR as a PDF or a client link (/r/<token>, serverDocLinks.ts).
 
 export type ReportStatus = 'draft' | 'submitted' | 'returned' | 'checked';
 export type TimeKey = '' | 'on_time' | 'ran_over' | 'rushed' | 'finished_early';
@@ -54,7 +61,7 @@ export interface TrainingReport {
   photos: ReportPhoto[];
   internal: ReportInternal;
   participant?: ParticipantRating | null;
-  showToHr?: Partial<Record<InternalKey, boolean>>;
+  showToHr?: Partial<Record<HrKey, boolean>>;
   submittedAt?: string;
   submittedByName?: string;
   returnNote?: string;
@@ -64,10 +71,34 @@ export interface TrainingReport {
   updatedAt?: string;
   updatedByName?: string;
   history?: { at: string; byName: string; action: string }[];
+  revisions?: Revision[];          // the trainer's changes after first sending (server only)
+  trainerDraft?: TrainerPart | null; // the trainer's changes not sent yet (server only)
+  hrHeader?: ReportHeaderData;     // the deal details HR's copy shows, saved by the CRM (for the client link)
 }
 
-// The internal sections Management can put on HR's copy.
+export interface Revision { at: string; byName: string; changes: string[] }
+export interface ReportHeaderData { programme: string; client: string; dates: string; venue: string; trainer: string; grantNumber: string }
+export type TrainerPart = ReturnType<typeof cleanTrainerPart>;
+
+// The main sections of HR's copy: on unless Management unticks them.
+export type PublicKey = 'attendance' | 'objectives' | 'participant' | 'observations' | 'outstanding' | 'attention' | 'followUps' | 'photos';
+export const PUBLIC_PARTS: { key: PublicKey; label: string }[] = [
+  { key: 'attendance', label: 'Attendance' },
+  { key: 'objectives', label: 'Objectives achieved' },
+  { key: 'participant', label: "Participants' rating" },
+  { key: 'observations', label: "Trainer's observations" },
+  { key: 'outstanding', label: 'Outstanding participants' },
+  { key: 'attention', label: 'Participants needing special attention' },
+  { key: 'followUps', label: 'Recommended follow-up training' },
+  { key: 'photos', label: 'Photos' },
+];
+// The internal sections Management can put on HR's copy (off unless ticked).
 export type InternalKey = 'trainerStars' | 'missing' | 'time' | 'review' | 'issues' | 'leads';
+export type HrKey = PublicKey | InternalKey;
+const PUBLIC_KEYS = new Set<string>(['attendance', 'objectives', 'participant', 'observations', 'outstanding', 'attention', 'followUps', 'photos']);
+/** Is this section on HR's copy? */
+export const onHrCopy = (r: Pick<TrainingReport, 'showToHr'>, key: HrKey) =>
+  PUBLIC_KEYS.has(key) ? r.showToHr?.[key] !== false : r.showToHr?.[key] === true;
 export const INTERNAL_PARTS: { key: InternalKey; label: string }[] = [
   { key: 'trainerStars', label: "Trainer's rating of the training" },
   { key: 'missing', label: 'What was missing' },
@@ -114,12 +145,19 @@ export interface ReportSeed {
   dates: string[];
   objectives: string[];       // from the deal's course outline (learning outcomes)
   names: string[];            // participants from the T3 name list (HRDC deals), if any
+  pax?: number;               // the deal's Participants
 }
+
+/** The deal's number of participants (0 when not given). */
+export const dealPax = (deal: any) => Math.max(0, Math.min(10000, Math.round(Number(deal?.participants) || 0)));
+
+/** The number registered always follows the deal's Participants when the deal has one. */
+export const withPax = <T extends { registered: number }>(r: T, pax: number): T => (pax > 0 && r.registered !== pax ? { ...r, registered: pax } : r);
 
 export function newReport(dealId: string, trainerId: string, trainerName: string, seed: ReportSeed): TrainingReport {
   return {
     dealId, trainerId, trainerName, status: 'draft',
-    registered: seed.names.length,
+    registered: seed.pax || seed.names.length,
     days: (seed.dates.length ? seed.dates : ['']).map(date => ({ date, absent: [], late: [], note: '' })),
     objectives: seed.objectives.map(text => ({ text, stars: 0, comment: '' })),
     observations: '', outstanding: [], attention: [], followUps: [], photos: [],
@@ -201,10 +239,94 @@ export const cleanParticipant = (p: any): ParticipantRating | null => {
   return avg || responses || note ? { avg, responses, note } : null;
 };
 
-/** Can the trainer still change it? Not once the team has checked it. */
-export const trainerCanEdit = (r: { status?: ReportStatus } | null | undefined) => !r || r.status !== 'checked';
+// ---------- Changes after sending (revisions) ----------
+const short = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+function listChange(label: string, before: string[], after: string[], out: string[]) {
+  const added = after.filter(x => !before.includes(x));
+  const gone = before.filter(x => !after.includes(x));
+  if (added.length) out.push(`${label}: added ${added.join(', ')}`);
+  if (gone.length) out.push(`${label}: took off ${gone.join(', ')}`);
+}
+
+/** What the trainer changed, in plain words ("Day 2 absent: added Ali", "Observations changed"). */
+export function reportChanges(a: TrainerPart, b: TrainerPart): string[] {
+  const out: string[] = [];
+  if (a.registered !== b.registered) out.push(`Participants registered: ${a.registered} → ${b.registered}`);
+  const many = b.days.length > 1;
+  b.days.forEach((d, i) => {
+    const was = a.days.find(x => x.date === d.date) || a.days[i] || { absent: [], late: [], note: '' };
+    const lab = (s: string) => (many ? `Day ${i + 1} ${s}` : s.charAt(0).toUpperCase() + s.slice(1));
+    listChange(lab('absent'), was.absent, d.absent, out);
+    listChange(lab('late / left early'), was.late, d.late, out);
+    if (was.note !== d.note) out.push(`${lab('note')} changed`);
+  });
+  const objA = new Map<string, ReportObjective>(a.objectives.map(o => [o.text, o]));
+  const objB = new Set(b.objectives.map(o => o.text));
+  b.objectives.forEach(o => {
+    const was = objA.get(o.text);
+    if (!was) { out.push(`Objective added: "${short(o.text)}"`); return; }
+    if (was.stars !== o.stars) out.push(`Objective "${short(o.text, 40)}": ${was.stars || 0} → ${o.stars} stars`);
+    if (was.comment !== o.comment) out.push(`Objective "${short(o.text, 40)}": comment changed`);
+  });
+  a.objectives.filter(o => !objB.has(o.text)).forEach(o => out.push(`Objective taken off: "${short(o.text)}"`));
+  if (a.observations !== b.observations) out.push('Observations changed');
+  const people = (label: string, x: NamedReason[], y: NamedReason[]) => {
+    listChange(label, x.map(p => p.name), y.map(p => p.name), out);
+    if (y.some(p => { const w = x.find(q => q.name === p.name); return w && w.reason !== p.reason; })) out.push(`${label}: reason changed`);
+  };
+  people('Outstanding participants', a.outstanding, b.outstanding);
+  people('Needing special attention', a.attention, b.attention);
+  people('Follow-up training', a.followUps, b.followUps);
+  const pa = a.photos.map(p => p.path), pb = b.photos.map(p => p.path);
+  const morePh = pb.filter(p => !pa.includes(p)).length, lessPh = pa.filter(p => !pb.includes(p)).length;
+  if (morePh) out.push(`${morePh} photo${morePh === 1 ? '' : 's'} added`);
+  if (lessPh) out.push(`${lessPh} photo${lessPh === 1 ? '' : 's'} taken off`);
+  const ia = a.internal, ib = b.internal;
+  if (ia.trainerStars !== ib.trainerStars) out.push(`Trainer's rating: ${ia.trainerStars || 0} → ${ib.trainerStars} stars`);
+  if (ia.missing !== ib.missing) out.push('What was missing changed');
+  if (ia.time !== ib.time) out.push(`Time management: ${ia.time ? TIME_LABELS[ia.time] : 'not given'} → ${ib.time ? TIME_LABELS[ib.time] : 'not given'}`);
+  if (ia.timeNote !== ib.timeNote) out.push('Time management note changed');
+  REVIEW_PARTS.forEach(p => { if (ia[p.key] !== ib[p.key]) out.push(`${p.label} changed`); });
+  if (ia.issues !== ib.issues) out.push('Issues on the day changed');
+  if (ia.leads !== ib.leads) out.push('Sales leads changed');
+  return out;
+}
+
+/** "21 Oct 2026, 3:15 pm" (Malaysia time) for a revision. */
+export const revisionWhen = (iso: string) =>
+  iso ? new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kuala_Lumpur' }) : '';
+
+// ---------- HR's copy ----------
+const PRIVATE_REPORT = ['trainerId', 'history', 'revisions', 'trainerDraft', 'returnNote', 'returnedByName', 'submittedByName', 'updatedAt', 'updatedByName', 'status'] as const;
+/** Only what HR may see: unticked sections emptied, internal notes kept only where ticked, team details left out. */
+export function hrCopy(r: TrainingReport): TrainingReport {
+  const x: any = { ...r };
+  PRIVATE_REPORT.forEach(k => delete x[k]);
+  if (!onHrCopy(r, 'attendance')) x.days = [];
+  if (!onHrCopy(r, 'objectives')) x.objectives = [];
+  if (!onHrCopy(r, 'participant')) x.participant = null;
+  if (!onHrCopy(r, 'observations')) x.observations = '';
+  if (!onHrCopy(r, 'outstanding')) x.outstanding = [];
+  if (!onHrCopy(r, 'attention')) x.attention = [];
+  if (!onHrCopy(r, 'followUps')) x.followUps = [];
+  if (!onHrCopy(r, 'photos')) x.photos = [];
+  const i = { ...emptyInternal() };
+  const src = r.internal || emptyInternal();
+  if (onHrCopy(r, 'trainerStars')) i.trainerStars = src.trainerStars;
+  if (onHrCopy(r, 'missing')) i.missing = src.missing;
+  if (onHrCopy(r, 'time')) { i.time = src.time; i.timeNote = src.timeNote; }
+  if (onHrCopy(r, 'review')) REVIEW_PARTS.forEach(p => { i[p.key] = src[p.key]; });
+  if (onHrCopy(r, 'issues')) i.issues = src.issues;
+  if (onHrCopy(r, 'leads')) i.leads = src.leads;
+  x.internal = i;
+  if (x.participant) x.participant = { avg: x.participant.avg, responses: x.participant.responses, note: x.participant.note };
+  return x;
+}
 
 /** The red flag in Admin work: a report waiting to be checked. */
 export function reportFlag(r: TrainingReport | null | undefined, trainerName = 'The trainer'): string {
-  return r?.status === 'submitted' ? `${trainerName} sent the training report: check it, then mark it ready for HR` : '';
+  if (r?.status !== 'submitted') return '';
+  return r.revisions?.length
+    ? `${trainerName} changed the training report after sending: check the changes, then mark it ready for HR`
+    : `${trainerName} sent the training report: check it, then mark it ready for HR`;
 }

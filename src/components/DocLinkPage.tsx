@@ -5,12 +5,14 @@ import { DocKind } from '../lib/docLinks';
 import { COMPANY } from '../lib/company';
 import QuotationDocument from './QuotationDocument';
 import CourseOutlineDocument from './CourseOutlineDocument';
+import TrainingReportDocument from './TrainingReportDocument';
 import logoUrl from '../assets/outline/next-logo.png';
 import RequestAccess, { linkVisitId } from './RequestAccess';
 import LinkGuard, { todayText } from './LinkGuard';
 import { teamBrowser, useLinkTracking } from '../lib/linkTracker';
 
-// What a client sees when they open a quotation or course outline link (/q/<token> or /o/<token>, 2026-10-19).
+// What a client sees when they open a quotation or course outline link (/q/<token> or /o/<token>, 2026-10-19),
+// or the training report Management sent to HR (/r/<token>, 2026-10-21: only the sections Management chose).
 // No login: the page asks serverDocLinks.ts for the sent copy and shows it as a web page.
 // Since 2026-10-20 (Joel: "client cannot download or screenshot"; "do not tell customer we are tracking"): no Download
 // PDF or Print, the same protection as teambuilding links (LinkGuard: blank print, no copying or right-click, watermark,
@@ -51,12 +53,14 @@ export default function DocLinkPage({ token }: { token: string }) {
   }, [token]);
 
   const isQuote = data?.kind === 'quotation';
+  const isReport = data?.kind === 'report';
   const title = !data ? 'NEXT Academy'
     : isQuote ? `Quotation ${data.doc.refNumber || ''}`.trim()
+    : isReport ? `Training report${data.doc.hrHeader?.programme ? ` · ${data.doc.hrHeader.programme}` : ''}`
     : String(data.doc.courseTitle || 'Course outline');
   useEffect(() => { document.title = data ? `${title} · NEXT Academy` : 'NEXT Academy'; }, [data]);
-  const company = data?.doc ? String((isQuote ? data.doc.company : data.doc.preparedForCompany) || '') : '';
-  useLinkTracking(token, !!data && team === false);
+  const company = data?.doc ? String((isQuote ? data.doc.company : isReport ? data.doc.hrHeader?.client : data.doc.preparedForCompany) || '') : '';
+  useLinkTracking(token, !!data && !isReport && team === false);
 
   return (
     <LinkGuard on={!!data} watermark={data ? `${company ? `${company} · ` : ''}${todayText()}` : undefined}>
@@ -92,6 +96,8 @@ export default function DocLinkPage({ token }: { token: string }) {
           </div>
         ) : !data ? (
           <p className="flex items-center justify-center gap-2 py-20 text-ink-soft"><Loader2 className="h-5 w-5 animate-spin" /> Opening…</p>
+        ) : isReport ? (
+          <FitWidth width={820}><TrainingReportDocument r={data.doc} h={data.doc.hrHeader || { programme: '', client: '', dates: '', venue: '', trainer: '', grantNumber: '' }} /></FitWidth>
         ) : isQuote ? (
           <FitWidth width={900}><QuotationDocument q={data.doc as Quotation} /></FitWidth>
         ) : (

@@ -33,7 +33,7 @@ import { SharedItem, SharedKind, useSharedInbox } from '../lib/sharedInbox';
 import { clientDeals, clientQuotes, clientTimeline, touchFollowUpOpen } from '../lib/touchPoints';
 import { useTouchPoints } from '../lib/useClientHistory';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
-import { DocLink, openedText } from '../lib/docLinks';
+import { DOC_NOUN, DocLink, openedText } from '../lib/docLinks';
 import ProposalActivity from './ProposalActivity';
 import { useProposalSettings } from '../lib/useProposalSettings';
 import { seesLink } from '../lib/proposalTracking';
@@ -916,10 +916,10 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         .sort((a, b) => (b.l.lastViewedAt || 0) - (a.l.lastViewedAt || 0))
         .map(({ l, p }) => ({
           key: `open_${l.token}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'attention' as const,
-          sub: `Opened your ${l.kind === 'quotation' ? 'quotation' : l.kind === 'teambuilding' ? 'teambuilding proposal' : 'course outline'} ${l.refNumber || ''}: ${openedText(l).replace(/^Opened /, '')}. A good time to follow up.`,
+          sub: `Opened your ${DOC_NOUN[l.kind] || 'document'} ${l.refNumber || ''}: ${openedText(l).replace(/^Opened /, '')}. A good time to follow up.`,
         }));
       // A client asked to open an expired link again (2026-10-19): only the team can reopen it.
-      const docNoun = (k: string) => (k === 'quotation' ? 'quotation' : k === 'teambuilding' ? 'teambuilding proposal' : 'course outline');
+      const docNoun = (k: DocLink['kind']) => DOC_NOUN[k] || 'document';
       const reopen: Item[] = c.docLinks
         .filter(l => l.status === 'open' && l.reopenRequest)
         .map(l => ({ l, p: c.deals.find(d => d.id === l.dealId) }))

@@ -1,21 +1,23 @@
 // Training report on the deal (2026-10-21; lib/trainingReport.ts): the box on the after-training "Training report"
 // step, and the panel where Admin or Management read, fix or write the report (for a trainer without portal access),
 // type the participants' rating from the Output assessment, send it back or mark it checked, and save HR's PDF.
-// Marking it checked ticks the step; reopening it unticks it. Management ticks which internal notes HR may see.
+// Marking it checked ticks the step; reopening it unticks it. Management ticks which sections HR sees and sends HR
+// the PDF or a link (/r/<token>); the trainer's changes after sending are listed with date and time (2026-10-21).
 
 import React, { useEffect, useState } from 'react';
-import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { CheckCircle2, Download, FileText, Loader2, Lock, Plus, Undo2, X } from 'lucide-react';
-import { db, friendlyError } from '../lib/firebase';
+import { collection, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { CheckCircle2, Download, FileText, Link2, Loader2, Lock, Plus, Undo2, X } from 'lucide-react';
+import { callServer, db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso, trainingDays, trainingEndDate } from '../lib/deals';
 import { linkedOnly } from '../lib/linked';
 import {
-  INTERNAL_PARTS, ReportPhoto, STATUS_TEXT, TrainingReport, cleanParticipant, newReport, reportDates, reportGaps, withDates,
+  HrKey, INTERNAL_PARTS, PUBLIC_PARTS, ReportPhoto, STATUS_TEXT, TrainingReport, cleanParticipant, dealPax, newReport, onHrCopy, reportDates, reportGaps, withDates, withPax,
 } from '../lib/trainingReport';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { jobId } from '../lib/trainerPortal';
 import PanelResizer from './PanelResizer';
-import TrainingReportForm from './TrainingReportForm';
+import TrainingReportForm, { RevisionList } from './TrainingReportForm';
+import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import type { ReportHeader } from './TrainingReportDocument';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -81,7 +83,7 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, header
   const pdf = async () => {
     if (!r) return;
     setBusy(true); setError('');
-    try { await savePdf(r, header); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+    try { await savePdf(withPax(r, dealPax(deal)), header); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
 
   return (
@@ -93,6 +95,7 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, header
               <span className={`mr-2 rounded-full px-2 py-0.5 text-xs font-semibold ${r.status === 'checked' ? 'bg-accent-soft text-accent' : r.status === 'submitted' ? 'bg-attention-soft text-ink' : 'bg-surface text-ink-soft'}`}>{STATUS_TEXT[r.status]}</span>
               {r.submittedAt && r.status !== 'draft' && <span className="text-ink-soft">Sent {formatDate(r.submittedAt.slice(0, 10))} by {r.trainerName || trainerName}</span>}
               {r.status === 'checked' && r.checkedByName && <span className="text-ink-soft">. Checked by {r.checkedByName}</span>}
+              {r.revisions?.length ? <span className="text-ink-soft">. Changed {r.revisions.length} time{r.revisions.length === 1 ? '' : 's'} after sending</span> : null}
             </>
           ) : (
             <span className="text-ink-soft">
@@ -129,7 +132,8 @@ function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, name
   const staff = viewer.role !== 'rep';
   const isManager = viewer.role === 'management';
   const dates = reportDates(String(deal.trainingDate || '').slice(0, 10), trainingDays(deal));
-  const [report, setReport] = useState<TrainingReport | null>(saved ? withDates(clean({ ...newReport(deal.id, trainerId, trainerName, { dates, objectives: [], names }), ...saved }), dates) : null);
+  const pax = dealPax(deal);   // the deal's Participants (2026-10-21)
+  const [report, setReport] = useState<TrainingReport | null>(saved ? withPax(withDates(clean({ ...newReport(deal.id, trainerId, trainerName, { dates, objectives: [], names, pax }), ...saved }), dates), pax) : null);
   const [savedJson, setSavedJson] = useState(() => (report && saved ? JSON.stringify(report) : ''));
   const [programmes, setProgrammes] = useState<{ id: string; name: string }[]>([]);
   const [claimPhotos, setClaimPhotos] = useState<ReportPhoto[]>([]);
@@ -149,7 +153,7 @@ function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, name
       const outlines = linkedOnly(s.docs.map(d => ({ ...(d.data() as any), id: d.id })))
         .sort((a: any, b: any) => Number(b.status === 'sent') - Number(a.status === 'sent') || String(b.sentAt || b.date || '').localeCompare(String(a.sentAt || a.date || '')));
       const objectives = ((outlines[0] as any)?.outcomes || []).map((x: any) => String(x || '').trim()).filter(Boolean);
-      const fresh = newReport(deal.id, trainerId, trainerName, { dates, objectives, names });
+      const fresh = newReport(deal.id, trainerId, trainerName, { dates, objectives, names, pax });
       setReport(fresh);
       setSavedJson(JSON.stringify(fresh));   // nothing is saved until someone types
     }).catch(e => setError(friendlyError(e)));
@@ -158,9 +162,12 @@ function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, name
   const locked = !staff || report?.status === 'checked';
   const json = report ? JSON.stringify(report) : '';
   const dirty = !!report && json !== savedJson;
+  // Merged, so the trainer's changes not sent yet and their change list (kept by the server) are never overwritten.
+  // The deal details are saved with it for HR's link.
   const write = async (v: TrainingReport | null) => {
     if (!v) return;
-    await setDoc(doc(db, 'training_reports', deal.id), clean({ ...v, updatedAt: nowIso(), updatedByName: viewer.name }));
+    const { trainerDraft, revisions, ...rest } = v;
+    await setDoc(doc(db, 'training_reports', deal.id), clean({ ...rest, hrHeader: header, updatedAt: nowIso(), updatedByName: viewer.name }), { merge: true });
   };
   const { state, flush } = useAutoSave({ value: report, dirty, enabled: !!report && !locked, write, onSaved: setSavedJson });
   const close = () => leaveAfterSave(flush, onClose);
@@ -192,6 +199,29 @@ function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, name
     if (!report) return;
     setBusy('pdf'); setError('');
     try { await flush(); await savePdf(report, header); } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
+  };
+
+  // Management picks HR's sections; on a checked (locked) report the tick is saved at once.
+  const setHr = async (key: HrKey, on: boolean) => {
+    if (!report) return;
+    const showToHr = { ...(report.showToHr || {}), [key]: on };
+    if (!locked) { setReport({ ...report, showToHr }); return; }
+    setBusy('hr'); setError('');
+    try {
+      await updateDoc(doc(db, 'training_reports', deal.id), { showToHr, updatedAt: nowIso(), updatedByName: viewer.name });
+      const next = { ...report, showToHr };
+      setReport(next); setSavedJson(JSON.stringify(next));
+    } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
+  };
+
+  // HR's link (Management): the report's deal details are saved first, so the link shows them.
+  const hrLink = openLinkOf(useDocLinks(deal.id), 'report');
+  const makeLink = async () => {
+    setBusy('link'); setError('');
+    try {
+      await updateDoc(doc(db, 'training_reports', deal.id), { hrHeader: clean(header) });
+      await callServer('/api/doc-link/create', { kind: 'report', id: deal.id }, true);
+    } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
   };
 
   const p = report?.participant || null;
@@ -273,27 +303,50 @@ function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, name
           {report?.status === 'returned' && <p className="rounded-lg bg-attention-soft px-3 py-2.5 text-sm"><strong>Sent back{report.returnedByName ? ` by ${report.returnedByName}` : ''}:</strong> {report.returnNote}</p>}
           {report?.status === 'checked' && staff && <p className="flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent"><Lock className="h-4 w-4" /> Checked{report.checkedByName ? ` by ${report.checkedByName}` : ''}. Reopen it to make changes.</p>}
 
-          {/* Management: which internal notes go on HR's copy */}
-          {report && (
+          {saved?.trainerDraft && <p className="rounded-lg bg-surface px-3 py-2.5 text-sm text-ink-soft">{trainerName} is changing the report in the trainer portal. You'll see the changes once they send them.</p>}
+
+          {/* Management: which sections go on HR's copy (2026-10-21: every section) */}
+          {report && staff && (
             <section className="rounded-2xl border border-line bg-white p-4">
               <h3 className="text-base font-bold">On HR's copy</h3>
-              <p className="mb-2 text-sm text-ink-soft">Attendance, objectives, participants' rating, observations, people, follow-up training and photos always go on it. The internal notes go on only when Management ticks them.</p>
-              <ul className="grid gap-1.5 sm:grid-cols-2">
-                {INTERNAL_PARTS.map(x => (
-                  <li key={x.key}>
-                    <label className={`flex items-center gap-2 text-[15px] ${isManager && !locked ? 'cursor-pointer' : 'text-ink-soft'}`}>
-                      <input type="checkbox" className="h-4 w-4 accent-[#0E6E62]" disabled={!isManager || locked} checked={!!report.showToHr?.[x.key]}
-                        onChange={e => setReport({ ...report, showToHr: { ...(report.showToHr || {}), [x.key]: e.target.checked } })} />
-                      {x.label}
-                    </label>
-                  </li>
-                ))}
-              </ul>
-              {!isManager && <p className="mt-1 text-sm text-ink-soft">Only Management can change these.</p>}
+              <p className="mb-2 text-sm text-ink-soft">Ticked sections go on the PDF and the link for HR. The internal notes stay with NEXT Academy unless ticked.{isManager && locked ? ' Changes here are saved at once.' : ''}</p>
+              {[{ title: 'Report', parts: PUBLIC_PARTS }, { title: 'For NEXT Academy only, unless ticked', parts: INTERNAL_PARTS }].map(g => (
+                <div key={g.title} className="mt-2">
+                  <p className="mb-1 text-sm font-semibold">{g.title}</p>
+                  <ul className="grid gap-1.5 sm:grid-cols-2">
+                    {g.parts.map(x => (
+                      <li key={x.key}>
+                        <label className={`flex items-center gap-2 text-[15px] ${isManager ? 'cursor-pointer' : 'text-ink-soft'}`}>
+                          <input type="checkbox" className="h-4 w-4 accent-[#0E6E62]" disabled={!isManager || busy === 'hr'} checked={onHrCopy(report, x.key)}
+                            onChange={e => setHr(x.key, e.target.checked)} />
+                          {x.label}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {!isManager && <p className="mt-2 text-sm text-ink-soft">Only Management can change these.</p>}
             </section>
           )}
 
-          {report && <TrainingReportForm value={report} onChange={setReport} names={names} programmes={programmes} disabled={locked} photos={photos} teamPart={teamPart} />}
+          {/* Send to HR: PDF (Admin or Management), or a client link (Management) */}
+          {report?.status === 'checked' && staff && (
+            <section className="rounded-2xl border border-accent/30 bg-accent-soft/30 p-4">
+              <h3 className="text-base font-bold">Send to HR</h3>
+              <p className="mb-3 text-sm text-ink-soft">Save the PDF and attach it, or send HR a private link that shows the same report (no download or copying).</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className={btnSecondary} disabled={!!busy} onClick={pdf}>{busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF for HR</button>
+                {isManager && !hrLink && <button type="button" className={btnPrimary} disabled={!!busy} onClick={makeLink}>{busy === 'link' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Make the link for HR</button>}
+              </div>
+              {hrLink && isManager && <div className="mt-3"><DocLinkBox link={hrLink} viewer={viewer} message={`Dear HR, here is the training report for ${[header.programme, header.dates].filter(Boolean).join(', ')}.`} /></div>}
+              {hrLink && !isManager && <p className="mt-2 text-sm text-ink-soft">Management has sent HR a link to this report.</p>}
+            </section>
+          )}
+
+          {report && <TrainingReportForm value={report} onChange={setReport} names={names} pax={pax} paxNote="From the deal's Participants. Change it there if it's wrong." programmes={programmes} disabled={locked} photos={photos} teamPart={teamPart} />}
+
+          {saved?.revisions?.length ? <RevisionList revisions={saved.revisions} title={`${trainerName}'s changes after sending`} /> : null}
 
           {report?.history?.length ? (
             <details className="rounded-2xl border border-line bg-white p-4 text-sm">
@@ -323,7 +376,6 @@ function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, name
                   {report.status === 'checked' ? (
                     <>
                       <button type="button" className={btnSecondary} disabled={!!busy} onClick={reopen}>{busy === 'reopen' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Reopen</button>
-                      <button type="button" className={btnPrimary} disabled={!!busy} onClick={pdf}>{busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF for HR</button>
                     </>
                   ) : (
                     <>

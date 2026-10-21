@@ -1,21 +1,16 @@
 // The training report as HR gets it (2026-10-21; lib/trainingReport.ts). A PDF made from the report and the deal,
-// saved from the deal's "Training report" step. The internal notes appear only where Management ticked them.
+// saved from the deal's "Training report" step, or opened by HR at /r/<token>. Each section appears only where
+// Management left it on (lib/trainingReport.ts onHrCopy: main sections on unless unticked, internal notes off unless ticked).
 // The sheet has the class "print-paper" so makeDocumentPdf can find it.
 
 import React from 'react';
 import { COMPANY } from '../lib/company';
 import {
-  INTERNAL_PARTS, REVIEW_PARTS, TIME_LABELS, TrainingReport, absentCount, attendancePct, objectivesAverage, presentCount,
+  HrKey, INTERNAL_PARTS, REVIEW_PARTS, ReportHeaderData, TIME_LABELS, TrainingReport, absentCount, attendancePct, objectivesAverage, onHrCopy, presentCount,
 } from '../lib/trainingReport';
 
-export interface ReportHeader {
-  programme: string;
-  client: string;
-  dates: string;
-  venue: string;
-  trainer: string;
-  grantNumber: string;
-}
+// Programme, client, dates, venue, trainer, HRDC grant no. (from the deal; saved on the report for HR's link).
+export type ReportHeader = ReportHeaderData;
 
 const stars = (n: number) => (n ? `${'★'.repeat(n)}${'☆'.repeat(5 - n)}` : 'Not rated');
 const day = (iso: string) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
@@ -23,7 +18,7 @@ const day = (iso: string) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateStri
 export default function TrainingReportDocument({ r, h }: { r: TrainingReport; h: ReportHeader }) {
   const cell = 'border border-slate-300 px-3 py-2 align-top';
   const head = 'mb-2 border-b border-slate-300 pb-1 text-[15px] font-bold text-[#0E6E62]';
-  const show = (k: string) => !!r.showToHr?.[k as keyof typeof r.showToHr];
+  const show = (k: HrKey) => onHrCopy(r, k);
   const extra = INTERNAL_PARTS.filter(p => show(p.key));
   const people = (rows: { name: string; reason: string }[]) => rows.length
     ? <table className="w-full border-collapse"><tbody>{rows.map((x, i) => <tr key={i}><td className={`${cell} w-[32%] font-semibold`}>{x.name}</td><td className={cell}>{x.reason}</td></tr>)}</tbody></table>
@@ -49,7 +44,7 @@ export default function TrainingReportDocument({ r, h }: { r: TrainingReport; h:
         </tbody>
       </table>
 
-      <section>
+      {show('attendance') && (<section>
         <h2 className={head}>Attendance</h2>
         <table className="w-full border-collapse">
           <thead><tr className="bg-slate-100">
@@ -70,17 +65,17 @@ export default function TrainingReportDocument({ r, h }: { r: TrainingReport; h:
           </tbody>
         </table>
         <p className="mt-2">Attendance rate: <strong>{attendancePct(r)}%</strong></p>
-      </section>
+      </section>)}
 
-      <section>
+      {show('objectives') && (<section>
         <h2 className={head}>Objectives achieved{avg ? ` (average ${avg} / 5)` : ''}</h2>
         <table className="w-full border-collapse">
           <thead><tr className="bg-slate-100"><th className={`${cell} text-left`}>Objective</th><th className={`${cell} w-28 text-left`}>Rating</th><th className={`${cell} text-left`}>Comment</th></tr></thead>
           <tbody>{r.objectives.map((o, i) => <tr key={i}><td className={cell}>{o.text}</td><td className={`${cell} text-[#B98500]`}>{stars(o.stars)}</td><td className={cell}>{o.comment}</td></tr>)}</tbody>
         </table>
-      </section>
+      </section>)}
 
-      {r.participant && (r.participant.avg > 0 || r.participant.note) && (
+      {show('participant') && r.participant && (r.participant.avg > 0 || r.participant.note) && (
         <section>
           <h2 className={head}>Participants' rating</h2>
           {r.participant.avg > 0 && <p><strong>{r.participant.avg} / 5</strong>{r.participant.responses ? ` from ${r.participant.responses} participant${r.participant.responses === 1 ? '' : 's'}` : ''}</p>}
@@ -88,16 +83,16 @@ export default function TrainingReportDocument({ r, h }: { r: TrainingReport; h:
         </section>
       )}
 
-      <section>
+      {show('observations') && (<section>
         <h2 className={head}>Trainer's observations</h2>
         <p className="whitespace-pre-line">{r.observations || 'None.'}</p>
-      </section>
-      <section><h2 className={head}>Outstanding participants</h2>{people(r.outstanding)}</section>
-      <section><h2 className={head}>Participants who may need special attention</h2>{people(r.attention)}</section>
-      <section>
+      </section>)}
+      {show('outstanding') && <section><h2 className={head}>Outstanding participants</h2>{people(r.outstanding)}</section>}
+      {show('attention') && <section><h2 className={head}>Participants who may need special attention</h2>{people(r.attention)}</section>}
+      {show('followUps') && (<section>
         <h2 className={head}>Recommended follow-up training</h2>
         {people(r.followUps.map(f => ({ name: f.name, reason: f.reason })))}
-      </section>
+      </section>)}
 
       {extra.length > 0 && (
         <section className="space-y-2">
@@ -111,7 +106,7 @@ export default function TrainingReportDocument({ r, h }: { r: TrainingReport; h:
         </section>
       )}
 
-      {r.photos.length > 0 && (
+      {show('photos') && r.photos.length > 0 && (
         <section>
           <h2 className={head}>Photos</h2>
           <div className="grid grid-cols-3 gap-2">
