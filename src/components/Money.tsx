@@ -6,7 +6,7 @@ import { pdfErrorText } from '../lib/oldTab';
 import { dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
   COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, OutStatus, TIMING_LABELS,
-  canDecide, dateTimeMY, dealPL, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
+  canDecide, dateTimeMY, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
 import { projectRow } from '../lib/projectPL';
@@ -97,15 +97,15 @@ export function RepMoneyStatus({ deal, ins }: { deal: any; ins: MoneyIn[] }) {
 // ---------- Money out and P&L for one deal (Admin and Management) ----------
 // Invoices, HRDC claims and the payments received are in the deal's "After training" section (AfterTraining.tsx),
 // so they have one home (Joel, 2026-10-20).
-// The training's P&L uses the same sums as Management → Project P&L (projectRow): income (or the deal value as an
-// estimate), minus SST, HRDC's %, the sales person's commission and the approved and paid costs.
+// The training's P&L is the same row as Management → Project P&L (projectRow, the only P&L): income (or the deal value
+// as an estimate), minus SST (including an amount Management typed there), HRDC's %, commission and the counted costs.
 // Costs are raised from the deal's "Before training" checklist (venue, bus, facilitator, trainer, materials;
 // 2026-10-20), so this section has no "Request a payment" form of its own any more.
 export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes = [] }: {
   deal: any; viewer: Viewer; ins: MoneyIn[]; outs: MoneyOut[]; settings: MoneySettings; quotes?: any[];
 }) {
-  const pl = dealPL(ins, outs, settings);
-  const row = projectRow(deal, ins, outs, settings, todayIso(), { quotes, plDocs: {} });
+  const plDocs = useTypedSst(deal.id);
+  const row = projectRow(deal, ins, outs, settings, todayIso(), { quotes, plDocs });
   const approvable = outs.filter(o => canDecide(o, viewer));
   const { busy, error, run } = useRun();
 
@@ -116,14 +116,14 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
         <Stat label={row.estimate ? 'Income (estimate: deal value)' : 'Invoiced and claimed'} value={formatRM(row.income)} />
         <Stat label="SST, HRDC %, commission, costs" value={formatRM(row.sst + row.hrdcFee + row.commission + row.costs)} />
         <Stat label="Profit" value={formatRM(row.profit)} tone={row.profit < 0 ? 'danger' : 'accent'} />
-        <Stat label="Received so far" value={formatRM(pl.received)} />
+        <Stat label="Received so far" value={formatRM(row.received)} />
       </div>
       <p className="text-sm text-ink-soft">
-        SST {formatRM(row.sst)} · HRDC {formatRM(row.hrdcFee)} · Commission {row.commissionPct}% {formatRM(row.commission)} (sales person) · Costs approved or paid {formatRM(row.costs)}
+        SST {formatRM(row.sst)}{row.sstTyped ? ' (typed in Project P&L)' : ''} · HRDC {formatRM(row.hrdcFee)} · Commission {row.commissionPct}% {formatRM(row.commission)} (sales person) · Costs approved or paid {formatRM(row.costs)}
       </p>
       <p className="text-sm text-ink-soft">
-        Still to come in: <strong className="text-ink">{formatRM(pl.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(pl.toPayOut)}</strong>
-        {pl.pendingApproval > 0 && <> · Waiting for approval (not counted yet): <strong className="text-ink">{formatRM(pl.pendingApproval)}</strong></>}
+        Still to come in{row.estimate ? ' (estimate)' : ''}: <strong className="text-ink">{formatRM(row.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(row.toPayOut)}</strong>
+        {row.pendingApproval > 0 && <> · Waiting for approval (not counted yet): <strong className="text-ink">{formatRM(row.pendingApproval)}</strong></>}
       </p>
 
       <p className="text-sm text-ink-soft">Invoices, HRDC claims and payments received are recorded in this deal's <strong className="text-ink">After training</strong> section. Costs are entered in its <strong className="text-ink">Before training</strong> checklist.</p>
@@ -146,6 +146,17 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
       </section>
     </div>
   );
+}
+
+/** The SST amount Management typed for this deal in Project P&L (project_pl/{dealId}), so the deal shows the same
+ *  profit. Admin can read it once firestore.rules is published; until then (or if none) the automatic SST is used. */
+function useTypedSst(dealId: string): Record<string, { sstAmount?: number | null }> {
+  const [plDocs, setPlDocs] = useState<Record<string, { sstAmount?: number | null }>>({});
+  useEffect(() => {
+    if (!dealId) return;
+    return onSnapshot(doc(db, 'project_pl', dealId), s => setPlDocs(s.exists() ? { [dealId]: s.data() as any } : {}), () => setPlDocs({}));
+  }, [dealId]);
+  return plDocs;
 }
 
 /** Approve several requests at once (the same check as one by one: a manager, never their own). */

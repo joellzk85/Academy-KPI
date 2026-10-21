@@ -335,9 +335,11 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
-    // Project P&L (2026-10-17): the SST amount Management types for a training. Management only.
+    // Project P&L (2026-10-17): the SST amount Management types for a training. Management writes; Admin reads it
+    // (2026-10-21) so the deal's "Money out and P&L" shows the same profit as Project P&L.
     match /project_pl/{dealId} {
-      allow read, write: if isManagement();
+      allow read: if isStaff();
+      allow write: if isManagement();
     }
 
     // Payment tracking (2026-10-20): HRDC claim and invoice lines imported from the Blueprint spreadsheet

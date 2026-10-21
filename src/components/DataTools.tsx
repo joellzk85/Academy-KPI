@@ -25,7 +25,7 @@ const CLEAR_COLLECTIONS: { name: string; label: string }[] = [
   { name: 'payments', label: 'Payment vouchers' },
   { name: 'client_payments', label: 'Client payments' },
   { name: 'events', label: 'Calendar events' },
-  { name: 'project_pls', label: 'P&L sheets' },
+  { name: 'project_pls', label: 'Old P&L sheets (no longer used)' },
   { name: 'links', label: 'Saved Google links' },
 ];
 
