@@ -1,12 +1,16 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
 import { addDays, formatRM } from '../lib/deals';
+import { mix } from '../lib/presentTheme';
 
 // Charts for the weekly presentation (lib/present.ts): number cards with up/down, a score ring, a funnel,
 // bars, donuts and two heatmaps. Colours follow the CRM palette (src/index.css): teal accent first.
 
 export const CHART_COLOURS = ['#0E6E62', '#5DB3A6', '#E0A458', '#1C2B45', '#8FA3BF', '#B45309', '#7C6CB0', '#C2554B'];
+// The slideshow and the PDF give the charts the meeting's colours (lib/presentTheme.ts); elsewhere the CRM palette.
+export const ChartPalette = createContext<string[]>(CHART_COLOURS);
+const usePalette = () => useContext(ChartPalette);
 
 export const compactRM = (n: number) => {
   const a = Math.abs(n);
@@ -36,7 +40,8 @@ export function StatCard({ label, value, delta, sub, tone = 'plain' }: {
 
 export function Ring({ pct, size = 180, label, sub }: { pct: number; size?: number; label: string; sub?: string }) {
   const r = size / 2 - 12, c = 2 * Math.PI * r, p = Math.max(0, Math.min(100, pct));
-  const colour = p >= 100 ? '#0E6E62' : p >= 50 ? '#5DB3A6' : '#E0A458';
+  const pal = usePalette();
+  const colour = p >= 100 ? pal[0] : p >= 50 ? pal[1] : '#E0A458';
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90" aria-hidden="true">
@@ -53,6 +58,7 @@ export function Ring({ pct, size = 180, label, sub }: { pct: number; size?: numb
 
 // A funnel: centred bars getting narrower, with the count, value and how many moved on from the step before.
 export function Funnel({ data, money, conversion = true }: { data: { label: string; count: number; value?: number }[]; money?: boolean; conversion?: boolean }) {
+  const pal = usePalette();
   const max = Math.max(1, ...data.map(d => d.count));
   return (
     <div className="space-y-2">
@@ -64,7 +70,7 @@ export function Funnel({ data, money, conversion = true }: { data: { label: stri
             <span className="text-right text-sm font-semibold text-ink-soft">{d.label}</span>
             <div className="flex justify-center">
               <div className="flex h-11 items-center justify-center rounded-lg text-sm font-bold text-white transition-all"
-                style={{ width: `${w}%`, background: CHART_COLOURS[i % 2 === 0 ? 0 : 1], opacity: 1 - i * 0.08 }}>
+                style={{ width: `${w}%`, background: pal[i % 2 === 0 ? 0 : 1], opacity: 1 - i * 0.08 }}>
                 {d.count}{money && d.value ? <span className="ml-2 hidden font-semibold text-white/85 sm:inline">{compactRM(d.value)}</span> : null}
               </div>
             </div>
@@ -80,6 +86,7 @@ export interface BarSpec { key: string; name: string; colour?: string }
 export function Bars({ data, bars, xKey = 'label', money, horizontal, stacked, height = 300, animate = true }: {
   data: any[]; bars: BarSpec[]; xKey?: string; money?: boolean; horizontal?: boolean; stacked?: boolean; height?: number; animate?: boolean;
 }) {
+  const pal = usePalette();
   const fmt = (v: any) => (money ? compactRM(Number(v)) : String(v));
   const tip = (v: any) => (money ? formatRM(Number(v)) : String(v));
   return (
@@ -96,7 +103,7 @@ export function Bars({ data, bars, xKey = 'label', money, horizontal, stacked, h
         <Tooltip formatter={tip} cursor={{ fill: 'rgba(14,110,98,0.06)' }} />
         {bars.length > 1 && <Legend wrapperStyle={{ fontSize: 13 }} />}
         {bars.map((b, i) => (
-          <Bar key={b.key} dataKey={b.key} name={b.name} fill={b.colour || CHART_COLOURS[i]} stackId={stacked ? 'all' : undefined}
+          <Bar key={b.key} dataKey={b.key} name={b.name} fill={b.colour || pal[i]} stackId={stacked ? 'all' : undefined}
             radius={stacked && i < bars.length - 1 ? 0 : horizontal ? [0, 6, 6, 0] : [6, 6, 0, 0]} isAnimationActive={animate} maxBarSize={48} />
         ))}
       </BarChart>
@@ -108,6 +115,7 @@ export function Bars({ data, bars, xKey = 'label', money, horizontal, stacked, h
 export function Donut({ data, money, height = 260, animate = true, centre }: {
   data: { name: string; value: number }[]; money?: boolean; height?: number; animate?: boolean; centre?: string;
 }) {
+  const pal = usePalette();
   const total = data.reduce((t, d) => t + d.value, 0);
   const shown = data.filter(d => d.value > 0);
   if (!shown.length) return <Empty />;
@@ -117,7 +125,7 @@ export function Donut({ data, money, height = 260, animate = true, centre }: {
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie data={shown} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="92%" paddingAngle={2} isAnimationActive={animate} stroke="none">
-              {shown.map((_, i) => <Cell key={i} fill={CHART_COLOURS[i % CHART_COLOURS.length]} />)}
+              {shown.map((_, i) => <Cell key={i} fill={pal[i % pal.length]} />)}
             </Pie>
             <Tooltip formatter={(v: any) => (money ? formatRM(Number(v)) : String(v))} />
           </PieChart>
@@ -127,7 +135,7 @@ export function Donut({ data, money, height = 260, animate = true, centre }: {
       <ul className="space-y-2">
         {shown.map((d, i) => (
           <li key={d.name} className="flex items-center gap-2 text-[15px]">
-            <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: CHART_COLOURS[i % CHART_COLOURS.length] }} />
+            <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: pal[i % pal.length] }} />
             <span className="min-w-0 flex-1 truncate">{d.name}</span>
             <span className="font-semibold tabular-nums">{money ? compactRM(d.value) : d.value}</span>
             <span className="w-12 text-right text-sm tabular-nums text-ink-soft">{total ? Math.round((d.value / total) * 100) : 0}%</span>
@@ -138,21 +146,25 @@ export function Donut({ data, money, height = 260, animate = true, centre }: {
   );
 }
 
-const heat = (v: number, max: number) => {
-  if (!v) return '#EEF0EB';
+// Five shades, from empty to the main colour.
+const shades = (main: string) => ['#EEF0EB', mix('#FFFFFF', main, 0.25), mix('#FFFFFF', main, 0.5), mix('#FFFFFF', main, 0.78), main];
+const heat = (sh: string[], v: number, max: number) => {
+  if (!v) return sh[0];
   const t = Math.min(1, v / Math.max(1, max));
-  return t > 0.75 ? '#0E6E62' : t > 0.5 ? '#3E9284' : t > 0.25 ? '#7FC2B6' : '#C4E3DC';
+  return t > 0.75 ? sh[4] : t > 0.5 ? sh[3] : t > 0.25 ? sh[2] : sh[1];
 };
 function HeatKey() {
+  const sh = shades(usePalette()[0]);
   return (
     <span className="inline-flex items-center gap-1 text-xs text-ink-soft">
-      Less {['#EEF0EB', '#C4E3DC', '#7FC2B6', '#3E9284', '#0E6E62'].map(c => <span key={c} className="h-3 w-3 rounded-sm" style={{ background: c }} />)} More
+      Less {sh.map(c => <span key={c} className="h-3 w-3 rounded-sm" style={{ background: c }} />)} More
     </span>
   );
 }
 
 // Every day of the last `weeks` weeks (Monday to Sunday rows), darker = more done that day.
 export function DayHeatmap({ dates, today, weeks = 12 }: { dates: string[]; today: string; weeks?: number }) {
+  const sh = shades(usePalette()[0]);
   const counts = new Map<string, number>();
   dates.forEach(d => counts.set(d, (counts.get(d) || 0) + 1));
   const dow = (new Date(today).getDay() + 6) % 7;   // Monday = 0
@@ -170,7 +182,7 @@ export function DayHeatmap({ dates, today, weeks = 12 }: { dates: string[]; toda
             <span className="h-5 text-xs text-ink-soft">{col[0].slice(8, 10) <= '07' ? new Date(col[0]).toLocaleDateString('en-GB', { month: 'short' }) : ''}</span>
             {col.map(d => (
               <span key={d} title={`${d}: ${counts.get(d) || 0}`} className="h-5 w-5 rounded sm:h-7 sm:w-7"
-                style={{ background: d > today ? 'transparent' : heat(counts.get(d) || 0, max), outline: d === today ? '2px solid #1C2B45' : undefined }} />
+                style={{ background: d > today ? 'transparent' : heat(sh, counts.get(d) || 0, max), outline: d === today ? '2px solid var(--color-ink)' : undefined }} />
             ))}
           </div>
         ))}
@@ -185,6 +197,7 @@ export function DayHeatmap({ dates, today, weeks = 12 }: { dates: string[]; toda
 
 // Rows (people) by columns (weeks): darker = more.
 export function MatrixHeatmap({ rows, cols }: { rows: { name: string; values: number[] }[]; cols: string[] }) {
+  const sh = shades(usePalette()[0]);
   const max = Math.max(1, ...rows.flatMap(r => r.values));
   return (
     <div className="overflow-x-auto">
@@ -202,7 +215,7 @@ export function MatrixHeatmap({ rows, cols }: { rows: { name: string; values: nu
               <td className="whitespace-nowrap pr-2 font-semibold">{r.name}</td>
               {r.values.map((v, i) => (
                 <td key={i} title={`${r.name}, ${cols[i]}: ${v}`} className="h-9 w-12 rounded-md text-center text-xs font-bold tabular-nums"
-                  style={{ background: heat(v, max), color: v / max > 0.5 ? '#fff' : '#1C2B45' }}>{v || ''}</td>
+                  style={{ background: heat(sh, v, max), color: v / max > 0.5 ? '#fff' : 'var(--color-ink)' }}>{v || ''}</td>
               ))}
               <td className="pl-2 text-right font-bold tabular-nums">{r.values.reduce((a, b) => a + b, 0)}</td>
             </tr>
