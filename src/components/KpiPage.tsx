@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query } from 'firebase/firestore';
-import { Check, HandHelping, Loader2, Pencil, UserCheck } from 'lucide-react';
+import { Check, HandHelping, Loader2, Pencil, Presentation, UserCheck } from 'lucide-react';
+import PresentPage from './PresentPage';
 import { db } from '../lib/firebase';
 import { Representative } from '../types';
 import { AUTO_SOURCE_LABELS, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, takesTyped, weekIndexOf } from '../lib/kpi';
@@ -75,8 +76,30 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
   const save = (changes: Record<string, any>) => onUpdateRepKpi(rep.id, { ...JSON.parse(JSON.stringify(rep.kpi || {})), ...changes });
   const fmt = (isRM: boolean, v: number) => (isRM ? formatRM(v) : String(Math.round(v * 10) / 10));
 
+  // Present tab (2026-10-21): the weekly presentation, built from these same numbers.
+  const [tab, setTab] = useState<'numbers' | 'present'>('numbers');
+  const tabs = (
+    <div className="inline-flex rounded-xl border border-line bg-white p-1" role="tablist" aria-label="KPI page">
+      {([['numbers', 'Numbers and check-in'], ['present', 'Present']] as const).map(([k, l]) => (
+        <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${tab === k ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'}`}>
+          {k === 'present' && <Presentation className="h-4 w-4" />}{l}
+        </button>
+      ))}
+    </div>
+  );
+  if (tab === 'present') {
+    return (
+      <div className="space-y-5">
+        {tabs}
+        <PresentPage viewer={viewer || { id: rep.id, name: rep.name, role: rep.role || 'rep' }} person={rep} reps={reps} month={selectedMonth} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 font-sans text-ink">
+      {tabs}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold">KPI</h2>

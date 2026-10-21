@@ -28,6 +28,10 @@ export interface Task {
   isDuplicate?: boolean;
   ownerRepId?: string;        // old field: whose list the old copy sat in
   isHidden?: boolean;
+  // Action points from the weekly presentation (2026-10-21, lib/present.ts): always a deadline and one responsible person.
+  source?: 'meeting';
+  meetingDate?: string;
+  meetingSlide?: string;      // the slide on screen when it was raised
 }
 
 export type TaskGroup = 'overdue' | 'today' | 'week' | 'later' | 'nodate' | 'done';

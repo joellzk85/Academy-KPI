@@ -13,6 +13,7 @@ import ClientManager from './ClientManager';
 import TrainerManager from './TrainerManager';
 import VenueManager from './VenueManager';
 import KpiPage, { asksFor } from './KpiPage';
+import PresentPage from './PresentPage';
 import WorkspaceMenu, { MENU_LABELS, MenuItem } from './WorkspaceMenu';
 import { SharedKind, useSharedInbox } from '../lib/sharedInbox';
 import DealsBoard from './DealsBoard';
@@ -39,7 +40,7 @@ interface RepDetailDashboardProps {
   onOpenDealHandled?: () => void;
 }
 
-type SubTab = 'quotation' | 'kpi' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
+type SubTab = 'quotation' | 'kpi' | 'present' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
 
 
 // Tombstone list of pipeline IDs the user has deleted, so other views
@@ -104,7 +105,10 @@ export default function RepDetailDashboard({
     return saved && RETIRED_TABS.includes(saved) ? 'pipeline' : saved || homeTab;
   };
   const [chosenSubTab, setActiveSubTab] = useState<SubTab>(savedSubTab);
-  const activeSubTab: SubTab = RETIRED_TABS.includes(chosenSubTab) || (rep.noKpis && chosenSubTab === 'kpi') ? 'pipeline' : chosenSubTab;
+  // Management without KPIs presents the company from a Present item on the menu (Joel, 2026-10-21); everyone else
+  // presents from the Present tab on their KPI page.
+  const presentOnMenu = !!rep.noKpis && rep.role === 'management' && viewer?.role === 'management';
+  const activeSubTab: SubTab = RETIRED_TABS.includes(chosenSubTab) || (rep.noKpis && chosenSubTab === 'kpi') || (chosenSubTab === 'present' && !presentOnMenu) ? 'pipeline' : chosenSubTab;
   const [subTabHistory, setSubTabHistory] = useState<SubTab[]>(() => [savedSubTab()]);
 
   const handleSubTabChange = (newTab: SubTab) => {
@@ -1296,6 +1300,7 @@ export default function RepDetailDashboard({
   const inbox = useSharedInbox(viewer && viewer.id !== rep.id ? undefined : rep.id);
   const workspaceMenuItems: MenuItem[] = [
     ...(rep.noKpis ? [] : [{ key: 'kpi' as const, label: MENU_LABELS.kpi, alert: kpiAsksOpen ? `${kpiAsksOpen} teammate request${kpiAsksOpen === 1 ? '' : 's'}` : undefined }]),
+    ...(presentOnMenu ? [{ key: 'present' as const, label: MENU_LABELS.present }] : []),
     { key: 'pipeline', label: MENU_LABELS.pipeline, alert: dealsAlert },
     { key: 'quotation', label: MENU_LABELS.quotation, count: inbox.quotations,
       alert: inbox.quotations ? `${inbox.quotations} shared with you` : hasTaggedQuotations ? 'Tagged quotation' : undefined },
@@ -1366,6 +1371,8 @@ export default function RepDetailDashboard({
             <VenueManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }} />
           ) : activeSubTab === 'kpi' ? (
             <KpiPage rep={rep} reps={reps.filter(r => !r.noKpis)} viewer={viewer} selectedMonth={selectedMonth} onMonthChange={onMonthChange} onUpdateRepKpi={onUpdateRepKpi} />
+          ) : activeSubTab === 'present' && viewer ? (
+            <PresentPage viewer={viewer} reps={reps.filter(r => !r.noKpis)} month={selectedMonth} companyOnly />
           ) : activeSubTab === 'pipeline' ? (
             <DealsBoard
               owner={rep}

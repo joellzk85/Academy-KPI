@@ -6,6 +6,7 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
 
 - `src/lib/deals.ts`: deal stages, funding types, date and value helpers. Deals are stored in the `pipelines` collection. Fields added in 2A: `stage`, `appointmentDate`, `wonDate`, `lostDate`, `lostReason`, `fundingType`, `clientId`, `history[]`. Old `status` (Pending/Won/Lost) is kept in step for the older screens.
 - `src/lib/kpi.ts`: KPI templates and counting. **Closing RM counts in the month a deal is won**, and only for the deal owner (not tagged helpers).
+- `src/lib/present.ts`, `src/components/PresentPage.tsx`, `PresentSlides.tsx`, `PresentCharts.tsx`: the weekly presentation (KPI page → Present; Joel: Present on his menu). Choices in `present_prefs`; action points are To-dos with `source: 'meeting'`.
 - `src/components/DealsBoard.tsx`: the Deals screen (in each workspace's "Deals" tab).
 - `src/components/TeamManager.tsx`: Team tab, including the KPI set and targets per person.
 - `src/components/DataTools.tsx`: Management → Data tools (link old records, clear old data).

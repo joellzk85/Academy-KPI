@@ -118,6 +118,15 @@ body {
   }
 }
 
+/* Weekly presentation (PresentPage.tsx, 2026-10-21): slide entrance, and "Save as PDF" with one slide per page. */
+@keyframes present-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .animate-\[present-in_350ms_ease-out\] { animation: none; } }
+@media print {
+  .present-print { left: 0 !important; width: 100% !important; }
+  .present-print-slide { break-after: page; page-break-after: always; }
+  .present-print-slide:last-child { break-after: auto; page-break-after: auto; }
+}
+
 /* Visible keyboard focus everywhere */
 :focus-visible {
   outline: 2px solid #0E6E62;

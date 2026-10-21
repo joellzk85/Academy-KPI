@@ -332,7 +332,10 @@ function TaskRow({ t, g, scope, rep, canTick, nameOf, deal, dealLabel, onOpenCli
       {/* A div, not a button, so the client tags inside can be their own buttons */}
       <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }} className="min-w-0 flex-1 cursor-pointer text-left">
         <DetailText t={t} onOpenClient={onOpenClient} className={`block whitespace-pre-line text-[15px] ${done ? 'text-ink-soft line-through' : ''}`} />
-        <span className="mt-0.5 block text-sm text-ink-soft">{[who, deal ? dealLabel(deal) : ''].filter(Boolean).join(' · ')}</span>
+        <span className="mt-0.5 block text-sm text-ink-soft">
+          {t.source === 'meeting' && <span className="mr-1.5 rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent">Action point{t.meetingDate ? `, meeting ${formatDate(t.meetingDate)}` : ''}</span>}
+          {[who, deal ? dealLabel(deal) : ''].filter(Boolean).join(' · ')}
+        </span>
       </div>
       <span className={`shrink-0 text-right text-sm ${g === 'overdue' ? 'font-semibold text-danger' : 'text-ink-soft'}`}>{when}</span>
     </li>
