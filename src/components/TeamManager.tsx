@@ -5,6 +5,7 @@ import { AUTO_SOURCE_LABELS, KPI_TEMPLATES, templateById, defaultTemplateIdFor, 
 import { db, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember, TeamRole, ROLE_LABELS } from '../types';
 import OutlookSetup from './OutlookSetup';
+import LoginLog from './LoginLog';
 
 interface TeamManagerProps {
   currentMember: TeamMember;
@@ -500,6 +501,8 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
         <OutlookSetup />
         </div>
       </div>
+
+      <LoginLog currentMember={currentMember} members={activeMembers} />
 
       {/* Dialogs */}
       {dialog && dialog.kind === 'kpi' && (

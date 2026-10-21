@@ -123,7 +123,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `trainer-portal.md` | Trainer portal (/trainer): email login for trainers given access, profile, bank, TIN, trainings, PO, fee request, rating |
 | `training-report.md` | Training report: trainer writes it in the portal (or Admin on the deal), can change it after sending (change list), pax from the deal, checked, Management picks HR's sections, PDF or link for HR |
 | `money.md` | Phase 3 money, company payments, Link for accounts, Project P&L, manager deletes, Blueprint import, Payment tracking, After training to Case closed |
-| `home-kpi-dashboards.md` | KPI templates, My home, rings, cards, workspace menu, KPI page, Team performance, weekly presentation (Present tab, action points) |
+| `home-kpi-dashboards.md` | KPI templates, My home, rings, cards, workspace menu, KPI page, Team performance, weekly presentation (Present tab, action points), Login log |
 | `clients-directories-calendar.md` | Client history, Clients, Trainers, Venues, To-do, Google Calendar |
 | `backup-and-tidyup.md` | Data backup, tidy-up done and still open |
 
@@ -142,6 +142,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Trainer fee checks (2026-10-21):** nothing to publish; go-live checklist item 40.
 - **Trainer outlines and teambuilding proposals (2026-10-21):** publish `firestore.rules` (`trainer_docs`); go-live checklist item 41.
 - **Search, client logo, KPI colours, potential, projection (2026-10-21):** publish `storage.rules` (logos) and `firestore.rules` (`forecast_settings`); go-live checklist item 42.
+- **Login log (2026-10-22):** publish `firestore.rules` (`login_days`, `login_rules`); go-live checklist item 43.
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.

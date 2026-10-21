@@ -62,11 +62,12 @@ service cloud.firestore {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
       // trainer_overview (2026-10-21): who else may open Trainers → Overview; Management only.
       // forecast_settings (2026-10-21): Hot / Warm / Cold chances for the sales projection; Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings']))
+      // login_rules (2026-10-22): green / amber / red rules of Team → Login log; Management only.
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules']))
                             || (docId in ['checklist_tasks', 'money_settings'] && isStaff())
-                            || (docId in ['sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings'] && isManagement());
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings']));
+                            || (docId in ['sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules'] && isManagement());
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -512,6 +513,30 @@ service cloud.firestore {
             && exists(/databases/$(database)/documents/config/proposal_settings)
             && request.auth.uid in get(/databases/$(database)/documents/config/proposal_settings).data.get('allowedIds', []));
       allow write: if false;
+    }
+
+    // Login history (2026-10-22), one document per person per day: "<memberId>_<YYYY-MM-DD>".
+    // Each person writes only their own: the CRM adds one active minute at a time (at most once every 50 seconds)
+    // or counts one more opening. Nobody can change a day's date, person or first time. Only Management reads them.
+    match /login_days/{dayId} {
+      allow read: if isManagement();
+      allow create: if isMember()
+        && request.resource.data.keys().hasOnly(['memberId', 'date', 'minutes', 'logins', 'firstAt', 'lastAt'])
+        && request.resource.data.memberId == request.auth.uid
+        && request.resource.data.date is string
+        && dayId == request.auth.uid + '_' + request.resource.data.date
+        && request.resource.data.minutes in [0, 1]
+        && request.resource.data.logins in [0, 1]
+        && request.resource.data.firstAt == request.time
+        && request.resource.data.lastAt == request.time;
+      allow update: if isMember()
+        && resource.data.memberId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['minutes', 'logins', 'lastAt'])
+        && request.resource.data.lastAt == request.time
+        && ((request.resource.data.minutes == resource.data.minutes && request.resource.data.logins == resource.data.logins + 1)
+            || (request.resource.data.logins == resource.data.logins && request.resource.data.minutes == resource.data.minutes + 1
+                && request.time > resource.data.lastAt + duration.value(50, 's')));
+      allow delete: if false;
     }
 
     // All other CRM work data: team members only

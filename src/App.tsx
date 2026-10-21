@@ -37,6 +37,7 @@ const RepDetailDashboard = React.lazy(() => import('./components/RepDetailDashbo
 const ManagementDashboard = React.lazy(() => import('./components/ManagementDashboard'));
 const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
 const PaymentTracking = React.lazy(() => import('./components/PaymentTracking'));
+import { useActivityTracker } from './lib/loginActivity';
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
 const FollowUpRulesPage = React.lazy(() => import('./components/FollowUpRulesPage'));
@@ -227,6 +228,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [showUserMenu, setShowUserMenu] = useState(false);
   // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
   useFollowUpRules();
+  // Login history (Team → Login log): counts this person's active minutes in the CRM.
+  useActivityTracker(currentMember.id);
   const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
   const [adminView, setAdminView] = useState<AdminView>('queue');

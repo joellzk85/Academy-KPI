@@ -96,3 +96,10 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
   - **Where:** My home card **Sales projection** (rep, Admin: own deals; Management: Whole team or one person; default card for reps and Management), Management → Team performance section, and the Present slide **Sales projection** (person: own; Company: whole team; a choice like the other slides).
   - **Chances:** default Hot 75%, Warm 50%, Cold 20%; Management changes them with **Change the chances** (`config/forecast_settings`, Management only: **publish `firestore.rules`**).
   - Checked: build, and 8 logic checks (window, overdue roll-in, training-date fallback, unrated, per person, colour bands).
+
+## Login log (2026-10-22)
+
+- **What:** Management → Team → **Login log**: for each active person, the minutes spent in the CRM on each of the last 5 working days (today shown separately, not judged yet), last seen, and a green / amber / red light. Click a person for 8 weeks of history (each past week's light, minutes per day, week total; point at a day for first and last time used and how many times the CRM was opened).
+- **How time is counted** (`lib/loginActivity.ts`, `useActivityTracker` in `App.tsx`): one minute is added each minute the CRM is open and on screen, with mouse or keyboard use in the last 10 minutes (`IDLE_MINUTES`). Several tabs open count once. Days use the person's computer date. Stored in `login_days/<memberId>_<YYYY-MM-DD>` (`minutes`, `logins`, `firstAt`, `lastAt`). The rules let each person add only their own minute (one at a time, at most every 50 seconds) and only Management reads them.
+- **Light rules** (Joel, 2026-10-22; `config/login_rules`, Management only, **Rules** button): working days Mon–Fri; green = all 5 working days with 1 hour or more each; amber = 3 working days with 30 minutes or more each; red = less. The light on the main table is for the last 5 working days before today; weekly history judges each Monday–Sunday week.
+- Checked: build, and logic checks (working-day window skipping weekends, green / amber / red edges).
