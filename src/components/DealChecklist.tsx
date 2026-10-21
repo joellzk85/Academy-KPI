@@ -13,6 +13,7 @@ import { MoneyOut } from '../lib/money';
 import { withoutDeleted } from '../lib/linked';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import StepFiles from './ChecklistFiles';
+import T3Maker from './T3Maker';
 import StepCosts, { VendorHint } from './StepCosts';
 import { useVendors } from './VendorsPage';
 import { useReceipts } from './PaymentReceipts';
@@ -100,6 +101,9 @@ export default function DealChecklist({
   useEffect(() => onSnapshot(query(collection(db, 'checklist_files'), where('dealId', '==', deal.id)),
     s => setFiles(s.docs.map(d => ({ ...(d.data() as ChecklistFile), id: d.id }))), () => setFiles([])), [deal.id]);
   const filesOf = (t: ChecklistTask) => files.filter(f => f.taskId === t.id);
+  // The T3 form maker on the Attendance list step: HRDC deals, Admin and Management.
+  const t3Shown = editable && isHrdc(deal.fundingType);
+  const [nameList, setNameList] = useState<{ files: File[]; at: number } | null>(null);
 
   // Costs raised from the steps (money_out), their receipts, and the vendors: Admin and Management only.
   const [outs, setOuts] = useState<MoneyOut[]>([]);
@@ -307,8 +311,11 @@ export default function DealChecklist({
                 {/* Files: the drop box steps (attendance, QR, JD14...), plus documents on venue, bus, facilitator and the trainer's PO */}
                 {hasFiles(t) && (
                   <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable}
-                    onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)} />
+                    onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)}
+                    onPicked={t.id === 'attendance' && t3Shown ? files => setNameList({ files, at: Date.now() }) : undefined} />
                 )}
+                {/* HRDC deals: HR's name list fills the T3 attendance form (T3Maker.tsx) */}
+                {t.id === 'attendance' && t3Shown && <T3Maker deal={deal} saved={checklist.t3} viewer={viewer} incoming={nameList} />}
                 {DOCS_WORD[t.kind] && (t.kind === 'trainer' || t.needed === true) && (
                   <div className="mt-2">
                     <p className="text-sm font-semibold">{t.kind === 'trainer' ? 'PO' : 'Documents'}</p>
