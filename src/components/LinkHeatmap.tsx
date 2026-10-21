@@ -69,7 +69,7 @@ export default function LinkHeatmap({ link, views, onClose }: { link: DocLink; v
     if (kind === 'quotation') return <div style={{ width: 900 }} className="mx-auto"><QuotationDocument q={doc.doc} /></div>;
     if (kind === 'outline') return <CourseOutlineDocument o={doc.doc} />;
     const p = doc.proposal;
-    const r = { p: { ...p, id: '', kind: 'teambuilding' }, deal: null, client: null, ownerId: '', company: p.company, pax: p.pax, eventDate: p.eventDate, isHrdc: p.isHrdc, sections: p.sections };
+    const r = { p: { ...p, id: '', kind: 'teambuilding' }, deal: null, client: null, ownerId: '', company: p.company, pax: p.pax, eventDate: p.eventDate, isHrdc: p.isHrdc, sections: p.sections, clientLogo: p.clientLogo || '' };
     return <TeambuildingSite r={r as any} />;
   })();
 

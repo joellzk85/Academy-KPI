@@ -80,8 +80,8 @@ export function trendBuckets(p: Period, today: string, earliest = ''): Bucket[] 
 }
 
 // ---------- Slide lists ----------
-export type PersonSlide = 'scorecard' | 'numbers' | 'checkin' | 'won' | 'pipeline' | 'next' | 'touch' | 'heatmap' | 'lost' | 'admin' | 'actions';
-export type CompanySlide = 'headline' | 'trend' | 'team' | 'funnel' | 'clients' | 'funding' | 'programmes' | 'collect' | 'profit' | 'touch' | 'lost' | 'trainings' | 'actions';
+export type PersonSlide = 'scorecard' | 'numbers' | 'checkin' | 'won' | 'pipeline' | 'next' | 'touch' | 'heatmap' | 'lost' | 'admin' | 'actions' | 'projection';
+export type CompanySlide = 'headline' | 'trend' | 'team' | 'funnel' | 'clients' | 'funding' | 'programmes' | 'collect' | 'profit' | 'touch' | 'lost' | 'trainings' | 'actions' | 'projection';
 
 export interface SlideInfo<K> { key: K; label: string; hint: string; admin?: boolean }
 
@@ -91,6 +91,7 @@ export const PERSON_SLIDES: SlideInfo<PersonSlide>[] = [
   { key: 'checkin', label: 'Weekly check-in', hint: 'What I got done, where I need help, target date' },
   { key: 'won', label: 'Deals won', hint: 'Each deal won, with client, programme and RM' },
   { key: 'pipeline', label: 'My pipeline', hint: 'Funnel of open deals at each stage, with their value' },
+  { key: 'projection', label: 'Sales projection', hint: 'Won plus open deals by Hot / Warm / Cold, up to 6 months ahead' },
   { key: 'next', label: 'Coming up', hint: 'Appointments, follow-ups, trainings and To-dos in the next 7 days' },
   { key: 'touch', label: 'Client touch points', hint: 'Who I contacted and how (call, WhatsApp, visit…)' },
   { key: 'heatmap', label: 'Activity heatmap', hint: 'Every day of the last 12 weeks, darker = busier' },
@@ -104,6 +105,7 @@ export const COMPANY_SLIDES: SlideInfo<CompanySlide>[] = [
   { key: 'trend', label: 'Sales and cash trend', hint: 'Bars of sales won against cash collected, over time' },
   { key: 'team', label: 'Team leaderboard', hint: 'Sales, proposals and appointments per person, and this month\'s KPI score' },
   { key: 'funnel', label: 'Pipeline funnel', hint: 'Deals started in the period: how many reached each stage, and open pipeline value' },
+  { key: 'projection', label: 'Sales projection', hint: 'Won plus open deals by Hot / Warm / Cold, up to 6 months ahead, for the team or one person' },
   { key: 'clients', label: 'Best clients and industries', hint: 'Top clients by sales, and sales by industry' },
   { key: 'funding', label: 'Funding mix', hint: 'HRDC, Direct pay and HRDC + top-up, by RM' },
   { key: 'programmes', label: 'Top programmes', hint: 'Programmes that sold the most' },

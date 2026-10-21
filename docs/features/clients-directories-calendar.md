@@ -74,3 +74,7 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
   - **"Booked" removed** (Joel): status is Available or Under renovation only; old "Booked" records show as Available.
   - **Only Management can delete a venue**, and only if no quotation or checklist uses it. `venues_directory` has its own rule and left the catch-all list. **Rules need publishing.**
 
+
+## Global search (2026-10-21)
+
+- **Search** button in the top bar (or Ctrl+K, or "/"): one box for clients, deals, quotations, course outlines, teambuilding proposals, programmes, trainers, venues and vendors (vendors for Admin and Management only). Reps see only what their screens already show them (own or tagged deals; own, shared or tagged documents); hidden and deleted records are left out. Deals, quotations and outlines use App's live lists; the rest are read when search opens (`components/GlobalSearch.tsx`). A result opens the record (client page, deal panel, document editor); trainers, venues and vendors open their list filtered to that name. No rule change.

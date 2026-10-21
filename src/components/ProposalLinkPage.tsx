@@ -48,7 +48,7 @@ export default function ProposalLinkPage({ token }: { token: string }) {
         if (!live) return;
         if (d.gone) { setState({ gone: d.gone }); return; }
         const p = d.proposal;
-        const r: ResolvedTb = { p: { ...p, id: '', kind: 'teambuilding' }, deal: null, client: null, ownerId: '', company: p.company, pax: p.pax, eventDate: p.eventDate, isHrdc: p.isHrdc, sections: p.sections };
+        const r: ResolvedTb = { p: { ...p, id: '', kind: 'teambuilding' }, deal: null, client: null, ownerId: '', company: p.company, pax: p.pax, eventDate: p.eventDate, isHrdc: p.isHrdc, sections: p.sections, clientLogo: p.clientLogo || '' };
         setPax(p.pax || 0);
         setState({ r, accepted: d.accepted });
       } catch (e: any) {

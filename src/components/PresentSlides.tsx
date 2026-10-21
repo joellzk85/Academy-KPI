@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, GraduationCap, ListTodo, PhoneCall, UserCheck } from 'lucide-react';
 import { Representative } from '../types';
-import { monthKpi, monthLabel, monthPrefix, weekIndexOf } from '../lib/kpi';
+import { KPI_LIGHT_BADGE, kpiBarClass, kpiLight, monthKpi, monthLabel, monthPrefix, weekIndexOf } from '../lib/kpi';
 import { addDays, dealAppointmentDate, dealNeedsAttention, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, trainingDateText } from '../lib/deals';
 import { HOW_LABELS } from '../lib/followUps';
 import { MoneySettings } from '../lib/money';
@@ -11,6 +11,8 @@ import {
   notCollected, openPipeline, Period, PersonSlide, personNumbers, PresentData, programmeNameOf, quietClients, Range, touchesOf,
   trainingsIn, trendBuckets, wonBy,
 } from '../lib/present';
+import { ProjectionSlide } from './SalesProjection';
+import { metricsFor } from '../lib/kpi';
 import { Bars, compactRM, Donut, DayHeatmap, Empty, Funnel, MatrixHeatmap, Panel, Ring, StatCard } from './PresentCharts';
 
 // The slides of the weekly presentation (lib/present.ts has the counting and the slide lists).
@@ -105,7 +107,7 @@ export function personSlides(args: {
                     <span className="font-bold">{m.label} <span className="font-normal text-ink-soft">({Math.round(m.weight * 100)}%)</span></span>
                     <span className="tabular-nums text-ink-soft"><strong className="text-ink">{m.isRM ? formatRM(total) : total}</strong> of {m.isRM ? formatRM(m.targetVal) : m.targetVal} · {pct}%</span>
                   </div>
-                  <div className="mt-1.5 h-4 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${pct >= 100 ? 'bg-accent' : pct >= 50 ? 'bg-accent/60' : 'bg-[#E0A458]'}`} style={{ width: `${pct}%` }} /></div>
+                  <div className="mt-1.5 h-4 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${kpiBarClass(pct)}`} style={{ width: `${pct}%` }} /></div>
                 </div>
               ))}
               {rows[0] && (
@@ -180,6 +182,12 @@ export function personSlides(args: {
             <Panel title="Funnel"><Funnel money conversion={false} data={pipe} /></Panel>
           </div>
         ),
+      });
+    } else if (key === 'projection') {
+      out.push({
+        key, title: 'Sales projection', subtitle: 'Won and expected, month by month',
+        body: <ProjectionSlide deals={data.deals} ownerId={rep.id} today={today} clientName={p => clientNameOf(p, data.clients)} storeKey={`present:${rep.id}`}
+          monthlyTarget={metricsFor(rep).find(m => m.key === 'salesFigure' && m.auto === 'won')?.targetVal || 0} />,
       });
     } else if (key === 'next') {
       const until = addDays(today, 7);
@@ -327,7 +335,7 @@ export function companySlides(args: {
                   <tr key={r.id} className="border-b border-line last:border-0">
                     <td className="py-2 font-semibold">{i === 0 && r.wonRM > 0 ? '🏆 ' : ''}{r.label}</td>
                     <td className="text-right tabular-nums">{r.proposals}</td><td className="text-right tabular-nums">{r.appointments}</td><td className="text-right tabular-nums">{r.touches}</td>
-                    <td className="text-right"><span className={`rounded-full px-2 py-0.5 text-sm font-bold ${r.score >= 80 ? 'bg-accent-soft text-accent' : r.score >= 50 ? 'bg-attention-soft text-attention' : 'bg-danger-soft text-danger'}`}>{r.score}%</span></td>
+                    <td className="text-right"><span className={`rounded-full px-2 py-0.5 text-sm font-bold ${KPI_LIGHT_BADGE[kpiLight(r.score)]}`}>{r.score}%</span></td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -347,6 +355,12 @@ export function companySlides(args: {
             </Panel>
           </div>
         ),
+      });
+    } else if (key === 'projection') {
+      out.push({
+        key, title: 'Sales projection', subtitle: 'The whole team: won and expected, month by month',
+        body: <ProjectionSlide deals={data.deals} today={today} clientName={p => clientNameOf(p, data.clients)} storeKey="present:company"
+          monthlyTarget={reps.reduce((t, r) => t + (metricsFor(r).find(m => m.key === 'salesFigure' && m.auto === 'won')?.targetVal || 0), 0)} />,
       });
     } else if (key === 'clients') {
       const top = wonBy(data.deals, period, p => clientNameOf(p, data.clients)).slice(0, 8);

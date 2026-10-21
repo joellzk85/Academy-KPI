@@ -17,7 +17,7 @@ export function photoPath(url: string): string {
   if (!m || m[1] !== BUCKET) return '';
   const path = decodeURIComponent(m[2]);
   // Also a trainer's photo uploaded from their own profile link (2026-10-20) or the trainer portal (2026-10-21).
-  return /^photos\/(activities|trainers|venues|covers)\/[A-Za-z0-9_.-]+$/.test(path) || /^trainer_uploads\/[a-f0-9]{32}\/photo_[0-9]+\.jpg$/.test(path)
+  return /^photos\/(activities|trainers|venues|covers|logos)\/[A-Za-z0-9_.-]+$/.test(path) || /^trainer_uploads\/[a-f0-9]{32}\/photo_[0-9]+\.jpg$/.test(path)
     || /^trainer_portal\/[A-Za-z0-9_-]+\/photo_[0-9]+\.jpg$/.test(path) ? path : '';
 }
 
@@ -34,7 +34,7 @@ export function registerPhotoRoutes(app: Express) {
       try {
         const [buf] = await bucket.file(path).download();
         if (buf.length > 8 * 1024 * 1024) continue;
-        out[url] = `data:image/jpeg;base64,${buf.toString('base64')}`;
+        out[url] = `data:image/${/\.png$/i.test(path) ? 'png' : 'jpeg'};base64,${buf.toString('base64')}`;
       } catch { /* missing or no access: the PDF just shows no photo there */ }
     }
     if (urls.length && !Object.keys(out).length && urls.some(u => photoPath(u))) {

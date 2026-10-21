@@ -48,6 +48,8 @@ import CostEstimator from './CostEstimator';
 import TrainingChangePanel from './TrainingChange';
 import { cancelledTraining, dateLocked } from '../lib/trainingChange';
 import PanelResizer from './PanelResizer';
+import { PotentialBox, PotentialButtons, PotentialChip, monthOptions } from './DealPotential';
+import { POTENTIAL_LABELS, Potential, forecastMonthLabel, potentialOf } from '../lib/forecast';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -107,6 +109,8 @@ const emptyForm = () => ({
   trainingDate: '',
   trainingDays: '',       // blank = 1 day
   followUpDate: '',
+  potential: '' as Potential | '',   // Hot / Warm / Cold (2026-10-21)
+  expectedMonth: '',                 // YYYY-MM the owner expects the client to sign
   ownerId: '',
   taggedRepIds: [] as string[],
   tagNote: '',
@@ -285,6 +289,8 @@ export default function DealsBoard({
       trainingDate: /^\d{4}-\d{2}-\d{2}/.test(p.trainingDate || '') ? p.trainingDate.slice(0, 10) : '',
       trainingDays: trainingDays(p) !== 1 ? String(trainingDays(p)) : '',
       followUpDate: /^\d{4}-\d{2}-\d{2}/.test(p.followUpDate || '') ? p.followUpDate.slice(0, 10) : '',
+      potential: potentialOf(p),
+      expectedMonth: typeof p.expectedMonth === 'string' ? p.expectedMonth.slice(0, 7) : '',
       ownerId: dealOwnerId(p) || owner.id,
       taggedRepIds: p.taggedRepIds || [],
       tagNote: p.tagNote || '',
@@ -355,6 +361,8 @@ export default function DealsBoard({
         trainingDate: form.trainingDate || '',
         trainingDays: days,
         followUpDate: form.followUpDate || 'TBD',
+        potential: form.potential,
+        expectedMonth: form.expectedMonth,
         ownerId: newOwner.id,
         ownerName: newOwner.name,
         taggedRepIds: form.taggedRepIds.filter(x => x !== newOwner.id),
@@ -695,6 +703,7 @@ export default function DealsBoard({
                     <span className="flex flex-wrap items-center gap-2 sm:justify-end">
                       <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${STAGE_TONE[st]}`}>{STAGE_LABELS[st]}</span>
                       {activeHold(p) && <span className="rounded-md border border-attention/40 px-2 py-0.5 text-xs font-semibold text-attention">On hold</span>}
+                      {OPEN_STAGES.includes(st) && <PotentialChip deal={p} />}
                       {p.fundingType && <span className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-soft">{FUNDING_LABELS[p.fundingType as FundingType]}</span>}
                       <span className="w-28 text-right font-semibold tabular-nums">{dealValue(p) ? formatRM(dealValue(p)) : '—'}</span>
                     </span>
@@ -892,6 +901,17 @@ export default function DealsBoard({
                   ))}
                 </div>
               </div>
+              {(editing === 'new' || OPEN_STAGES.includes(dealStage(deals.find(p => p.id === editing)))) && (
+                <div>
+                  <span className={label}>Potential <span className="font-normal text-ink-soft">(how likely the client is to sign; used for the sales projection)</span></span>
+                  <PotentialButtons value={form.potential} onChange={v => setForm(f => ({ ...f, potential: v }))} />
+                  <label htmlFor="d-exp" className={`${label} mt-3`}>Expected to close in</label>
+                  <select id="d-exp" value={form.expectedMonth} onChange={e => setForm(f => ({ ...f, expectedMonth: e.target.value }))} className={`${input} sm:w-60`}>
+                    <option value="">Not set (uses the training date's month)</option>
+                    {monthOptions(form.expectedMonth).map(m => <option key={m} value={m}>{forecastMonthLabel(m)}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <label htmlFor="d-req" className={label}>Client asked on</label>
@@ -1276,6 +1296,13 @@ function DealPanel(props: {
         <Fold title="Follow-ups" hint={followUpCountText(nNotes)} defaultOpen={def === 'followups'} id={p.id}>
           <FollowUpList deal={p} />
         </Fold>
+
+        {/* Potential and expected closing month, open deals only (2026-10-21) */}
+        {OPEN_STAGES.includes(st) && (
+          <Fold title="Potential" hint={[potentialOf(p) ? POTENTIAL_LABELS[potentialOf(p) as Potential] : 'Not set', typeof p.expectedMonth === 'string' && p.expectedMonth ? `closing ${forecastMonthLabel(p.expectedMonth.slice(0, 7))}` : ''].filter(Boolean).join(' · ')} defaultOpen={false} id={p.id}>
+            <PotentialBox deal={p} editable={props.editable} viewer={props.viewer} />
+          </Fold>
+        )}
 
         {/* Details */}
         <Fold title="Details" hint={[dealValue(p) ? formatRM(dealValue(p)) : 'No value yet', p.fundingType ? FUNDING_LABELS[p.fundingType as FundingType] : ''].filter(Boolean).join(' · ')} defaultOpen={def === 'details'} id={p.id}>

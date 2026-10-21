@@ -38,6 +38,8 @@ interface RepDetailDashboardProps {
   onOpenClientHandled?: () => void;
   openDealId?: string | null;       // Management → Team follow-ups: open this deal's panel
   onOpenDealHandled?: () => void;
+  openSubTab?: string | null;       // Global search: open this menu item (Trainers, Venues)
+  onOpenSubTabHandled?: () => void;
 }
 
 type SubTab = 'quotation' | 'kpi' | 'present' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
@@ -93,7 +95,9 @@ export default function RepDetailDashboard({
   openClientId,
   onOpenClientHandled,
   openDealId,
-  onOpenDealHandled
+  onOpenDealHandled,
+  openSubTab,
+  onOpenSubTabHandled
 }: RepDetailDashboardProps) {
   // The old payment, P&L, appointment and Admin records screens were retired; anyone left on them,
   // however they got there, lands on Deals.
@@ -515,6 +519,11 @@ export default function RepDetailDashboard({
     handleSubTabChange('pipeline');
     onOpenDealHandled?.();
   }, [openDealId]);
+  useEffect(() => {
+    if (!openSubTab) return;
+    handleSubTabChange(openSubTab as SubTab);
+    onOpenSubTabHandled?.();
+  }, [openSubTab]);
   // Outlines opened from a deal (2026-10-19) get "Back to deal", like quotations. If the deal already has a
   // draft outline, "Create outline" opens that one instead of making a second.
   const [outlineFromDeal, setOutlineFromDeal] = useState<string | null>(null);

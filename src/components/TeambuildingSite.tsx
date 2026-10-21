@@ -187,6 +187,12 @@ function Nav({ r, onGo }: { r: ResolvedTb; onGo: (k: string) => void }) {
     <nav className="sticky top-0 z-30 border-b border-black/5 bg-white/85 backdrop-blur-md" data-pdf-skip>
       <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-2.5 sm:px-6">
         <img src={logoUrl} alt="NEXT Academy" className="h-8 w-auto shrink-0" />
+        {r.clientLogo && (
+          <span className="hidden shrink-0 items-center gap-3 sm:flex">
+            <span className="h-6 w-px bg-black/10" />
+            <img src={r.clientLogo} alt={r.company || 'Client logo'} className="h-8 w-auto max-w-[8rem] object-contain" />
+          </span>
+        )}
         <div className="no-scrollbar -mr-4 flex flex-1 gap-1 overflow-x-auto pr-4 sm:mr-0 sm:justify-end sm:pr-0">
           {items.map(s => (
             <button key={s.key} type="button" onClick={() => onGo(s.key)}
@@ -223,8 +229,21 @@ function Hero({ r, pax, pdf, onGo }: { r: ResolvedTb; pax: number; pdf: boolean;
         <path d="M20 20 L90 100 L20 180 L60 180 L130 100 L60 20 Z" fill={TB.mint} opacity="0.55" />
         <path d="M80 20 L150 100 L80 180 L120 180 L190 100 L120 20 Z" fill={TB.chevron} opacity="0.75" />
       </svg>
-      {pdf && <div className="absolute left-6 top-6 rounded-2xl bg-white/95 px-3 py-2"><img src={logoUrl} alt="NEXT Academy" className="h-10 w-auto" /></div>}
+      {pdf && (
+        <div className="absolute left-6 top-6 flex items-center gap-3 rounded-2xl bg-white/95 px-3 py-2">
+          <img src={logoUrl} alt="NEXT Academy" className="h-10 w-auto" />
+          {r.clientLogo && <><span className="text-lg font-light text-[#9aa8a3]">×</span><img src={r.clientLogo} alt={r.company || 'Client logo'} className="h-10 w-auto max-w-[11rem] object-contain" /></>}
+        </div>
+      )}
       <div className="relative mx-auto w-full max-w-6xl px-4 pb-14 pt-28 sm:px-6 sm:pb-20">
+        {/* The client's logo, "prepared for" style (read live from the client record) */}
+        {!pdf && r.clientLogo && (
+          <div className="tb-rise mb-6 inline-flex items-center gap-3 rounded-2xl bg-white/95 px-4 py-2.5 shadow-[0_10px_30px_-15px_rgba(0,0,0,0.5)]">
+            <img src={logoUrl} alt="NEXT Academy" className="h-8 w-auto sm:h-9" />
+            <span className="text-lg font-light text-[#9aa8a3]">×</span>
+            <img src={r.clientLogo} alt={r.company || 'Client logo'} className="h-9 w-auto max-w-[9rem] object-contain sm:h-10 sm:max-w-[11rem]" />
+          </div>
+        )}
         <p className="tb-rise text-sm font-semibold uppercase tracking-[0.2em] text-white/85">Teambuilding proposal{r.company ? ` · Prepared for ${r.company}` : ''}</p>
         <h1 className="tb-rise mt-3 max-w-4xl text-4xl font-extrabold uppercase leading-[1.05] text-white sm:text-6xl" style={{ animationDelay: '80ms' }}>{p.title || 'Teambuilding proposal'}</h1>
         {p.subtitle && <p className="tb-rise mt-4 max-w-2xl text-lg leading-relaxed text-white/90" style={{ animationDelay: '160ms' }}>{p.subtitle}</p>}

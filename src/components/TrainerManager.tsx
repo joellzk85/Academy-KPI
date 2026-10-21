@@ -20,6 +20,7 @@ import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
 import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel } from '../lib/trainerProfile';
 import PanelResizer from './PanelResizer';
+import { useSearchPrefill } from './GlobalSearch';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -100,6 +101,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const waiting = links.filter(l => l.kind === 'profile' && l.status === 'submitted' && isLive(l)).sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
 
   const [search, setSearch] = useState('');
+  useSearchPrefill('trainers', setSearch);   // Global search opened a trainer
   const [typeFilter, setTypeFilter] = useState<TrainingType | ''>('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<'new' | string | null>(null);

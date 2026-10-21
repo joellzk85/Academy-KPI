@@ -282,6 +282,7 @@ export interface Client {
   address?: string;
   industry?: string;
   hrdcRegistered?: boolean;
+  logoUrl?: string;      // optional company logo (2026-10-21): photos/logos/ in Storage; shown on teambuilding proposal covers
   notes?: string;
   createdAt?: number;
   createdBy?: string;
