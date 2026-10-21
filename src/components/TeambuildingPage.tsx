@@ -13,7 +13,7 @@ import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import {
   AGENDA_TAGS, AgendaTag, DEFAULT_HRDC_NOTE, ResolvedTb, SECTION_HINTS, TB_TERMS_DEFAULT, TbAgendaDay, TbPoint, TbProposal, TbProposalActivity,
   TbSectionKey, TbSources, TbTrainer, TbVenueOption, activityFromLibrary, blankActivity, blankProposalContent, cleanForSave, copyContent,
-  lockedCopy, newTbId, nextTbRef, resolveTb, sectionsOf, tbSent, tbSummary, venuePhotos,
+  lockedCopy, newTbId, nextTbRef, PENDING_APPROVAL, resolveTb, sectionsOf, tbSent, tbSummary, venuePhotos,
 } from '../lib/teambuilding';
 import { downloadBlob } from '../lib/quotePdf';
 import { GapsBox } from './DealGates';
@@ -874,7 +874,7 @@ function Activities({ list, library, me, onChange }: { list: TbProposalActivity[
       const id = `act_${Date.now().toString(36)}`;
       const { id: _i, libraryId: _l, ...content } = a;
       const at = new Date().toISOString();
-      await setDoc(doc(db, 'tb_activities', id), JSON.parse(JSON.stringify({ ...cleanActivity(content), createdAt: at, createdById: me.id, createdByName: me.name, updatedAt: at, updatedById: me.id, updatedByName: me.name })));
+      await setDoc(doc(db, 'tb_activities', id), JSON.parse(JSON.stringify({ ...cleanActivity(content), createdAt: at, createdById: me.id, createdByName: me.name, updatedAt: at, updatedById: me.id, updatedByName: me.name, approval: PENDING_APPROVAL })));
       setAt(a.id, { libraryId: id });
       setMsg(`"${a.name}" is now in the Activity library.`);
     } catch (e) { setMsg(friendlyError(e)); } finally { setSaving(null); }

@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
-import { Archive, ArchiveRestore, ImageOff, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, ImageOff, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate } from '../lib/deals';
-import { TbActivity, TbActivityContent, TbPackages, blankActivity, defaultPackages, trimLines } from '../lib/teambuilding';
+import {
+  APPROVAL_LABELS, ActivityApproval, PENDING_APPROVAL, TbActivity, TbActivityContent, TbPackages, blankActivity, canApproveActivity, defaultPackages, trimLines,
+} from '../lib/teambuilding';
 import { ActivityForm, Card, PackageEditor, btnPrimary, btnSecondary, input, linkBtn } from './TeambuildingParts';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
@@ -14,6 +16,8 @@ import PanelResizer from './PanelResizer';
 //   tailored for that client without changing the library. Saved in tb_activities/{id}.
 // - The package template is what a new proposal's packages start from: tb_settings/package_template.
 // Every change records who and when.
+// - New activities wait for Management's approval (2026-10-22, lib/teambuilding.ts); only approved ones count for the
+//   "Design new activity" KPI. A "Waiting for approval" filter, and Approve / Not approved in the panel.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -34,6 +38,8 @@ export function usePackageTemplate(): { pk: TbPackages | null; meta: any; loaded
   return state;
 }
 
+// Malaysia date of a saved time (approval dates).
+const myDay = (iso?: string) => (iso && Number.isFinite(Date.parse(iso)) ? new Date(Date.parse(iso) + 8 * 3600_000).toISOString().slice(0, 10) : '');
 const stamp = (me: Viewer) => ({ updatedAt: new Date().toISOString(), updatedById: me.id, updatedByName: me.name });
 
 export function cleanActivity(a: TbActivityContent): TbActivityContent {
@@ -48,12 +54,15 @@ export function ActivityLibrary({ me }: { me: Viewer }) {
   const { list, loaded } = useActivities();
   const [search, setSearch] = useState('');
   const [showOld, setShowOld] = useState(false);
+  const [waitingOnly, setWaitingOnly] = useState(false);
+  const waiting = list.filter(a => !a.archived && a.approval?.status === 'pending');
   const [editing, setEditing] = useState<{ a: TbActivity; isNew: boolean } | null>(null);
   const t = search.trim().toLowerCase();
   const shown = useMemo(() => list
     .filter(a => showOld || !a.archived)
+    .filter(a => !waitingOnly || a.approval?.status === 'pending')
     .filter(a => !t || `${a.name} ${a.summary} ${a.location} ${a.format}`.toLowerCase().includes(t))
-    .sort((a, b) => a.name.localeCompare(b.name)), [list, t, showOld]);
+    .sort((a, b) => a.name.localeCompare(b.name)), [list, t, showOld, waitingOnly]);
 
   return (
     <div className="space-y-4">
@@ -70,6 +79,12 @@ export function ActivityLibrary({ me }: { me: Viewer }) {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search activities" className={`${input} pl-9`} aria-label="Search activities" />
         </div>
         <label className="flex items-center gap-2 text-sm text-ink-soft"><input type="checkbox" checked={showOld} onChange={e => setShowOld(e.target.checked)} className="h-4 w-4 accent-[#0E6E62]" /> Show ones no longer used</label>
+        {(waiting.length > 0 || waitingOnly) && (
+          <button type="button" aria-pressed={waitingOnly} onClick={() => setWaitingOnly(w => !w)}
+            className={`rounded-full border px-3 py-1 text-sm font-semibold ${waitingOnly ? 'border-attention bg-attention-soft text-attention' : 'border-line text-ink-soft hover:bg-surface'}`}>
+            Waiting for approval ({waiting.length})
+          </button>
+        )}
       </div>
       {!loaded ? (
         <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
@@ -89,6 +104,9 @@ export function ActivityLibrary({ me }: { me: Viewer }) {
                 </div>
                 <span className="flex-1 p-4">
                   <span className="block font-semibold">{a.name || 'Untitled activity'}{a.archived && <span className="ml-2 rounded bg-surface px-1.5 text-xs font-semibold text-ink-soft">No longer used</span>}</span>
+                  {a.approval && a.approval.status !== 'approved' && (
+                    <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${a.approval.status === 'pending' ? 'bg-attention-soft text-attention' : 'bg-danger-soft text-danger'}`}>{APPROVAL_LABELS[a.approval.status]}</span>
+                  )}
                   <span className="mt-0.5 block text-sm text-ink-soft">{[a.duration, a.location, a.groupSize].filter(Boolean).join(' · ')}</span>
                   {a.summary && <span className="mt-1.5 line-clamp-2 block text-sm">{a.summary}</span>}
                 </span>
@@ -115,7 +133,9 @@ function ActivityPanel({ initial, isNew, me, onClose }: { initial: TbActivity; i
     try {
       const out: TbActivity = {
         ...a, ...cleanActivity(a), ...stamp(me),
-        ...(isNew ? { createdAt: new Date().toISOString(), createdById: me.id, createdByName: me.name } : {}),
+        ...(isNew ? { createdAt: new Date().toISOString(), createdById: me.id, createdByName: me.name, approval: PENDING_APPROVAL } : {}),
+        // Not approved: the creator's changes send it back to Management.
+        ...(!isNew && initial.approval?.status === 'rejected' && initial.createdById === me.id ? { approval: PENDING_APPROVAL } : {}),
       };
       await setDoc(doc(db, 'tb_activities', a.id), JSON.parse(JSON.stringify(out)));
       draft.clear();
@@ -133,6 +153,16 @@ function ActivityPanel({ initial, isNew, me, onClose }: { initial: TbActivity; i
     try { await deleteDoc(doc(db, 'tb_activities', a.id)); onClose(); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
   const canDelete = !isNew && (me.role === 'management' || initial.createdById === me.id);
+  // Management approval (never your own activity).
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectNote, setRejectNote] = useState('');
+  const decide = async (status: 'approved' | 'rejected') => {
+    if (status === 'rejected' && rejectNote.trim().length < 5) { setError('Say briefly why it is not approved.'); return; }
+    setBusy(true); setError('');
+    const approval: ActivityApproval = { status, at: new Date().toISOString(), byId: me.id, byName: me.name, ...(status === 'rejected' ? { note: rejectNote.trim() } : {}) };
+    try { await setDoc(doc(db, 'tb_activities', initial.id), { approval }, { merge: true }); onClose(); }
+    catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
   const close = onClose;
 
   return (
@@ -148,6 +178,30 @@ function ActivityPanel({ initial, isNew, me, onClose }: { initial: TbActivity; i
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="mb-4 empty:hidden"><DraftBar draft={draft} what={isNew ? 'new activity' : 'change to this activity'} /></div>
+          {!isNew && initial.approval && (
+            <div className={`mb-4 rounded-xl px-4 py-3 text-[15px] ${initial.approval.status === 'approved' ? 'bg-accent-soft text-accent' : initial.approval.status === 'pending' ? 'bg-attention-soft text-attention' : 'bg-danger-soft text-danger'}`}>
+              <p className="font-semibold">{APPROVAL_LABELS[initial.approval.status]}{initial.approval.byName ? ` by ${initial.approval.byName} on ${formatDate(myDay(initial.approval.at))}` : ''}</p>
+              {initial.approval.status === 'pending' && <p className="text-sm">Management approves new activities. Only approved ones count for the Design new activity KPI.</p>}
+              {initial.approval.status === 'rejected' && <p className="text-sm">"{initial.approval.note}"{initial.createdById === me.id ? ' Change it and save to send it for approval again.' : ''}</p>}
+              {canApproveActivity(initial, me) && initial.approval.status !== 'approved' && (
+                rejecting ? (
+                  <div className="mt-2 space-y-2">
+                    <input value={rejectNote} onChange={e => { setRejectNote(e.target.value); setError(''); }} className={input} placeholder="Why not, and what to change" aria-label="Why not approved" />
+                    <span className="flex gap-2">
+                      <button type="button" className={btnSecondary} onClick={() => setRejecting(false)}>Cancel</button>
+                      <button type="button" className={`${btnSecondary} text-danger`} disabled={busy} onClick={() => decide('rejected')}>Not approved</button>
+                    </span>
+                  </div>
+                ) : (
+                  <span className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" className={btnPrimary} disabled={busy || dirty} onClick={() => decide('approved')}><Check className="h-4 w-4" /> Approve</button>
+                    {initial.approval.status === 'pending' && <button type="button" className={btnSecondary} disabled={busy} onClick={() => setRejecting(true)}>Not approved</button>}
+                  </span>
+                )
+              )}
+            </div>
+          )}
+          {isNew && <p className="mb-4 rounded-xl bg-surface px-4 py-3 text-sm text-ink-soft">New activities wait for Management's approval. Only approved ones count for the Design new activity KPI.</p>}
           <ActivityForm a={a} onChange={c => setA(x => ({ ...x, ...c }))} me={me} />
           {!isNew && <p className="mt-4 text-sm text-ink-soft">Changes here are used by proposals made from now on. Proposals that already have this activity keep their own copy.</p>}
         </div>

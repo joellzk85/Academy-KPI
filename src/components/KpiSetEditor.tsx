@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { doc, setDoc } from 'firebase/firestore';
+import React, { useEffect, useMemo, useState } from 'react';
+import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import { ArrowDown, ArrowUp, Loader2, Trash2, X } from 'lucide-react';
 import PanelResizer from './PanelResizer';
 import DraftBar from './DraftBar';
@@ -15,6 +15,8 @@ import {
 // Team → KPIs for one person (Management, Joel 2026-10-22): pick KPIs from the KPI library, set each one's target
 // or colour bands and its weight; the weights must add up to 100%. Saved as reps/{memberId}.kpiSet (lib/kpi.ts).
 // A ready-made set (the old templates) can be the starting point. Management people can also have no KPIs.
+// Internal trainer (Part B): their trainer record, picked here, is what the trainer KPIs count for. Only people
+// given one can have those KPIs (Joel: some internal trainers focus on other KPIs for now).
 
 const small = 'w-24 rounded-lg border border-line bg-white px-2.5 py-1.5 text-right text-[15px] focus:border-accent focus:outline-none';
 const input = 'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -24,7 +26,7 @@ const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink 
 const numText = (v: string) => v.replace(/[^0-9.]/g, '');
 
 interface ItemDraft { kpiId: string; slot: string; label: string; weight: string; target: string; bands: BandsDraft | null; param: string }
-interface SetDraft { none: boolean; items: ItemDraft[] }
+interface SetDraft { none: boolean; items: ItemDraft[]; trainerId: string }
 
 function toDraft(items: KpiSetItem[]): ItemDraft[] {
   const lib = activeKpiLibrary();
@@ -48,10 +50,14 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
   const lib = activeKpiLibrary();
   const [draft, setDraft] = useState<SetDraft>(() => {
     const noneYet = member.role === 'management' && !saved?.kpiSet?.items?.length && !presetById(saved?.kpiTemplate);
-    return { none: noneYet, items: noneYet ? [] : toDraft(setItemsFor({ id: member.id, role: member.role, kpiTemplate: saved?.kpiTemplate, kpiSet: saved?.kpiSet, targets: saved?.targets })) };
+    return { none: noneYet, trainerId: saved?.kpiSet?.trainerId || '', items: noneYet ? [] : toDraft(setItemsFor({ id: member.id, role: member.role, kpiTemplate: saved?.kpiTemplate, kpiSet: saved?.kpiSet, targets: saved?.targets })) };
   });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [trainers, setTrainers] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => onSnapshot(query(collection(db, 'trainers_directory')),
+    s => setTrainers(s.docs.map(d => ({ id: d.id, name: String((d.data() as any).name || '') })).filter(t => t.name).sort((a, b) => a.name.localeCompare(b.name))),
+    () => setTrainers([])), []);
   const formDraft = useFormDraft(viewer.id, `kpi-set:${member.id}`, draft, setDraft);
 
   const setItem = (i: number, ch: Partial<ItemDraft>) => { setDraft(d => ({ ...d, items: d.items.map((x, j) => (j === i ? { ...x, ...ch } : x)) })); setError(''); };
@@ -65,12 +71,12 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
   const add = (kpiId: string) => {
     const def = lib.defs.find(d => d.id === kpiId);
     if (!def) return;
-    setDraft(d => ({ none: false, items: [...d.items, { kpiId, slot: slotFor(kpiId, d.items.map(x => x.slot)), label: '', weight: '0', target: String(def.target), bands: null, param: '' }] }));
+    setDraft(d => ({ ...d, none: false, items: [...d.items, { kpiId, slot: slotFor(kpiId, d.items.map(x => x.slot)), label: '', weight: '0', target: String(def.target), bands: null, param: '' }] }));
     setError('');
   };
   const usePreset = (id: string) => {
     const p = presetById(id);
-    if (p) setDraft({ none: false, items: toDraft(p.items) });
+    if (p) setDraft(d => ({ ...d, none: false, items: toDraft(p.items) }));
     setError('');
   };
   const spread = () => setDraft(d => {
@@ -122,12 +128,14 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
       if (MEASURE_INFO[def.measure]?.paramLabel && x.param !== '') item.param = Number(x.param);
       items.push(item);
     }
+    const trainerKpi = items.find(i => MEASURE_INFO[lib.defs.find(d => d.id === i.kpiId)!.measure]?.trainer);
+    if (trainerKpi && !draft.trainerId) return setError('Pick their trainer record under Internal trainer, or take out the trainer KPIs.');
     if (Math.abs(total - 100) > 0.01) return setError(`The weights add up to ${Math.round(total * 100) / 100}%. They must add up to 100%.`);
     // Old screens still read targets by slot.
     const targets = Object.fromEntries(items.filter(i => i.target).map(i => [i.slot, i.target]));
     setBusy(true);
     try {
-      await setDoc(ref, { kpiTemplate: 'custom', kpiSet: { items, ...by }, targets }, { merge: true });
+      await setDoc(ref, { kpiTemplate: 'custom', kpiSet: { items, trainerId: draft.trainerId, ...by }, targets }, { merge: true });
       formDraft.clear();
       onSaved(`${member.name}'s KPIs have been saved.`);
     } catch (err) { setError(friendlyError(err)); setBusy(false); }
@@ -165,6 +173,14 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
 
           {!draft.none && (
             <>
+              <div className="rounded-xl border border-line bg-white px-4 py-3">
+                <label className="block text-sm font-semibold" htmlFor="kpi-trainer">Internal trainer</label>
+                <select id="kpi-trainer" className={`${input} mt-1`} value={draft.trainerId} onChange={e => { setDraft(d => ({ ...d, trainerId: e.target.value })); setError(''); }}>
+                  <option value="">Not a trainer for KPIs</option>
+                  {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <p className="mt-1 text-sm text-ink-soft">Their record in Trainers. The trainer KPIs (output assessment, feedback speed) count the trainings where this trainer taught.</p>
+              </div>
               <ul className="space-y-3">
                 {draft.items.map((x, i) => {
                   const def = lib.defs.find(d => d.id === x.kpiId)!;

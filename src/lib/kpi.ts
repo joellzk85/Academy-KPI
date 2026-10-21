@@ -28,6 +28,8 @@ export interface KpiSources {
   forecast?: ForecastSettings;
   gp?: Record<string, Record<string, GpFigure>>;
   people?: (RepLike & { kpi?: any })[];
+  trainingReports?: Record<string, any>;   // training_reports by deal id (trainer KPIs)
+  activities?: any[];                      // tb_activities (Design new activity)
 }
 
 // The old templates, kept for screens that list them (they are now the ready-made sets in lib/kpiLibrary.ts).
@@ -45,7 +47,7 @@ export interface RepLike {
   id: string;
   role?: string;
   kpiTemplate?: string;
-  kpiSet?: { items?: KpiSetItem[] } | null;
+  kpiSet?: { items?: KpiSetItem[]; trainerId?: string } | null;   // trainerId: their trainers_directory record (trainer KPIs)
   targets?: Record<string, number | undefined>;
 }
 
@@ -209,6 +211,16 @@ function byWeek(dates: string[], prefix: string): number[] {
   return w;
 }
 
+function trainerTrainings(c: Ctx): any[] {
+  const tid = c.rep.kpiSet?.trainerId;
+  if (!tid) return [];
+  return c.deals.filter(p => {
+    if (dealStage(p) !== 'won' || !trainingEndDate(p).startsWith(c.prefix) || trainingEndDate(p) >= c.today) return false;
+    if (c.sources.trainingReports?.[p.id]?.trainerId === tid) return true;
+    return (c.sources.checklists?.[p.id] || []).some((t: any) => (t.kind === 'trainer' || t.id === 'trainer') && t.trainerId === tid);
+  });
+}
+
 function gpFor(c: Ctx, who: string): Measured {
   const g = c.sources.gp?.[c.prefix]?.[who];
   return { value: g && g.trainings > 0 ? g.margin : null };
@@ -346,6 +358,27 @@ const MEASURES: Record<string, (c: Ctx) => Measured> = {
     const paid = (c.sources.claims || []).filter(m => m.source === 'hrdc' && ymd(m.paidDate).startsWith(c.prefix));
     const expected = paid.reduce((t, m) => t + expectedFor(m, s), 0);
     return { value: expected > 0 ? (paid.reduce((t, m) => t + shortfall(m, s), 0) / expected) * 100 : null };
+  },
+  // Trainer KPIs (Part B): trainings that ended this month where this person's trainer record is the report's
+  // trainer or the trainer picked on the deal's checklist.
+  output_rating: c => ({
+    value: average(trainerTrainings(c)
+      .map(p => Number(c.sources.trainingReports?.[p.id]?.participant?.avg))
+      .filter(v => Number.isFinite(v) && v > 0)),
+  }),
+  report_days: c => ({
+    value: average(trainerTrainings(c).map(p => {
+      const sent = dayOf(c.sources.trainingReports?.[p.id]?.submittedAt);
+      return Math.max(0, daysFrom(trainingEndDate(p), sent || c.today));
+    })),
+  }),
+  // Activities this person added that Management approved this month, by approval date (lib/teambuilding.ts).
+  new_activities: c => {
+    const dates = (c.sources.activities || [])
+      .filter(a => a.createdById === c.rep.id && a.approval?.status === 'approved')
+      .map(a => dayOf(a.approval.at));
+    const weeks = byWeek(dates, c.prefix);
+    return { value: weeks.reduce((a, b) => a + b, 0), weeks };
   },
   team_avg: c => {
     const others = (c.sources.people || []).filter(p => p.id !== c.rep.id && !metricsFor(p).some(m => m.auto === 'team_avg'));

@@ -143,7 +143,8 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Trainer outlines and teambuilding proposals (2026-10-21):** publish `firestore.rules` (`trainer_docs`); go-live checklist item 41.
 - **Search, client logo, KPI colours, potential, projection (2026-10-21):** publish `storage.rules` (logos) and `firestore.rules` (`forecast_settings`); go-live checklist item 42.
 - **Login log (2026-10-22):** publish `firestore.rules` (`login_days`, `login_rules`); go-live checklist item 43.
-- **KPI library (2026-10-22):** publish `firestore.rules` (`kpi_library`); go-live checklist item 44. Next: Part B (trainer KPIs: Internal trainer pick in Team, output assessment, report speed, new activities approved by Management) and Part C (360 rating: comment required, open or closed view, Management always sees who rated, optional for others).
+- **KPI library (2026-10-22):** publish `firestore.rules` (`kpi_library`); go-live checklist item 44.
+- **Trainer KPIs and activity approval (2026-10-22):** publish `firestore.rules` (`tb_activities`); go-live checklist item 45. Next: Part C (360 rating: comment required, open or closed view, Management always sees who rated, optional for others).
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.

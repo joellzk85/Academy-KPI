@@ -61,6 +61,39 @@ Joel asked for every KPI to be selectable and editable for reps, Admin and Manag
   - Phone width.
 - Still needs the live site: the GP server route and the rules.
 
+### Trainer KPIs and activity approval (Joel, 2026-10-22; Part B of 3)
+
+**Internal trainer**
+- **Where:** Team → KPIs has an **Internal trainer** drop-down listing records from Trainers. It's saved as `reps/{id}.kpiSet.trainerId`.
+- **Who gets trainer KPIs:** only people given a trainer record. Joel: some internal trainers focus on other KPIs for now.
+- **Save check:** a set with trainer KPIs can't be saved without one.
+- **Which trainings count:** trainings that ended this month where the person's trainer record is the training report's trainer, or the trainer ticked on the deal's checklist.
+
+**New KPIs in the library (Trainer group)**
+- **Output assessment rating:** the average participants' rating on the training reports (`participant.avg`, typed by Admin). 4.5+ green, 4.0-4.49 amber, below red.
+- **Trainer feedback speed:** average days from the last training day to the report sent (`submittedAt`, Malaysia date). A report not sent yet counts the days so far. 2 days or less green, 3-5 amber, 6-7 red, later grey.
+- **Design new activity:** new teambuilding activities this person added that Management approved this month, counted by approval date. 3+ green, 2 amber, 1 red, 0 grey.
+
+**Approving activities**
+- **Saved as:** `tb_activities.approval` = `{ status: pending | approved | rejected, at, byId, byName, note }`.
+- **New activities start pending.** That covers both Add activity and "save to library" from a proposal.
+- **Who decides:** any Management person except the one who added it clicks **Approve**, or **Not approved** with a short reason.
+- **Resending:** when the creator saves changes to a not-approved activity, it goes back to waiting.
+- **Older activities** (no `approval`) stay as they are and aren't counted.
+- **Library screen:** shows "Waiting for approval" and "Not approved" badges, plus a "Waiting for approval (N)" filter.
+
+**Rules:** `firestore.rules` `tb_activities` enforces all of this: only Management, never the creator, sets approved or not approved; the creator can only send it back to waiting. Anyone else's edit keeps the approval.
+
+**Testing**
+- A script checked: only the person's own trainings counted, report days including a report not sent yet, only approved activities counted, and no trainer record meaning no data.
+- A temporary local page checked:
+  - Joel can't approve his own activity.
+  - Not approved needs a reason; Amy saw the reason, changed the activity and it went back to waiting.
+  - Joel approved it.
+  - Amy's new activity started pending.
+  - The Team editor refused trainer KPIs without a trainer record, then saved with one.
+- The rules can't run here (no Java).
+
 ### KPI templates (follow the current KPIs; agreed)
 
 | Template | KPIs (weight) | Counted |

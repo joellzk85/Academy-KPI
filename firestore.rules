@@ -330,10 +330,23 @@ service cloud.firestore {
 
     // Teambuilding activity library (2026-10-19): everyone reads, adds and edits (Joel: "everyone can amend").
     // Delete only by the person who added it, or Management (anyone can "Stop using" it instead).
+    // Approval (2026-10-22): a new activity starts pending (or, from older screens, with no approval). Only Management,
+    // never the one who added it, sets approved or not approved (signed with their own id). The creator's change to a
+    // not-approved activity may only send it back to pending. Any other change keeps the approval as it was.
     match /tb_activities/{activityId} {
+      function approvalOf(d) { return d.get('approval', null); }
       allow read: if isMember();
-      allow create: if isMember() && request.resource.data.get('createdById', '') == request.auth.uid;
-      allow update: if isMember() && request.resource.data.get('createdById', '') == resource.data.get('createdById', '');
+      allow create: if isMember() && request.resource.data.get('createdById', '') == request.auth.uid
+        && (approvalOf(request.resource.data) == null || approvalOf(request.resource.data) == {'status': 'pending'});
+      allow update: if isMember() && request.resource.data.get('createdById', '') == resource.data.get('createdById', '')
+        && (approvalOf(request.resource.data) == approvalOf(resource.data)
+          || (isManagement() && approvalOf(resource.data) != null
+              && resource.data.get('createdById', '') != request.auth.uid
+              && approvalOf(request.resource.data).get('status', '') in ['approved', 'rejected']
+              && approvalOf(request.resource.data).get('byId', '') == request.auth.uid)
+          || (approvalOf(resource.data) != null && approvalOf(resource.data).get('status', '') == 'rejected'
+              && resource.data.get('createdById', '') == request.auth.uid
+              && approvalOf(request.resource.data) == {'status': 'pending'}));
       allow delete: if isManagement()
         || (isMember() && resource.data.get('createdById', '') == request.auth.uid);
     }

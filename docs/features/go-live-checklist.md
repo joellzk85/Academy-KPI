@@ -60,3 +60,8 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
       - On their KPI page, check the bands, colours and score. Gross profit shows only once they have a training this month.
     - **Project P&L and the Costing estimator:** margins are now coloured by the GP bands.
     - **As the rep:** they see only their own GP %.
+45. **Trainer KPIs and activity approval (2026-10-22):** after it is live, **publish `firestore.rules`** (`tb_activities` approval; until then Approve is refused).
+    - **Team → KPIs on an internal trainer:** pick their record under Internal trainer, add Output assessment rating, Trainer feedback speed and Design new activity, set the weights to 100%, and save.
+    - **Teambuilding → Activity library:** as that person add a test activity; it shows "Waiting for approval".
+    - **As the other manager:** open it, click Not approved with a reason. The creator changes it and saves; it waits again. Approve it.
+    - **Their KPI page:** Design new activity shows 1 (red). After a training they taught ends, check the feedback days and, once Admin types the participants' rating on the report, the output rating.

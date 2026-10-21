@@ -9,7 +9,7 @@
 // How each KPI is counted lives in lib/kpi.ts (MEASURES); the plain words for it are in MEASURE_INFO below.
 
 export type KpiUnit = 'rm' | 'count' | 'pct' | 'days' | 'rating';
-export type KpiGroup = 'sales' | 'admin' | 'management' | 'other';
+export type KpiGroup = 'sales' | 'admin' | 'trainer' | 'management' | 'other';
 export type Light = 'green' | 'amber' | 'red' | 'grey';
 export type Scoring = 'target' | 'bands';
 
@@ -42,6 +42,7 @@ export interface MeasureInfo {
   scope?: 'company';               // counted for the whole company, not the person
   asOfToday?: boolean;             // a count of how things stand today (not by month)
   weekly?: boolean;                // has a week-by-week breakdown
+  trainer?: boolean;               // counted for the person's trainer record (Team → KPIs → Internal trainer)
 }
 
 export const MEASURE_INFO: Record<string, MeasureInfo> = {
@@ -67,9 +68,13 @@ export const MEASURE_INFO: Record<string, MeasureInfo> = {
   hrdc_shortfall: { label: 'HRDC paid less than expected, % of claims paid this month', unit: 'pct', scope: 'company' },
   gp_company: { label: 'gross profit % of every training this month', unit: 'pct', scope: 'company' },
   team_avg: { label: 'average KPI score of everyone else with KPIs', unit: 'pct', scope: 'company' },
+  // Trainer KPIs (Part B, 2026-10-22): the first two need the person's trainer record.
+  output_rating: { label: 'output assessment rating by participants, trainings ended this month', unit: 'rating', trainer: true },
+  report_days: { label: 'days from last training day to training report sent, trainings ended this month', unit: 'days', trainer: true },
+  new_activities: { label: 'new teambuilding activities approved by Management this month', unit: 'count', weekly: true },
 };
 
-export const GROUP_LABELS: Record<KpiGroup, string> = { sales: 'Sales', admin: 'Admin and operations', management: 'Management', other: 'Other' };
+export const GROUP_LABELS: Record<KpiGroup, string> = { sales: 'Sales', admin: 'Admin and operations', trainer: 'Trainer', management: 'Management', other: 'Other' };
 export const UNIT_LABELS: Record<KpiUnit, string> = { rm: 'RM', count: 'Number', pct: '%', days: 'Days', rating: 'Rating (1-5)' };
 export const LIGHT_LABELS: Record<Light, string> = { green: 'Green', amber: 'Amber', red: 'Red', grey: 'Grey' };
 
@@ -102,6 +107,11 @@ export const BUILT_IN_KPIS: KpiDef[] = [
   { id: 'docs_days', name: 'Post-training documents', group: 'admin', description: 'Average days to finish the post-training documents; ones still open count the days so far.', measure: 'docs_days', unit: 'days', ...LO(7, 14, null) },
   { id: 'invoice_days', name: 'Invoice speed', group: 'admin', description: 'Average days from the last training day to the client invoice.', measure: 'invoice_days', unit: 'days', ...LO(3, 7, null) },
   { id: 'hrdc_shortfall', name: 'HRDC shortfall', group: 'admin', description: 'How much less HRDC paid than expected, as % of claims paid this month.', measure: 'hrdc_shortfall', unit: 'pct', ...LO(1, 3, null) },
+  // Trainer (Joel, 2026-10-22): output assessment 4.5+ green, 4.0-4.49 amber, below red; report sent within 2 days green,
+  // 3-5 amber, 6-7 red, later grey; new activities 3 a month green, 2 amber, 1 red, 0 grey.
+  { id: 'output_rating', name: 'Output assessment rating', group: 'trainer', description: 'Average rating (1-5) by participants on the training reports of trainings ended this month.', measure: 'output_rating', unit: 'rating', ...HI(4.5, 4, null) },
+  { id: 'report_days', name: 'Trainer feedback speed', group: 'trainer', description: 'Average days from the last training day to the training report sent; reports not sent yet count the days so far.', measure: 'report_days', unit: 'days', ...LO(2, 5, 7) },
+  { id: 'new_activities', name: 'Design new activity', group: 'trainer', description: 'New teambuilding activities this person added that Management approved this month.', measure: 'new_activities', unit: 'count', ...HI(3, 2, 1) },
   // Management
   { id: 'gp_company', name: 'Company gross profit', group: 'management', description: 'Overall gross profit % of every training held this month. Bands are the company GP setting.', measure: 'gp_company', unit: 'pct', ...HI(50, 40, 30) },
   { id: 'team_avg', name: 'Team average KPI score', group: 'management', description: 'Average KPI score of everyone else with KPIs.', measure: 'team_avg', unit: 'pct', ...T(80) },
