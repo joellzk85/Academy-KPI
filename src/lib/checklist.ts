@@ -10,7 +10,9 @@
 import { FundingType, trainingEndDate } from './deals';
 import { isItemsOnly } from './dealQuotes';
 
-export type TaskKind = 'grant' | 'quotation' | 'venue' | 'trainer' | 'basic';
+// Before training (Joel, 2026-10-20): venue, bus and facilitator first ask "Needed? Yes / No"; materials is a small
+// tick list of its own. Costs on these steps are payment requests (money_out with checklistTaskId, StepCosts.tsx).
+export type TaskKind = 'grant' | 'quotation' | 'venue' | 'trainer' | 'basic' | 'bus' | 'facilitator' | 'materials';
 export type AppliesTo = 'all' | 'hrdc';
 
 export interface TaskTemplate {
@@ -49,7 +51,29 @@ export interface ChecklistTask {
   // Confirm trainer (picked from the trainer list, or typed)
   trainerId?: string;
   trainerName?: string;
+  // Venue, bus, facilitator: answered "Needed?" (undefined = not answered yet). No = done, "Not needed".
+  needed?: boolean;
+  busCount?: number;
+  busSeats?: number;        // seats per bus
+  facilitatorCount?: number;
+  // Materials: lines to tick (undefined = the standard T-shirt, Banner, Print-out, none ticked)
+  items?: MaterialItem[];
 }
+
+export interface MaterialItem { id: string; label: string; done: boolean; byName?: string; at?: string }
+export const DEFAULT_MATERIALS = ['T-shirt', 'Banner', 'Print-out'];
+export const materialItems = (t: Partial<ChecklistTask>): MaterialItem[] =>
+  Array.isArray(t.items) ? t.items : DEFAULT_MATERIALS.map((label, i) => ({ id: `m${i + 1}`, label, done: false }));
+
+// Steps that ask "Needed for this training?" first.
+export const ASKS_NEEDED: TaskKind[] = ['venue', 'bus', 'facilitator'];
+export const asksNeeded = (t: { kind?: string }) => ASKS_NEEDED.includes(t.kind as TaskKind);
+export const notNeeded = (t: Partial<ChecklistTask>) => asksNeeded(t) && t.needed === false;
+
+// What a step's payment requests are filed under (money_out.category), so the P&L shows them by kind.
+export const COST_CATEGORY: Partial<Record<TaskKind, string>> = { venue: 'Venue', bus: 'Bus', facilitator: 'Facilitator', trainer: 'Trainer', materials: 'Materials' };
+export const costCategory = (t: { kind?: string }) => COST_CATEGORY[t.kind as TaskKind] || 'Other';
+export const hasCosts = (t: { kind?: string }) => !!COST_CATEGORY[t.kind as TaskKind];
 
 export interface ChecklistSettings {
   tasks: TaskTemplate[];
@@ -69,6 +93,9 @@ export const KIND_LABELS: Record<TaskKind, string> = {
   venue: 'Venue',
   trainer: 'Trainer',
   basic: 'Simple tick',
+  bus: 'Bus',
+  facilitator: 'Facilitator',
+  materials: 'Materials list',
 };
 
 export const APPLIES_LABELS: Record<AppliesTo, string> = {
@@ -80,12 +107,17 @@ export const DEFAULT_SETTINGS: ChecklistSettings = {
   flagDays: 7,
   grantDays: 3,
   tasks: [
-    { id: 'grant', label: 'Apply grant', kind: 'grant', appliesTo: 'hrdc' },
+    // Before training, in Joel's order (2026-10-20). The quotation isn't a step any more: the checklist shows it
+    // ticked by itself (a deal is won only after its quotation).
+    { id: 'grant', label: 'Grant approved', kind: 'grant', appliesTo: 'hrdc' },
     { id: 'quotation', label: 'Quotation', kind: 'quotation', appliesTo: 'all', retired: true },
-    { id: 'attendance', label: 'Follow up attendance list', kind: 'basic', appliesTo: 'all' },
-    { id: 'venue', label: 'Check venue + payment', kind: 'venue', appliesTo: 'all' },
-    { id: 'materials', label: 'Prepare materials', kind: 'basic', appliesTo: 'all' },
-    { id: 'trainer', label: 'Confirm trainer', kind: 'trainer', appliesTo: 'all' },
+    { id: 'attendance', label: 'Attendance list', kind: 'basic', appliesTo: 'all', files: true },
+    { id: 'venue', label: 'Venue', kind: 'venue', appliesTo: 'all' },
+    { id: 'bus', label: 'Bus', kind: 'bus', appliesTo: 'all' },
+    { id: 'facilitator', label: 'Facilitator', kind: 'facilitator', appliesTo: 'all' },
+    { id: 'trainer', label: 'Trainer', kind: 'trainer', appliesTo: 'all' },
+    { id: 'output_qr', label: 'Output assessment QR', kind: 'basic', appliesTo: 'all', files: true },
+    { id: 'materials', label: 'Materials', kind: 'materials', appliesTo: 'all' },
     // After training day, in Joel's order (2026-10-20): the invoice comes first (recorded in the deal's
     // "After training" section, lib/postTraining.ts), then JD14, T3, training report, output assessment.
     // Certificates is optional (not in Joel's list): shown last, never needed for "Case closed".
@@ -102,6 +134,37 @@ export const DEFAULT_SETTINGS: ChecklistSettings = {
 const FILE_BUILTINS = DEFAULT_SETTINGS.tasks.filter(t => t.files).map(t => t.id);
 export const hasFiles = (t: { id?: string; kind?: string; files?: boolean }) =>
   t.kind === 'basic' && (t.files ?? FILE_BUILTINS.includes(t.id || ''));
+
+// Built-in steps renamed or changed on 2026-10-20 (Joel's pre-training flow). Lists and checklists saved before keep
+// their own names if someone renamed them; untouched ones take the new name and kind.
+const OLD_LABELS: Record<string, string> = {
+  grant: 'Apply grant', attendance: 'Follow up attendance list', venue: 'Check venue + payment', materials: 'Prepare materials', trainer: 'Confirm trainer',
+};
+export function upgradeTask<T extends { id: string; label: string; kind: TaskKind; files?: boolean }>(t: T): T {
+  if (!OLD_LABELS[t.id] && t.id !== 'attendance' && t.id !== 'materials') return t;
+  const builtin = DEFAULT_SETTINGS.tasks.find(d => d.id === t.id);
+  const next = { ...t };
+  if (builtin && t.label === OLD_LABELS[t.id]) next.label = builtin.label;
+  if (t.id === 'attendance' && t.kind === 'basic') next.files = true;                 // now an upload
+  if (t.id === 'materials' && t.kind === 'basic') next.kind = 'materials';           // now a tick list
+  return next;
+}
+export const upgradeTasks = (tasks: ChecklistTask[] | undefined): ChecklistTask[] => (tasks || []).map(upgradeTask);
+
+// Steps added in the 2026-10-20 update. A won deal whose training hasn't ended gets them on its checklist
+// (DealChecklist.tsx), placed after the built-in step before them.
+export const NEW_STEPS_2026_10_20 = ['bus', 'facilitator', 'output_qr'];
+export function withSteps(tasks: ChecklistTask[], add: TaskTemplate[]): ChecklistTask[] {
+  const next = [...tasks];
+  add.forEach(m => {
+    if (next.some(t => t.id === m.id)) return;
+    const i = DEFAULT_SETTINGS.tasks.findIndex(d => d.id === m.id);
+    const before = DEFAULT_SETTINGS.tasks.slice(0, Math.max(i, 0)).reverse().find(p => next.some(t => t.id === p.id));
+    const at = before ? next.findIndex(t => t.id === before.id) + 1 : next.filter(t => !t.after).length;
+    next.splice(at, 0, { id: m.id, label: m.label, kind: m.kind, appliesTo: m.appliesTo, after: !!m.after, files: hasFiles(m), optional: isOptional(m), done: false });
+  });
+  return next;
+}
 // Optional built-in steps (Certificates). Older lists and checklists don't have the setting yet, so this decides for them.
 const OPTIONAL_BUILTINS = DEFAULT_SETTINGS.tasks.filter(t => t.optional).map(t => t.id);
 export const isOptional = (t: { id?: string; optional?: boolean }) => t.optional ?? OPTIONAL_BUILTINS.includes(t.id || '');
@@ -120,7 +183,7 @@ export function readSettings(data: any): ChecklistSettings {
       merged.splice(before ? merged.findIndex(t => t.id === before.id) + 1 : merged.length, 0, d);
     });
   }
-  const tasks = merged.map(t => ({ ...t, files: hasFiles(t), optional: isOptional(t), ...(isRetiredStep(t) ? { retired: true } : {}) }));
+  const tasks = merged.map(upgradeTask).map(t => ({ ...t, files: hasFiles(t), optional: isOptional(t), ...(isRetiredStep(t) ? { retired: true } : {}) }));
   const num = (v: any, fallback: number) => (Number.isFinite(Number(v)) && v !== '' && v !== null && Number(v) >= 0 ? Number(v) : fallback);
   return { tasks, flagDays: num(data?.flagDays, DEFAULT_SETTINGS.flagDays), grantDays: num(data?.grantDays, DEFAULT_SETTINGS.grantDays) };
 }
@@ -140,11 +203,11 @@ export function buildChecklist(settings: ChecklistSettings): ChecklistTask[] {
     .map(t => ({ id: t.id, label: t.label, kind: t.kind, appliesTo: t.appliesTo, after: !!t.after, files: hasFiles(t), optional: isOptional(t), done: false }));
 }
 
-// Tasks that apply to this deal, in the checklist's own order.
-// A retired built-in step (Quotation) still open on an older checklist is left out, so it never
-// blocks "All done" or counts in "X of Y"; one already ticked stays, for the record.
+// Tasks that apply to this deal, in the checklist's own order (older built-in names and kinds upgraded).
+// The Quotation step on older checklists is left out: the checklist shows the quotation ticked by itself
+// (2026-10-20), so it never counts in "X of Y" or blocks "All done".
 export function applicableTasks(tasks: ChecklistTask[] | undefined, fundingType?: FundingType | string): ChecklistTask[] {
-  return (tasks || []).filter(t => (t.appliesTo !== 'hrdc' || isHrdc(fundingType)) && !(isRetiredStep(t) && !t.done));
+  return upgradeTasks(tasks).filter(t => (t.appliesTo !== 'hrdc' || isHrdc(fundingType)) && !isRetiredStep(t));
 }
 
 // Optional steps (Certificates) aren't counted. part: only the steps before, or after, training day.
@@ -204,14 +267,22 @@ export function dealVenue(checklist: any | null, quotes: any[], venues: any[]): 
 
 // What still has to be filled in before a task can be ticked. Empty = ready.
 // hasVenue / hasTrainer: a venue or trainer is chosen on the checklist or comes from the quotation.
-// fileCount: files uploaded on this step (only matters for steps with a file drop box).
+// fileCount: files uploaded on this step (the drop box steps, and the trainer's PO).
 export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = '', hasVenue = !!t.venueId, hasTrainer = !!t.trainerId, fileCount = 0): string {
   if (hasFiles(t) && fileCount === 0) return `Upload the ${t.label} file first (drop it in the box).`;
   if (t.kind === 'grant' && grantBlock) return grantBlock;
-  if (t.kind === 'grant' && !(t.grantNumber || '').trim()) return 'Enter the grant number once HRDC approves it.';
+  if (asksNeeded(t) && t.needed === undefined) return 'Answer "Needed for this training?" first.';
+  if (notNeeded(t)) return '';
   if (t.kind === 'venue' && !hasVenue) return 'Choose or type the venue first.';
-  if (t.kind === 'venue' && !t.venuePaid) return 'Tick "Venue paid" first.';
+  if (t.kind === 'bus' && !(Number(t.busCount) > 0)) return 'Enter how many buses first.';
+  if (t.kind === 'facilitator' && !(Number(t.facilitatorCount) > 0)) return 'Enter how many facilitators first.';
   if (t.kind === 'trainer' && !hasTrainer) return 'Choose or type the trainer first.';
+  if (t.kind === 'trainer' && fileCount === 0) return "Upload the trainer's PO first.";
+  if (t.kind === 'materials') {
+    const items = materialItems(t);
+    if (!items.length) return 'Add at least one item to the materials list.';
+    if (items.some(i => !i.done)) return 'Tick every item on the materials list first.';
+  }
   if (t.kind === 'quotation' && dealQuoteCount === 0) return 'Create or link a quotation for this deal first.';
   return '';
 }
@@ -225,23 +296,22 @@ export function daysUntil(iso: string, today: string): number | null {
 
 export interface Flag { level: 'danger' | 'attention'; text: string; grant?: boolean }
 
-// HRDC deal won a while ago and the grant not applied yet (Joel, 2026-10-18).
-// Amber from settings.grantDays after the won date; red once it's double that, or when training
-// is within the red-flag window. Stops once the training date has passed (the "training date has
-// passed" flag covers it). A won deal with no checklist yet counts as not applied.
-// Direct-pay deals never get it.
+// HRDC deal won a while ago and "Grant approved" not ticked yet (Joel, 2026-10-18; a tick only since 2026-10-20).
+// Amber from settings.grantDays after the won date; red when training is within the red-flag window.
+// Stops once the training date has passed (the "training date has passed" flag covers it).
+// A won deal with no checklist yet counts as not approved. Direct-pay deals never get it.
 export function grantNotAppliedFlag(deal: any, tasks: ChecklistTask[] | undefined, settings: ChecklistSettings, today: string, wonDate: string): Flag | null {
   if (!isHrdc(deal?.fundingType) || !wonDate) return null;
   const grant = (tasks || []).find(t => t.kind === 'grant');
-  if (grant && (grant.done || (grant.grantAppliedDate || '').trim())) return null;
+  if (grant?.done) return null;
   if (tasks && !grant) return null;                      // grant step removed from this deal
   const since = -(daysUntil(wonDate, today) ?? 0);
   if (since < settings.grantDays) return null;
   const train = daysUntil(deal?.trainingDate, today);
   const trainEnd = daysUntil(trainingEndDate(deal), today);
   if (trainEnd !== null && trainEnd < 0) return null;
-  const red = since >= settings.grantDays * 2 || (train !== null && train <= settings.flagDays);
-  return { level: red ? 'danger' : 'attention', text: `Won ${since} day${since === 1 ? '' : 's'} ago, grant not applied`, grant: true };
+  const red = train !== null && train <= settings.flagDays;
+  return { level: red ? 'danger' : 'attention', text: `Won ${since} day${since === 1 ? '' : 's'} ago, grant not approved`, grant: true };
 }
 
 // Red flags for the admin work queue.

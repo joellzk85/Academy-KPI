@@ -228,7 +228,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
             Every HRDC claim and client invoice, and whether it has been paid. Mark a payment received here with the receipt from the client or HRDC. Lines from the Blueprint spreadsheet are kept here; claims and invoices recorded on deals show by themselves.
           </p>
         </div>
-        {seesProfit && <button type="button" className={btnPrimary} onClick={() => startEdit(null)}><Plus className="h-4 w-4" /> Add a line</button>}
+        {/* "Add a line" removed (Joel, 2026-10-20): new trainings' claims come from their deals. */}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -307,7 +307,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
         {records === null ? (
           <p className="flex items-center gap-2 px-5 pb-5 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
         ) : shown.length === 0 ? (
-          <p className="px-5 pb-5 text-[15px] text-ink-soft">{lines.length === 0 ? 'No lines yet. Import the Blueprint spreadsheet in Data tools, or add a line.' : 'No lines match these filters.'}</p>
+          <p className="px-5 pb-5 text-[15px] text-ink-soft">{lines.length === 0 ? 'No lines yet. Import the Blueprint spreadsheet in Data tools; claims and invoices recorded on deals appear here by themselves.' : 'No lines match these filters.'}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[56rem] text-sm">

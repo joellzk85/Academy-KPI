@@ -12,6 +12,7 @@ import DealChecklist, { ProgressBar, startChecklist, useChecklistSettings } from
 import TrainingTimeBox from './TrainingTimeBox';
 import HrdcQueries from './HrdcQueries';
 import MoneyPanel, { MoneyOverview, useMoneySettings } from './Money';
+import VendorsPage from './VendorsPage';
 import { MoneyIn, MoneyOut, moneyFlags } from '../lib/money';
 import AfterTraining from './AfterTraining';
 import { useReceipts } from './PaymentReceipts';
@@ -36,7 +37,7 @@ const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink disabled:opacity-30';
 
-export type AdminView = 'queue' | 'money' | 'payments' | 'programmes' | 'tasks' | 'backup';
+export type AdminView = 'queue' | 'money' | 'payments' | 'vendors' | 'programmes' | 'tasks' | 'backup';
 
 export default function WorkQueue({ viewer, people, onOpenQuotations, initialView = 'queue', initialDealId = '', deals = [], onOpenManagementPayments }: {
   viewer: Viewer;
@@ -50,7 +51,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
   const [view, setView] = useState<AdminView>(initialView);
   const [focusDeal, setFocusDeal] = useState(initialDealId);
   // Payment tracking is in Admin work for Admin; Management has it under Management (with profit), so it isn't repeated.
-  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ['backup', 'Backup']];
+  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['vendors', 'Vendors'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ['backup', 'Backup']];
   const openPayments = viewer.role === 'admin' ? () => setView('payments') : onOpenManagementPayments;
   return (
     <div className="space-y-5 font-sans text-ink">
@@ -75,6 +76,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
             <PaymentTracking pipelinesSync={linkedOnly(deals)} people={people} viewer={viewer} onOpenDeal={d => { setFocusDeal(d.id); setView('queue'); }} />
           </React.Suspense>
         )
+        : view === 'vendors' ? <VendorsPage viewer={viewer} />
         : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : view === 'tasks' ? <TaskSettings viewer={viewer} /> : <BackupPanel />}
     </div>
   );
@@ -362,7 +364,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
             )}
             <section>
               <h4 className="mb-2 font-bold">Money out and P&amp;L</h4>
-              <MoneyPanel deal={openDeal} viewer={viewer} settings={moneySettings}
+              <MoneyPanel deal={openDeal} viewer={viewer} settings={moneySettings} quotes={quotes.filter(q => q.pipelineId === openDeal.id)}
                 ins={moneyIn.filter(m => m.dealId === openDeal.id)} outs={moneyOut.filter(m => m.dealId === openDeal.id)} />
             </section>
           </div>
@@ -465,7 +467,7 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
                 <button type="button" className={iconBtn} disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${t.label} up`}><ArrowUp className="h-4 w-4" /></button>
                 <button type="button" className={iconBtn} disabled={i === s.tasks.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${t.label} down`}><ArrowDown className="h-4 w-4" /></button>
                 {t.retired && RETIRED_BUILTINS.includes(t.id) ? (
-                  <span className="ml-1 px-2 text-sm text-ink-soft" title="A deal can only be won after its quotation is sent, so this step is always done already">No longer needed</span>
+                  <span className="ml-1 px-2 text-sm text-ink-soft" title="A deal can only be won after its quotation is sent, so the checklist shows the quotation ticked by itself">Ticks itself</span>
                 ) : t.retired ? (
                   <button type="button" className={`${btnSecondary} ml-1 py-1.5`} onClick={() => update(t.id, { retired: false })}><RotateCcw className="h-3.5 w-3.5" /> Bring back</button>
                 ) : (
@@ -500,10 +502,10 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
       </div>
 
       <div className="max-w-md rounded-2xl border border-line bg-white p-4">
-        <label htmlFor="grant-days" className="mb-1.5 block text-sm font-semibold">Flag grant not applied after this many days won</label>
+        <label htmlFor="grant-days" className="mb-1.5 block text-sm font-semibold">Flag "grant not approved" after this many days won</label>
         <input id="grant-days" type="number" min={1} max={60} value={s.grantDays}
           onChange={e => edit({ ...s, grantDays: Math.max(1, Math.min(60, Number(e.target.value) || 1)) })} className={`${field} w-28`} />
-        <p className="mt-1.5 text-sm text-ink-soft">HRDC and HRDC + top-up deals only. Amber once the deal was won this many days ago and "Apply grant" has no applied date. Red at double the days, or when training is within the window above.</p>
+        <p className="mt-1.5 text-sm text-ink-soft">HRDC and HRDC + top-up deals only. Amber once the deal was won this many days ago and "Grant approved" isn't ticked. Red when training is within the window above.</p>
       </div>
 
       {msg && <p role="status" className={`rounded-lg px-3 py-2.5 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</p>}

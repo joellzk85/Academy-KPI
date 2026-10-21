@@ -5,7 +5,7 @@
 import React from 'react';
 import Logo from './Logo';
 import { COMPANY_ADDRESS } from '../lib/company';
-import { MoneyOut, OUT_STATUS_LABELS, dateTimeMY, isCompanyPayment, paidViaLink, paymentRef } from '../lib/money';
+import { MoneyOut, OUT_STATUS_LABELS, TIMING_LABELS, dateTimeMY, isCompanyPayment, paidViaLink, paymentRef } from '../lib/money';
 import { formatDate } from '../lib/deals';
 
 export { paymentRef };
@@ -14,7 +14,7 @@ const sen = (n: number) => 'RM ' + (Number(n) || 0).toLocaleString('en-MY', { mi
 
 export function paymentLines(o: MoneyOut): { description: string; qty: number; price: number }[] {
   if (isCompanyPayment(o) && (o.items || []).length) return o.items!.map(i => ({ description: i.description, qty: Number(i.qty) || 0, price: Number(i.price) || 0 }));
-  return [{ description: o.category, qty: 1, price: Number(o.amount) || 0 }];
+  return [{ description: o.description ? `${o.category}: ${o.description}` : o.category, qty: 1, price: Number(o.amount) || 0 }];
 }
 
 export function paymentStatusText(o: MoneyOut): string {
@@ -56,7 +56,7 @@ export default function PaymentRequestDocument({ o, forText }: { o: MoneyOut; fo
           {row('Requested by', o.requestedByName)}
           {row('For', forText)}
           {row('Category', o.category)}
-          {!company && row('When', o.timing === 'before' ? 'Deposit before training' : 'After training')}
+          {!company && row('When', `${TIMING_LABELS[o.timing] || TIMING_LABELS.after} payment`)}
           {row('Needed by', o.neededBy ? formatDate(o.neededBy) : '')}
         </div>
         <div className="space-y-2">
@@ -92,7 +92,7 @@ export default function PaymentRequestDocument({ o, forText }: { o: MoneyOut; fo
         </tbody>
       </table>
 
-      {o.description && (
+      {o.description && company && (
         <div>
           <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-500">Info</p>
           <p className="whitespace-pre-wrap leading-relaxed text-slate-700">{o.description}</p>

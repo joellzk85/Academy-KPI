@@ -22,6 +22,7 @@ export interface Receipt {
   dealId: string;          // '' for an imported Payment tracking line
   moneyInId: string;       // the invoice or claim it's for ('' for an imported line)
   recordId: string;        // the imported Payment tracking line (payment_records) it's for ('' for a deal's)
+  moneyOutId?: string;     // a payment we made (money_out), e.g. a venue booking raised from the checklist (2026-10-20)
   name: string;
   size: number;
   type: string;

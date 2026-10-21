@@ -5,10 +5,11 @@ import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
 import { dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
-  COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_CATEGORIES, OUT_STATUS_LABELS, OutStatus, OutTiming,
+  COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, OutStatus, TIMING_LABELS,
   canDecide, dateTimeMY, dealPL, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
+import { projectRow } from '../lib/projectPL';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { onPhone } from '../lib/whatsapp';
 import { useFormDraft } from '../lib/useFormDraft';
@@ -16,6 +17,7 @@ import DraftBar from './DraftBar';
 import PaymentRequestDocument, { paymentRef, paymentStatusText } from './PaymentRequestDocument';
 import { Receipt, needsReceipt } from '../lib/postTraining';
 import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
+import PaymentSummaryPanel from './PaymentSummaryPanel';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -94,44 +96,67 @@ export function RepMoneyStatus({ deal, ins }: { deal: any; ins: MoneyIn[] }) {
 // ---------- Money out and P&L for one deal (Admin and Management) ----------
 // Invoices, HRDC claims and the payments received are in the deal's "After training" section (AfterTraining.tsx),
 // so they have one home (Joel, 2026-10-20).
-export default function MoneyPanel({ deal, viewer, ins, outs, settings }: {
-  deal: any; viewer: Viewer; ins: MoneyIn[]; outs: MoneyOut[]; settings: MoneySettings;
+// The training's P&L uses the same sums as Management → Project P&L (projectRow): income (or the deal value as an
+// estimate), minus SST, HRDC's %, the sales person's commission and the approved and paid costs.
+// Costs are raised from the deal's "Before training" checklist (venue, bus, facilitator, trainer, materials;
+// 2026-10-20), so this section has no "Request a payment" form of its own any more.
+export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes = [] }: {
+  deal: any; viewer: Viewer; ins: MoneyIn[]; outs: MoneyOut[]; settings: MoneySettings; quotes?: any[];
 }) {
   const pl = dealPL(ins, outs, settings);
-  const [addingOut, setAddingOut] = useState(false);
+  const row = projectRow(deal, ins, outs, settings, todayIso(), { quotes, plDocs: {} });
+  const approvable = outs.filter(o => canDecide(o, viewer));
+  const { busy, error, run } = useRun();
 
   return (
     <div className="space-y-5">
       {/* P&L */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat label="Invoiced and claimed" value={formatRM(pl.invoiced)} />
-        <Stat label={`HRDC ${settings.hrdcDeductionPct}% and costs`} value={formatRM(pl.hrdcFee + pl.shortfall + pl.costs)} />
-        <Stat label="Profit" value={formatRM(pl.profit)} tone={pl.profit < 0 ? 'danger' : 'accent'} />
+        <Stat label={row.estimate ? 'Income (estimate: deal value)' : 'Invoiced and claimed'} value={formatRM(row.income)} />
+        <Stat label="SST, HRDC %, commission, costs" value={formatRM(row.sst + row.hrdcFee + row.commission + row.costs)} />
+        <Stat label="Profit" value={formatRM(row.profit)} tone={row.profit < 0 ? 'danger' : 'accent'} />
         <Stat label="Received so far" value={formatRM(pl.received)} />
       </div>
       <p className="text-sm text-ink-soft">
+        SST {formatRM(row.sst)} · HRDC {formatRM(row.hrdcFee)} · Commission {row.commissionPct}% {formatRM(row.commission)} (sales person) · Costs approved or paid {formatRM(row.costs)}
+      </p>
+      <p className="text-sm text-ink-soft">
         Still to come in: <strong className="text-ink">{formatRM(pl.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(pl.toPayOut)}</strong>
         {pl.pendingApproval > 0 && <> · Waiting for approval (not counted yet): <strong className="text-ink">{formatRM(pl.pendingApproval)}</strong></>}
-        {pl.invoiced === 0 && dealValue(deal) > 0 && <> · Deal value {formatRM(dealValue(deal))}, nothing invoiced or claimed yet</>}
       </p>
 
-      <p className="text-sm text-ink-soft">Invoices, HRDC claims and payments received are recorded in this deal's <strong className="text-ink">After training</strong> section.</p>
+      <p className="text-sm text-ink-soft">Invoices, HRDC claims and payments received are recorded in this deal's <strong className="text-ink">After training</strong> section. Costs are entered in its <strong className="text-ink">Before training</strong> checklist.</p>
 
       {/* Money out */}
       <section className="space-y-2">
-        <h5 className="text-sm font-bold uppercase tracking-wide text-ink-soft">Money out</h5>
-        {outs.length === 0 && !addingOut && <p className="text-[15px] text-ink-soft">No payment requests yet.</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          <h5 className="text-sm font-bold uppercase tracking-wide text-ink-soft">Money out</h5>
+          {approvable.length > 1 && (
+            <button type="button" disabled={busy} className={`${btnPrimary} ml-auto py-1.5`} onClick={() => run(() => approveMany(approvable, viewer))}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Approve all {approvable.length} ({formatSen(approvable.reduce((t, o) => t + (Number(o.amount) || 0), 0))})
+            </button>
+          )}
+        </div>
+        {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+        {outs.length === 0 && <p className="text-[15px] text-ink-soft">No payment requests yet. Add costs on the venue, bus, facilitator, trainer or materials step of the checklist.</p>}
         <ul className="space-y-2">
           {[...outs].sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt))).map(o => <OutRow key={o.id} o={o} viewer={viewer} docFor={`${deal.client || 'Client'} · ${deal.courseName || 'Training'}`} />)}
         </ul>
-        {addingOut ? (
-          <OutForm deal={deal} viewer={viewer} onDone={() => setAddingOut(false)} />
-        ) : (
-          <button type="button" className={btnSecondary} onClick={() => setAddingOut(true)}><Plus className="h-4 w-4" /> Request a payment</button>
-        )}
       </section>
     </div>
   );
+}
+
+/** Approve several requests at once (the same check as one by one: a manager, never their own). */
+export async function approveMany(list: MoneyOut[], viewer: Viewer) {
+  const ok = list.filter(o => canDecide(o, viewer));
+  if (!ok.length) return;
+  const at = new Date().toISOString();
+  for (let i = 0; i < ok.length; i += 400) {
+    const batch = writeBatch(db);
+    ok.slice(i, i + 400).forEach(o => batch.update(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: at, rejectReason: '' }));
+    await batch.commit();
+  }
 }
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'danger' | 'accent' }) {
@@ -273,62 +298,6 @@ export function InRow({ m, viewer, settings, context, receipts = [], readOnly }:
       )}
       {error && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
     </li>
-  );
-}
-
-// ---------- Money out ----------
-function OutForm({ deal, viewer, onDone }: { deal: any; viewer: Viewer; onDone: () => void }) {
-  const [f, setF] = useState({ category: 'Trainer', payee: '', description: '', amount: '', timing: 'after' as OutTiming });
-  // Kept in this browser until it's saved (lib/useFormDraft.ts).
-  const draft = useFormDraft(viewer.id, `money-out:${deal.id}`, f, setF);
-  const { busy, error, setError, run } = useRun();
-  const save = (e: React.FormEvent) => {
-    e.preventDefault();
-    const amount = num(f.amount);
-    if (!f.payee.trim()) return setError('Enter who is being paid.');
-    if (!(amount > 0)) return setError('Enter the amount, for example 2500.');
-    const id = `out_${Date.now()}`;
-    return run(async () => {
-      await setDoc(doc(db, 'money_out', id), {
-        id, dealId: deal.id, category: f.category, payee: f.payee.trim(), description: f.description.trim(), amount, timing: f.timing,
-        status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
-        decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
-      });
-      draft.clear();
-      onDone();
-    });
-  };
-  return (
-    <form onSubmit={save} className="space-y-3 rounded-xl border border-line bg-surface p-4">
-      <p className="text-sm font-semibold">Request a payment</p>
-      <DraftBar draft={draft} what="payment request" />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className={small} htmlFor="mo-cat">What for</label>
-          <select id="mo-cat" value={f.category} onChange={e => setF(x => ({ ...x, category: e.target.value }))} className={input}>
-            {OUT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div><label className={small} htmlFor="mo-payee">Pay to</label><input id="mo-payee" value={f.payee} onChange={e => setF(x => ({ ...x, payee: e.target.value }))} className={input} placeholder="Name of person or company" /></div>
-        <div><label className={small} htmlFor="mo-amt">Amount (RM)</label><input id="mo-amt" inputMode="decimal" value={f.amount} onChange={e => setF(x => ({ ...x, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
-        <div>
-          <span className={small}>When</span>
-          <div className="flex gap-2">
-            {([['before', 'Deposit before training'], ['after', 'After training']] as const).map(([k, t]) => (
-              <button key={k} type="button" aria-pressed={f.timing === k} onClick={() => setF(x => ({ ...x, timing: k }))}
-                className={`flex-1 rounded-lg border px-2 py-2 text-sm font-semibold ${f.timing === k ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{t}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-      <input value={f.description} onChange={e => setF(x => ({ ...x, description: e.target.value }))} className={input} placeholder="Details (optional), e.g. 2 days, 50% deposit" aria-label="Details" />
-      <p className="text-sm text-ink-soft">{viewer.role === 'management' ? 'The other manager must approve this before it can be paid.' : 'A manager must approve this before it can be paid.'}</p>
-      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
-      <div className="flex gap-2">
-        <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
-        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Send for approval</button>
-      </div>
-    </form>
   );
 }
 
@@ -534,7 +503,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
           <p className="flex flex-wrap items-center gap-2 font-semibold">
             {o.category} · {o.payee} · {company ? formatSen(o.amount) : formatRM(o.amount)}
             <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${OUT_TONE[o.status]}`}>{OUT_STATUS_LABELS[o.status]}</span>
-            {!company && <span className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-soft">{o.timing === 'before' ? 'Deposit before training' : 'After training'}</span>}
+            {!company && <span className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-soft">{TIMING_LABELS[o.timing] || TIMING_LABELS.after} payment</span>}
           </p>
           {company && (o.items || []).length > 0 && (
             <ul className="mt-1 text-sm text-ink">
@@ -746,8 +715,9 @@ export function MoneyOverview({ viewer, onOpenPayments }: { viewer: Viewer; onOp
     const d = deals.find(x => x.id === dealId);
     if (!d) return 'Deal no longer exists';
     const c = clients.find(x => x.id === d.clientId)?.companyName || d.client || 'No client';
-    return `${c} · ${d.courseName || 'No programme'}`;
+    return `${c} · ${d.courseName || 'No programme'}${d.trainingDate ? ` · ${formatDate(d.trainingDate)}` : ''}`;
   };
+  const { busy: approving, error: approveError, run: runApprove } = useRun();
 
   const pending = outs.filter(o => o.status === 'pending').sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
   const mine = pending.filter(o => canDecide(o, viewer));
@@ -767,9 +737,19 @@ export function MoneyOverview({ viewer, onOpenPayments }: { viewer: Viewer; onOp
         </button>
       </div>
 
+      {mine.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" disabled={approving} className={btnPrimary} onClick={() => runApprove(() => approveMany(mine, viewer))}>
+            {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Approve all {mine.length} waiting for you ({formatSen(mine.reduce((t, o) => t + (Number(o.amount) || 0), 0))})
+          </button>
+          {approveError && <span role="alert" className="text-sm text-danger">{approveError}</span>}
+        </div>
+      )}
       <Section title="Payment requests waiting for approval" empty="Nothing waiting for approval.">
         {pending.map(o => <OutRow key={o.id} o={o} viewer={viewer} context={dealLabel(o.dealId)} />)}
       </Section>
+
+      <PaymentSummaryPanel outs={outs} viewer={viewer} forTextOf={o => dealLabel(o.dealId)} />
       <Section title="Approved, not paid yet" empty="Nothing approved and waiting to be paid.">
         {toPay.map(o => <OutRow key={o.id} o={o} viewer={viewer} context={dealLabel(o.dealId)} />)}
       </Section>
@@ -794,11 +774,11 @@ function Section({ title, empty, children }: { title: string; empty: string; chi
 }
 
 function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; viewer: Viewer }) {
-  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string } | null>(null);
+  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string; commission: string } | null>(null);
   const { busy, error, setError, run } = useRun();
   const [saved, setSaved] = useState(false);
-  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays) };
-  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
+  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays), commission: String(settings.commissionPct) };
+  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder' | 'commission', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
   const save = () => {
     const pct = Number(v.pct);
     const overdue = Number(v.overdue);
@@ -807,9 +787,11 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
     const reminder = Number(v.reminder);
     if (!(reminder >= 1)) return setError('The claim reminder must be at least 1 day.');
     if (v.deadline !== '' && Number(v.deadline) <= reminder) return setError('The claim deadline must be later than the reminder.');
+    const commission = Number(v.commission);
+    if (!(commission >= 0 && commission < 100)) return setError('The commission must be a percentage, for example 3.');
     return run(async () => {
       await setDoc(doc(db, 'config', 'money_settings'), {
-        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder,
+        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder, commissionPct: commission,
         updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name,
       });
       setF(null);
@@ -824,6 +806,7 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
         <div><label className={small} htmlFor="ms-od">Overdue after (days)</label><input id="ms-od" inputMode="numeric" value={v.overdue} onChange={e => set('overdue', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="ms-dl">HRDC claim deadline (days after training)</label><input id="ms-dl" inputMode="numeric" value={v.deadline} onChange={e => set('deadline', e.target.value)} className={input} placeholder="Not set" /></div>
         <div><label className={small} htmlFor="ms-rm">Claim reminder turns red after (days after training)</label><input id="ms-rm" inputMode="numeric" value={v.reminder} onChange={e => set('reminder', e.target.value)} className={input} /></div>
+        <div><label className={small} htmlFor="ms-cm">Sales commission (% of the price before SST and HRDC's %)</label><input id="ms-cm" inputMode="decimal" value={v.commission} onChange={e => set('commission', e.target.value)} className={input} /></div>
       </div>
       <p className="text-sm text-ink-soft">HRD Corp allows 6 months (180 days) after training to submit a claim. The work queue shows an amber reminder straight after training and turns it red after the reminder days, well before the deadline.</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}

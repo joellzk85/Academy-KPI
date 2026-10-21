@@ -1360,7 +1360,7 @@ function DealPanel(props: {
         {/* Money out and P&L (won deals): Admin and Management */}
         {st === 'won' && props.viewer.role !== 'rep' && (
           <Fold title="Money out and P&L" defaultOpen={def === 'money'} id={p.id}>
-            <MoneyPanel deal={p} viewer={props.viewer} ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} />
+            <MoneyPanel deal={p} viewer={props.viewer} ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} quotes={props.quotes} />
           </Fold>
         )}
 

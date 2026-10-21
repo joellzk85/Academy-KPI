@@ -37,7 +37,7 @@ async function uploadOne(dealId: string, task: { id: string; label: string }, fi
   return rec;
 }
 
-export default function StepFiles({ dealId, task, files, viewer, editable, onUploaded, onLastRemoved }: {
+export default function StepFiles({ dealId, task, files, viewer, editable, onUploaded, onLastRemoved, what, ticks = true }: {
   dealId: string;
   task: { id: string; label: string; done?: boolean };
   files: ChecklistFile[];                 // this step's files
@@ -45,6 +45,8 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
   editable: boolean;                      // Admin and Management
   onUploaded: (files: ChecklistFile[]) => void;
   onLastRemoved: () => void;              // the step's last file was deleted
+  what?: string;                          // e.g. "venue documents" (default: "<step> file")
+  ticks?: boolean;                        // uploading ticks the step (false: venue, bus, facilitator documents, trainer PO)
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -81,7 +83,7 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
     setError(await openProposalFile(f));
   };
   const remove = async (f: ChecklistFile) => {
-    const last = files.length === 1 && task.done;
+    const last = ticks && files.length === 1 && task.done;
     if (!window.confirm(`Delete "${f.name}"? The file and its backup copy in the CRM are removed. This can't be undone.${last ? ` It's the only file, so "${task.label}" is reopened.` : ''}`)) return;
     setBusyId(f.id);
     setError('');
@@ -131,7 +133,7 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
           </button>
         ) : (
           <div
-            role="button" tabIndex={0} aria-label={`Upload the ${task.label} file: drop it here or click to choose`}
+            role="button" tabIndex={0} aria-label={`Upload the ${what || `${task.label} file`}: drop it here or click to choose`}
             onClick={pick}
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } }}
             onDragOver={e => { e.preventDefault(); setOver(true); }}
@@ -143,8 +145,8 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
               <span className="flex items-center gap-2 text-sm font-semibold text-accent"><Loader2 className="h-4 w-4 animate-spin" /> Uploading… {progress}%</span>
             ) : (
               <>
-                <span className="flex items-center gap-2 text-[15px] font-semibold text-ink"><Upload className="h-4 w-4 text-accent" /> Drop the {task.label} file here, or click to choose</span>
-                <span className="text-sm text-ink-soft">{CHECKLIST_FILE_KINDS}, up to 100 MB. Uploading marks this step done.</span>
+                <span className="flex items-center gap-2 text-[15px] font-semibold text-ink"><Upload className="h-4 w-4 text-accent" /> Drop the {what || `${task.label} file`} here, or click to choose</span>
+                <span className="text-sm text-ink-soft">{CHECKLIST_FILE_KINDS}, up to 100 MB.{ticks ? ' Uploading marks this step done.' : ' You can add several.'}</span>
               </>
             )}
           </div>

@@ -22,6 +22,7 @@ export const LIST_NAMES: [string, string][] = [
   ['proposal_files', 'Proposal files'],
   ['money_in', 'Money in'],
   ['money_out', 'Money out'],
+  ['vendors', 'Vendors'],
   ['project_pl', 'Project P&L SST typed'],
   ['payment_records', 'Payment tracking'],
   ['payment_receipts', 'Payment receipts'],

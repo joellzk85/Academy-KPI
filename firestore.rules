@@ -351,6 +351,13 @@ service cloud.firestore {
     // Payment receipts from the client or HRDC (2026-10-20): on a deal's invoice or claim (money_in) or on a
     // Payment tracking line. Admin and Management upload and read; delete by the uploader or Management.
     // The files are in Storage receipts/... (storage.rules).
+    // Vendors (2026-10-20): who we pay for trainings, with bank details for accounts. Admin and Management only
+    // (bank account numbers); delete by Management. Payment summaries for accounts read them on the server.
+    match /vendors/{vendorId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isManagement();
+    }
+
     match /payment_receipts/{receiptId} {
       allow read: if isStaff();
       allow create: if isStaff() && request.resource.data.byId == request.auth.uid && request.resource.data.path is string;

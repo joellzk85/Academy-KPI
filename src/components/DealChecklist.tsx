@@ -1,15 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
-import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, FileText, ListChecks, Loader2, Plus, Trash2, Undo2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, FileText, ListChecks, Loader2, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { formatDate, todayIso } from '../lib/deals';
+import { formatDate, todayIso, trainingEndDate } from '../lib/deals';
 import {
-  ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, Picked, applicableTasks, buildChecklist, effectiveTrainer, effectiveVenue,
-  hasFiles, isHrdc, isOptional, newTaskId, progress, readSettings, taskGate,
+  ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS_2026_10_20, Picked, applicableTasks, asksNeeded, buildChecklist,
+  effectiveTrainer, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
+  upgradeTasks, withSteps,
 } from '../lib/checklist';
 import { ChecklistFile } from '../lib/checklistFiles';
+import { MoneyOut } from '../lib/money';
+import { withoutDeleted } from '../lib/linked';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import StepFiles from './ChecklistFiles';
+import StepCosts, { VendorHint } from './StepCosts';
+import { useVendors } from './VendorsPage';
+import { useReceipts } from './PaymentReceipts';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -20,6 +26,7 @@ const btnPrimary =
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink disabled:opacity-30';
+const small = 'mb-1 block text-sm font-medium text-ink-soft';
 
 // The master task list and flag setting, live.
 export function useChecklistSettings(): ChecklistSettings {
@@ -54,6 +61,7 @@ export function ProgressBar({ done, total, label = true }: { done: number; total
 }
 
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+const DOCS_WORD: Record<string, string> = { venue: 'venue documents', bus: 'transporter documents', facilitator: 'facilitator documents', trainer: "trainer's PO" };
 
 export default function DealChecklist({
   deal, checklist, quotes, viewer, onCreateQuotation, onOpenQuotations, grantBlock = '', part, hideProgress,
@@ -76,6 +84,7 @@ export default function DealChecklist({
   const [arranging, setArranging] = useState(false);
   const [newTask, setNewTask] = useState('');
   const editable = viewer.role !== 'rep';
+  const money = editable && part !== 'after';   // costs, vendors and receipts: Admin and Management, before training
 
   // Everyone needs the lists: the venue and trainer names show on the checklist for reps too.
   useEffect(() => {
@@ -86,13 +95,23 @@ export default function DealChecklist({
     return () => subs.forEach(u => u());
   }, []);
 
-  // Files uploaded on this deal's steps (JD14, T3, Output assessment, ...).
+  // Files uploaded on this deal's steps (attendance, venue documents, PO, JD14, T3, Output assessment, ...).
   const [files, setFiles] = useState<ChecklistFile[]>([]);
   useEffect(() => onSnapshot(query(collection(db, 'checklist_files'), where('dealId', '==', deal.id)),
     s => setFiles(s.docs.map(d => ({ ...(d.data() as ChecklistFile), id: d.id }))), () => setFiles([])), [deal.id]);
   const filesOf = (t: ChecklistTask) => files.filter(f => f.taskId === t.id);
 
-  const allTasks: ChecklistTask[] = checklist?.tasks || [];
+  // Costs raised from the steps (money_out), their receipts, and the vendors: Admin and Management only.
+  const [outs, setOuts] = useState<MoneyOut[]>([]);
+  useEffect(() => {
+    if (!money) { setOuts([]); return; }
+    return onSnapshot(query(collection(db, 'money_out'), where('dealId', '==', deal.id)),
+      s => setOuts(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))), () => setOuts([]));
+  }, [deal.id, money]);
+  const receipts = useReceipts(money, deal.id);
+  const vendors = useVendors(money);
+
+  const allTasks: ChecklistTask[] = upgradeTasks(checklist?.tasks);
   const inPart = (t: { after?: boolean }) => !part || (part === 'after') === !!t.after;
   const tasks = applicableTasks(allTasks, deal.fundingType).filter(inPart);
   const { done, total } = progress(allTasks, deal.fundingType, part);
@@ -113,8 +132,22 @@ export default function DealChecklist({
     }
   };
 
+  // The 2026-10-20 steps (Bus, Facilitator, Output assessment QR) are added once to a won deal whose training
+  // hasn't ended yet. Trainings already over are left as they were ("Add new steps from the master list" adds them).
+  const added = useRef('');
+  const end = trainingEndDate(deal);
+  const ended = !!end && end < todayIso();
+  const missingNew = settings.tasks.filter(m => NEW_STEPS_2026_10_20.includes(m.id) && !m.retired && !allTasks.some(t => t.id === m.id));
+  useEffect(() => {
+    if (!editable || !checklist || ended || part === 'after' || !missingNew.length || added.current === deal.id) return;
+    added.current = deal.id;
+    save(withSteps(allTasks, missingNew), `New steps added: ${missingNew.map(m => m.label).join(', ')}`);
+  }, [editable, !!checklist, ended, missingNew.length, deal.id]);
+
   const patch = (id: string, changes: Partial<ChecklistTask>, action: string) =>
     save(allTasks.map(t => (t.id === id ? { ...t, ...changes } : t)), action);
+  const doneBy = () => ({ done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name });
+  const openAgain = { done: false, doneAt: '', doneById: '', doneByName: '' };
 
   const markDone = (t: ChecklistTask) => {
     const venue = t.kind === 'venue' ? effectiveVenue(t, quotes, venues) : null;
@@ -124,23 +157,33 @@ export default function DealChecklist({
     // A venue or trainer still coming from the quotation is saved on the checklist when ticked,
     // so later changes to the quotation don't change what Admin confirmed.
     const keep: Partial<ChecklistTask> = {};
-    if (venue?.from === 'quotation') Object.assign(keep, { venueId: venue.id, venueName: venue.name });
+    if (venue?.from === 'quotation' && !notNeeded(t)) Object.assign(keep, { venueId: venue.id, venueName: venue.name });
     if (trainer?.from === 'quotation') Object.assign(keep, { trainerId: trainer.id, trainerName: trainer.name });
-    return patch(t.id, { ...keep, done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name }, `${t.label}: done`);
+    return patch(t.id, { ...keep, ...doneBy() }, `${t.label}: done`);
   };
-  const undo = (t: ChecklistTask) => patch(t.id, { done: false, doneAt: '', doneById: '', doneByName: '' }, `${t.label}: reopened`);
+  const undo = (t: ChecklistTask) => patch(t.id, openAgain, `${t.label}: reopened`);
+
+  // "Needed for this training?" No = done ("Not needed"); Yes reopens it for the details.
+  const answerNeeded = (t: ChecklistTask, yes: boolean) =>
+    patch(t.id, yes ? { needed: true, ...openAgain } : { needed: false, ...doneBy() }, `${t.label}: ${yes ? 'needed' : 'not needed'}`);
+
+  // Materials: tick, add or remove lines. All ticked = done; unticking one reopens it.
+  const setItems = (t: ChecklistTask, items: MaterialItem[], action: string) => {
+    const all = items.length > 0 && items.every(i => i.done);
+    return patch(t.id, { items, ...(all && !t.done ? doneBy() : !all && t.done ? openAgain : {}) }, `${t.label}: ${action}${all && !t.done ? ', done' : !all && t.done ? ', reopened' : ''}`);
+  };
 
   // Uploading a file on a step with a drop box ticks it (Joel, 2026-10-19); deleting its last file reopens it.
-  const fileUploaded = (t: ChecklistTask, added: ChecklistFile[]) => {
-    const what = added.length === 1 ? `"${added[0].name}" uploaded` : `${added.length} files uploaded`;
+  const fileUploaded = (t: ChecklistTask, list: ChecklistFile[]) => {
+    const what = list.length === 1 ? `"${list[0].name}" uploaded` : `${list.length} files uploaded`;
     const now = allTasks.find(x => x.id === t.id);
     if (!now) return;
-    if (now.done) return save(allTasks, `${t.label}: ${what}`);
-    return patch(t.id, { done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name }, `${t.label}: ${what}, done`);
+    if (now.done || !hasFiles(t)) return save(allTasks, `${t.label}: ${what}`);
+    return patch(t.id, doneBy(), `${t.label}: ${what}, done`);
   };
   const lastFileRemoved = (t: ChecklistTask) => {
     const now = allTasks.find(x => x.id === t.id);
-    if (now?.done) return patch(t.id, { done: false, doneAt: '', doneById: '', doneByName: '' }, `${t.label}: last file deleted, reopened`);
+    if (now?.done && hasFiles(t)) return patch(t.id, openAgain, `${t.label}: last file deleted, reopened`);
     return save(allTasks, `${t.label}: file deleted`);
   };
 
@@ -171,8 +214,7 @@ export default function DealChecklist({
   };
 
   const missing = settings.tasks.filter(m => !m.retired && inPart(m) && !allTasks.some(t => t.id === m.id));
-  const addMissing = () =>
-    save([...allTasks, ...missing.map(m => ({ id: m.id, label: m.label, kind: m.kind, appliesTo: m.appliesTo, after: !!m.after, files: hasFiles(m), optional: isOptional(m), done: false }))], `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
+  const addMissing = () => save(withSteps(allTasks, missing), `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
   // Optional steps (Certificates) show last, except while arranging (the arrows move the saved order).
   const shown = arranging ? tasks : [...tasks.filter(t => !isOptional(t)), ...tasks.filter(t => isOptional(t))];
 
@@ -204,21 +246,28 @@ export default function DealChecklist({
     );
   }
 
+  const hintFor = (t: ChecklistTask): VendorHint | undefined => {
+    if (t.kind === 'trainer') { const p = effectiveTrainer(t, quotes, trainers); return { type: 'trainer', trainerId: p?.id || undefined, name: p?.name }; }
+    if (t.kind === 'venue') { const p = effectiveVenue(t, quotes, venues); return { type: 'venue', venueId: p?.id || undefined, name: p?.name }; }
+    return undefined;
+  };
+
   return (
     <div className="space-y-3">
       {!hideProgress && <ProgressBar done={done} total={total} />}
-      {!isHrdc(deal.fundingType) && allTasks.some(t => t.appliesTo === 'hrdc') && (
+      {!isHrdc(deal.fundingType) && allTasks.some(t => t.appliesTo === 'hrdc' && inPart(t)) && (
         <p className="text-sm text-ink-soft">HRDC-only steps are hidden because this deal isn't HRDC funded.</p>
       )}
 
       {tasks.length === 0 && <p className="text-[15px] text-ink-soft">No steps here for this deal.</p>}
       <ul className="space-y-2">
+        {part !== 'after' && !arranging && <QuotationRow quotes={quotes} onOpenQuotations={onOpenQuotations} onCreateQuotation={editable ? onCreateQuotation : undefined} />}
         {shown.map((t, i) => (
           <li key={t.id} className={`rounded-xl border px-3.5 py-3 ${t.done ? 'border-accent/25 bg-accent-soft/50' : 'border-line bg-white'}`}>
             <div className="flex items-start gap-3">
               {t.done ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-accent" /> : <Circle className="mt-0.5 h-5 w-5 shrink-0 text-ink-soft/50" />}
               <div className="min-w-0 flex-1">
-                <p className="font-semibold">{t.label}{t.after && !part && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">After training</span>}{isOptional(t) && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">Optional</span>}{t.oneOff && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">This deal only</span>}</p>
+                <p className="font-semibold">{t.label}{t.after && !part && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">After training</span>}{isOptional(t) && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">Optional</span>}{t.oneOff && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">This deal only</span>}{notNeeded(t) && <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">Not needed</span>}</p>
                 <TaskSummary t={t} venues={venues} trainers={trainers} quotes={quotes} withNote={!(editable && !t.done && !arranging)} />
                 {t.done && <p className="text-sm text-ink-soft">Done {formatDate(t.doneAt || '')} by {t.doneByName}</p>}
                 {t.kind === 'grant' && !t.done && grantBlock && <p className="mt-1 text-sm font-semibold text-attention">{grantBlock}</p>}
@@ -231,19 +280,56 @@ export default function DealChecklist({
                 </span>
               ) : editable && (
                 t.done
-                  ? <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => undo(t)}><Undo2 className="h-3.5 w-3.5" /> Undo</button>
-                  : !(hasFiles(t) && !filesOf(t).length) && <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => markDone(t)}><Check className="h-3.5 w-3.5" /> Done</button>
+                  ? <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => (notNeeded(t) ? answerNeeded(t, true) : undo(t))}><Undo2 className="h-3.5 w-3.5" /> {notNeeded(t) ? 'It is needed' : 'Undo'}</button>
+                  : !(hasFiles(t) && !filesOf(t).length) && t.kind !== 'materials' && !(asksNeeded(t) && t.needed === undefined) &&
+                    <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => markDone(t)}><Check className="h-3.5 w-3.5" /> Done</button>
               )}
             </div>
-            {hasFiles(t) && !arranging && (
+
+            {!arranging && (
               <div className="pl-8">
-                <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable}
-                  onUploaded={added => fileUploaded(t, added)} onLastRemoved={() => lastFileRemoved(t)} />
+                {/* "Needed for this training?" */}
+                {asksNeeded(t) && editable && !t.done && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium">Needed for this training?</span>
+                    {([true, false] as const).map(yes => (
+                      <button key={String(yes)} type="button" disabled={busy} aria-pressed={t.needed === yes} onClick={() => answerNeeded(t, yes)}
+                        className={`rounded-lg border px-3 py-1 text-sm font-semibold ${t.needed === yes ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{yes ? 'Yes' : 'No'}</button>
+                    ))}
+                  </div>
+                )}
+
+                {editable && !t.done && t.kind !== 'basic' && (
+                  <TaskFields t={t} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
+                    onPatch={(c, a) => patch(t.id, c, a)} />
+                )}
+
+                {/* Files: the drop box steps (attendance, QR, JD14...), plus documents on venue, bus, facilitator and the trainer's PO */}
+                {hasFiles(t) && (
+                  <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable}
+                    onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)} />
+                )}
+                {DOCS_WORD[t.kind] && (t.kind === 'trainer' || t.needed === true) && (
+                  <div className="mt-2">
+                    <p className="text-sm font-semibold">{t.kind === 'trainer' ? 'PO' : 'Documents'}</p>
+                    <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable} what={DOCS_WORD[t.kind]} ticks={false}
+                      onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)} />
+                  </div>
+                )}
+
+                {t.kind === 'materials' && (
+                  <MaterialsList t={t} busy={busy} editable={editable} onChange={(items, action) => setItems(t, items, action)} />
+                )}
+
+                {editable && !t.done && t.kind === 'basic' && (
+                  <TaskFields t={t} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
+                    onPatch={(c, a) => patch(t.id, c, a)} />
+                )}
+
+                {money && hasCosts(t) && !notNeeded(t) && (t.needed === true || !asksNeeded(t)) && (
+                  <StepCosts deal={deal} task={t} viewer={viewer} outs={outs} receipts={receipts} vendors={vendors} trainers={trainers} venues={venues} hint={hintFor(t)} />
+                )}
               </div>
-            )}
-            {editable && !t.done && !arranging && (
-              <TaskFields t={t} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
-                onPatch={(c, a) => patch(t.id, c, a)} onCreateQuotation={onCreateQuotation} onOpenQuotations={onOpenQuotations} />
             )}
           </li>
         ))}
@@ -275,19 +361,80 @@ export default function DealChecklist({
   );
 }
 
+// 1. Quotation: ticked by itself (Joel, 2026-10-20). A deal is won only after its quotation, so this is a reminder
+// of which quotation it was, not a step to do. Not counted in "X of Y".
+function QuotationRow({ quotes, onOpenQuotations, onCreateQuotation }: { quotes: any[]; onOpenQuotations?: () => void; onCreateQuotation?: () => void }) {
+  const sent = quotes.filter(q => q.status === 'sent');
+  const list = sent.length ? sent : quotes;
+  return (
+    <li className={`rounded-xl border px-3.5 py-3 ${quotes.length ? 'border-accent/25 bg-accent-soft/50' : 'border-line bg-white'}`}>
+      <div className="flex items-start gap-3">
+        {quotes.length ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-accent" /> : <Circle className="mt-0.5 h-5 w-5 shrink-0 text-ink-soft/50" />}
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">Quotation <span className="ml-1 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">Ticks itself</span></p>
+          <p className="text-sm text-ink-soft">
+            {quotes.length ? `${list.map(q => q.refNumber || q.id).join(', ')}${sent.length ? ` · sent ${formatDate(String(sent[0].sentAt || '').slice(0, 10))}` : ' · draft'}` : 'No quotation linked to this deal yet'}
+          </p>
+        </div>
+        {quotes.length > 0 && onOpenQuotations && <button type="button" className={`${btnSecondary} shrink-0 py-1.5`} onClick={onOpenQuotations}><FileText className="h-3.5 w-3.5" /> Open</button>}
+        {!quotes.length && onCreateQuotation && <button type="button" className={`${btnSecondary} shrink-0 py-1.5`} onClick={onCreateQuotation}><Plus className="h-3.5 w-3.5" /> Create</button>}
+      </div>
+    </li>
+  );
+}
+
+// 9. Materials: T-shirt, Banner, Print-out to start with; add, tick and remove lines.
+function MaterialsList({ t, busy, editable, onChange }: { t: ChecklistTask; busy: boolean; editable: boolean; onChange: (items: MaterialItem[], action: string) => void }) {
+  const items = materialItems(t);
+  const [text, setText] = useState('');
+  const add = (e: React.FormEvent) => {
+    e.preventDefault();
+    const label = text.trim();
+    if (!label) return;
+    setText('');
+    onChange([...items, { id: `m_${Date.now().toString(36)}`, label, done: false }], `"${label}" added to the list`);
+  };
+  return (
+    <div className="mt-2 space-y-2">
+      <ul className="divide-y divide-line rounded-lg border border-line bg-white">
+        {items.length === 0 && <li className="px-3 py-2 text-sm text-ink-soft">No items yet.</li>}
+        {items.map(i => (
+          <li key={i.id} className="flex items-center gap-2 px-3 py-1.5">
+            <label className="flex min-w-0 flex-1 items-center gap-2 text-[15px]">
+              <input type="checkbox" disabled={!editable || busy} checked={i.done} className="h-4 w-4 accent-[#0E6E62]"
+                onChange={e => onChange(items.map(x => (x.id === i.id ? { ...x, done: e.target.checked, at: e.target.checked ? todayIso() : '' } : x)), `${i.label} ${e.target.checked ? 'ticked' : 'unticked'}`)} />
+              <span className={`truncate ${i.done ? 'text-ink-soft line-through' : ''}`}>{i.label}</span>
+            </label>
+            {editable && (
+              <button type="button" disabled={busy} onClick={() => onChange(items.filter(x => x.id !== i.id), `"${i.label}" removed from the list`)}
+                className="rounded-md p-1 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove ${i.label}`}><X className="h-4 w-4" /></button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {editable && (
+        <form onSubmit={add} className="flex gap-2">
+          <input value={text} onChange={e => setText(e.target.value)} className={input} placeholder="Add an item, e.g. Lanyards" aria-label="New materials item" />
+          <button type="submit" disabled={busy || !text.trim()} className={btnSecondary}><Plus className="h-4 w-4" /> Add</button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 // One line of detail under each task title.
 function TaskSummary({ t, venues, trainers, quotes, withNote }: { t: ChecklistTask; venues: any[]; trainers: any[]; quotes: any[]; withNote: boolean }) {
   const bits: string[] = [];
-  if (t.kind === 'grant') {
-    if (t.grantAppliedDate) bits.push(`Applied ${formatDate(t.grantAppliedDate)}`);
-    if (t.grantNumber) bits.push(`Grant no. ${t.grantNumber}${t.grantApprovedDate ? `, approved ${formatDate(t.grantApprovedDate)}` : ''}`);
-  }
+  if (t.kind === 'grant' && t.grantNumber) bits.push(`Grant no. ${t.grantNumber}`);
   const fromQuote = (p: Picked) => (p.from === 'quotation' ? ' (from quotation)' : '');
-  const venue = t.kind === 'venue' ? effectiveVenue(t, quotes, venues) : null;
-  if (venue) bits.push(`${venue.name}${fromQuote(venue)}${t.venuePaid ? ', paid' : ', not paid yet'}`);
+  const venue = t.kind === 'venue' && !notNeeded(t) ? effectiveVenue(t, quotes, venues) : null;
+  if (venue) bits.push(`${venue.name}${fromQuote(venue)}`);
+  if (t.kind === 'bus' && t.needed && Number(t.busCount) > 0) bits.push(`${t.busCount} bus${Number(t.busCount) === 1 ? '' : 'es'}${Number(t.busSeats) > 0 ? ` × ${t.busSeats} seats` : ''}`);
+  if (t.kind === 'facilitator' && t.needed && Number(t.facilitatorCount) > 0) bits.push(`${t.facilitatorCount} facilitator${Number(t.facilitatorCount) === 1 ? '' : 's'}`);
+  if (asksNeeded(t) && t.needed === undefined) bits.push('Needed? Not answered yet');
   const trainer = t.kind === 'trainer' ? effectiveTrainer(t, quotes, trainers) : null;
   if (trainer) bits.push(`${trainer.name}${fromQuote(trainer)}`);
-  if (t.kind === 'quotation') bits.push(quotes.length ? `Quotation ${quotes.map(q => q.refNumber || q.id).join(', ')}` : 'No quotation linked yet');
+  if (t.kind === 'materials') { const items = materialItems(t); bits.push(`${items.filter(i => i.done).length} of ${items.length} ticked`); }
   if (withNote && t.note) bits.push(t.note);
   if (!bits.length) return null;
   return <p className="text-sm text-ink-soft">{bits.join(' · ')}</p>;
@@ -329,50 +476,47 @@ function ChosenBox({ id, busy, options, picked, fromQuote, what, onSave }: {
   );
 }
 
+// A number box that saves when you leave it.
+function NumberBox({ id, label, value, busy, onSave }: { id: string; label: string; value?: number; busy: boolean; onSave: (n: number) => void }) {
+  const [v, setV] = useState(value ? String(value) : '');
+  useEffect(() => setV(value ? String(value) : ''), [value]);
+  return (
+    <div>
+      <label className={small} htmlFor={id}>{label}</label>
+      <input id={id} inputMode="numeric" disabled={busy} value={v} onChange={e => setV(e.target.value.replace(/[^0-9]/g, ''))}
+        onBlur={() => Number(v || 0) !== Number(value || 0) && onSave(Number(v || 0))} className={input} />
+    </div>
+  );
+}
+
 // The inputs each kind of task needs before it can be ticked.
-function TaskFields({ t, busy, venues, trainers, quotes, onPatch, onCreateQuotation, onOpenQuotations, programmeId }: {
+function TaskFields({ t, busy, venues, trainers, quotes, onPatch, programmeId }: {
   t: ChecklistTask; busy: boolean; venues: any[]; trainers: any[]; quotes: any[]; programmeId?: string;
   onPatch: (c: Partial<ChecklistTask>, action: string) => void;
-  onCreateQuotation?: () => void; onOpenQuotations?: () => void;
 }) {
   const [note, setNote] = useState(t.note || '');
-  const [grantNo, setGrantNo] = useState(t.grantNumber || '');
   useEffect(() => setNote(t.note || ''), [t.note]);
-  useEffect(() => setGrantNo(t.grantNumber || ''), [t.grantNumber]);
-  const small = 'mb-1 block text-sm font-medium text-ink-soft';
+  const waiting = asksNeeded(t) && t.needed !== true;   // not answered yet (No = done, so not here)
 
   return (
-    <div className="mt-3 space-y-3 pl-8">
-      {t.kind === 'grant' && (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div>
-            <label className={small} htmlFor={`ga-${t.id}`}>Applied on</label>
-            <input id={`ga-${t.id}`} type="date" disabled={busy} value={t.grantAppliedDate || ''} onChange={e => onPatch({ grantAppliedDate: e.target.value }, `${t.label}: applied date set`)} className={input} />
-          </div>
-          <div>
-            <label className={small} htmlFor={`gn-${t.id}`}>Grant number</label>
-            <input id={`gn-${t.id}`} disabled={busy} value={grantNo} onChange={e => setGrantNo(e.target.value)}
-              onBlur={() => grantNo.trim() !== (t.grantNumber || '') && onPatch({ grantNumber: grantNo.trim(), grantApprovedDate: t.grantApprovedDate || (grantNo.trim() ? todayIso() : '') }, `${t.label}: grant number saved`)}
-              className={input} placeholder="Once approved" />
-          </div>
-          <div>
-            <label className={small} htmlFor={`gd-${t.id}`}>Approved on</label>
-            <input id={`gd-${t.id}`} type="date" disabled={busy} value={t.grantApprovedDate || ''} onChange={e => onPatch({ grantApprovedDate: e.target.value }, `${t.label}: approved date set`)} className={input} />
-          </div>
+    <div className="mt-3 space-y-3">
+      {t.kind === 'venue' && !waiting && (
+        <div>
+          <label className={small} htmlFor={`v-${t.id}`}>Venue</label>
+          <ChosenBox id={`v-${t.id}`} busy={busy} options={nameOptions(venues)} picked={effectiveVenue(t, quotes, venues)}
+            fromQuote={effectiveVenue(undefined, quotes, venues)} what="venue"
+            onSave={(v, action) => onPatch({ venueId: v.id, venueName: v.text }, `${t.label}: ${action}`)} />
         </div>
       )}
-      {t.kind === 'venue' && (
-        <div className="grid items-end gap-3 sm:grid-cols-[1fr_auto]">
-          <div>
-            <label className={small} htmlFor={`v-${t.id}`}>Venue</label>
-            <ChosenBox id={`v-${t.id}`} busy={busy} options={nameOptions(venues)} picked={effectiveVenue(t, quotes, venues)}
-              fromQuote={effectiveVenue(undefined, quotes, venues)} what="venue"
-              onSave={(v, action) => onPatch({ venueId: v.id, venueName: v.text }, `${t.label}: ${action}`)} />
-          </div>
-          <label className="flex items-center gap-2 pb-2 text-[15px]">
-            <input type="checkbox" disabled={busy} checked={!!t.venuePaid} onChange={e => onPatch({ venuePaid: e.target.checked }, `${t.label}: ${e.target.checked ? 'marked paid' : 'marked not paid'}`)} className="h-4 w-4 accent-[#0E6E62]" />
-            Venue paid
-          </label>
+      {t.kind === 'bus' && !waiting && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <NumberBox id={`bc-${t.id}`} label="How many buses" value={t.busCount} busy={busy} onSave={n => onPatch({ busCount: n }, `${t.label}: ${n} bus${n === 1 ? '' : 'es'}`)} />
+          <NumberBox id={`bs-${t.id}`} label="Seats per bus" value={t.busSeats} busy={busy} onSave={n => onPatch({ busSeats: n }, `${t.label}: ${n} seats per bus`)} />
+        </div>
+      )}
+      {t.kind === 'facilitator' && !waiting && (
+        <div className="sm:w-1/2">
+          <NumberBox id={`fc-${t.id}`} label="How many facilitators" value={t.facilitatorCount} busy={busy} onSave={n => onPatch({ facilitatorCount: n }, `${t.label}: ${n} facilitator${n === 1 ? '' : 's'}`)} />
         </div>
       )}
       {t.kind === 'trainer' && (
@@ -383,14 +527,10 @@ function TaskFields({ t, busy, venues, trainers, quotes, onPatch, onCreateQuotat
             onSave={(v, action) => onPatch({ trainerId: v.id, trainerName: v.text }, `${t.label}: ${action}`)} />
         </div>
       )}
-      {t.kind === 'quotation' && (onCreateQuotation || (onOpenQuotations && quotes.length > 0)) && (
-        <div className="flex flex-wrap gap-2">
-          {quotes.length > 0 && onOpenQuotations && <button type="button" className={btnSecondary} onClick={onOpenQuotations}><FileText className="h-4 w-4" /> Open quotations</button>}
-          {onCreateQuotation && <button type="button" className={btnSecondary} onClick={onCreateQuotation}><Plus className="h-4 w-4" /> Create quotation</button>}
-        </div>
+      {!waiting && (
+        <input disabled={busy} value={note} onChange={e => setNote(e.target.value)} onBlur={() => note.trim() !== (t.note || '') && onPatch({ note: note.trim() }, `${t.label}: note updated`)}
+          className={input} placeholder="Note (optional)" aria-label={`Note for ${t.label}`} />
       )}
-      <input disabled={busy} value={note} onChange={e => setNote(e.target.value)} onBlur={() => note.trim() !== (t.note || '') && onPatch({ note: note.trim() }, `${t.label}: note updated`)}
-        className={input} placeholder="Note (optional), e.g. 18 of 20 confirmed" aria-label={`Note for ${t.label}`} />
     </div>
   );
 }

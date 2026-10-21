@@ -63,7 +63,7 @@ export function dealLines(args: {
         afterDeduct: hrdc ? Math.round((Number(m.amount) || 0) * (1 - settings.hrdcDeductionPct / 100) * 100) / 100 : Number(m.amount) || 0,
         afterTax: null,
         paidDate: isPaid(m) ? m.paidDate! : '', paidNote: '', paidAmount: isPaid(m) && Number.isFinite(Number(m.paidAmount)) ? Number(m.paidAmount) : null,
-        trainingFee: row ? Math.round(row.income * 100) / 100 : null, trainer: '', trainerCost: null, commission: null, management: null,
+        trainingFee: row ? Math.round(row.income * 100) / 100 : null, trainer: '', trainerCost: null, commission: row ? Math.round(row.commission * 100) / 100 : null, management: null,
         otherFee: null, otherFeeLabel: '', venueCost: null, transport: null, facilitators: null,
         grossProfit: row ? Math.round(row.profit * 100) / 100 : null, margin: row ? Math.round(row.margin * 100) / 100 : null,
         remarks: hrdc ? 'HRDC claim' : 'Client invoice',

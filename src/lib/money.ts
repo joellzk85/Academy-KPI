@@ -14,6 +14,9 @@ export type OutTiming = 'before' | 'after';
 
 export const OUT_CATEGORIES = ['Trainer', 'Venue', 'Hotel', 'Bus', 'Materials', 'Facilitator', 'Commission', 'Staff claim', 'Other'];
 
+// When a training's payment is due (Joel, 2026-10-20: "pre training payment tick, post training payment tick").
+export const TIMING_LABELS: Record<OutTiming, string> = { before: 'Pre-training', after: 'Post-training' };
+
 // Company payments: requests not tied to a training (Joel, 2026-10-18). Stored in money_out
 // with an empty dealId and kind 'company', so they follow the same approval rules.
 export const COMPANY_CATEGORIES = ['Office', 'Rental', 'Utilities', 'Marketing', 'Equipment', 'Software and subscriptions', 'Travel', 'Staff claim', 'Other'];
@@ -81,6 +84,11 @@ export interface MoneyOut {
   // Link for accounts (Joel, 2026-10-20): accounts open it without logging in and click "Payment made".
   accountsLink?: { token: string; at: string; byName: string } | null;
   paidAt?: string;         // exact time accounts clicked "Payment made" (ISO); with an empty paidById
+  // Raised from a deal's before-training checklist (2026-10-20): the step it belongs to and the vendor (lib/vendors.ts).
+  checklistTaskId?: string;
+  vendorId?: string;
+  // On a payment summary sent to accounts (payment_links kind 'batch'): the summary's link token.
+  summaryToken?: string;
 }
 
 // PR-YYYYMMDD-NNNN, from the request date and the record's id (fixed, so it never changes).
@@ -108,10 +116,11 @@ export interface MoneySettings {
   overdueDays: number;                 // invoice or claim unpaid this long = overdue
   claimDeadlineDays: number | null;    // days after training to submit the HRDC claim (blank = no deadline countdown)
   claimReminderDays: number;           // claim still not submitted this many days after training = red
+  commissionPct: number;               // sales person's commission: % of the selling price before SST and HRDC's % (Joel, 2026-10-20: 3)
 }
 
 // HRD Corp allows 6 months to claim (Joel, 2026-10-16); he wants a red reminder after 14 days.
-export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14 };
+export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14, commissionPct: 3 };
 
 export function readMoneySettings(data: any): MoneySettings {
   const num = (v: any, d: number) => (Number.isFinite(Number(v)) && Number(v) >= 0 && v !== '' && v !== null ? Number(v) : d);
@@ -122,6 +131,7 @@ export function readMoneySettings(data: any): MoneySettings {
     claimDeadlineDays: data?.claimDeadlineDays === undefined ? DEFAULT_MONEY_SETTINGS.claimDeadlineDays
       : data.claimDeadlineDays === null || data.claimDeadlineDays === '' ? null : num(data.claimDeadlineDays, 0),
     claimReminderDays: num(data?.claimReminderDays, DEFAULT_MONEY_SETTINGS.claimReminderDays),
+    commissionPct: num(data?.commissionPct, DEFAULT_MONEY_SETTINGS.commissionPct),
   };
 }
 

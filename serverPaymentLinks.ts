@@ -10,10 +10,12 @@
 
 import type { Express, Request } from 'express';
 import crypto from 'crypto';
+import type { Firestore } from 'firebase-admin/firestore';
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import { addDealHistory } from './serverDocLinks';
 import { isLinkToken } from './src/lib/docLinks';
 import { ACCOUNTS_PAID_BY, paymentRef } from './src/lib/money';
+import { buildSummary, summaryRef } from './src/lib/paymentSummary';
 import { COMPANY } from './src/lib/company';
 
 const hits = new Map<string, { n: number; since: number }>();
@@ -52,6 +54,7 @@ async function openLink(token: string) {
   const link: any = (await ref.get()).data();
   if (!link) throw new UserError(404, 'link-not-found', gone);
   if (link.status !== 'open') throw new UserError(410, 'link-stopped', `This payment link is no longer active. Please contact NEXT Academy (${COMPANY.phone}).`);
+  if (link.kind === 'batch') return { db, link, outRef: db.collection('money_out').doc('_batch'), o: null as any };  // a summary: see payBatch
   const outRef = db.collection('money_out').doc(link.moneyOutId);
   const o: any = (await outRef.get()).data();
   if (!o || o.dealDeleted) throw new UserError(410, 'payment-gone', `This payment request was cancelled. Please contact NEXT Academy (${COMPANY.phone}).`);
@@ -59,6 +62,8 @@ async function openLink(token: string) {
 }
 
 export function registerPaymentLinkRoutes(app: Express) {
+  registerBatchRoutes(app);
+
   // Make the link (or give back the one the request already has).
   app.post('/api/pay-link/create', route(async req => {
     const caller = await staffFrom(req);
@@ -91,6 +96,13 @@ export function registerPaymentLinkRoutes(app: Express) {
     if (!link) throw new UserError(404, 'link-not-found', 'That link was not found.');
     const byName = String((await db.collection('team').doc(caller.memberId).get()).data()?.name || '');
     await ref.update({ status: 'stopped', stoppedAt: Date.now(), stoppedByName: byName });
+    if (link.kind === 'batch') {
+      const batch = db.batch();
+      const docs = await Promise.all((link.moneyOutIds || []).map((id: string) => db.collection('money_out').doc(id).get()));
+      docs.forEach(d => { if (d.exists && (d.data() as any).summaryToken === token) batch.update(d.ref, { summaryToken: '' }); });
+      await batch.commit();
+      return {};
+    }
     const outRef = db.collection('money_out').doc(link.moneyOutId);
     const o: any = (await outRef.get()).data();
     if (o?.accountsLink?.token === token) await outRef.update({ accountsLink: null });
@@ -100,15 +112,19 @@ export function registerPaymentLinkRoutes(app: Express) {
   // What accounts see.
   app.post('/api/pay-link/get', route(async req => {
     slowDown(req);
-    const { link, o } = await openLink(String(req.body?.token || ''));
+    const token = String(req.body?.token || '');
+    const { db, link, o } = await openLink(token);
+    if (link.kind === 'batch') return publicBatch(db, token, link);
     return publicPayment(link.moneyOutId, o, link.forText || '');
   }));
 
   // Accounts click "Payment made". Only an approved request can be paid (same rule as in the CRM).
   app.post('/api/pay-link/paid', route(async req => {
     slowDown(req);
-    const { db, link, outRef } = await openLink(String(req.body?.token || ''));
+    const token = String(req.body?.token || '');
+    const { db, link, outRef } = await openLink(token);
     const paidRef = String(req.body?.ref || '').trim().slice(0, 80);
+    if (link.kind === 'batch') return payBatch(db, token, link, req.body?.ids, paidRef);
     const now = new Date().toISOString();
     const result = await db.runTransaction(async tx => {
       const o: any = (await tx.get(outRef)).data();
@@ -125,5 +141,90 @@ export function registerPaymentLinkRoutes(app: Express) {
         `Payment made: ${result.o.category} · ${result.o.payee} (${money(result.o.amount)})${paidRef ? `, ref ${paidRef}` : ''}`);
     }
     return publicPayment(link.moneyOutId, result.o, link.forText || '');
+  }));
+}
+
+// ---------- Payment summary for accounts (2026-10-20) ----------
+// Admin work → Money → "Payment summary for accounts": several approved requests on one link, grouped by vendor with
+// their bank details (vendors). payment_links/{token}: { kind: 'batch', moneyOutIds, status, createdAt, byId, byName }.
+// Each request keeps summaryToken so the CRM shows it was sent. Accounts click "Payment made" per vendor (ids).
+
+const dayText = (iso: string) => {
+  const d = /^\d{4}-\d{2}-\d{2}/.test(iso || '') ? new Date(iso.slice(0, 10) + 'T00:00:00') : null;
+  return d ? d.toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+};
+
+async function loadBatch(db: Firestore, link: any) {
+  const ids: string[] = (link.moneyOutIds || []).slice(0, 200);
+  const docs = await Promise.all(ids.map(id => db.collection('money_out').doc(id).get()));
+  const outs: any[] = docs.filter(d => d.exists).map(d => ({ ...(d.data() as any), id: d.id })).filter(o => !o.dealDeleted);
+  const vendorIds = [...new Set(outs.map(o => o.vendorId).filter(Boolean))] as string[];
+  const vendors = (await Promise.all(vendorIds.map(id => db.collection('vendors').doc(id).get()))).filter(d => d.exists).map(d => ({ ...(d.data() as any), id: d.id }));
+  const dealIds = [...new Set(outs.map(o => o.dealId).filter(Boolean))] as string[];
+  const deals = new Map((await Promise.all(dealIds.map(id => db.collection('pipelines').doc(id).get()))).filter(d => d.exists).map(d => [d.id, d.data() as any]));
+  const clientIds = [...new Set([...deals.values()].map(d => d.clientId).filter(Boolean))] as string[];
+  const clients = new Map((await Promise.all(clientIds.map(id => db.collection('clients').doc(id).get()))).filter(d => d.exists).map(d => [d.id, d.data() as any]));
+  const forText = (o: any) => {
+    if (!o.dealId) return 'Company payment';
+    const d = deals.get(o.dealId);
+    if (!d) return 'Training';
+    const client = clients.get(d.clientId)?.companyName || d.client || 'Client';
+    return [client, d.courseName, dayText(d.trainingDate)].filter(Boolean).join(' · ');
+  };
+  return { outs, summary: buildSummary(outs, vendors, forText) };
+}
+
+async function publicBatch(db: Firestore, token: string, link: any) {
+  const { summary } = await loadBatch(db, link);
+  // Only what the summary shows: no deal, client, vendor or people ids.
+  const groups = summary.groups.map((g, i) => ({ ...g, key: `g${i}` }));
+  return { batch: true, ref: summaryRef(link.createdAt, token), byName: link.byName || '', createdAt: new Date(link.createdAt || Date.now()).toISOString(), summary: { ...summary, groups } };
+}
+
+async function payBatch(db: Firestore, token: string, link: any, rawIds: any, paidRef: string) {
+  const { summary } = await loadBatch(db, link);
+  const groupKey = String(Array.isArray(rawIds) ? rawIds[0] : rawIds || '');
+  const group = summary.groups.find((_, i) => `g${i}` === groupKey);
+  if (!group) throw new UserError(404, 'not-found', 'That vendor is not on this summary. Reload the page.');
+  const now = new Date().toISOString();
+  const paid: any[] = [];
+  for (const line of group.lines) {
+    const ref = db.collection('money_out').doc(line.id);
+    const o: any = await db.runTransaction(async tx => {
+      const cur: any = (await tx.get(ref)).data();
+      if (!cur || cur.status !== 'approved') return null;          // pending, rejected or already paid: left alone
+      const patch = { status: 'paid', paidDate: todayMY(), paidAt: now, paidRef, paidById: '', paidByName: ACCOUNTS_PAID_BY };
+      tx.update(ref, patch);
+      return { ...cur, ...patch };
+    });
+    if (o) paid.push(o);
+  }
+  if (!paid.length && group.lines.some(l => l.status !== 'paid')) {
+    throw new UserError(409, 'not-approved', 'These payments are not approved any more. Please don\'t pay them, and contact NEXT Academy.');
+  }
+  for (const o of paid) {
+    if (o.dealId) await addDealHistory(db, o.dealId, '', ACCOUNTS_PAID_BY, `Payment made: ${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${money(o.amount)})${paidRef ? `, ref ${paidRef}` : ''}`);
+  }
+  return publicBatch(db, token, link);
+}
+
+function registerBatchRoutes(app: Express) {
+  // Make the link for a summary of approved requests.
+  app.post('/api/pay-batch/create', route(async req => {
+    const caller = await staffFrom(req);
+    const ids = Array.isArray(req.body?.ids) ? [...new Set(req.body.ids.map((x: any) => String(x)).filter(Boolean))] as string[] : [];
+    if (!ids.length) throw new UserError(400, 'nothing', 'Tick at least one payment.');
+    if (ids.length > 200) throw new UserError(400, 'too-many', 'A summary can have up to 200 payments.');
+    const { db } = admin();
+    const docs = await Promise.all(ids.map(id => db.collection('money_out').doc(id).get()));
+    const bad = docs.find(d => !d.exists || (d.data() as any).dealDeleted || (d.data() as any).status !== 'approved');
+    if (bad) throw new UserError(409, 'not-approved', 'Only approved payments that are not paid yet can go on a summary. Reload and try again.');
+    const byName = String((await db.collection('team').doc(caller.memberId).get()).data()?.name || '');
+    const token = crypto.randomBytes(16).toString('hex');
+    await db.collection('payment_links').doc(token).set({ kind: 'batch', moneyOutIds: ids, status: 'open', createdAt: Date.now(), byId: caller.memberId, byName });
+    const batch = db.batch();
+    docs.forEach(d => batch.update(d.ref, { summaryToken: token }));
+    await batch.commit();
+    return { token };
   }));
 }

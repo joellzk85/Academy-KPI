@@ -119,8 +119,8 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
         <Tile label="Trainings" value={String(totals.count)} sub={`${totals.done} done · ${totals.upcoming} upcoming`} />
         <Tile label="Income" value={formatRM(totals.income)}
           sub={totals.estimated ? `incl. ${formatRM(totals.estimated)} estimated (not invoiced yet)` : 'All invoiced or claimed'} />
-        <Tile label="SST, HRDC % and costs" value={formatRM(totals.sst + totals.hrdcFee + totals.costs)}
-          sub={`SST ${formatRM(totals.sst)} · HRDC ${formatRM(totals.hrdcFee)} · costs ${formatRM(totals.costs)}`} />
+        <Tile label="SST, HRDC %, commission and costs" value={formatRM(totals.sst + totals.hrdcFee + totals.commission + totals.costs)}
+          sub={`SST ${formatRM(totals.sst)} · HRDC ${formatRM(totals.hrdcFee)} · commission ${formatRM(totals.commission)} · costs ${formatRM(totals.costs)}`} />
         <Tile label="Profit" value={formatRM(totals.profit)} sub={`${Math.round(totals.margin)}% margin`} tone={totals.profit < 0 ? 'danger' : 'accent'} />
       </div>
       <p className="-mt-2 text-sm text-ink-soft">
@@ -134,7 +134,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
           <h3 className="mb-1 font-bold">Month by month, {periodLabel}</h3>
           <p className="mb-3 text-sm text-ink-soft">Click a month to see only its trainings.</p>
           <div className="-mx-5 overflow-x-auto px-5">
-            <table className="w-full min-w-[46rem] text-[15px]">
+            <table className="w-full min-w-[52rem] text-[15px]">
               <thead>
                 <tr className="border-b border-line text-left text-sm text-ink-soft">
                   <th className="py-2 pr-3 font-semibold">Month</th>
@@ -142,6 +142,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                   <th className="py-2 pr-3 text-right font-semibold">Income</th>
                   <th className="py-2 pr-3 text-right font-semibold">SST</th>
                   <th className="py-2 pr-3 text-right font-semibold">HRDC %</th>
+                  <th className="py-2 pr-3 text-right font-semibold">Commission</th>
                   <th className="py-2 pr-3 text-right font-semibold">Costs</th>
                   <th className="py-2 pr-3 text-right font-semibold">Profit</th>
                   <th className="py-2 text-right font-semibold">Margin</th>
@@ -155,6 +156,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{t.count ? formatRM(t.income) : '—'}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.sst ? `− ${formatRM(t.sst)}` : '—'}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.hrdcFee ? `− ${formatRM(t.hrdcFee)}` : '—'}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.commission ? `− ${formatRM(t.commission)}` : '—'}</td>
                     <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums text-ink-soft">{t.costs ? `− ${formatRM(t.costs)}` : '—'}</td>
                     <td className={`whitespace-nowrap py-2 pr-3 text-right font-bold tabular-nums ${t.profit < 0 ? 'text-danger' : ''}`}>{t.count ? formatRM(t.profit) : '—'}</td>
                     <td className="whitespace-nowrap py-2 text-right tabular-nums text-ink-soft">{t.income > 0 ? `${Math.round(t.margin)}%` : '—'}</td>
@@ -168,6 +170,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{formatRM(totals.income)}</td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.sst ? `− ${formatRM(totals.sst)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.hrdcFee ? `− ${formatRM(totals.hrdcFee)}` : '—'}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.commission ? `− ${formatRM(totals.commission)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{totals.costs ? `− ${formatRM(totals.costs)}` : '—'}</td>
                   <td className={`whitespace-nowrap py-2 pr-3 text-right tabular-nums ${totals.profit < 0 ? 'text-danger' : ''}`}>{formatRM(totals.profit)}</td>
                   <td className="whitespace-nowrap py-2 text-right tabular-nums">{totals.income > 0 ? `${Math.round(totals.margin)}%` : '—'}</td>
@@ -183,7 +186,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
         <h3 className="mb-3 font-bold">Trainings in {periodLabel} ({shown.length})</h3>
         {shown.length === 0 ? <p className="text-ink-soft">No won deals with a training date in {periodLabel}{show !== 'all' ? ' for this filter' : ''}.</p> : (
           <div className="-mx-5 overflow-x-auto px-5">
-            <table className="w-full min-w-[62rem] text-[15px]">
+            <table className="w-full min-w-[68rem] text-[15px]">
               <thead>
                 <tr className="border-b border-line text-left text-sm text-ink-soft">
                   <th className="w-8 py-2 pr-2">
@@ -194,6 +197,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                   <th className="py-2 pr-3 text-right font-semibold">Income</th>
                   <th className="py-2 pr-3 text-right font-semibold">SST</th>
                   <th className="py-2 pr-3 text-right font-semibold">HRDC %</th>
+                  <th className="py-2 pr-3 text-right font-semibold">Commission</th>
                   <th className="py-2 pr-3 text-right font-semibold">Costs</th>
                   <th className="py-2 pr-3 text-right font-semibold">Profit</th>
                   <th className="py-2 pr-3 text-right font-semibold">Margin</th>
@@ -227,6 +231,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                         {r.sst ? `− ${formatRM(r.sst)}` : '—'}{r.sstTyped && <span className="block text-xs">typed</span>}
                       </td>
                       <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-ink-soft">{r.hrdcFee ? `− ${formatRM(r.hrdcFee)}` : '—'}</td>
+                      <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-ink-soft">{r.commission ? `− ${formatRM(r.commission)}` : '—'}</td>
                       <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums text-ink-soft">{r.costs ? `− ${formatRM(r.costs)}` : '—'}</td>
                       <td className={`whitespace-nowrap py-2.5 pr-3 text-right font-bold tabular-nums ${r.profit < 0 ? 'text-danger' : ''}`}>{formatRM(r.profit)}</td>
                       <td className={`whitespace-nowrap py-2.5 pr-3 text-right tabular-nums ${r.profit < 0 ? 'text-danger' : 'text-ink-soft'}`}>{r.income > 0 ? `${Math.round(r.margin)}%` : '—'}</td>
@@ -236,7 +241,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                       </td>
                     </tr>
                     {openId === r.deal.id && (
-                      <tr><td colSpan={10} className="bg-surface px-4 py-4"><Breakdown r={r} viewer={viewer} /></td></tr>
+                      <tr><td colSpan={11} className="bg-surface px-4 py-4"><Breakdown r={r} viewer={viewer} personName={personName} /></td></tr>
                     )}
                   </React.Fragment>
                 ))}
@@ -247,6 +252,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{formatRM(totals.income)}</td>
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.sst ? `− ${formatRM(totals.sst)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.hrdcFee ? `− ${formatRM(totals.hrdcFee)}` : '—'}</td>
+                  <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.commission ? `− ${formatRM(totals.commission)}` : '—'}</td>
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.costs ? `− ${formatRM(totals.costs)}` : '—'}</td>
                   <td className={`whitespace-nowrap py-2.5 pr-3 text-right tabular-nums ${totals.profit < 0 ? 'text-danger' : ''}`}>{formatRM(totals.profit)}</td>
                   <td className="whitespace-nowrap py-2.5 pr-3 text-right tabular-nums">{totals.income > 0 ? `${Math.round(totals.margin)}%` : '—'}</td>
@@ -257,7 +263,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
           </div>
         )}
         <p className="mt-3 text-sm text-ink-soft">
-          Profit = income − SST − HRDC's {settings.hrdcDeductionPct}% (and anything else HRDC didn't pay) − approved and paid costs.
+          Profit = income − SST − HRDC's {settings.hrdcDeductionPct}% (and anything else HRDC didn't pay) − the sales person's {settings.commissionPct}% commission (on the price before SST and HRDC's %) − approved and paid costs.
           SST is worked out automatically when the deal's quotation adds SST (normally 8%), or you can type the amount in a line's details.
           "Estimate" means no invoice or claim is recorded yet, so the deal value is used. Click a line to see the details, or tick lines to add them up.
           Invoices, claims and costs are added in the deal's Money section (Admin work).
@@ -284,6 +290,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
           <span>Income <strong className="tabular-nums">{formatRM(tickedTotals.income)}</strong></span>
           <span className="text-ink-soft">SST <span className="tabular-nums">− {formatRM(tickedTotals.sst)}</span></span>
           <span className="text-ink-soft">HRDC <span className="tabular-nums">− {formatRM(tickedTotals.hrdcFee)}</span></span>
+          <span className="text-ink-soft">Commission <span className="tabular-nums">− {formatRM(tickedTotals.commission)}</span></span>
           <span className="text-ink-soft">Costs <span className="tabular-nums">− {formatRM(tickedTotals.costs)}</span></span>
           <span>Profit <strong className={`tabular-nums ${tickedTotals.profit < 0 ? 'text-danger' : 'text-accent'}`}>{formatRM(tickedTotals.profit)}</strong> <span className="text-ink-soft">({Math.round(tickedTotals.margin)}%)</span></span>
           {tickedTotals.estimated > 0 && <span className="text-sm text-attention">incl. {formatRM(tickedTotals.estimated)} estimated</span>}
@@ -295,7 +302,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
   );
 }
 
-function Breakdown({ r, viewer }: { r: ProjectRow; viewer: { id: string; name: string } }) {
+function Breakdown({ r, viewer, personName }: { r: ProjectRow; viewer: { id: string; name: string }; personName: (id: string) => string }) {
   const cats = costsByCategory(r.outs);
   const pending = r.outs.filter(o => o.status === 'pending');
   return (
@@ -319,6 +326,7 @@ function Breakdown({ r, viewer }: { r: ProjectRow; viewer: { id: string; name: s
         )}
         <p className="mt-2 text-ink-soft">Received {formatRM(r.received)} · still to come in {formatRM(r.toComeIn)}</p>
         <SstBox r={r} viewer={viewer} />
+        <p className="mt-2"><span className="font-semibold">Commission</span> {formatRM(r.commission)} <span className="text-ink-soft">({r.commissionPct}% of {formatRM(r.income - r.sst)}, the price before SST and HRDC's %; for {personName(r.commissionTo)})</span></p>
       </div>
       <div>
         <p className="mb-1 font-semibold">Costs (approved and paid)</p>
