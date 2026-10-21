@@ -264,6 +264,7 @@ export interface TbProposal {
   updatedAt?: string;
   fromTrainerDocId?: string;       // made from a trainer's own proposal in the portal (trainer_docs, lib/trainerDocs.ts)
   fromTrainerDocVersion?: number;  // which version of it we have
+  hideClientLogo?: boolean;        // the cover shows the client's logo (read live from clients/{id}.logoUrl) unless this is on
 }
 
 export const DEFAULT_HRDC_NOTE =
@@ -346,6 +347,7 @@ export interface ResolvedTb {
   eventDate: string;
   isHrdc: boolean;
   sections: TbSection[];       // in order, with the ones not shown left out
+  clientLogo?: string;         // the client's logo for the cover ('' = none, or switched off on this proposal)
 }
 
 const isHrdcDeal = (deal: any) => ['hrdc', 'hrdc_topup'].includes(deal?.fundingType);
@@ -380,6 +382,8 @@ export function resolveTb(p: TbProposal, s: TbSources): ResolvedTb {
   return {
     p: out, deal, client, ownerId, company: out.preparedForCompany || '',
     pax: out.pax || 0, eventDate: out.eventDate || '', isHrdc, sections,
+    // Always read live from the client record (never copied into the proposal), even after it's sent.
+    clientLogo: p.hideClientLogo ? '' : String(client?.logoUrl || ''),
   };
 }
 

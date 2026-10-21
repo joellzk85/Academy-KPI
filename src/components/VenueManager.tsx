@@ -12,6 +12,7 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
 import PanelResizer from './PanelResizer';
+import { useSearchPrefill } from './GlobalSearch';
 
 // Venues (redesigned 2026-10-17, like Clients and Trainers): one shared list, the same details as before.
 // Status is only Available / Under renovation: bookings show by themselves from the deals (Joel removed "Booked").
@@ -62,6 +63,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
   const [loaded, setLoaded] = useState(false);
 
   const [search, setSearch] = useState('');
+  useSearchPrefill('venues', setSearch);   // Global search opened a venue
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm());

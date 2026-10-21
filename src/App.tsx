@@ -56,6 +56,7 @@ import { runBackup } from './lib/backupApi';
 import { useFollowUpRules } from './lib/useFollowUpRules';
 import { linkedOnly, setLinkedTeam } from './lib/linked';
 import { SharedKind } from './lib/sharedInbox';
+import GlobalSearch, { SearchHit, setSearchPrefill } from './components/GlobalSearch';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -245,6 +246,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const [fileToOpen, setFileToOpen] = useState<{ kind: SharedKind; id: string } | null>(null);   // My home's "Shared with me"
   const [clientToOpen, setClientToOpen] = useState<{ repId: string; clientId: string } | null>(null);   // My home's "My follow-ups"
   const [dealToOpen, setDealToOpen] = useState<{ repId: string; dealId: string } | null>(null);   // Management → Team follow-ups
+  const [tabToOpen, setTabToOpen] = useState<{ repId: string; tab: string } | null>(null);   // Global search: Trainers / Venues
   const [selectedRepId, setSelectedRepId] = useState<string | null>(() => {
     const saved = localStorage.getItem('next_selected_rep_id') || null;
     // Everyone lands on My home after logging in.
@@ -791,6 +793,21 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     },
   };
 
+  // Global search: open the record found (deals, clients and files directly; trainers, venues and vendors
+  // open their list with the name in its search box).
+  const openSearchHit = (hit: SearchHit) => {
+    if (hit.kind === 'client') homeNav.openClient(hit.id);
+    else if (hit.kind === 'deal') homeNav.openDeal(hit.record);
+    else if (hit.kind === 'quotation' || hit.kind === 'outline' || hit.kind === 'teambuilding') homeNav.openFile(hit.kind, hit.id);
+    else if (hit.kind === 'vendor') { setSearchPrefill('vendors', hit.record?.displayName || hit.title); homeNav.openAdminWork('vendors'); }
+    else {
+      const tab = hit.kind === 'trainer' ? 'trainerList' : 'venue';
+      setSearchPrefill(hit.kind === 'trainer' ? 'trainers' : 'venues', hit.title);
+      setTabToOpen({ repId: currentMember.id, tab });
+      homeNav.openWorkspace(currentMember.id, tab);
+    }
+  };
+
   // Formatted date string
   const formattedDate = currentTime.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -846,6 +863,14 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
           {/* Active Session Badges & Real-time Dynamic Date & Time */}
           <div className="flex items-center gap-4 text-right">
+            <GlobalSearch
+              viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+              people={teamMembers.map(m => ({ id: m.id, name: m.name }))}
+              deals={pipelinesSync}
+              quotations={quotationsSync}
+              outlines={outlinesSync}
+              onOpen={openSearchHit}
+            />
             {/* Logged-in person + menu */}
             <div className="relative">
               <button
@@ -998,6 +1023,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 onMonthChange={handleMonthChange}
                 onOpenTeam={() => setManagementView('team')}
                 onOpenDeal={homeNav.openDeal}
+                viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                 pipelinesSync={pipelinesSync}
                 people={teamMembers.map(m => ({ id: m.id, name: m.name }))}
               />
@@ -1058,6 +1084,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                   onOpenClientHandled={() => setClientToOpen(null)}
                   openDealId={dealToOpen && dealToOpen.repId === selectedRep.id ? dealToOpen.dealId : null}
                   onOpenDealHandled={() => setDealToOpen(null)}
+                  openSubTab={tabToOpen && tabToOpen.repId === selectedRep.id ? tabToOpen.tab : null}
+                  onOpenSubTabHandled={() => setTabToOpen(null)}
                 />
               ) : (
                 <div className="text-center py-12 bg-white rounded-xl border border-slate-200">

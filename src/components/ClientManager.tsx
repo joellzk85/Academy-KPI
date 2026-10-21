@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  Building2, CheckCircle2, ChevronRight, Circle, Download, FileText, ListTodo, Loader2, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, Repeat2, Search, Trash2, X,
+  Building2, CheckCircle2, ChevronRight, Circle, Download, FileText, ImagePlus, ListTodo, Loader2, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, Repeat2, Search, Trash2, X,
 } from 'lucide-react';
 import { Representative, Client } from '../types';
 import { db, friendlyError } from '../lib/firebase';
@@ -16,7 +16,8 @@ import { Contact, clientContacts, mainContactFields, newContactId } from '../lib
 import { ProposalFile } from '../lib/proposals';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
-import { openProposalFile } from './ProposalFiles';
+import { openProposalFile, storageError } from './ProposalFiles';
+import { uploadPhoto } from './PhotoPicker';
 import {
   COLOUR_LABELS, ClientSummary, ClientTouchPoint, ContactColour, FILTER_LABELS, TOUCH_HOW_LABELS, TimelineEntry, TimelineFilter, TouchHow,
   agoText, clientDeals, clientQuotes, entryInFilter, newTouchPointId, summariseClient, taskAssignees, taskClientIds,
@@ -63,6 +64,7 @@ const select = 'rounded-lg border border-line bg-white px-3 py-2 text-sm text-in
 const emptyContact = (): Contact => ({ id: newContactId(), name: '', designation: '', phone: '', email: '' });
 const emptyForm = () => ({
   companyName: '', code: '', employerName: '', industry: '', address: '', hrdcRegistered: true,
+  logoUrl: '',   // optional company logo (2026-10-21), shown on teambuilding proposal covers
   contacts: [emptyContact()] as Contact[],
 });
 type Form = ReturnType<typeof emptyForm>;
@@ -228,6 +230,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
   const startEdit = (c: Client) => {
     setForm({
       companyName: c.companyName || '', code: c.code || '', employerName: c.employerName || '', industry: c.industry || '', address: c.address || '', hrdcRegistered: !!c.hrdcRegistered,
+      logoUrl: c.logoUrl || '',
       contacts: clientContacts(c).length ? clientContacts(c) : [emptyContact()],
     });
     setFormError(''); setDupId(null); setEditing(c.id);
@@ -258,6 +261,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
     // Notes have their own box on the client page (with who changed them last), so the form leaves them alone.
     const details = {
       companyName: name, code, employerName: form.employerName.trim(), industry: form.industry.trim(), address: form.address.trim(), hrdcRegistered: form.hrdcRegistered,
+      logoUrl: form.logoUrl || '',
       contacts, ...mainContactFields(contacts),
     };
     setBusy(true);
@@ -486,6 +490,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
                   <label className={label} htmlFor="c-address">Address <span className="font-normal text-ink-soft">(optional, printed on quotations)</span></label>
                   <textarea id="c-address" value={form.address} onChange={e => set({ address: e.target.value })} rows={3} className={`${input} resize-y`} />
                 </div>
+                <ClientLogoBox url={form.logoUrl || ''} onChange={logoUrl => set({ logoUrl })} me={viewer} />
               </fieldset>
 
               <fieldset className="space-y-3">
@@ -950,5 +955,46 @@ function Timeline(props: React.ComponentProps<typeof ClientPanel>) {
       )}
       <p className="mt-2 text-sm text-ink-soft">Solid entries count as contact with the client; dashed ones (drafts, booked appointments, To-dos, lost deals, proposals opened by the client) don't.</p>
     </section>
+  );
+}
+
+// The client's logo (2026-10-21): optional, shown "prepared for" style on teambuilding proposal covers (read live,
+// never copied into the proposal). Saved with the client when the form is saved. A PNG keeps its see-through
+// background (PhotoPicker.tsx uploadPhoto, folder "logos"). Remove only takes the link off; the file stays.
+function ClientLogoBox({ url, onChange, me }: { url: string; onChange: (url: string) => void; me: { id: string; name: string } }) {
+  const ref = React.useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [error, setError] = useState('');
+  const pick = async (f?: File | null) => {
+    if (!f) return;
+    setError(''); setBusy(0);
+    try {
+      onChange(await uploadPhoto(f, 'logos', me, setBusy));
+    } catch (e: any) {
+      setError(e?.code ? storageError(e) : String(e?.message || e));
+    } finally {
+      setBusy(null);
+      if (ref.current) ref.current.value = '';
+    }
+  };
+  return (
+    <div>
+      <p className={label}>Company logo <span className="font-normal text-ink-soft">(optional, shown on teambuilding proposal covers)</span></p>
+      <div className="flex flex-wrap items-center gap-3">
+        {url
+          ? <img src={url} alt="Company logo" className="h-14 w-auto max-w-[10rem] rounded-lg border border-line bg-white object-contain p-1.5" />
+          : <span className="flex h-14 w-24 items-center justify-center rounded-lg border border-dashed border-line text-xs text-ink-soft">No logo</span>}
+        <button type="button" onClick={() => ref.current?.click()} disabled={busy !== null} className={btnSecondary}>
+          {busy !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+          {busy !== null ? `Uploading ${busy}%` : url ? 'Change logo' : 'Upload logo'}
+        </button>
+        {url && busy === null && (
+          <button type="button" onClick={() => onChange('')} className={`${btnSecondary} text-danger`}><X className="h-4 w-4" /> Remove</button>
+        )}
+        <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={e => pick(e.target.files?.[0])} />
+      </div>
+      <p className="mt-1 text-sm text-ink-soft">A PNG with a see-through background looks best. Saved when you save the client.</p>
+      {error && <p className="mt-1 text-sm text-danger">{error}</p>}
+    </div>
   );
 }

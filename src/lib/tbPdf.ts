@@ -22,6 +22,7 @@ function photoUrls(r: ResolvedTb): string[] {
   const p = r.p;
   return Array.from(new Set([
     p.coverPhoto || '',
+    r.clientLogo || '',
     ...(p.trainers || []).map(t => t.photo || ''),
     ...(p.activities || []).flatMap(a => a.photos || []),
     ...(p.venues || []).flatMap(v => v.photos || []),
@@ -40,7 +41,7 @@ async function withLocalPhotos(r: ResolvedTb): Promise<ResolvedTb> {
   p.trainers = (p.trainers || []).map((t: any) => ({ ...t, photo: sw(t.photo) }));
   p.activities = (p.activities || []).map((a: any) => ({ ...a, photos: (a.photos || []).slice(0, 1).map(sw) }));
   p.venues = (p.venues || []).map((v: any) => ({ ...v, photos: (v.photos || []).slice(0, 1).map(sw) }));
-  return { ...r, p };
+  return { ...r, p, clientLogo: sw(r.clientLogo) };
 }
 
 async function settle(host: HTMLElement) {

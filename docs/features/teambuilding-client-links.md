@@ -40,3 +40,7 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
   - **Rules need publishing:** `firestore.rules` (`proposal_views`).
   - Tested with a script (29 checks: cleaning per kind, caps, older pages, merging, summaries, Hot score, read depth, price focus, who sees what) and a temporary local page with a pretend server: the quotation link (no buttons, watermark, blur cover until clicked, Ctrl+P / Ctrl+S / right-click recorded and blocked, the stored visit), Management's panel and the three heatmap layers (mouse rest and clicks where they were made), phone width (no sideways scroll), and the teambuilding link (sections marked, package and group-size tries). **Live site only:** real visits reaching the server, the database rule, the heatmap's document from `/api/link-preview`, a real phone, the Snipping Tool.
 
+
+## Client logo on teambuilding proposals (2026-10-21)
+
+- The logo lives only on the client (`clients.logoUrl`, Clients → Edit → Company logo; `uploadPhoto` folder `logos`, PNG keeps its see-through background, up to 600px). The proposal reads it live (`resolveTb` → `clientLogo`); nothing is copied. Shows in the site's top bar (computer and tablet), as a "NEXT × client" badge on the cover and on the PDF cover. Per proposal: **Show client logo on the cover** (`hideClientLogo`, on by default). The `/p/` server route sends `clientLogo` only when shown. **Publish `storage.rules`** (`photos/logos`).

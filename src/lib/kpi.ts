@@ -218,3 +218,15 @@ export function monthLabel(month: string): string {
   if (!p) return month;
   return new Date(Number(p.slice(0, 4)), Number(p.slice(5, 7)) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 }
+
+// Traffic light for every KPI bar and ring (Joel, 2026-10-21): 0-35% red, 36-75% amber, 76% and up green.
+export type KpiLight = 'red' | 'amber' | 'green';
+export function kpiLight(pct: number): KpiLight {
+  const p = Math.round(pct);
+  return p >= 76 ? 'green' : p >= 36 ? 'amber' : 'red';
+}
+export const KPI_LIGHT_HEX: Record<KpiLight, string> = { red: '#DC2626', amber: '#F59E0B', green: '#16A34A' };
+export const KPI_LIGHT_BG: Record<KpiLight, string> = { red: 'bg-[#DC2626]', amber: 'bg-[#F59E0B]', green: 'bg-[#16A34A]' };
+export const KPI_LIGHT_BADGE: Record<KpiLight, string> = { red: 'bg-danger-soft text-danger', amber: 'bg-attention-soft text-attention', green: 'bg-[#E7F6EC] text-[#15803D]' };
+export const kpiBarClass = (pct: number) => KPI_LIGHT_BG[kpiLight(pct)];
+export const kpiHex = (pct: number) => KPI_LIGHT_HEX[kpiLight(pct)];

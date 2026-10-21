@@ -57,12 +57,13 @@ service firebase.storage {
     }
 
     // Photos for teambuilding proposals, activities, trainers and venues (2026-10-19): photos/{folder}/{id}.jpg.
+    // Client logos (2026-10-21): photos/logos/{id}.png (or .jpg), shown on teambuilding proposal covers.
     // Every member uploads (made smaller in the browser first); up to 10 MB; JPG, PNG or WebP.
     // Never changed or deleted from the CRM, so a proposal that uses a photo never loses it.
     match /photos/{folder}/{fileName} {
       allow read: if isMember();
       allow create: if isMember()
-        && folder in ['activities', 'trainers', 'venues', 'covers']
+        && folder in ['activities', 'trainers', 'venues', 'covers', 'logos']
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/(jpeg|png|webp)')
         && request.resource.metadata.uploadedBy == request.auth.uid;

@@ -679,7 +679,21 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
                 </div>
               </div>
             </div>
-            <PhotoPicker photos={p.coverPhoto ? [p.coverPhoto] : []} onChange={ph => set({ coverPhoto: ph[0] || '' })} folder="covers" me={me} single label="Cover photo" disabled={locked} />
+            <div>
+              <PhotoPicker photos={p.coverPhoto ? [p.coverPhoto] : []} onChange={ph => set({ coverPhoto: ph[0] || '' })} folder="covers" me={me} single label="Cover photo" disabled={locked} />
+              {/* The client's logo on the cover is read live from the client record (Clients → Edit). */}
+              {r.client && (
+                <div className="mt-3">
+                  <label className="flex items-center gap-2 text-sm text-ink">
+                    <input type="checkbox" checked={!p.hideClientLogo} onChange={e => set({ hideClientLogo: !e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
+                    Show client logo on the cover
+                  </label>
+                  {r.client.logoUrl
+                    ? !p.hideClientLogo && <img src={r.client.logoUrl} alt="" className="mt-2 h-10 w-auto max-w-[10rem] rounded border border-line bg-white object-contain p-1" />
+                    : <p className="mt-0.5 text-xs text-ink-soft">{r.client.companyName || 'This client'} has no logo yet. Add one in Clients → Edit.</p>}
+                </div>
+              )}
+            </div>
           </div>
         </Card>
 

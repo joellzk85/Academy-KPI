@@ -5,6 +5,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { VENDOR_TYPES, Vendor, VendorType, bankText, hasBank, vendorName, vendorProblem, vendorTypeLabel } from '../lib/vendors';
+import { useSearchPrefill } from './GlobalSearch';
 
 // Admin work → Vendors (2026-10-20): who NEXT Academy pays for trainings, with bank details for accounts.
 // Admin and Management only (lib/vendors.ts). The same form opens from a checklist step ("New vendor",
@@ -147,6 +148,7 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
   const vendors = useVendors(true);
   const { trainers, venues } = useTrainersVenues();
   const [search, setSearch] = useState('');
+  useSearchPrefill('vendors', setSearch);   // Global search opened a vendor
   const [type, setType] = useState<'' | VendorType>('');
   const [editing, setEditing] = useState<Vendor | 'new' | null>(null);
   const [error, setError] = useState('');

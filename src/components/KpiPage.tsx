@@ -4,7 +4,7 @@ import { Check, HandHelping, Loader2, Pencil, Presentation, UserCheck } from 'lu
 import PresentPage from './PresentPage';
 import { db } from '../lib/firebase';
 import { Representative } from '../types';
-import { AUTO_SOURCE_LABELS, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, takesTyped, weekIndexOf } from '../lib/kpi';
+import { AUTO_SOURCE_LABELS, kpiBarClass, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, takesTyped, weekIndexOf } from '../lib/kpi';
 import { useKpiSources } from '../lib/useKpiSources';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 import { linkedOnly } from '../lib/linked';
@@ -136,7 +136,7 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
                     {m.plusTyped && typedTotal > 0 && <span className="block text-right text-xs">{fmt(m.isRM, autoTotal)} automatic + {fmt(m.isRM, typedTotal)} typed</span>}
                   </span>
                 </div>
-                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${pct >= 100 ? 'bg-accent' : pct >= 50 ? 'bg-[#5DB3A6]' : 'bg-attention'}`} style={{ width: `${pct}%` }} /></div>
+                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${kpiBarClass(pct)}`} style={{ width: `${pct}%` }} /></div>
               </li>
             ))}
           </ul>

@@ -85,6 +85,7 @@ export function publicProposal(r: ReturnType<typeof resolveTb>) {
     packages: p.packages, chosenPackage: p.chosenPackage || '', hrdcNote: p.hrdcNote || '', terms: p.terms || '',
     ownerName: p.ownerName || '', preparedForCompany: r.company,
     sections: r.sections, company: r.company, pax: r.pax, eventDate: r.eventDate, isHrdc: r.isHrdc,
+    clientLogo: r.clientLogo || '',   // the client's own logo (empty when the proposal hides it)
   };
 }
 

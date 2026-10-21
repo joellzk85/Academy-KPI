@@ -3,6 +3,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveCo
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
 import { addDays, formatRM } from '../lib/deals';
 import { mix } from '../lib/presentTheme';
+import { kpiHex } from '../lib/kpi';
 
 // Charts for the weekly presentation (lib/present.ts): number cards with up/down, a score ring, a funnel,
 // bars, donuts and two heatmaps. Colours follow the CRM palette (src/index.css): teal accent first.
@@ -40,8 +41,7 @@ export function StatCard({ label, value, delta, sub, tone = 'plain' }: {
 
 export function Ring({ pct, size = 180, label, sub }: { pct: number; size?: number; label: string; sub?: string }) {
   const r = size / 2 - 12, c = 2 * Math.PI * r, p = Math.max(0, Math.min(100, pct));
-  const pal = usePalette();
-  const colour = p >= 100 ? pal[0] : p >= 50 ? pal[1] : '#E0A458';
+  const colour = kpiHex(p);
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90" aria-hidden="true">

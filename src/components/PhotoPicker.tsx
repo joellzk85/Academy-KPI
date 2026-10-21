@@ -13,25 +13,32 @@ import { storageError } from './ProposalFiles';
 //   photo box last pointed at, clicked or tabbed into), or added with "Paste screenshot" (reads the clipboard).
 
 type Viewer = { id: string; name: string };
-export type PhotoFolder = 'activities' | 'trainers' | 'venues' | 'covers';
+export type PhotoFolder = 'activities' | 'trainers' | 'venues' | 'covers' | 'logos';
 
 const MAX_SIDE = 1600;
 const MAX_INPUT = 25 * 1024 * 1024;
 const NOT_PHOTO = 'isn\'t a photo or screenshot (JPG, PNG, WebP, GIF or BMP).';
+// Client logos (2026-10-21) keep their see-through background: a PNG, WebP or GIF logo is saved as a PNG up to
+// 600px wide; a JPG or BMP logo is saved as a JPG.
+const LOGO_W = 600;
+const keepsTransparency = (f: File) => /^image\/(png|webp|gif)$/.test(f.type) || /\.(png|webp|gif)$/i.test(f.name);
 
-export async function shrink(file: File): Promise<Blob> {
+export async function shrink(file: File, logo = false): Promise<Blob> {
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`"${file.name}" couldn't be read as a photo.`)); i.src = url; });
-    const k = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+    const k = logo ? Math.min(1, LOGO_W / img.naturalWidth) : Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+    const png = logo && keepsTransparency(file);
     const c = document.createElement('canvas');
-    c.width = Math.round(img.naturalWidth * k);
-    c.height = Math.round(img.naturalHeight * k);
+    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+    c.height = Math.max(1, Math.round(img.naturalHeight * k));
     const ctx = c.getContext('2d')!;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, c.width, c.height);
+    if (!png) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, c.width, c.height);
+    }
     ctx.drawImage(img, 0, 0, c.width, c.height);
-    return await new Promise<Blob>((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('The photo could not be prepared.'))), 'image/jpeg', 0.84));
+    return await new Promise<Blob>((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('The photo could not be prepared.'))), png ? 'image/png' : 'image/jpeg', 0.84));
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -56,10 +63,11 @@ let pickerCount = 0;
 export async function uploadPhoto(file: File, folder: PhotoFolder, me: Viewer, onProgress?: (pct: number) => void): Promise<string> {
   if (!isImage(file)) throw new Error(`"${file.name}" ${NOT_PHOTO}`);
   if (file.size > MAX_INPUT) throw new Error(`"${file.name}" is too big (over 25 MB).`);
-  const blob = await shrink(file);
+  const blob = await shrink(file, folder === 'logos');
+  const png = blob.type === 'image/png';
   const id = `ph_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-  const r = ref(storage, `photos/${folder}/${id}.jpg`);
-  const task = uploadBytesResumable(r, blob, { contentType: 'image/jpeg', customMetadata: { uploadedBy: me.id, uploadedByName: me.name } });
+  const r = ref(storage, `photos/${folder}/${id}.${png ? 'png' : 'jpg'}`);
+  const task = uploadBytesResumable(r, blob, { contentType: png ? 'image/png' : 'image/jpeg', customMetadata: { uploadedBy: me.id, uploadedByName: me.name } });
   await new Promise<void>((resolve, reject) => {
     task.on('state_changed', s => onProgress?.(s.totalBytes ? Math.round((s.bytesTransferred / s.totalBytes) * 100) : 0), reject, () => resolve());
   });

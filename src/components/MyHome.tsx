@@ -12,9 +12,10 @@ import { CalendarEvent, Representative } from '../types';
 import {
   OPEN_STAGES, STAGE_LABELS, DealStage, journeyStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
 } from '../lib/deals';
-import { metricsFor, countAuto, monthKpi } from '../lib/kpi';
+import { metricsFor, countAuto, monthKpi, kpiBarClass, kpiHex } from '../lib/kpi';
 import { periodFor } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
+import SalesProjection from './SalesProjection';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
 import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags } from '../lib/money';
@@ -48,12 +49,13 @@ type CardId =
   | 'follow_up_alerts' | 'team_follow_ups'
   | 'follow_ups' | 'my_kpi' | 'my_won' | 'next14' | 'new_won' | 'due_now' | 'money_jobs'
   | 'approvals' | 'money_position' | 'pipeline' | 'programmes_waiting' | 'notices' | 'team_appointments' | 'shared_with_me' | 'proposal_activity'
-  | 'post_training';
+  | 'post_training' | 'sales_projection';
 
 const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
   { id: 'follow_ups', title: 'My follow-ups', roles: ['rep', 'admin', 'management'] },
   { id: 'my_kpi', title: 'My KPI this month', roles: ['rep', 'admin'] },
   { id: 'my_won', title: 'My won deals', roles: ['rep', 'admin'] },
+  { id: 'sales_projection', title: 'Sales projection', roles: ['rep', 'admin', 'management'] },   // Hot / Warm / Cold x expected month (2026-10-21)
   { id: 'next14', title: 'Trainings in the next 14 days', roles: ['rep', 'admin', 'management'] },
   { id: 'new_won', title: 'New won deals', roles: ['admin', 'management'] },
   { id: 'post_training', title: 'After training', roles: ['admin', 'management'] },   // trainings that ended, until the case is closed (2026-10-20)
@@ -73,9 +75,9 @@ const CARDS: { id: CardId; title: string; roles: Role[] }[] = [
 
 // Notices are off by default (Joel removed the newsfeed); anyone can switch the card back on.
 const DEFAULT_CARDS: Record<Role, CardId[]> = {
-  rep: ['follow_ups', 'proposal_activity', 'my_kpi', 'next14', 'my_won'],
+  rep: ['follow_ups', 'proposal_activity', 'my_kpi', 'sales_projection', 'next14', 'my_won'],
   admin: ['shared_with_me', 'post_training', 'proposal_activity', 'new_won', 'due_now', 'money_jobs', 'next14'],
-  management: ['team_follow_ups', 'approvals', 'post_training', 'proposal_activity', 'follow_up_alerts', 'money_position', 'pipeline', 'team_appointments', 'next14'],
+  management: ['team_follow_ups', 'approvals', 'post_training', 'proposal_activity', 'follow_up_alerts', 'money_position', 'pipeline', 'sales_projection', 'team_appointments', 'next14'],
 };
 
 // ---------- Shortcut library (Joel, 2026-10-17) ----------
@@ -695,9 +697,9 @@ function Rings({ ring, size, monthLabel = '' }: { ring: Ring; size: number; mont
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`Year ${yp}% of target, this month ${pct(ring.monthValue, ring.monthTarget)}% of target`}>
       <circle cx={c} cy={c} r={outerR} fill="none" stroke="#E2E5DE" strokeWidth={outerW} />
-      {ring.yearValue > 0 && <circle cx={c} cy={c} r={outerR} fill="none" stroke="#0E6E62" strokeWidth={outerW} strokeLinecap="round" strokeDasharray={arc(outerR, ring.yearTarget ? ring.yearValue / ring.yearTarget : 0)} transform={`rotate(-90 ${c} ${c})`} />}
+      {ring.yearValue > 0 && <circle cx={c} cy={c} r={outerR} fill="none" stroke={kpiHex(yp)} strokeWidth={outerW} strokeLinecap="round" strokeDasharray={arc(outerR, ring.yearTarget ? ring.yearValue / ring.yearTarget : 0)} transform={`rotate(-90 ${c} ${c})`} />}
       <circle cx={c} cy={c} r={innerR} fill="none" stroke="#E2E5DE" strokeWidth={innerW} />
-      {ring.monthValue > 0 && <circle cx={c} cy={c} r={innerR} fill="none" stroke="#5DB3A6" strokeWidth={innerW} strokeLinecap="round" strokeDasharray={arc(innerR, ring.monthTarget ? ring.monthValue / ring.monthTarget : 0)} transform={`rotate(-90 ${c} ${c})`} />}
+      {ring.monthValue > 0 && <circle cx={c} cy={c} r={innerR} fill="none" stroke={kpiHex(pct(ring.monthValue, ring.monthTarget))} strokeWidth={innerW} strokeLinecap="round" strokeDasharray={arc(innerR, ring.monthTarget ? ring.monthValue / ring.monthTarget : 0)} transform={`rotate(-90 ${c} ${c})`} />}
       {/* Year % big in the middle; the month % small under it (Joel, 2026-10-17) */}
       <text x={c} y={c + size * (monthLabel ? 0.01 : 0.05)} textAnchor="middle" fill="#1C2B45" style={{ fontSize: size * 0.14, fontWeight: 700 }}>{yp}%</text>
       {monthLabel && (
@@ -799,6 +801,20 @@ function feeRequestItems(c: CardCtx, deal: (p: any) => string): (Item & { dealId
   return out;
 }
 
+// Sales projection card: a person's own; Management picks the whole team or one person.
+function ProjectionCard({ ctx, editing }: { ctx: CardCtx; editing: boolean }) {
+  const target = useSalesTarget();
+  const sellers = ctx.representatives.filter(r => salesTarget(r) !== null);
+  const monthlyTargetFor = (who: string) => {
+    if (who !== 'all') { const r = ctx.representatives.find(x => x.id === who); return r ? salesTarget(r) || 0 : 0; }
+    return target ? target.monthly : sellers.reduce((t, r) => t + (salesTarget(r) || 0), 0);
+  };
+  return (
+    <SalesProjection deals={ctx.deals} people={sellers.map(r => ({ id: r.id, name: r.name }))} viewer={ctx.viewer} today={ctx.today}
+      monthlyTargetFor={monthlyTargetFor} onOpenDeal={editing ? undefined : ctx.openDeal} clientName={ctx.clientName} compact storeKey={`home:${ctx.viewer.id}`} />
+  );
+}
+
 type Item = { key: string; title: string; sub?: string; level?: 'danger' | 'attention'; onClick?: () => void };
 
 function Card({ id, ctx, editing, onRemove, stacked }: { id: CardId; ctx: CardCtx; editing: boolean; onRemove: () => void; stacked?: boolean; key?: string }) {
@@ -838,6 +854,16 @@ function Card({ id, ctx, editing, onRemove, stacked }: { id: CardId; ctx: CardCt
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-2">
           <ProposalActivity viewer={ctx.viewer} deals={ctx.deals} people={ctx.representatives.map(r => ({ id: r.id, name: r.name }))} nameOf={ctx.nameOf}
             clientName={ctx.clientName} onOpen={editing ? undefined : ctx.openDeal} />
+        </div>
+      </div>
+    );
+  }
+  if (id === 'sales_projection') {
+    return (
+      <div className={shell}>
+        {titleBar()}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-2">
+          <ProjectionCard ctx={ctx} editing={editing} />
         </div>
       </div>
     );
@@ -975,7 +1001,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
             {rows.map(({ m, value, p }) => (
               <li key={m.key}>
                 <div className="flex justify-between text-sm"><span className="font-semibold">{m.label}</span><span className="tabular-nums text-ink-soft">{m.isRM ? formatRM(value) : value} of {m.isRM ? formatRM(m.targetVal) : m.targetVal} ({p}%)</span></div>
-                <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, p)}%` }} /></div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${kpiBarClass(p)}`} style={{ width: `${Math.min(100, p)}%` }} /></div>
               </li>
             ))}
             <li><button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => c.nav.openWorkspace(c.viewer.id, 'kpi')}>Open my KPI page</button></li>

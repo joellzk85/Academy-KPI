@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
-import { ChevronRight, Target, Trophy, Users, XCircle } from 'lucide-react';
+import { ChevronRight, Target, TrendingUp, Trophy, Users, XCircle } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import {
@@ -8,11 +8,12 @@ import {
   dealWonDate, formatDate, formatRM, journeyStage, todayIso,
 } from '../lib/deals';
 import { activeHold } from '../lib/dealHold';
-import { metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
+import { kpiBarClass, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
 import { useKpiSources } from '../lib/useKpiSources';
 import { SalesTarget, monthsBetween, periodFor, ymLabel } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
 import FollowUpAlerts from './FollowUpAlerts';
+import SalesProjection from './SalesProjection';
 
 // Management → Dashboard: Team performance (rebuilt 2026-10-17).
 // Everything is counted from deals by the same rules as the KPI page and My home rings
@@ -28,12 +29,13 @@ interface Props {
   onOpenTeam?: () => void;
   people?: { id: string; name: string }[];   // everyone on the Team list, for owner names
   onOpenDeal?: (deal: any) => void;     // opens the deal's panel in its owner's workspace
+  viewer?: { id: string; name: string; role: string };   // for the sales projection's settings
 }
 
 const card = 'rounded-2xl border border-line bg-white p-5';
 const OPEN_JOURNEY: DealStage[] = ['lead', 'proposal', 'agreed', 'quoted'];
 
-export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam, people = [], onOpenDeal }: Props) {
+export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam, people = [], onOpenDeal, viewer }: Props) {
   const deals = pipelinesSync || [];
   const [clients, setClients] = useState<any[]>([]);
   useEffect(() => onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))), []);
@@ -125,7 +127,7 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
                   <p className="font-semibold">{rep.name}</p>
                   <div className="mt-1 flex items-center gap-2">
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={score} aria-valuemin={0} aria-valuemax={100} aria-label={`${rep.name} KPI score`}>
-                      <div className={`h-full rounded-full ${score >= 100 ? 'bg-accent' : score >= 50 ? 'bg-accent/70' : 'bg-attention'}`} style={{ width: `${Math.min(100, score)}%` }} />
+                      <div className={`h-full rounded-full ${kpiBarClass(score)}`} style={{ width: `${Math.min(100, score)}%` }} />
                     </div>
                     <span className="w-16 text-right text-sm font-bold tabular-nums">{score}%</span>
                   </div>
@@ -146,6 +148,16 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
           </ul>
         )}
       </section>
+
+      {/* Sales projection (2026-10-21): won + open deals x Hot / Warm / Cold chance, up to 6 months ahead */}
+      {viewer && (
+        <section className={card}>
+          <h3 className="mb-3 flex items-center gap-2 font-bold"><TrendingUp className="h-4 w-4 text-accent" /> Sales projection</h3>
+          <SalesProjection deals={deals} people={sellers.map(r => ({ id: r.id, name: r.name }))} viewer={viewer} today={today}
+            monthlyTargetFor={who => who === 'all' ? monthTarget : (metricsFor(reps.find(r => r.id === who) || { id: who }).find(m => m.key === 'salesFigure')?.targetVal || 0)}
+            onOpenDeal={onOpenDeal} clientName={clientName} storeKey={`mgmt:${viewer.id}`} />
+        </section>
+      )}
 
       {/* Follow-up alerts (Joel, 2026-10-18): deals past a follow-up checkpoint with no note since */}
       <section className={card}>
