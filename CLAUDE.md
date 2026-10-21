@@ -132,7 +132,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Rules to publish** (if not yet): `firestore.rules` and `storage.rules` as of the latest push.
 - **Data:** link old records in Data tools (ask for a screenshot of the matches first), then clear old data (Joel clicks; KPI history kept); both managers change passwords once; adjust KPI templates and targets; Blueprint import (check HRDC code 1000168564, the duplicate Valmont August line, and the 16 unknown trainer names).
 - **To confirm with Joel:** team-building terms if they differ from course-outline terms; whether HRDC gives a programme code on approval; who usually handles HRDC queries.
-- **Go-live tests:** items 6 to 29 of the go-live checklist (29: pre-training checklist, vendors, payment summary; publish `firestore.rules` for `vendors`).
+- **Go-live tests:** items 6 to 30 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; publish `firestore.rules` for both).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (old P&L, tasks, `handleCellChange`); redesign remaining old screens in the new style.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 

@@ -12,7 +12,7 @@
 // and before HRDC's %, i.e. income minus SST. It comes off profit; it isn't a payment request (it's for payslips later).
 
 import { dealOwnerId, dealStage, dealValue, todayIso, trainingEndDate } from './deals';
-import { MoneyIn, MoneyOut, MoneySettings, dealPL, moneySettled } from './money';
+import { MoneyIn, MoneyOut, MoneySettings, dealPL, inPL, moneySettled } from './money';
 import { mainQuote } from './checklist';
 import { quoteSst } from './quoteSst';
 
@@ -141,7 +141,7 @@ export function projectTotals(rows: ProjectRow[]): ProjectTotals {
 // Approved and paid costs by category, biggest first.
 export function costsByCategory(outs: MoneyOut[]): { category: string; amount: number }[] {
   const m: Record<string, number> = {};
-  outs.filter(o => o.status === 'approved' || o.status === 'paid')
+  outs.filter(o => (o.status === 'approved' || o.status === 'paid') && inPL(o))
     .forEach(o => { m[o.category || 'Other'] = (m[o.category || 'Other'] || 0) + (Number(o.amount) || 0); });
   return Object.entries(m).map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
 }

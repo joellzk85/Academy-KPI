@@ -170,6 +170,8 @@ service cloud.firestore {
           && changedOnly(['status', 'paidDate', 'paidRef', 'paidById', 'paidByName']))
         // hidden with (or brought back with) a deal Management deleted (2026-10-20)
         || (isManagement() && changedOnly(['dealDeleted']))
+        // "Include in P&L" tick (2026-10-21): Admin or Management, at any status
+        || changedOnly(['inPL'])
       );
       // Delete: Management any request at any time (2026-10-20); the requester only while pending or rejected.
       allow delete: if isManagement()

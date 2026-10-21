@@ -89,7 +89,12 @@ export interface MoneyOut {
   vendorId?: string;
   // On a payment summary sent to accounts (payment_links kind 'batch'): the summary's link token.
   summaryToken?: string;
+  // Include in P&L (Joel, 2026-10-21): new cost lines start unticked (false); older requests without it count.
+  inPL?: boolean;
 }
+
+/** Counted in the training's P&L? Missing = yes (requests made before the tick existed). Company payments never are. */
+export const inPL = (o: Pick<MoneyOut, 'inPL'>) => o.inPL !== false;
 
 // PR-YYYYMMDD-NNNN, from the request date and the record's id (fixed, so it never changes).
 export function paymentRef(o: Pick<MoneyOut, 'id' | 'requestDate' | 'requestedAt'>): string {
@@ -172,10 +177,11 @@ export function dealPL(ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings): Deal
   const hrdcFee = ins.filter(m => m.source === 'hrdc').reduce((t, m) => t + money(m.amount) * (s.hrdcDeductionPct / 100), 0);
   const received = ins.filter(isPaid).reduce((t, m) => t + money(m.paidAmount), 0);
   const toComeIn = ins.filter(m => !isPaid(m)).reduce((t, m) => t + expectedFor(m, s), 0);
-  const counted = outs.filter(o => o.status === 'approved' || o.status === 'paid');
+  // Only lines ticked "Include in P&L" count as costs; every approved line still has to be paid (toPayOut).
+  const counted = outs.filter(o => (o.status === 'approved' || o.status === 'paid') && inPL(o));
   const costs = counted.reduce((t, o) => t + money(o.amount), 0);
   const toPayOut = outs.filter(o => o.status === 'approved').reduce((t, o) => t + money(o.amount), 0);
-  const pendingApproval = outs.filter(o => o.status === 'pending').reduce((t, o) => t + money(o.amount), 0);
+  const pendingApproval = outs.filter(o => o.status === 'pending' && inPL(o)).reduce((t, o) => t + money(o.amount), 0);
   const short = ins.reduce((t, m) => t + shortfall(m, s), 0);
   return { invoiced, hrdcFee, costs, profit: invoiced - hrdcFee - short - costs, received, toComeIn, toPayOut, pendingApproval, shortfall: short };
 }

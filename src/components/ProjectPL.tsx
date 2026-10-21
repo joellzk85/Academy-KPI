@@ -3,7 +3,7 @@ import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { FUNDING_LABELS, FundingType, dealOwnerId, formatDate, formatRM, todayIso } from '../lib/deals';
-import { IN_SOURCE_LABELS, MoneyIn, MoneyOut, OUT_STATUS_LABELS, isPaid } from '../lib/money';
+import { IN_SOURCE_LABELS, MoneyIn, MoneyOut, OUT_STATUS_LABELS, inPL, isPaid } from '../lib/money';
 import {
   MONEY_STATUS_LABELS, ProjectRow, TRAINING_STATUS_LABELS, costsByCategory, inPeriod, projectRows, projectTotals,
 } from '../lib/projectPL';
@@ -304,7 +304,8 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
 
 function Breakdown({ r, viewer, personName }: { r: ProjectRow; viewer: { id: string; name: string }; personName: (id: string) => string }) {
   const cats = costsByCategory(r.outs);
-  const pending = r.outs.filter(o => o.status === 'pending');
+  const pending = r.outs.filter(o => o.status === 'pending' && inPL(o));
+  const leftOut = r.outs.filter(o => !inPL(o) && o.status !== 'rejected');
   return (
     <div className="grid gap-4 text-sm md:grid-cols-2">
       <div>
@@ -342,6 +343,9 @@ function Breakdown({ r, viewer, personName }: { r: ProjectRow; viewer: { id: str
           <p className="mt-2 text-attention">
             Waiting for approval, not counted: {pending.map(o => `${o.category} ${formatRM(Number(o.amount) || 0)}`).join(', ')}
           </p>
+        )}
+        {leftOut.length > 0 && (
+          <p className="mt-2 text-ink-soft">Not in the P&L (unticked): {leftOut.map(o => `${o.category}${o.description ? ` ${o.description}` : ''} ${formatRM(Number(o.amount) || 0)}`).join(', ')}</p>
         )}
         {r.outs.some(o => o.status === 'rejected') && (
           <p className="mt-1 text-ink-soft">{r.outs.filter(o => o.status === 'rejected').length} rejected request(s) not counted ({OUT_STATUS_LABELS.rejected.toLowerCase()}).</p>

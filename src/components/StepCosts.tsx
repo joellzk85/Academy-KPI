@@ -3,7 +3,7 @@ import { doc, setDoc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { AlertTriangle, Check, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
-import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide } from '../lib/money';
+import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL } from '../lib/money';
 import { ChecklistTask, costCategory, materialItems } from '../lib/checklist';
 import { STEP_VENDOR_TYPE, Vendor, bankText, hasBank, vendorName } from '../lib/vendors';
 import { Receipt } from '../lib/postTraining';
@@ -61,15 +61,15 @@ export default function StepCosts({ deal, task, viewer, outs, receipts, vendors,
 }) {
   const lines = outs.filter(o => o.checklistTaskId === task.id).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
   const [adding, setAdding] = useState(false);
-  const counted = lines.filter(o => o.status === 'approved' || o.status === 'paid').reduce((t, o) => t + (Number(o.amount) || 0), 0);
-  const waiting = lines.filter(o => o.status === 'pending').reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  const counted = lines.filter(o => (o.status === 'approved' || o.status === 'paid') && inPL(o)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  const waiting = lines.filter(o => o.status === 'pending' && inPL(o)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
 
   return (
     <div className="mt-3 space-y-2">
       <div className="flex flex-wrap items-baseline gap-x-3">
         <p className="text-sm font-semibold">Costs</p>
         {lines.length > 0 && (
-          <p className="text-sm text-ink-soft">In the P&L {sen(counted)}{waiting > 0 && ` · waiting for approval ${sen(waiting)}`}</p>
+          <p className="text-sm text-ink-soft">In the P&L {sen(counted)}{waiting > 0 && ` · waiting for approval ${sen(waiting)}`}{lines.some(o => !inPL(o)) && ` · not in the P&L ${sen(lines.filter(o => !inPL(o) && o.status !== 'rejected').reduce((t, o) => t + (Number(o.amount) || 0), 0))}`}</p>
         )}
       </div>
       {lines.length > 0 && (
@@ -141,7 +141,8 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
           )}
           {vendor && hasBank(vendor) && o.status !== 'paid' && <p className="mt-0.5 text-xs text-ink-soft">{bankText(vendor)}</p>}
         </div>
-        <span className="flex shrink-0 flex-wrap gap-1">
+        <span className="flex shrink-0 flex-wrap items-center gap-1">
+          {o.status !== 'rejected' && <PLTick o={o} viewer={viewer} />}
           {decide && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
           {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={reject}><X className="h-3.5 w-3.5" /> Reject</button>}
           {canDelete && <button type="button" disabled={busy} onClick={remove} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label="Delete this cost">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button>}
@@ -164,7 +165,8 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, onDone 
 }) {
   const vType = STEP_VENDOR_TYPE[task.kind] || 'other';
   const hinted = hint && vendors.find(v => (hint.trainerId && v.trainerId === hint.trainerId) || (hint.venueId && v.venueId === hint.venueId));
-  const [f, setF] = useState({ description: '', amount: '', timing: defaultTiming(task), vendorId: hinted?.id || '' });
+  // "Include in P&L" starts unticked (Joel, 2026-10-21).
+  const [f, setF] = useState({ description: '', amount: '', timing: defaultTiming(task), vendorId: hinted?.id || '', inPL: false });
   const draft = useFormDraft(viewer.id, `cost:${deal.id}:${task.id}`, f, setF);
   const [newVendor, setNewVendor] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -188,7 +190,7 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, onDone 
     try {
       await setDoc(doc(db, 'money_out', id), {
         id, dealId: deal.id, kind: 'deal', category: costCategory(task), payee: vendorName(vendor, trainers, venues), vendorId: vendor.id,
-        description: f.description.trim(), amount: Math.round(amount * 100) / 100, timing: f.timing, checklistTaskId: task.id, requestDate: todayIso(),
+        description: f.description.trim(), amount: Math.round(amount * 100) / 100, timing: f.timing, inPL: !!f.inPL, checklistTaskId: task.id, requestDate: todayIso(),
         status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
         decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
       });
@@ -252,12 +254,46 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, onDone 
           </div>
         </div>
       </div>
-      <p className="text-sm text-ink-soft">It goes into this training's P&L and waits for {viewer.role === 'management' ? 'the other manager' : 'a manager'} to approve it.</p>
+      <label className="flex items-center gap-2 text-[15px]">
+        <input type="checkbox" checked={!!f.inPL} onChange={e => setF(x => ({ ...x, inPL: e.target.checked }))} className="h-4 w-4 accent-[#0E6E62]" />
+        Include in P&L <span className="text-sm text-ink-soft">(count it as a cost of this training; can be changed later)</span>
+      </label>
+      <p className="text-sm text-ink-soft">It waits for {viewer.role === 'management' ? 'the other manager' : 'a manager'} to approve it, then goes on the payment summary for accounts.</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
         <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
         <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Add cost</button>
       </div>
     </form>
+  );
+}
+
+/** "Include in P&L" tick beside a cost (Joel, 2026-10-21). Unticked = still a payment to approve and pay, but not a
+ *  cost in the training's P&L. Admin and Management change it at any status; each change goes into the deal's History. */
+export function PLTick({ o, viewer }: { o: MoneyOut; viewer: Viewer }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const on = inPL(o);
+  const change = async (next: boolean) => {
+    setBusy(true); setError('');
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'money_out', o.id), { inPL: next });
+      const d = o.dealId ? await getDoc(doc(db, 'pipelines', o.dealId)) : null;
+      if (d?.exists()) {
+        const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `${next ? 'Included in' : 'Left out of'} the P&L: ${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${sen(o.amount)})` };
+        batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
+      }
+      await batch.commit();
+    } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  if (viewer.role === 'rep') return null;
+  return (
+    <label className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${on ? 'border-accent/40 bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft'}`}
+      title="Ticked: counted as a cost in this training's P&L. Unticked: still paid, but not in the P&L.">
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <input type="checkbox" checked={on} disabled={busy} onChange={e => change(e.target.checked)} className="h-3.5 w-3.5 accent-[#0E6E62]" />}
+      Include in P&L
+      {error && <span role="alert" className="ml-1 font-normal text-danger">{error}</span>}
+    </label>
   );
 }

@@ -18,6 +18,7 @@ import PaymentRequestDocument, { paymentRef, paymentStatusText } from './Payment
 import { Receipt, needsReceipt } from '../lib/postTraining';
 import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
 import PaymentSummaryPanel from './PaymentSummaryPanel';
+import { PLTick } from './StepCosts';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -530,6 +531,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
         </div>
         {viewer.role !== 'rep' && !mode && (
           <span className="flex max-w-full shrink-0 flex-wrap justify-end gap-1 sm:max-w-[22rem]">
+            {!company && o.status !== 'rejected' && <PLTick o={o} viewer={viewer} />}
             <PaymentShare o={o} forText={forText} />
             {o.status !== 'rejected' && (
               <button type="button" className={btnSmall} onClick={() => setShowLink(v => !v)} title="A link your accounts open to pay it and click Payment made">
