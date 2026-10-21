@@ -20,12 +20,14 @@ const paymentToken = window.location.pathname.match(/^\/pay\/([a-f0-9]{32})\/?$/
 
 // The trainer portal (/trainer): trainers with access log in by email (TrainerPortal.tsx, 2026-10-21).
 const TrainerPortal = lazy(() => import('./components/TrainerPortal'));
-const trainerPortal = /^\/trainer\/?$/.test(window.location.pathname);
+const portalMatch = window.location.pathname.match(/^\/trainer(?:\/join\/([a-f0-9]{32}))?\/?$/);
+const trainerPortal = !!portalMatch;
+const portalInvite = portalMatch?.[1];   // an invite link: /trainer/join/<token>
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {trainerPortal ? (
-      <Suspense fallback={null}><TrainerPortal /></Suspense>
+      <Suspense fallback={null}><TrainerPortal inviteToken={portalInvite} /></Suspense>
     ) : paymentToken ? (
       <Suspense fallback={null}><PaymentLinkPage token={paymentToken} /></Suspense>
     ) : trainerToken ? (

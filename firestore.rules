@@ -402,6 +402,12 @@ service cloud.firestore {
       allow create, update: if isStaff();
       allow delete: if isManagement();
     }
+    // Invite links to the trainer portal (/trainer/join/<token>): Admin and Management make and cancel them; the
+    // trainer's side (open, accept) goes only through the CRM server.
+    match /portal_invites/{token} {
+      allow read, update, delete: if isStaff();
+      allow create: if isStaff() && request.resource.data.status == 'open' && request.resource.data.createdById == request.auth.uid;
+    }
     match /trainer_bank_requests/{trainerId} {
       allow read, update, delete: if isStaff();
       allow create: if false;

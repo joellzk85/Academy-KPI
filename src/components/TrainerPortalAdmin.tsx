@@ -5,9 +5,9 @@ import { auth, callServer, db, friendlyError } from '../lib/firebase';
 import { sendPortalPasswordEmail } from '../lib/portalEmail';
 import { formatDate } from '../lib/deals';
 import { MoneyOut } from '../lib/money';
-import { whatsappShare } from '../lib/trainerLinks';
+import { newToken, whatsappShare } from '../lib/trainerLinks';
 import {
-  BankRequest, PORTAL_PATH, STARS, STAR_WORDS, TrainerAccount, TrainerJob, claimFlag, cleanEmail, emailProblem, jobId, ratingAverage,
+  BankRequest, INVITE_DAYS, PORTAL_PATH, PortalInvite, STARS, STAR_WORDS, TrainerAccount, TrainerJob, claimFlag, cleanEmail, emailProblem, inviteLive, invitePath, jobId, ratingAverage,
 } from '../lib/trainerPortal';
 
 // The CRM side of the trainer portal (2026-10-21, lib/trainerPortal.ts): giving a trainer access (Trainers panel),
@@ -75,7 +75,7 @@ export function useBankRequests(enabled: boolean): BankRequest[] {
 }
 
 // ---------- Trainers panel: portal access (Admin and Management) ----------
-export function PortalAccessBox({ trainer, account, viewer }: { trainer: any; account?: TrainerAccount; viewer: Viewer }) {
+export function PortalAccessBox({ trainer, account, viewer, onInvite }: { trainer: any; account?: TrainerAccount; viewer: Viewer; onInvite?: () => void }) {
   const [email, setEmail] = useState(account?.email || trainer.email || '');
   const [changing, setChanging] = useState(false);
   const [sent, setSent] = useState('');
@@ -135,7 +135,12 @@ export function PortalAccessBox({ trainer, account, viewer }: { trainer: any; ac
             {account ? 'Portal access is turned off.' : 'No portal access yet. Not every trainer needs it; their profile link keeps working either way.'}
             {' '}With access, {trainer.name} logs in at {portalUrl()} to update their profile, biodata and bank details, see their trainings, PO and rating, and request their fee.
           </p>
-          {emailForm}
+          {changing ? emailForm : (
+            <div className="flex flex-wrap items-center gap-2">
+              {onInvite && <button type="button" className={btnPrimary} onClick={onInvite}><KeyRound className="h-4 w-4" /> Invite to trainer portal</button>}
+              <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => setChanging(true)}>or set it up with their email</button>
+            </div>
+          )}
         </>
       )}
       {error && <p role="alert" className={alertBox}>{error}</p>}
@@ -148,6 +153,125 @@ export function PortalAccessBox({ trainer, account, viewer }: { trainer: any; ac
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------- Trainers → "Invite to trainer portal" (Admin and Management): an invite link ----------
+export function usePortalInvites(enabled: boolean): PortalInvite[] {
+  const [list, setList] = useState<PortalInvite[]>([]);
+  useEffect(() => {
+    if (!enabled) { setList([]); return; }
+    return onSnapshot(query(collection(db, 'portal_invites'), where('status', '==', 'open')),
+      s => setList(s.docs.map(d => ({ ...(d.data() as PortalInvite), id: d.id })).sort((a, b) => b.createdAt - a.createdAt)), () => setList([]));
+  }, [enabled]);
+  return list;
+}
+
+const inviteUrl = (token: string) => `${window.location.origin}${invitePath(token)}`;
+const inviteMessage = (name: string) => `Hi ${name || 'there'}, NEXT Academy is inviting you to our trainer portal. Open this link to set up your login (email and password):`;
+
+function InviteShare({ inv, phone, onCancel }: { inv: PortalInvite; phone?: string; onCancel?: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const url = inviteUrl(inv.token);
+  const copy = async () => { try { await navigator.clipboard.writeText(url); setCopied(true); window.setTimeout(() => setCopied(false), 2000); } catch { /* shown, select by hand */ } };
+  return (
+    <div className="space-y-2 rounded-xl border border-line bg-surface p-3 text-sm">
+      <input readOnly value={url} onFocus={e => e.target.select()} aria-label="Invite link" className="w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm" />
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={copy} className={btnSecondary}>{copied ? <Check className="h-4 w-4 text-accent" /> : <Copy className="h-4 w-4" />} {copied ? 'Copied' : 'Copy link'}</button>
+        <a href={whatsappShare(url, inviteMessage(inv.name), phone ?? inv.phone)} target="_blank" rel="noreferrer" className={btnSecondary}><MessageCircle className="h-4 w-4" /> WhatsApp</a>
+        <span className="text-ink-soft">Works once, until {formatDate(new Date(inv.expiresAt).toISOString().slice(0, 10))}</span>
+        {onCancel && <button type="button" onClick={onCancel} className="ml-auto inline-flex items-center gap-1 font-semibold text-danger hover:underline"><X className="h-4 w-4" /> Cancel</button>}
+      </div>
+    </div>
+  );
+}
+
+export function PortalInviteDialog({ viewer, trainers, onClose, preselect = '' }: { viewer: Viewer; trainers: any[]; onClose: () => void; preselect?: string }) {
+  const accounts = useTrainerAccounts();
+  const invites = usePortalInvites(true);
+  const [who, setWho] = useState(preselect);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [made, setMade] = useState<PortalInvite | null>(null);
+  const { busy, error, setError, run } = useRun();
+  const isNew = who === '__new';
+  const sorted = [...trainers].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const picked = trainers.find(t => t.id === who);
+
+  const make = () => {
+    if (!who) return setError('Choose the trainer, or "Someone new".');
+    if (isNew && !name.trim()) return setError("Type the new trainer's name.");
+    return run(async () => {
+      const token = newToken();
+      const inv: PortalInvite = {
+        id: token, token, status: 'open', name: isNew ? name.trim() : String(picked?.name || ''), ...(isNew ? { phone: phone.trim() } : { trainerId: who }),
+        createdAt: Date.now(), expiresAt: Date.now() + INVITE_DAYS * 86_400_000, createdById: viewer.id, createdByName: viewer.name,
+      };
+      await setDoc(doc(db, 'portal_invites', token), inv);
+      setMade(inv); setWho(''); setName(''); setPhone('');
+    });
+  };
+  const cancel = (inv: PortalInvite) => {
+    if (!window.confirm(`Cancel the invite for ${inv.name}? The link stops working.`)) return;
+    return run(() => updateDoc(doc(db, 'portal_invites', inv.id), { status: 'cancelled' }));
+  };
+  const phoneOf = (inv: PortalInvite) => (inv.trainerId ? trainers.find(t => t.id === inv.trainerId)?.contact : inv.phone);
+  const waiting = invites.filter(i => inviteLive(i) && i.id !== made?.id);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" role="dialog" aria-modal="true" aria-label="Invite to trainer portal" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold">Invite to trainer portal</h3>
+            <p className="text-sm text-ink-soft">Send the trainer a link. They type their email, choose a password and they're in. Portal address: {portalUrl()}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
+        </div>
+
+        {made ? (
+          <div className="space-y-2">
+            <p className="flex items-center gap-1.5 text-[15px] font-semibold text-accent"><Check className="h-4 w-4" /> Invite link for {made.name} is ready. Send it by WhatsApp:</p>
+            <InviteShare inv={made} phone={phoneOf(made)} />
+            <button type="button" className={btnSecondary} onClick={() => setMade(null)}>Invite someone else</button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm font-semibold" htmlFor="pi-who">Who?</label>
+              <select id="pi-who" value={who} onChange={e => { setWho(e.target.value); setError(''); }} className={input}>
+                <option value="">Choose a trainer…</option>
+                <option value="__new">Someone new (not in the Trainers list yet)</option>
+                {sorted.map(t => <option key={t.id} value={t.id}>{t.name}{accounts[t.id]?.active ? ' (has access already)' : ''}</option>)}
+              </select>
+              {picked && accounts[picked.id]?.active && <p className="mt-1 text-sm text-ink-soft">{picked.name} already logs in with {accounts[picked.id].email}. A new invite lets them set up their login again (new email or password).</p>}
+            </div>
+            {isNew && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div><label className="mb-1 block text-sm font-semibold" htmlFor="pi-name">Name</label><input id="pi-name" value={name} onChange={e => setName(e.target.value)} className={input} /></div>
+                <div><label className="mb-1 block text-sm font-semibold" htmlFor="pi-phone">Phone (for WhatsApp)</label><input id="pi-phone" type="tel" value={phone} onChange={e => setPhone(e.target.value)} className={input} /></div>
+                <p className="text-sm text-ink-soft sm:col-span-2">They're added to Trainers when they set up their login, and fill in their profile in the portal.</p>
+              </div>
+            )}
+            <button type="button" disabled={busy} className={btnPrimary} onClick={make}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Make invite link</button>
+          </div>
+        )}
+        {error && <p role="alert" className={alertBox}>{error}</p>}
+
+        {waiting.length > 0 && (
+          <section className="space-y-2 border-t border-line pt-3">
+            <h4 className="text-sm font-semibold text-ink-soft">Invites not used yet ({waiting.length})</h4>
+            {waiting.map(inv => (
+              <div key={inv.id} className="space-y-1">
+                <p className="text-[15px]"><strong>{inv.name}</strong> <span className="text-sm text-ink-soft">· {inv.trainerId ? 'on the list' : 'new trainer'} · by {inv.createdByName}</span></p>
+                <InviteShare inv={inv} phone={phoneOf(inv)} onCancel={() => cancel(inv)} />
+              </div>
+            ))}
+          </section>
+        )}
+      </div>
     </div>
   );
 }

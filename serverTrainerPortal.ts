@@ -20,7 +20,7 @@ import { effectiveVenue } from './src/lib/checklist';
 import { isDeletedRecord, ownedByTeam } from './src/lib/linked';
 import {
   bankProblem, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeStatusText,
-  jobId, portalFolder, portalUid, sameBank, trainerIdFromUid,
+  inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
 
 const BUCKET = String((firebaseConfig as any).storageBucket || '');
@@ -110,7 +110,99 @@ async function poFiles(db: Firestore, dealId: string, taskId: string) {
   return snap.docs.map(d => ({ ...(d.data() as any), id: d.id })).filter(f => f.taskId === taskId);
 }
 
+// Makes or updates a trainer's Firebase email login (id tr_<trainerId>). With no password, a random one is set
+// (the trainer then chooses theirs through the reset email).
+async function upsertLogin(db: Firestore, trainerId: string, email: string, password?: string) {
+  const { auth } = admin();
+  const clash = await db.collection('trainer_accounts').where('email', '==', email).get();
+  if (clash.docs.some(d => d.id !== trainerId)) throw new UserError(409, 'email-taken', 'Another trainer already logs in with that email.');
+  const uid = portalUid(trainerId);
+  const taken = () => new UserError(409, 'email-taken', 'That email is already used by another login. Use a different email, or ask NEXT Academy.');
+  try {
+    await auth.updateUser(uid, { email, disabled: false, ...(password ? { password } : {}) });
+  } catch (e: any) {
+    if (e?.code === 'auth/email-already-exists') throw taken();
+    if (e?.code !== 'auth/user-not-found') throw e;
+    try { await auth.createUser({ uid, email, password: password || crypto.randomBytes(24).toString('base64url'), emailVerified: false }); }
+    catch (e2: any) { if (e2?.code === 'auth/email-already-exists') throw taken(); throw e2; }
+  }
+}
+
+// Light protection for the invite routes (no login): 30 requests a minute per address.
+const hits = new Map<string, { n: number; since: number }>();
+function slowDown(req: Request) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const now = Date.now();
+  const h = hits.get(ip);
+  if (!h || now - h.since > 60_000) { hits.set(ip, { n: 1, since: now }); return; }
+  if (++h.n > 30) throw new UserError(429, 'too-many', 'Too many tries. Wait a minute and try again.');
+}
+
+async function openInvite(db: Firestore, token: any) {
+  const t = String(token || '');
+  const bad = () => new UserError(404, 'invite-not-found', 'This invite link is not valid. Ask NEXT Academy for a new one.');
+  if (!/^[a-f0-9]{32}$/.test(t)) throw bad();
+  const ref = db.collection('portal_invites').doc(t);
+  const inv: any = (await ref.get()).data();
+  if (!inv) throw bad();
+  if (inv.status === 'used') throw new UserError(410, 'invite-used', 'This invite has already been used. Log in with your email and password, or use "Forgot password".');
+  if (inv.status === 'cancelled') throw new UserError(410, 'invite-cancelled', 'This invite was cancelled. Ask NEXT Academy for a new one.');
+  if (!inviteLive(inv)) throw new UserError(410, 'invite-expired', 'This invite has expired. Ask NEXT Academy for a new one.');
+  const trainer: any = inv.trainerId ? (await db.collection('trainers_directory').doc(inv.trainerId).get()).data() : null;
+  if (inv.trainerId && !trainer) throw new UserError(410, 'invite-trainer-gone', 'This invite is no longer valid. Ask NEXT Academy for a new one.');
+  return { ref, inv, trainer };
+}
+
 export function registerTrainerPortalRoutes(app: Express) {
+  // ---------- Invite links (no login) ----------
+  app.post('/api/portal-invite/get', route(async req => {
+    slowDown(req);
+    const { db } = admin();
+    const { inv, trainer } = await openInvite(db, req.body?.token);
+    const acc: any = inv.trainerId ? (await db.collection('trainer_accounts').doc(inv.trainerId).get()).data() : null;
+    return { name: trainer?.name || inv.name || '', email: acc?.email || trainer?.email || '', isNew: !inv.trainerId, invitedBy: String(inv.createdByName || '').split(' ')[0] || 'NEXT Academy' };
+  }));
+
+  // The trainer types their email and a password: the login is made, a new person is added to Trainers.
+  app.post('/api/portal-invite/accept', route(async req => {
+    slowDown(req);
+    const { db } = admin();
+    const { ref, inv, trainer } = await openInvite(db, req.body?.token);
+    const email = cleanEmail(req.body?.email);
+    const bad = emailProblem(email) || passwordProblem(req.body?.password);
+    if (bad) throw new UserError(400, 'invalid', bad);
+    const name = String(req.body?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 100) || trainer?.name || inv.name;
+    if (!name) throw new UserError(400, 'invalid', 'Type your full name.');
+    // Claim the invite first, so the same link can't make two logins.
+    await db.runTransaction(async tx => {
+      const now: any = (await tx.get(ref)).data();
+      if (now?.status !== 'open') throw new UserError(410, 'invite-used', 'This invite has already been used. Log in with your email and password.');
+      tx.update(ref, { status: 'used', usedAt: nowIso(), usedEmail: email });
+    });
+    let trainerId = inv.trainerId || '';
+    try {
+      if (!trainerId) {
+        const tRef = db.collection('trainers_directory').doc();
+        trainerId = tRef.id;
+        await tRef.set({ id: trainerId, name, email, contact: String(inv.phone || ''), specialization: '', programmeIds: [], status: 'Available', notes: '',
+          createdAt: Date.now(), createdBy: inv.createdById || '', createdByName: `${name}${PORTAL} invite` });
+      }
+      await upsertLogin(db, trainerId, email, String(req.body.password));
+    } catch (e) {
+      // Give the link back so the trainer can try again (e.g. another email), and drop a half-made new trainer.
+      await ref.update({ status: 'open', usedAt: null, usedEmail: null });
+      if (!inv.trainerId && trainerId) await db.collection('trainers_directory').doc(trainerId).delete().catch(() => {});
+      throw e;
+    }
+    const accRef = db.collection('trainer_accounts').doc(trainerId);
+    const before = (await accRef.get()).exists;
+    await accRef.set({ trainerId, email, active: true, updatedAt: nowIso(), ...(before ? {} : { createdAt: nowIso(), createdById: inv.createdById || '', createdByName: inv.createdByName || '' }) }, { merge: true });
+    if (trainer && !trainer.email) await db.collection('trainers_directory').doc(trainerId).update({ email });
+    await ref.update({ usedTrainerId: trainerId });
+    await logAccount(db, trainerId, name, `Joined the portal from ${inv.createdByName || 'a team'}'s invite (${email})`);
+    return { email };
+  }));
+
   // ---------- Admin and Management ----------
   // Give a trainer portal access (or change their login email). The CRM then asks Firebase to email them a
   // "set your password" link (TrainerManager.tsx). Their profile and outline links are not touched.
@@ -123,22 +215,7 @@ export function registerTrainerPortalRoutes(app: Express) {
     if (bad) throw new UserError(400, 'bad-email', bad);
     const tr = await db.collection('trainers_directory').doc(trainerId).get();
     if (!trainerId || !tr.exists) throw new UserError(404, 'no-trainer', 'That trainer is no longer on the list.');
-    const clash = await db.collection('trainer_accounts').where('email', '==', email).get();
-    if (clash.docs.some(d => d.id !== trainerId)) throw new UserError(409, 'email-taken', 'Another trainer already logs in with that email.');
-    const uid = portalUid(trainerId);
-    try {
-      await auth.updateUser(uid, { email, disabled: false });
-    } catch (e: any) {
-      if (e?.code === 'auth/user-not-found') {
-        try { await auth.createUser({ uid, email, password: crypto.randomBytes(24).toString('base64url'), emailVerified: false }); }
-        catch (e2: any) {
-          if (e2?.code === 'auth/email-already-exists') throw new UserError(409, 'email-taken', 'That email is already used by another login.');
-          throw e2;
-        }
-      } else if (e?.code === 'auth/email-already-exists') {
-        throw new UserError(409, 'email-taken', 'That email is already used by another login.');
-      } else throw e;
-    }
+    await upsertLogin(db, trainerId, email);
     const ref = db.collection('trainer_accounts').doc(trainerId);
     const before: any = (await ref.get()).data();
     await ref.set({

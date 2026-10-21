@@ -8,6 +8,13 @@ Joel's decisions (2026-10-21):
 - **Fee:** follows the Admin work flow. The trainer never types an amount. The fee is the trainer cost line Admin raised on the deal's Trainer step (with the PO), approved and paid as usual. If there's no line yet, the request waits with a red flag telling Admin to add one; nothing is raised automatically.
 - **Rating:** everyone sees it, including the trainer (stars and comments).
 
+## Simpler access (2026-10-21, same day; Joel: "too complicated, simplify it")
+- **Landing page** at `/trainer` (not logged in): what the portal offers (trainings, PO, fee, profile, payment details, rating) with the **Log in** box beside it (below on phones) and Forgot password.
+- **Invite to trainer portal** button on Trainers, next to "Invite a new trainer" (Admin and Management): pick a trainer, or **Someone new** (name and phone) → **Make invite link** → Copy / WhatsApp. Waiting invites are listed there with Cancel. A trainer's panel without access has the same **Invite to trainer portal** button (the email way stays as "or set it up with their email").
+- The trainer opens `/trainer/join/<token>`, types their name, email and a password (8 characters or more, typed twice) → logged straight in. No Firebase email needed. A new person is added to Trainers then. One use, 14 days. Using an invite for someone who already has access sets their email and password again.
+- `portal_invites/{token}`: Admin and Management make, read, cancel (rules); `/api/portal-invite/get` and `/accept` (server, no login, 30 a minute per address). The invite is claimed in a transaction before the login is made, and handed back if that fails (e.g. the email is already used).
+- Tested on a temporary local page: landing (computer and phone), join (passwords not matching refused, right details sent, the "not switched on yet" message from real Firebase), used invite message, the invite box (new person needs a name). Making a real invite needs the live site.
+
 ## How it works
 - **Where:** `/trainer` on the live site (`src/main.tsx` → `TrainerPortal.tsx`). The portal uses its own Firebase connection (named app `trainer-portal`), so a team member logged in to the CRM in the same browser stays logged in.
 - **Logins:** a Firebase Auth user with id `tr_<trainerId>`, made by the server. It has no `auth_map` record, so the database rules give it nothing; the portal only talks to `serverTrainerPortal.ts` (`/api/portal/*`), which checks the login and returns only that trainer's own things. Uploads go straight to Storage `trainer_portal/{trainerId}/…` (`storage.rules`: only that trainer, while `trainer_accounts/{trainerId}.active`).

@@ -74,6 +74,32 @@ export interface BankRequest {
   rejectReason?: string;
 }
 
+// ---------- Invite links (2026-10-21; Joel: "send invite via link") ----------
+// portal_invites/{token}: made by Admin or Management (Trainers → Invite to trainer portal), for a trainer on the
+// list (trainerId) or a new person (name only). The trainer opens /trainer/join/<token>, types their email and
+// chooses a password, and is logged in. A new person is added to Trainers then. One use, 14 days.
+export const INVITE_DAYS = 14;
+export const MIN_PORTAL_PASSWORD = 8;
+export const invitePath = (token: string) => `${PORTAL_PATH}/join/${token}`;
+export interface PortalInvite {
+  id: string;
+  token: string;
+  status: 'open' | 'used' | 'cancelled';
+  trainerId?: string;
+  name: string;
+  phone?: string;
+  createdAt: number;
+  expiresAt: number;
+  createdById: string;
+  createdByName: string;
+  usedAt?: string;
+  usedTrainerId?: string;
+  usedEmail?: string;
+}
+export const inviteLive = (i: { status?: string; expiresAt?: number }, now = Date.now()) => i.status === 'open' && !!i.expiresAt && now <= i.expiresAt;
+export const passwordProblem = (p: string) =>
+  typeof p !== 'string' || p.length < MIN_PORTAL_PASSWORD ? `Choose a password of at least ${MIN_PORTAL_PASSWORD} characters.` : p.length > 100 ? 'That password is too long.' : '';
+
 // ---------- Cleaning what a trainer sends (the server keeps only this) ----------
 const str = (v: any, max: number) => String(v ?? '').replace(/\u0000/g, '').trim().slice(0, max);
 

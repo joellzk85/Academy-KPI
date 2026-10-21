@@ -14,7 +14,9 @@ import { shrink } from './PhotoPicker';
 import { sizeText } from './TrainerExtrasFields';
 import { ProfileSubmission, cleanProfile, profileProblem } from '../lib/trainerLinks';
 import { PROFILE_PARTS, emptyExtras, profileGaps, safeName, trainerFileProblem, trainerFileType } from '../lib/trainerProfile';
-import { PortalFile, STAR_WORDS, bankProblem, claimFolder, cleanBank, cleanTin, portalFolder } from '../lib/trainerPortal';
+import {
+  MIN_PORTAL_PASSWORD, PORTAL_PATH, PortalFile, STAR_WORDS, bankProblem, claimFolder, cleanBank, cleanEmail, cleanTin, emailProblem, passwordProblem, portalFolder,
+} from '../lib/trainerPortal';
 import { formatDateRange, formatRM, daysText } from '../lib/deals';
 import { COMPANY } from '../lib/company';
 
@@ -92,16 +94,115 @@ const shell = (children: React.ReactNode, right?: React.ReactNode) => (
   </div>
 );
 
-export default function TrainerPortal() {
+export default function TrainerPortal({ inviteToken }: { inviteToken?: string }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
+  const [invite, setInvite] = useState(inviteToken || '');
   useEffect(() => { document.title = 'NEXT Academy trainer portal'; return onAuthStateChanged(pAuth, setUser); }, []);
+  const leaveInvite = () => { setInvite(''); window.history.replaceState(null, '', PORTAL_PATH); };
   if (user === undefined) return shell(<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>);
-  if (!user) return <LoginScreen />;
+  if (invite) return <JoinScreen token={invite} onDone={leaveInvite} />;
+  if (!user) return <Landing />;
   return <Portal user={user} />;
 }
 
+// ---------- Landing page (Joel, 2026-10-21): what the portal is, and log in ----------
+const FEATURES: { icon: React.ReactNode; title: string; text: string }[] = [
+  { icon: <CalendarDays className="h-5 w-5" />, title: 'Your trainings', text: 'Upcoming trainings with dates and venue, and your training history with us.' },
+  { icon: <FileText className="h-5 w-5" />, title: 'Purchase orders', text: 'Download and accept your PO as soon as a training is confirmed.' },
+  { icon: <Upload className="h-5 w-5" />, title: 'Request your fee', text: 'Send the training photos and T3 form, and follow your payment until it is paid.' },
+  { icon: <UserIcon className="h-5 w-5" />, title: 'Your profile', text: 'Keep your profile, topics and HRDC biodata up to date in one place.' },
+  { icon: <Landmark className="h-5 w-5" />, title: 'Payment details', text: 'Your bank account, tax number (TIN) and address, kept safely.' },
+  { icon: <Star className="h-5 w-5" />, title: 'Your rating', text: 'See how NEXT Academy rated each training, with comments.' },
+];
+
+function Landing() {
+  return (
+    <div className="min-h-screen bg-surface font-sans text-ink">
+      <header className="border-b border-line bg-white">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3"><Logo /><a href="#login" className={`${btnSecondary} lg:hidden`}>Log in</a></div>
+      </header>
+      <main className="mx-auto grid max-w-5xl gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:py-12">
+        <div className="space-y-6">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-accent">For NEXT Academy trainers</p>
+            <h1 className="mt-2 text-3xl font-bold leading-tight sm:text-4xl">Your trainings, PO and payments, all in one place</h1>
+            <p className="mt-3 max-w-xl text-[16px] text-ink-soft">The NEXT Academy trainer portal is where you see the trainings you run with us, accept your PO, request your fee and keep your profile up to date.</p>
+          </div>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {FEATURES.map(f => (
+              <li key={f.title} className="flex gap-3 rounded-2xl border border-line bg-white p-4">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">{f.icon}</span>
+                <span><span className="block font-semibold">{f.title}</span><span className="block text-sm text-ink-soft">{f.text}</span></span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-ink-soft">New here? NEXT Academy sends you an invite link to set up your login. Questions: {COMPANY.phone} · {COMPANY.email}</p>
+        </div>
+        <div id="login" className="lg:pt-8"><LoginBox /></div>
+      </main>
+    </div>
+  );
+}
+
+// ---------- Joining from an invite link (/trainer/join/<token>): email + choose a password ----------
+function JoinScreen({ token, onDone }: { token: string; onDone: () => void }) {
+  const [info, setInfo] = useState<any>(null);
+  const [error, setError] = useState('');
+  const [f, setF] = useState({ name: '', email: '', password: '', again: '' });
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const post = async (path: string, body: any) => {
+    let res: Response;
+    try { res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+    catch { throw new Error('No internet connection. Check it and try again.'); }
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d?.ok) throw new Error(d?.error || 'Something went wrong. Please try again in a minute.');
+    return d;
+  };
+  useEffect(() => {
+    post('/api/portal-invite/get', { token }).then(d => { setInfo(d); setF(x => ({ ...x, name: d.name || '', email: d.email || '' })); }).catch(e => setError(e.message));
+  }, [token]);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProblem('');
+    if (!f.name.trim()) return setProblem('Type your full name.');
+    const bad = emailProblem(cleanEmail(f.email)) || passwordProblem(f.password);
+    if (bad) return setProblem(bad);
+    if (f.password !== f.again) return setProblem("The two passwords aren't the same.");
+    setBusy(true);
+    try {
+      const r = await post('/api/portal-invite/accept', { token, name: f.name, email: f.email, password: f.password });
+      try { await signInWithEmailAndPassword(pAuth, r.email, f.password); onDone(); }
+      catch (err: any) { setProblem(`Your login is ready. ${loginError(err)}`); }
+    } catch (err: any) { setProblem(err.message); } finally { setBusy(false); }
+  };
+  if (error) return shell(
+    <div className={`${card} mx-auto max-w-md space-y-3`}>
+      <p className="text-[15px]">{error}</p>
+      <button type="button" className={btnSecondary} onClick={onDone}>Go to the trainer portal</button>
+    </div>
+  );
+  if (!info) return shell(<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading your invite…</p>);
+  return shell(
+    <form onSubmit={submit} className={`${card} mx-auto max-w-md space-y-4`}>
+      <div>
+        <h1 className="text-xl font-bold">Welcome{info.name ? `, ${info.name.split(' ')[0]}` : ''}!</h1>
+        <p className="mt-1 text-[15px] text-ink-soft">{info.invitedBy} from NEXT Academy invited you to the trainer portal. Set up your login below; you'll use this email and password from now on.</p>
+      </div>
+      <div><label className={label} htmlFor="j-name">Full name</label><input id="j-name" autoComplete="name" value={f.name} onChange={e => setF(x => ({ ...x, name: e.target.value }))} className={input} /></div>
+      <div><label className={label} htmlFor="j-email">Your email</label><input id="j-email" type="email" autoComplete="email" value={f.email} onChange={e => setF(x => ({ ...x, email: e.target.value }))} className={input} /></div>
+      <div><label className={label} htmlFor="j-pw">Choose a password</label><input id="j-pw" type="password" autoComplete="new-password" value={f.password} onChange={e => setF(x => ({ ...x, password: e.target.value }))} className={input} />
+        <p className="mt-1 text-sm text-ink-soft">At least {MIN_PORTAL_PASSWORD} characters.</p></div>
+      <div><label className={label} htmlFor="j-pw2">Type it again</label><input id="j-pw2" type="password" autoComplete="new-password" value={f.again} onChange={e => setF(x => ({ ...x, again: e.target.value }))} className={input} /></div>
+      {problem && <p role="alert" className={alertBox}>{problem}</p>}
+      <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Set up my login</button>
+      <button type="button" className="w-full text-center text-sm font-semibold text-accent hover:underline" onClick={onDone}>I already have a login</button>
+    </form>
+  );
+}
+
 // ---------- Log in / forgot password ----------
-function LoginScreen() {
+function LoginBox() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'login' | 'forgot' | 'sent'>('login');
@@ -122,12 +223,12 @@ function LoginScreen() {
       else setError(loginError(err));
     } finally { setBusy(false); }
   };
-  return shell(
-    <div className="mx-auto max-w-md">
-      <form onSubmit={submit} className={`${card} space-y-4`}>
+  return (
+    <div>
+      <form onSubmit={submit} className={`${card} space-y-4 shadow-sm`}>
         <div>
-          <h1 className="text-xl font-bold">{mode === 'login' ? 'Trainer portal' : 'Reset your password'}</h1>
-          <p className="mt-1 text-[15px] text-ink-soft">{mode === 'login' ? 'Log in with the email NEXT Academy registered for you.' : mode === 'forgot' ? "Type your email and we'll send you a link to choose a new password." : ''}</p>
+          <h2 className="text-xl font-bold">{mode === 'login' ? 'Log in' : 'Reset your password'}</h2>
+          <p className="mt-1 text-[15px] text-ink-soft">{mode === 'login' ? 'With the email and password you set up from your invite.' : mode === 'forgot' ? "Type your email and we'll send you a link to choose a new password." : ''}</p>
         </div>
         {mode === 'sent' ? (
           <>
@@ -141,12 +242,11 @@ function LoginScreen() {
             {error && <p role="alert" className={alertBox}>{error}</p>}
             <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} {mode === 'login' ? 'Log in' : 'Send me the link'}</button>
             <button type="button" className="w-full text-center text-sm font-semibold text-accent hover:underline" onClick={() => { setError(''); setMode(mode === 'login' ? 'forgot' : 'login'); }}>
-              {mode === 'login' ? 'Forgot password? / First time here?' : 'Back to log in'}
+              {mode === 'login' ? 'Forgot password?' : 'Back to log in'}
             </button>
           </>
         )}
       </form>
-      <p className="mt-4 text-center text-sm text-ink-soft">No access yet? Ask NEXT Academy: {COMPANY.phone} · {COMPANY.email}</p>
     </div>
   );
 }

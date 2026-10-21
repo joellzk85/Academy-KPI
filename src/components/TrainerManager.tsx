@@ -14,7 +14,7 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
 import { downloadBiodataPdf } from './TrainerBiodataDocument';
-import { BankRequestsBox, PortalAccessBox, TrainerRatings, useTrainerAccounts } from './TrainerPortalAdmin';
+import { BankRequestsBox, PortalAccessBox, PortalInviteDialog, TrainerRatings, useTrainerAccounts } from './TrainerPortalAdmin';
 import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
 import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel } from '../lib/trainerProfile';
@@ -186,6 +186,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
 
   const bookingsOf = (t: Trainer) => trainerBookings(t, deals, checklists, quotes, trainers);
   const accounts = useTrainerAccounts();
+  const [portalInvite, setPortalInvite] = useState<string | null>(null);   // null = closed; '' = no one picked yet
   const dealLabel = (dealId: string) => {
     const d = deals.find(x => x.id === dealId);
     if (!d) return 'Deal no longer exists';
@@ -337,6 +338,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         </div>
         <span className="flex flex-wrap gap-2">
           <button type="button" onClick={inviteNew} className={btnSecondary}>Invite a new trainer</button>
+          {isStaff && <button type="button" onClick={() => setPortalInvite('')} className={btnSecondary}>Invite to trainer portal</button>}
           <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add trainer</button>
         </span>
       </div>
@@ -444,7 +446,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
             {/* Trainer portal (2026-10-21): access by email, for the trainers who need it */}
             <section className="mt-4 space-y-2 rounded-xl border border-line p-4">
               <h4 className="text-sm font-semibold text-ink-soft">Trainer portal</h4>
-              <PortalAccessBox trainer={openTrainer} account={accounts[openTrainer.id]} viewer={viewer} />
+              <PortalAccessBox trainer={openTrainer} account={accounts[openTrainer.id]} viewer={viewer} onInvite={() => setPortalInvite(openTrainer.id)} />
             </section>
             <section className="mt-4 space-y-2 rounded-xl border border-line p-4">
               <h4 className="text-sm font-semibold text-ink-soft">Rating</h4>
@@ -452,6 +454,11 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
             </section>
           </div>
         </div>
+      )}
+
+      {/* Invite to the trainer portal (2026-10-21): a link where the trainer sets up their own login */}
+      {portalInvite !== null && (
+        <PortalInviteDialog viewer={viewer} trainers={trainers} preselect={portalInvite} onClose={() => setPortalInvite(null)} />
       )}
 
       {/* A new link to share */}
