@@ -18,6 +18,7 @@ import { useSalesTarget } from '../lib/useSalesTarget';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
 import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags } from '../lib/money';
+import { TrainerJob, claimFlag, jobId } from '../lib/trainerPortal';
 import { KIND_TEXT, canDecideChange, changeFlagText, changeSummary, pendingChange } from '../lib/trainingChange';
 import { projectRow } from '../lib/projectPL';
 import { useChecklistSettings } from './DealChecklist';
@@ -152,6 +153,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const [clients, setClients] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [plDocs, setPlDocs] = useState<Record<string, any>>({});
+  const [trainerJobs, setTrainerJobs] = useState<TrainerJob[]>([]);
   const touchPoints = useTouchPoints();
   const [savedCards, setSavedCards] = useState<CardId[] | null>(null);
   const [savedShortcuts, setSavedShortcuts] = useState<ShortcutId[] | null>(null);
@@ -231,6 +233,8 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     if (staff) {
       subs.push(onSnapshot(query(collection(db, 'money_out')), s => setMoneyOut(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id }))))));
       subs.push(onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))));
+      // Trainer fee requests from the portal, as a notification (2026-10-21).
+      subs.push(onSnapshot(query(collection(db, 'trainer_jobs')), s => setTrainerJobs(s.docs.map(d => ({ ...(d.data() as TrainerJob), id: d.id }))), () => setTrainerJobs([])));
     }
     // SST typed in Project P&L, for the Money position card's profit (Management only).
     if (viewer.role === 'management') {
@@ -331,7 +335,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
-    quotes, plDocs,
+    quotes, plDocs, trainerJobs,
   };
 
   return (
@@ -776,7 +780,24 @@ type CardCtx = {
   docLinks: DocLink[];
   openedLinks: DocLink[];   // the links this person may see opens of
   quotes: any[]; plDocs: Record<string, any>;   // for the one P&L (SST from the quotation, or typed in Project P&L)
+  trainerJobs: TrainerJob[];
 };
+
+// Trainers who asked for their fee in the portal and aren't approved yet (Admin and Management's notification,
+// 2026-10-21). taskId: the deal's Trainer step, so the fee lines waiting on it aren't listed twice.
+function feeRequestItems(c: CardCtx, deal: (p: any) => string): (Item & { dealId: string; taskId: string })[] {
+  const out: (Item & { dealId: string; taskId: string })[] = [];
+  c.wonDeals.forEach(p => {
+    const task = (c.checklists[p.id]?.tasks || []).find((t: any) => t.kind === 'trainer' && t.trainerId);
+    if (!task) return;
+    const flag = claimFlag(c.trainerJobs.find(j => j.id === jobId(p.id, task.trainerId)), c.moneyOut.filter(o => o.checklistTaskId === task.id), task.trainerName || 'The trainer');
+    if (flag) out.push({
+      key: `${p.id}_fee`, dealId: p.id, taskId: task.id, title: `Trainer fee · ${deal(p)}`, level: 'attention',
+      sub: flag, onClick: () => c.openDeal(p),
+    });
+  });
+  return out;
+}
 
 type Item = { key: string; title: string; sub?: string; level?: 'danger' | 'attention'; onClick?: () => void };
 
@@ -1054,7 +1075,8 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       return { items, empty: 'Nothing urgent. Every checklist and HRDC query is on track.' };
     }
     case 'money_jobs': {
-      const items: Item[] = [];
+      // Trainers asking for their fee in the portal (2026-10-21): Admin checks T3, photos and report first.
+      const items: Item[] = [...feeRequestItems(c, deal)];
       // Before training only: invoicing a direct-pay client. From the day after the training it's in the After training card.
       c.wonDeals.forEach(p => {
         moneyFlags(p, c.moneyIn.filter(m => m.dealId === p.id), [], c.moneySettings, c.today).forEach((f, i) => items.push({
@@ -1073,7 +1095,9 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       return { items, empty: 'No money jobs waiting.' };
     }
     case 'approvals': {
-      const list = c.moneyOut.filter(o => canDecide(o, c.viewer));
+      // Trainers asking for their fee (2026-10-21) replace their fee lines here: approved on the deal, after the checks.
+      const fees = feeRequestItems(c, deal);
+      const list = c.moneyOut.filter(o => canDecide(o, c.viewer) && !fees.some(f => f.taskId === o.checklistTaskId));
       // Training date changes and cancellations (2026-10-21) come first: nothing moves until they're decided.
       const changes = c.deals.filter(p => canDecideChange(pendingChange(p), c.viewer));
       return {
@@ -1082,6 +1106,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
             const tc = pendingChange(p)!;
             return { key: `${p.id}_tc`, title: `${KIND_TEXT[tc.kind]} · ${deal(p)}`, level: (tc.kind === 'cancel' ? 'danger' : 'attention') as Item['level'], sub: `${changeSummary(tc)} · asked by ${tc.byName}`, onClick: () => c.openDeal(p) };
           }),
+          ...fees,
           ...list.map(o => {
             const p = c.deals.find(d => d.id === o.dealId);
             return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · requested by ${o.requestedByName}`, onClick: () => c.nav.openAdminWork('money') };

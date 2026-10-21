@@ -7,6 +7,8 @@ import { dealStage, formatDate, formatDateRange, trainingEndDate } from '../lib/
 import { linkedOnly } from '../lib/linked';
 import { MoneyOut } from '../lib/money';
 import { newToken, whatsappShare } from '../lib/trainerLinks';
+import { isTrainerFee } from '../lib/feeChecks';
+import { FeeChecksBox } from './FeeChecks';
 import {
   BankRequest, Booking, INVITE_DAYS, PORTAL_PATH, PortalInvite, STARS, STAR_WORDS, TrainerAccount, TrainerJob, claimFlag, clashesWith, cleanEmail, emailProblem, inviteLive, invitePath,
   jobId, poDeclinedFlag, poLines, ratingAverage,
@@ -461,6 +463,7 @@ export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
           {staff && claim.status === 'submitted' && <button type="button" disabled={busy} className={btnSecondary} onClick={sendBack}>Ask the trainer to fix something</button>}
         </div>
       )}
+      {staff && lines.some(o => isTrainerFee(o) && o.status !== 'rejected') && <FeeChecksBox dealId={deal.id} taskId={task.id} viewer={viewer} />}
 
       <div>
         {rating ? (

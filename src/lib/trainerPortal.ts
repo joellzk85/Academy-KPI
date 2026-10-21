@@ -15,6 +15,7 @@
 //   poDeclined { reason, at }                       the trainer declined the PO (red flag in Admin work)
 // trainer_calendars/{token}: { trainerId, at }: the trainer's private calendar link (server only).
 //   claim { status, photos[], t3[], submittedAt, returnNote?, returnedByName?, history[] }   "Request training fee"
+//   feeChecks { t3?, photos?, report? }: { byId, byName, at }   Admin ticked it by hand before the fee is approved
 // trainer_bank_requests/{trainerId}: a bank account change typed by the trainer, waiting for Admin or Management.
 //   Accepting copies it onto the trainer's vendor record (Admin work → Vendors), where payments read it.
 // Storage: trainer_portal/{trainerId}/{kind}_{time}_{name} (profile files) and
@@ -52,6 +53,7 @@ export interface TrainerJob {
   po?: PoInput | null;                              // the made-automatically PO as the trainer accepted it
   poDeclined?: { reason: string; at: string } | null;
   claim?: TrainerClaim | null;
+  feeChecks?: Partial<Record<'t3' | 'photos' | 'report', { byId: string; byName: string; at: string }>>;  // ticked by Admin (lib/feeChecks.ts)
 }
 
 export interface TrainerAccount {
@@ -263,5 +265,5 @@ export function claimFlag(job: TrainerJob | undefined, feeLines: { status?: stri
   const live = feeLines.filter(o => o.status !== 'rejected');
   if (!live.length) return `${trainerName} asked for their fee, but there's no trainer fee line yet: add it on the Trainer step`;
   if (live.every(o => o.status === 'approved' || o.status === 'paid')) return '';
-  return `${trainerName} asked for their fee: check what they sent, then approve`;
+  return `${trainerName} asked for their fee: check the T3, training photos and training report, then approve`;
 }

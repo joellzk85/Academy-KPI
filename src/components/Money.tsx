@@ -19,6 +19,8 @@ import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } fr
 import PaymentSummaryPanel from './PaymentSummaryPanel';
 import { BankRequestsBox, TrainerFeeRequests } from './TrainerPortalAdmin';
 import { FixRequest, PLTick, resubmitRequest } from './StepCosts';
+import { isTrainerFee } from '../lib/feeChecks';
+import { ApproveFeeDialog } from './FeeChecks';
 import { VendorForm, useVendors } from './VendorsPage';
 import { bankText, hasBank, vendorName } from '../lib/vendors';
 
@@ -108,7 +110,7 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
 }) {
   const plDocs = useTypedSst(deal.id);
   const row = projectRow(deal, ins, outs, settings, todayIso(), { quotes, plDocs });
-  const approvable = outs.filter(o => canDecide(o, viewer));
+  const approvable = outs.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
   const { busy, error, run } = useRun();
   const stepTotals = Object.values(outs.filter(o => o.checklistTaskId && o.status !== 'rejected').reduce((m, o) => {
     const s = m[o.category] || (m[o.category] = { category: o.category, count: 0, total: 0, pending: 0, approved: 0, paid: 0 });
@@ -181,9 +183,10 @@ function useTypedSst(dealId: string): Record<string, { sstAmount?: number | null
   return plDocs;
 }
 
-/** Approve several requests at once (the same check as one by one: a manager, never their own). */
+/** Approve several requests at once (the same check as one by one: a manager, never their own).
+ *  Trainer fees are left out: each is approved by itself, after its checks (lib/feeChecks.ts). */
 export async function approveMany(list: MoneyOut[], viewer: Viewer) {
-  const ok = list.filter(o => canDecide(o, viewer));
+  const ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
   if (!ok.length) return;
   const at = new Date().toISOString();
   for (let i = 0; i < ok.length; i += 400) {
@@ -391,7 +394,7 @@ function OldAccountsLink({ o }: { o: MoneyOut }) {
 }
 
 export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Viewer; context?: string; docFor?: string; key?: string }) {
-  const [mode, setMode] = useState<null | 'reject' | 'fix'>(null);
+  const [mode, setMode] = useState<null | 'reject' | 'fix' | 'approve'>(null);
   const [reason, setReason] = useState('');
   const { busy, error, setError, run } = useRun();
   const decide = canDecide(o, viewer);
@@ -400,7 +403,9 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
   const forText = company ? 'Company payment' : docFor || context || 'Training';
   const canFix = o.status === 'rejected' && isMine && !o.trainingCancelled;
 
-  const approve = () => run(() => updateDoc(doc(db, 'money_out', o.id), clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' })));
+  const approveNow = () => updateDoc(doc(db, 'money_out', o.id), clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' }));
+  // A trainer fee first shows "Are you sure?" with the T3, photos and report checks (lib/feeChecks.ts).
+  const approve = () => (isTrainerFee(o) ? setMode('approve') : run(approveNow));
   const reject = () => {
     if (!reason.trim()) return setError('Say briefly why it is rejected.');
     return run(async () => {
@@ -478,6 +483,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
         </div>
       )}
       {mode === 'fix' && <FixRequest o={o} viewer={viewer} onDone={() => setMode(null)} />}
+      {mode === 'approve' && <ApproveFeeDialog o={o} onApprove={approveNow} onClose={() => setMode(null)} />}
       {error && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
     </li>
   );
@@ -675,6 +681,7 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
 
   const pending = outs.filter(o => o.status === 'pending').sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
   const mine = pending.filter(o => canDecide(o, viewer));
+  const mineInBulk = mine.filter(o => !isTrainerFee(o));   // trainer fees are approved one by one, after their checks
   const toPay = outs.filter(o => o.status === 'approved');
   const owed = useMemo(() => ins.filter(m => !isPaid(m)), [ins]);
   const owedTotal = owed.reduce((t, m) => t + expectedFor(m, settings), 0);
@@ -695,11 +702,12 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
       <TrainerFeeRequests outs={outs} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
       <BankRequestsBox viewer={viewer} trainers={[]} />
 
-      {mine.length > 1 && (
+      {mineInBulk.length > 1 && (
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" disabled={approving} className={btnPrimary} onClick={() => runApprove(() => approveMany(mine, viewer))}>
-            {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Approve all {mine.length} waiting for you ({formatSen(mine.reduce((t, o) => t + (Number(o.amount) || 0), 0))})
+          <button type="button" disabled={approving} className={btnPrimary} onClick={() => runApprove(() => approveMany(mineInBulk, viewer))}>
+            {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Approve all {mineInBulk.length} waiting for you ({formatSen(mineInBulk.reduce((t, o) => t + (Number(o.amount) || 0), 0))})
           </button>
+          {mineInBulk.length < mine.length && <span className="text-sm text-ink-soft">Trainer fees are approved one by one, after their checks.</span>}
           {approveError && <span role="alert" className="text-sm text-danger">{approveError}</span>}
         </div>
       )}

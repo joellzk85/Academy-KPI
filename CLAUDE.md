@@ -139,7 +139,8 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Trainer portal (2026-10-21):** switch on Firebase Email/Password sign-in; publish both rules; go-live checklist item 32.
 - **Weekly presentation (2026-10-21):** publish `firestore.rules` (`present_prefs`, `present_settings`, `meeting_notes`); go-live checklist items 36 and 37.
 - **Training report (2026-10-21):** publish `firestore.rules` (`training_reports`); go-live checklist items 38 and 39. Later: read the Output assessment file by itself (needs a sample file from Joel).
-- **Trainer outlines and teambuilding proposals (2026-10-21):** publish `firestore.rules` (`trainer_docs`); go-live checklist item 40.
+- **Trainer fee checks (2026-10-21):** nothing to publish; go-live checklist item 40.
+- **Trainer outlines and teambuilding proposals (2026-10-21):** publish `firestore.rules` (`trainer_docs`); go-live checklist item 41.
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
