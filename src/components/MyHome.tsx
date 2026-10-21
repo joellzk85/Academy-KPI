@@ -17,7 +17,7 @@ import { periodFor } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
-import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, moneyFlags } from '../lib/money';
+import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags } from '../lib/money';
 import { KIND_TEXT, canDecideChange, changeFlagText, changeSummary, pendingChange } from '../lib/trainingChange';
 import { projectRow } from '../lib/projectPL';
 import { useChecklistSettings } from './DealChecklist';
@@ -1021,7 +1021,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         const since = st.daysSince || 0;
         items.push({
           key: p.id, title: deal(p), level, since, onClick: () => c.nav.openAdminWork('queue', p.id),
-          sub: st.started ? `Ended ${since} day${since === 1 ? '' : 's'} ago · step ${Math.min(st.step, 3)} of 3: ${st.next}${flags[0] && flags[0].level === 'danger' ? ` · ${flags[0].text}` : ''}`
+          sub: st.started ? `Ended ${since} day${since === 1 ? '' : 's'} ago · step ${Math.min(st.step, 4)} of 4: ${st.next}${flags[0] && flags[0].level === 'danger' ? ` · ${flags[0].text}` : ''}`
             : flags[0]?.text || 'Training ended: start post-training',
         });
       });
@@ -1061,7 +1061,13 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           key: `${p.id}_m${i}`, title: deal(p), level: f.level, sub: f.text, onClick: () => c.nav.openAdminWork('queue', p.id),
         }));
       });
-      c.moneyOut.filter(o => o.status === 'approved').forEach(o => items.push({ key: o.id, title: `Pay ${o.payee}: ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment · ' : ''}${o.category}, approved by ${o.decidedByName}`, onClick: () => c.nav.openAdminWork('money') }));
+      // Pre-training payments still unpaid as the training gets close (2026-10-21).
+      c.wonDeals.forEach(p => prePaymentFlags(p, c.moneyOut, c.checklistSettings.flagDays, c.today).forEach((f, i) => items.push({
+        key: `${p.id}_pp${i}`, title: deal(p), level: f.level, sub: f.text, onClick: () => c.nav.openAdminWork('queue', p.id),
+      })));
+      // Approved and payable, not on a payment summary yet: one line (accounts are sent a summary, 2026-10-21).
+      const ready = c.moneyOut.filter(o => o.status === 'approved' && !o.summaryToken && isPayable(o, c.deals.find(d => d.id === o.dealId), c.today));
+      if (ready.length) items.push({ key: 'ready_for_summary', title: `${ready.length} approved payment${ready.length === 1 ? '' : 's'} to send to accounts`, sub: `${formatRM(ready.reduce((t, o) => t + (Number(o.amount) || 0), 0))} · make a payment summary in Admin work → Money`, onClick: () => c.nav.openAdminWork('money') });
       c.moneyOut.filter(o => o.status === 'rejected' && !o.trainingCancelled && o.requestedById === c.viewer.id).forEach(o => items.push({ key: o.id, title: `Rejected: ${o.payee} ${formatRM(o.amount)}`, sub: o.rejectReason || 'See the reason and send a new request', level: 'attention', onClick: () => c.nav.openAdminWork('money') }));
       items.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : b.level === 'danger' ? 1 : a.level ? -1 : 1));
       return { items, empty: 'No money jobs waiting.' };

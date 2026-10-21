@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDoc, onSnapshot, query, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { AlertTriangle, Check, Copy, Download, Link2, Loader2, MessageCircle, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
 import { dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
@@ -11,15 +11,16 @@ import {
 import { daysUntil } from '../lib/checklist';
 import { projectRow } from '../lib/projectPL';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
-import { onPhone } from '../lib/whatsapp';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
-import PaymentRequestDocument, { paymentRef, paymentStatusText } from './PaymentRequestDocument';
+import PaymentRequestDocument, { paymentRef } from './PaymentRequestDocument';
 import { Receipt, needsReceipt } from '../lib/postTraining';
 import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
 import PaymentSummaryPanel from './PaymentSummaryPanel';
 import { BankRequestsBox, TrainerFeeRequests } from './TrainerPortalAdmin';
-import { PLTick } from './StepCosts';
+import { FixRequest, PLTick, resubmitRequest } from './StepCosts';
+import { VendorForm, useVendors } from './VendorsPage';
+import { bankText, hasBank, vendorName } from '../lib/vendors';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -109,6 +110,12 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
   const row = projectRow(deal, ins, outs, settings, todayIso(), { quotes, plDocs });
   const approvable = outs.filter(o => canDecide(o, viewer));
   const { busy, error, run } = useRun();
+  const stepTotals = Object.values(outs.filter(o => o.checklistTaskId && o.status !== 'rejected').reduce((m, o) => {
+    const s = m[o.category] || (m[o.category] = { category: o.category, count: 0, total: 0, pending: 0, approved: 0, paid: 0 });
+    s.count++; s.total += Number(o.amount) || 0;
+    if (o.status === 'pending' || o.status === 'approved' || o.status === 'paid') s[o.status]++;
+    return m;
+  }, {} as Record<string, { category: string; count: number; total: number; pending: number; approved: number; paid: number }>));
 
   return (
     <div className="space-y-5">
@@ -141,8 +148,22 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
         </div>
         {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
         {outs.length === 0 && <p className="text-[15px] text-ink-soft">No payment requests yet. Add costs on the venue, bus, facilitator, trainer or materials step of the checklist.</p>}
+        {/* Costs raised on the checklist are managed on their step (one home, 2026-10-21): here, one line per step. */}
+        {stepTotals.length > 0 && (
+          <ul className="divide-y divide-line rounded-xl border border-line bg-white">
+            {stepTotals.map(s => (
+              <li key={s.category} className="flex flex-wrap items-baseline gap-x-3 px-3.5 py-2 text-[15px]">
+                <span className="font-semibold">{s.category}</span>
+                <span className="text-sm text-ink-soft">{s.count} line{s.count === 1 ? '' : 's'}</span>
+                <span className="ml-auto text-sm text-ink-soft">{[s.pending && `${s.pending} waiting`, s.approved && `${s.approved} to pay`, s.paid && `${s.paid} paid`].filter(Boolean).join(' · ')}</span>
+                <span className="font-semibold tabular-nums">{formatRM(s.total)}</span>
+              </li>
+            ))}
+            <li className="px-3.5 py-2 text-sm text-ink-soft">Approve, fix or upload receipts on the cost lines in the Before training checklist.</li>
+          </ul>
+        )}
         <ul className="space-y-2">
-          {[...outs].sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt))).map(o => <OutRow key={o.id} o={o} viewer={viewer} docFor={`${deal.client || 'Client'} · ${deal.courseName || 'Training'}`} />)}
+          {[...outs].filter(o => !o.checklistTaskId).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt))).map(o => <OutRow key={o.id} o={o} viewer={viewer} docFor={`${deal.client || 'Client'} · ${deal.courseName || 'Training'}`} />)}
         </ul>
       </section>
     </div>
@@ -323,165 +344,61 @@ async function paymentPdf(o: MoneyOut, forText: string): Promise<{ blob: Blob; n
   return { blob, name };
 }
 
-function paymentWaText(o: MoneyOut, forText: string): string {
-  return [
-    `Payment request ${paymentRef(o)}`,
-    `${o.category} · ${forText}`,
-    `Pay to: ${o.payee}`,
-    `Total: ${formatSen(o.amount)}`,
-    `Status: ${paymentStatusText(o)}`,
-    '',
-    '(PDF attached)',
-  ].join('\n');
-}
-
 async function saveBlob(blob: Blob, name: string) {
   const { downloadBlob } = await import('../lib/quotePdf');
   downloadBlob(blob, name);
 }
 
-function PaymentShare({ o, forText }: { o: MoneyOut; forText: string }) {
-  const [busy, setBusy] = useState<'' | 'pdf' | 'wa'>('');
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [ready, setReady] = useState<File | null>(null);   // phone: PDF made, share needs one more tap
-
+// The request's own PDF, for printing or filing. Accounts are sent payment summaries only (2026-10-21), so there is
+// no WhatsApp or per-request link any more.
+function PaymentPdf({ o, forText }: { o: MoneyOut; forText: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   const download = async () => {
-    setBusy('pdf'); setMsg(null);
+    setBusy(true); setError('');
     try { const { blob, name } = await paymentPdf(o, forText); await saveBlob(blob, name); }
-    catch (e) { setMsg({ ok: false, text: pdfErrorText(e) }); }
-    finally { setBusy(''); }
+    catch (e) { setError(pdfErrorText(e)); }
+    finally { setBusy(false); }
   };
-
-  const share = async (file: File) => {
-    try {
-      await navigator.share({ files: [file], text: paymentWaText(o, forText), title: `Payment request ${paymentRef(o)}` });
-      setReady(null);
-      setMsg({ ok: true, text: 'Shared. Check it went to the right chat in WhatsApp.' });
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return setReady(null);              // closed the share menu
-      if (e?.name === 'NotAllowedError') return setReady(file);          // took too long: ask for one more tap
-      setReady(null);
-      setMsg({ ok: false, text: 'Your phone could not open the share menu. Use PDF instead and attach it in WhatsApp.' });
-    }
-  };
-
-  const whatsapp = async () => {
-    setMsg(null);
-    const phone = onPhone() && typeof navigator.share === 'function';
-    // Computer: open WhatsApp first (straight from the click, so it isn't blocked); you pick the chat.
-    if (!phone) window.open(`https://wa.me/?text=${encodeURIComponent(paymentWaText(o, forText))}`, '_blank', 'noopener');
-    setBusy('wa');
-    try {
-      const { blob, name } = await paymentPdf(o, forText);
-      const file = new File([blob], name, { type: 'application/pdf' });
-      if (phone && navigator.canShare?.({ files: [file] })) { await share(file); return; }
-      await saveBlob(blob, name);
-      setMsg({ ok: true, text: phone
-        ? 'The PDF was downloaded. Open WhatsApp, pick the chat and attach it (📎, Document).'
-        : `WhatsApp opened: pick the chat, then drag "${name}" from your downloads into it and press send.` });
-    } catch (e) {
-      setMsg({ ok: false, text: `The PDF could not be made: ${friendlyError(e)}` });
-    } finally {
-      setBusy('');
-    }
-  };
-
   return (
     <>
-      <button type="button" disabled={!!busy} className={btnSmall} onClick={download} title="Download as PDF">
-        {busy === 'pdf' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF
+      <button type="button" disabled={busy} className={btnSmall} onClick={download} title="Download as PDF (for printing or filing)">
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF
       </button>
-      <button type="button" disabled={!!busy} className={btnSmall} onClick={whatsapp} title="Send the PDF by WhatsApp">
-        {busy === 'wa' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />} WhatsApp
-      </button>
-      {(ready || msg) && (
-        <span className="basis-full">
-          {ready && <button type="button" className={`${btnPrimary} mt-1 py-1.5`} onClick={() => share(ready)}><MessageCircle className="h-3.5 w-3.5" /> PDF ready: share now</button>}
-          {msg && <span role="status" className={`mt-1 block rounded-lg px-2.5 py-1.5 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</span>}
-        </span>
-      )}
+      {error && <span role="alert" className="basis-full rounded-lg bg-danger-soft px-2.5 py-1.5 text-sm text-danger">{error}</span>}
     </>
   );
 }
 
-// ---------- Link for accounts (Joel, 2026-10-20) ----------
-// Accounts open the link without logging in (/pay/<token>, PaymentLinkPage.tsx), see the request and where it stands,
-// and click "Payment made" once it's approved and paid. The server (serverPaymentLinks.ts) keeps the token on the
-// request (accountsLink), so the same link shows here until someone stops it.
-function AccountsLink({ o, forText, onClose }: { o: MoneyOut; forText: string; onClose: () => void }) {
-  const [token, setToken] = useState(o.accountsLink?.token || '');
-  const [busy, setBusy] = useState(!o.accountsLink?.token);
+// A link made for one request before 2026-10-21 still works until it's stopped (serverPaymentLinks.ts). The request
+// can't go on a payment summary while it's open, so it can be stopped here.
+function OldAccountsLink({ o }: { o: MoneyOut }) {
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [copied, setCopied] = useState<'' | 'link' | 'msg'>('');
-
-  useEffect(() => {
-    if (o.accountsLink?.token) { setToken(o.accountsLink.token); return; }
-    if (token) return;
-    setBusy(true);
-    callServer<{ token: string }>('/api/pay-link/create', { id: o.id, forText }, true)
-      .then(r => setToken(r.token)).catch(e => setError(friendlyError(e))).finally(() => setBusy(false));
-  }, [o.accountsLink?.token]);
-
-  const url = token ? `${window.location.origin}/pay/${token}` : '';
-  const message = [
-    `Payment request ${paymentRef(o)}`,
-    `${o.category} · ${forText}`,
-    `Pay to: ${o.payee}`,
-    `Total: ${formatSen(o.amount)}`,
-    '',
-    'Please open this link to see the details, and click "Payment made" once it is paid:',
-    url,
-  ].join('\n');
-  const copy = async (what: 'link' | 'msg') => {
-    const text = what === 'link' ? url : message;
-    try { await navigator.clipboard.writeText(text); } catch { window.prompt('Copy this:', text); }
-    setCopied(what);
-    window.setTimeout(() => setCopied(''), 2000);
-  };
   const stop = async () => {
-    if (!window.confirm('Stop this link? Accounts will no longer be able to open it. Making a link again gives a new address.')) return;
+    if (!window.confirm('Stop the accounts link made for this payment? Accounts will no longer be able to open it; send it on a payment summary instead.')) return;
     setBusy(true); setError('');
-    try { await callServer('/api/pay-link/stop', { token }, true); setToken(''); onClose(); }
+    try { await callServer('/api/pay-link/stop', { token: o.accountsLink!.token }, true); }
     catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
-
   return (
-    <div className="mt-3 space-y-2 rounded-lg border border-line bg-surface px-3 py-2.5">
-      <p className="text-sm font-semibold">Link for accounts</p>
-      {busy && !token && <p className="flex items-center gap-2 text-sm text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Making the link…</p>}
-      {token && (
-        <>
-          <p className="break-all rounded-md border border-line bg-white px-2.5 py-1.5 font-mono text-xs">{url}</p>
-          <p className="text-sm text-ink-soft">
-            {o.status === 'pending' ? 'Accounts will see "Payment raised, waiting approval" until a manager approves it; then a Payment made button appears.'
-              : o.status === 'approved' ? 'Accounts can click Payment made on this link once they have paid.'
-              : o.status === 'paid' ? 'Already paid. The link shows when it was paid.'
-              : 'Rejected: the link tells accounts not to pay it.'}
-          </p>
-          <span className="flex flex-wrap gap-1">
-            <button type="button" className={btnSmall} onClick={() => copy('link')}>{copied === 'link' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied === 'link' ? 'Copied' : 'Copy link'}</button>
-            <button type="button" className={btnSmall} onClick={() => copy('msg')}>{copied === 'msg' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied === 'msg' ? 'Copied' : 'Copy message with link'}</button>
-            <a className={btnSmall} href={url} target="_blank" rel="noopener">Open</a>
-            <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={stop}>Stop link</button>
-            <button type="button" className={btnSmall} onClick={onClose}>Close</button>
-          </span>
-        </>
-      )}
-      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
-    </div>
+    <span className="basis-full text-sm text-ink-soft">
+      Has its own accounts link (made {formatDate(o.accountsLink!.at)}).{' '}
+      <button type="button" disabled={busy} className="font-semibold text-danger hover:underline" onClick={stop}>Stop it</button>
+      {error && <span role="alert" className="ml-2 text-danger">{error}</span>}
+    </span>
   );
 }
 
 export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Viewer; context?: string; docFor?: string; key?: string }) {
-  const [mode, setMode] = useState<null | 'reject' | 'pay'>(null);
-  const [showLink, setShowLink] = useState(false);
+  const [mode, setMode] = useState<null | 'reject' | 'fix'>(null);
   const [reason, setReason] = useState('');
-  const [pay, setPay] = useState({ date: todayIso(), ref: '' });
   const { busy, error, setError, run } = useRun();
   const decide = canDecide(o, viewer);
   const isMine = o.requestedById === viewer.id;
   const company = isCompanyPayment(o);
   const forText = company ? 'Company payment' : docFor || context || 'Training';
+  const canFix = o.status === 'rejected' && isMine && !o.trainingCancelled;
 
   const approve = () => run(() => updateDoc(doc(db, 'money_out', o.id), clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' })));
   const reject = () => {
@@ -491,13 +408,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
       setMode(null);
     });
   };
-  const markPaid = () => {
-    if (!pay.date) return setError('Enter the date it was paid.');
-    return run(async () => {
-      await updateDoc(doc(db, 'money_out', o.id), { status: 'paid', paidDate: pay.date, paidRef: pay.ref.trim(), paidById: viewer.id, paidByName: viewer.name });
-      setMode(null);
-    });
-  };
+  // Marked paid in Admin work → Money → Payment summary (2026-10-21), or by accounts on the summary's link.
   const undoPaid = () => run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', paidDate: '', paidRef: '', paidById: '', paidByName: '' }));
   const cancel = () => {
     const settled = o.status === 'approved' || o.status === 'paid';
@@ -507,6 +418,8 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
     const what = `payment request: ${o.category} · ${o.payee} (${company ? formatSen(o.amount) : formatRM(o.amount)}, ${OUT_STATUS_LABELS[o.status].toLowerCase()})`;
     return run(() => deleteMoney('money_out', o.id, o.dealId || '', viewer, what));
   };
+
+  if (mode === 'fix' && company) return <li><CompanyForm viewer={viewer} editing={o} onDone={() => setMode(null)} /></li>;
 
   return (
     <li className="rounded-xl border border-line bg-white px-3.5 py-3">
@@ -529,7 +442,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
           {company && o.neededBy && <p className="text-sm text-ink-soft">Needed by {formatDate(o.neededBy)}</p>}
           {company && o.paymentDetails && <p className="text-sm text-ink-soft">Payment details: {o.paymentDetails}</p>}
           <p className="text-sm text-ink-soft">
-            Requested by {o.requestedByName} on {formatDate(o.requestDate || o.requestedAt)}
+            Requested by {o.requestedByName} on {formatDate(o.requestDate || o.requestedAt)}{o.resubmittedAt ? ` (fixed and sent again ${formatDate(o.resubmittedAt)})` : ''}
             {o.decidedByName && ` · ${o.status === 'rejected' ? 'rejected' : 'approved'} by ${o.decidedByName} on ${formatDate(o.decidedAt || '')}`}
             {o.status === 'rejected' && o.rejectReason ? `: ${o.rejectReason}` : ''}
             {o.status === 'paid' && !paidViaLink(o) && ` · paid ${formatDate(o.paidDate || '')}${o.paidRef ? ` (ref ${o.paidRef})` : ''} by ${o.paidByName}`}
@@ -539,28 +452,24 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
               <Check className="h-3.5 w-3.5" /> Payment made {dateTimeMY(o.paidAt)} · by accounts (via link){o.paidRef ? ` · ref ${o.paidRef}` : ''}
             </p>
           )}
+          {o.status === 'approved' && o.summaryToken && <p className="text-sm text-accent">On a payment summary sent to accounts</p>}
           {o.status === 'pending' && isMine && <p className="text-sm text-attention">{viewer.role === 'management' ? 'Waiting for the other manager to approve.' : 'Waiting for a manager to approve.'}</p>}
         </div>
         {viewer.role !== 'rep' && !mode && (
           <span className="flex max-w-full shrink-0 flex-wrap justify-end gap-1 sm:max-w-[22rem]">
             {!company && o.status !== 'rejected' && <PLTick o={o} viewer={viewer} />}
-            <PaymentShare o={o} forText={forText} />
-            {o.status !== 'rejected' && (
-              <button type="button" className={btnSmall} onClick={() => setShowLink(v => !v)} title="A link your accounts open to pay it and click Payment made">
-                <Link2 className="h-3.5 w-3.5" /> {o.accountsLink?.token ? 'Accounts link' : 'Link for accounts'}
-              </button>
-            )}
+            <PaymentPdf o={o} forText={forText} />
             {decide && <button type="button" disabled={busy} className={`${btnPrimary} py-1.5`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
             {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={() => { setMode('reject'); setError(''); }}><X className="h-3.5 w-3.5" /> Reject</button>}
-            {o.status === 'approved' && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setMode('pay'); setError(''); }}><Check className="h-3.5 w-3.5" /> Mark paid</button>}
+            {canFix && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setMode('fix'); setError(''); }}><Pencil className="h-3.5 w-3.5" /> Fix and send again</button>}
             {o.status === 'paid' && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
             {(viewer.role === 'management' || ((o.status === 'pending' || o.status === 'rejected') && isMine)) && (
               <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={cancel} aria-label="Cancel request"><Trash2 className="h-4 w-4" /></button>
             )}
+            {o.accountsLink?.token && o.status !== 'paid' && <OldAccountsLink o={o} />}
           </span>
         )}
       </div>
-      {showLink && viewer.role !== 'rep' && <AccountsLink o={o} forText={forText} onClose={() => setShowLink(false)} />}
       {mode === 'reject' && (
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <input value={reason} onChange={e => setReason(e.target.value)} className={`${input} min-w-[14rem] flex-1`} placeholder="Why it is rejected" aria-label="Reason for rejecting" />
@@ -568,14 +477,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
           <button type="button" disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-[#931C13]" onClick={reject}>Reject</button>
         </div>
       )}
-      {mode === 'pay' && (
-        <div className="mt-3 flex flex-wrap items-end gap-2">
-          <div><label className={small} htmlFor={`op-${o.id}`}>Paid on</label><input id={`op-${o.id}`} type="date" value={pay.date} onChange={e => setPay(p => ({ ...p, date: e.target.value }))} className={input} /></div>
-          <div className="min-w-[12rem] flex-1"><label className={small} htmlFor={`or-${o.id}`}>Payment reference (optional)</label><input id={`or-${o.id}`} value={pay.ref} onChange={e => setPay(p => ({ ...p, ref: e.target.value }))} className={input} placeholder="e.g. bank transfer ref" /></div>
-          <button type="button" className={btnSecondary} onClick={() => setMode(null)}>Cancel</button>
-          <button type="button" disabled={busy} className={btnPrimary} onClick={markPaid}>Save</button>
-        </div>
-      )}
+      {mode === 'fix' && <FixRequest o={o} viewer={viewer} onDone={() => setMode(null)} />}
       {error && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
     </li>
   );
@@ -586,41 +488,69 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
 type ItemDraft = { description: string; qty: string; price: string };
 const blankItem = (): ItemDraft => ({ description: '', qty: '1', price: '' });
 
-function CompanyForm({ viewer, onDone }: { viewer: Viewer; onDone: () => void }) {
-  const [f, setF] = useState({ requestDate: todayIso(), category: COMPANY_CATEGORIES[0], payee: '', info: '', neededBy: '', paymentDetails: '' });
-  const [items, setItems] = useState<ItemDraft[]>([blankItem()]);
+// Who is paid comes from Admin work → Vendors (2026-10-21), so bank details are kept in one place; "+ New vendor"
+// adds one there. Older company payments keep what was typed in "Pay to" and "Payment details".
+// editing: a rejected request, fixed by the person who raised it and sent again (resubmitRequest).
+function CompanyForm({ viewer, onDone, editing }: { viewer: Viewer; onDone: () => void; editing?: MoneyOut }) {
+  const vendors = useVendors(true);
+  const [f, setF] = useState({
+    requestDate: editing?.requestDate || todayIso(), category: editing?.category || COMPANY_CATEGORIES[0], vendorId: editing?.vendorId || '',
+    info: editing?.description || '', neededBy: editing?.neededBy || '', paymentDetails: editing?.paymentDetails || '',
+  });
+  const [items, setItems] = useState<ItemDraft[]>(editing?.items?.length
+    ? editing.items.map(i => ({ description: i.description, qty: String(i.qty), price: String(i.price) }))
+    : [blankItem()]);
   // Kept in this browser until it's saved (lib/useFormDraft.ts).
-  const draft = useFormDraft(viewer.id, 'company-payment:new', { f, items }, v => { setF(v.f); setItems(v.items); });
+  const draft = useFormDraft(viewer.id, editing ? `company-payment:fix:${editing.id}` : 'company-payment:new', { f, items }, v => { setF(v.f); setItems(v.items); });
+  const [newVendor, setNewVendor] = useState(false);
   const { busy, error, setError, run } = useRun();
   const parsed = items.map(i => ({ description: i.description.trim(), qty: num(i.qty), price: num(i.price) }));
   const total = itemsTotal(parsed);
   const setItem = (i: number, ch: Partial<ItemDraft>) => setItems(list => list.map((x, j) => (j === i ? { ...x, ...ch } : x)));
+  const vendor = vendors.find(v => v.id === f.vendorId);
+  const sorted = [...vendors].sort((a, b) => vendorName(a).localeCompare(vendorName(b)));
 
   const save = (e: React.FormEvent) => {
     e.preventDefault();
     const used = parsed.filter((it, i) => it.description || items[i].price.trim());
     if (!f.requestDate) return setError('Enter the date of request.');
-    if (!f.payee.trim()) return setError('Enter who is being paid.');
+    if (!vendor && !(editing && !editing.vendorId && editing.payee)) return setError('Pick who is being paid, or add a new vendor.');
     if (!used.length) return setError('Add at least one item.');
     if (used.some(it => !it.description)) return setError('Every item needs a description.');
     if (used.some(it => !(it.qty > 0) || !(it.price > 0))) return setError('Every item needs a quantity and a price, for example 1 and 250.');
     const amount = itemsTotal(used);
-    const id = `out_${Date.now()}`;
+    const payee = vendor ? vendorName(vendor) : editing!.payee;
+    const fields = {
+      category: f.category, payee, vendorId: vendor?.id || '', description: f.info.trim(), amount,
+      requestDate: f.requestDate, items: used, neededBy: f.neededBy, paymentDetails: vendor && hasBank(vendor) ? '' : f.paymentDetails.trim(),
+    };
     return run(async () => {
-      await setDoc(doc(db, 'money_out', id), {
-        id, dealId: '', kind: 'company', category: f.category, payee: f.payee.trim(), description: f.info.trim(), amount, timing: 'before',
-        requestDate: f.requestDate, items: used, neededBy: f.neededBy, paymentDetails: f.paymentDetails.trim(),
-        status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
-        decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
-      });
+      if (editing) {
+        await resubmitRequest(editing, fields, viewer);
+      } else {
+        const id = `out_${Date.now()}`;
+        await setDoc(doc(db, 'money_out', id), {
+          id, dealId: '', kind: 'company', timing: 'before', ...fields,
+          status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
+          decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
+        });
+      }
       draft.clear();
       onDone();
     });
   };
 
+  if (newVendor) {
+    return (
+      <VendorForm vendors={vendors} trainers={[]} venues={[]} viewer={viewer} start={{ type: 'other' }}
+        onSaved={v => { setF(x => ({ ...x, vendorId: v.id })); setNewVendor(false); }} onCancel={() => setNewVendor(false)} />
+    );
+  }
+
   return (
     <form onSubmit={save} className="space-y-4 rounded-2xl border border-line bg-surface p-4">
-      <p className="font-semibold">Raise a company payment</p>
+      <p className="font-semibold">{editing ? 'Fix and send again' : 'Raise a company payment'}</p>
+      {editing?.rejectReason && <p className="text-sm text-danger">Rejected by {editing.decidedByName}: {editing.rejectReason}</p>}
       <DraftBar draft={draft} what="company payment" />
       <div className="grid gap-3 sm:grid-cols-2">
         <div><label className={small} htmlFor="cp-date">Date of request</label><input id="cp-date" type="date" value={f.requestDate} onChange={e => setF(x => ({ ...x, requestDate: e.target.value }))} className={input} /></div>
@@ -630,7 +560,15 @@ function CompanyForm({ viewer, onDone }: { viewer: Viewer; onDone: () => void })
             {COMPANY_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <div><label className={small} htmlFor="cp-payee">Pay to</label><input id="cp-payee" value={f.payee} onChange={e => setF(x => ({ ...x, payee: e.target.value }))} className={input} placeholder="Name of person or company" /></div>
+        <div>
+          <label className={small} htmlFor="cp-payee">Pay to (vendor)</label>
+          <select id="cp-payee" value={f.vendorId} onChange={e => e.target.value === '__new' ? setNewVendor(true) : setF(x => ({ ...x, vendorId: e.target.value }))} className={input}>
+            <option value="">{editing && !editing.vendorId && editing.payee ? `${editing.payee} (typed before)` : 'Pick a vendor'}</option>
+            {sorted.map(v => <option key={v.id} value={v.id}>{vendorName(v)}</option>)}
+            <option value="__new">+ New vendor…</option>
+          </select>
+          {vendor && <span className={`mt-0.5 block text-xs ${hasBank(vendor) ? 'text-ink-soft' : 'font-semibold text-attention'}`}>{hasBank(vendor) ? bankText(vendor) : 'No bank details yet: add them in Admin work → Vendors, or type them below.'}</span>}
+        </div>
         <div><label className={small} htmlFor="cp-need">Needed by (optional)</label><input id="cp-need" type="date" value={f.neededBy} onChange={e => setF(x => ({ ...x, neededBy: e.target.value }))} className={input} /></div>
       </div>
 
@@ -654,13 +592,15 @@ function CompanyForm({ viewer, onDone }: { viewer: Viewer; onDone: () => void })
       </div>
 
       <div><label className={small} htmlFor="cp-info">Info</label><textarea id="cp-info" rows={2} value={f.info} onChange={e => setF(x => ({ ...x, info: e.target.value }))} className={input} placeholder="Why it's needed, invoice number, anything the approver should know" /></div>
-      <div><label className={small} htmlFor="cp-bank">Payment details (optional)</label><input id="cp-bank" value={f.paymentDetails} onChange={e => setF(x => ({ ...x, paymentDetails: e.target.value }))} className={input} placeholder="e.g. Maybank, account name, account number" /></div>
+      {!(vendor && hasBank(vendor)) && (
+        <div><label className={small} htmlFor="cp-bank">Payment details (optional)</label><input id="cp-bank" value={f.paymentDetails} onChange={e => setF(x => ({ ...x, paymentDetails: e.target.value }))} className={input} placeholder="Only if the vendor has no bank details yet" /></div>
+      )}
 
       <p className="text-sm text-ink-soft">{viewer.role === 'management' ? 'The other manager must approve this before it can be paid.' : 'A manager must approve this before it can be paid.'}</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
         <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
-        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Send for approval</button>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{editing ? 'Send for approval again' : 'Send for approval'}</button>
       </div>
     </form>
   );
@@ -707,7 +647,7 @@ function CompanyPayments({ outs, viewer }: { outs: MoneyOut[]; viewer: Viewer })
 
 // ---------- Admin work → Money: payment requests across deals, company payments, settings ----------
 // Money coming in (invoices and claims still to be paid) is listed in Payment tracking only (Joel, 2026-10-20: no repeats).
-export function MoneyOverview({ viewer, onOpenPayments }: { viewer: Viewer; onOpenPayments?: () => void }) {
+export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: Viewer; onOpenPayments?: () => void; onOpenDeal?: (dealId: string) => void }) {
   const settings = useMoneySettings();
   const [deals, setDeals] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
@@ -752,7 +692,7 @@ export function MoneyOverview({ viewer, onOpenPayments }: { viewer: Viewer; onOp
       </div>
 
       {/* From the trainer portal (2026-10-21): fee requests with photos and T3, and bank accounts to check */}
-      <TrainerFeeRequests outs={outs} dealLabel={dealLabel} />
+      <TrainerFeeRequests outs={outs} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
       <BankRequestsBox viewer={viewer} trainers={[]} />
 
       {mine.length > 1 && (
@@ -767,13 +707,8 @@ export function MoneyOverview({ viewer, onOpenPayments }: { viewer: Viewer; onOp
         {pending.map(o => <OutRow key={o.id} o={o} viewer={viewer} context={dealLabel(o.dealId)} />)}
       </Section>
 
-      <PaymentSummaryPanel outs={outs} viewer={viewer} forTextOf={o => dealLabel(o.dealId)} />
-      <Section title="Approved, not paid yet" empty="Nothing approved and waiting to be paid.">
-        {toPay.map(o => <OutRow key={o.id} o={o} viewer={viewer} context={dealLabel(o.dealId)} />)}
-      </Section>
-      <Section title="Money still to come in (oldest first)" empty="Every recorded invoice and claim has been paid.">
-        {owed.map(m => <InRow key={m.id} m={m} viewer={viewer} settings={settings} context={dealLabel(m.dealId)} />)}
-      </Section>
+      {/* Approved payments live in the summary list only, and money still to come in in Payment tracking (2026-10-21). */}
+      <PaymentSummaryPanel outs={outs} viewer={viewer} forTextOf={o => dealLabel(o.dealId)} dealOf={o => deals.find(d => d.id === o.dealId)} />
 
       <CompanyPayments outs={outs} viewer={viewer} />
 

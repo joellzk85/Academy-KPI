@@ -5,7 +5,20 @@
 // accounts as a PDF or a link (/pay/<token>, payment_links kind 'batch', serverPaymentLinks.ts), where accounts click
 // "Payment made" per vendor. Pure code, shared by the screen, the PDF and the server.
 
-import { MoneyOut, OutTiming, OutStatus } from './money';
+import { MoneyOut, OutTiming, OutStatus, payableFrom } from './money';
+import { formatDate, todayIso } from './deals';
+
+/** Why this request can't go on a new summary ('' = it can). One summary per payment, so accounts never pay twice
+ *  (2026-10-21): a request already on a summary (summaryToken) or with its own open accounts link stays there until
+ *  it's taken off or the link is stopped (the server clears both then). Post-training ones wait for the training. */
+export function summaryProblem(o: MoneyOut, deal: any, today = todayIso()): string {
+  if (o.status !== 'approved') return o.status === 'paid' ? 'Already paid' : 'Not approved';
+  if (o.summaryToken) return 'Already on a summary sent to accounts';
+  if (o.accountsLink?.token) return 'Has its own accounts link: stop that link first';
+  const from = payableFrom(o, deal);
+  if (from && from > today) return `Post-training: payable from ${formatDate(from)}`;
+  return '';
+}
 import { Vendor } from './vendors';
 
 export interface SummaryLine {

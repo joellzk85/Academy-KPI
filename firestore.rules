@@ -205,6 +205,15 @@ service cloud.firestore {
         || (isManagement() && changedOnly(['dealDeleted']))
         // "Include in P&L" tick (2026-10-21): Admin or Management, at any status
         || changedOnly(['inPL'])
+        // Fix and send again (2026-10-21): the person who raised a rejected request fixes it; it waits for approval again
+        || (resource.data.status == 'rejected'
+          && resource.data.get('trainingCancelled', false) != true
+          && resource.data.requestedById == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.requestedById == request.auth.uid
+          && request.resource.data.decidedById == ''
+          && changedOnly(['status', 'amount', 'description', 'decidedById', 'decidedByName', 'decidedAt', 'rejectReason', 'resubmittedAt',
+                          'category', 'payee', 'vendorId', 'requestDate', 'items', 'neededBy', 'paymentDetails']))
       );
       // Delete: Management any request at any time (2026-10-20); the requester only while pending or rejected.
       allow delete: if isManagement()

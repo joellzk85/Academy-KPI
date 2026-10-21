@@ -8,6 +8,7 @@
 //      steps (deal_checklists). Certificates is an optional extra step.
 //   6. Payment received: each invoice or claim is marked received with the client's or HRDC's receipt uploaded
 //      (payment_receipts), on the deal or in Payment tracking.
+//   7. Payments out (2026-10-21): every payment request on the deal (trainer, venue...) approved and paid.
 //   Then the deal is "Case closed": every step done, every invoice and claim received with its receipt, and no
 //   payment request (trainer, venue...) still waiting for approval or to be paid.
 //
@@ -65,11 +66,13 @@ export interface PostStatus {
   unpaid: MoneyIn[];
   noReceipt: MoneyIn[];             // received, receipt still to upload
   outsOpen: MoneyOut[];             // payment requests waiting for approval or to be paid
-  paymentDone: boolean;
+  paymentInDone: boolean;           // step 3: every invoice and claim received with its receipt
+  outsDone: boolean;                // step 4: no payment request waiting for approval or to be paid
+  paymentDone: boolean;             // both
   closed: boolean;
   closedOn: string;                 // the latest date in the journey, once closed
   next: string;                     // the next thing to do, in plain words
-  step: number;                     // 1 invoice, 2 documents, 3 payment, 4 closed
+  step: number;                     // 1 invoice, 2 documents, 3 payment received, 4 payments out, 5 closed
 }
 
 export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[], today = todayIso()): PostStatus {
@@ -85,24 +88,28 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   const unpaid = ins.filter(m => !isPaid(m));
   const noReceipt = ins.filter(m => needsReceipt(m) && !receiptsFor(m, receipts).length);
   const outsOpen = outs.filter(o => o.status === 'pending' || o.status === 'approved');
-  const paymentDone = invoiceDone && ins.length > 0 && unpaid.length === 0 && noReceipt.length === 0 && outsOpen.length === 0;
+  const paymentInDone = invoiceDone && ins.length > 0 && unpaid.length === 0 && noReceipt.length === 0;
+  const outsDone = outsOpen.length === 0;
+  const paymentDone = paymentInDone && outsDone;
   const closed = ended && paymentDone && docsOpen.length === 0;
   const started = ins.length > 0 || after.some(t => t.done);
 
   let next = '';
-  let step = 4;
+  let step = 5;
   if (!invoiceDone) {
     step = 1;
     next = missingInvoices.length ? `Record the ${missingInvoices.map(s => INVOICE_WORDS[s]).join(' and the ')}` : 'Record the invoice or HRDC claim';
   } else if (docsOpen.length) {
     step = 2;
     next = `${docsOpen[0].label}${docsOpen.length > 1 ? ` (then ${docsOpen.slice(1).map(t => t.label).join(', ')})` : ''}`;
-  } else if (!paymentDone) {
+  } else if (!paymentInDone) {
     step = 3;
     next = unpaid.length ? `Waiting for payment: ${plural(unpaid.length, 'invoice or claim')}`
       : noReceipt.length ? `Upload the receipt for ${plural(noReceipt.length, 'payment')}`
-      : outsOpen.length ? `${plural(outsOpen.length, 'payment request')} still to approve or pay`
       : 'Record the payment received';
+  } else if (!outsDone) {
+    step = 4;
+    next = `Payments out: ${plural(outsOpen.length, 'payment request')} still to approve or pay`;
   } else if (!ended) {
     step = 2;
     next = 'Starts after the training';
@@ -114,7 +121,7 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
     ? [...ins.map(m => m.paidDate || ''), ...docs.map(t => t.doneAt || ''), ...receipts.filter(r => ins.some(m => m.id === r.moneyInId)).map(r => r.at.slice(0, 10)),
       ...outs.map(o => o.paidDate || '')].filter(isDay).map(d => d.slice(0, 10)).sort().pop() || ''
     : '';
-  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, paymentDone, closed, closedOn, next, step };
+  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, paymentInDone, outsDone, paymentDone, closed, closedOn, next, step };
 }
 
 /** Reminders from the day after the training until the case is closed (the work queue, My home's After training card). */

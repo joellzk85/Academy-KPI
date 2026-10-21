@@ -512,7 +512,7 @@ export function TrainerFeeRequests({ outs, dealLabel, onOpenDeal }: { outs: Mone
   return (
     <section className="space-y-2 rounded-xl border border-danger/30 bg-danger-soft/40 p-4">
       <h3 className="font-bold">Trainers asking for their fee ({waiting.length})</h3>
-      <p className="text-sm text-ink-soft">Sent from the trainer portal with photos and T3. Check them on the deal's Trainer step, then approve the fee line as usual.</p>
+      <p className="text-sm text-ink-soft">Sent from the trainer portal (photos and T3 are optional). Check what they sent on the deal's Trainer step, then approve the fee line as usual.</p>
       <ul className="space-y-1.5">
         {waiting.map(({ j, name, flag }) => (
           <li key={j.id} className="rounded-lg border border-line bg-white px-3 py-2 text-[15px]">

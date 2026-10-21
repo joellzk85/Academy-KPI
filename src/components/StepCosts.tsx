@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { doc, setDoc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
-import { AlertTriangle, Check, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
-import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL } from '../lib/money';
+import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, paidViaLink } from '../lib/money';
 import { ChecklistTask, costCategory, materialItems } from '../lib/checklist';
 import { STEP_VENDOR_TYPE, Vendor, bankText, hasBank, vendorName } from '../lib/vendors';
 import { Receipt } from '../lib/postTraining';
@@ -91,6 +91,7 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [fixing, setFixing] = useState(false);
   const vendor = vendors.find(v => v.id === o.vendorId);
   const run = async (fn: () => Promise<void>) => {
     setBusy(true); setError('');
@@ -118,6 +119,8 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
       await batch.commit();
     });
   };
+  // Paid from the payment summary (Admin work → Money); a mistaken Mark paid can be undone here.
+  const undoPaid = () => run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', paidDate: '', paidRef: '', paidById: '', paidByName: '' }));
   const canDelete = viewer.role === 'management' || (mine && (o.status === 'pending' || o.status === 'rejected'));
 
   return (
@@ -134,6 +137,7 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
             <span className={`rounded px-1.5 py-0.5 font-semibold ${TONE[o.status]}`}>{OUT_STATUS_LABELS[o.status]}</span>
             {o.decidedByName && <span className="text-ink-soft">{o.status === 'rejected' ? 'rejected' : 'approved'} by {o.decidedByName}{o.status === 'rejected' && o.rejectReason ? `: ${o.rejectReason}` : ''}</span>}
             {o.status === 'paid' && <span className="text-ink-soft">paid {formatDate(o.paidDate || '')}{o.paidRef ? `, ref ${o.paidRef}` : ''}</span>}
+            {o.status === 'approved' && o.summaryToken && <span className="text-accent">on a payment summary sent to accounts</span>}
             {o.status === 'pending' && mine && <span className="text-attention">{viewer.role === 'management' ? 'the other manager approves' : 'a manager approves'}</span>}
           </p>
           {o.status !== 'rejected' && o.status !== 'paid' && (!vendor || !hasBank(vendor)) && (
@@ -145,9 +149,12 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
           {o.status !== 'rejected' && <PLTick o={o} viewer={viewer} />}
           {decide && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
           {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={reject}><X className="h-3.5 w-3.5" /> Reject</button>}
+          {o.status === 'rejected' && mine && !o.trainingCancelled && !fixing && <button type="button" disabled={busy} className={btnSmall} onClick={() => setFixing(true)}><Pencil className="h-3.5 w-3.5" /> Fix and send again</button>}
+          {o.status === 'paid' && !paidViaLink(o) && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
           {canDelete && <button type="button" disabled={busy} onClick={remove} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label="Delete this cost">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button>}
         </span>
       </div>
+      {fixing && <FixRequest o={o} viewer={viewer} onDone={() => setFixing(false)} />}
       {o.status === 'paid' && (
         <>
           <ReceiptList receipts={receipts} viewer={viewer} />
@@ -268,6 +275,48 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
         <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Add cost</button>
       </div>
     </form>
+  );
+}
+
+/** A rejected request, fixed by the person who raised it and sent for approval again (Joel, 2026-10-21), instead of
+ *  deleting it and starting over. The rejection is cleared; the deal's History keeps a line. */
+export async function resubmitRequest(o: MoneyOut, patch: Partial<MoneyOut>, viewer: Viewer) {
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'money_out', o.id), { ...patch, status: 'pending', decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', resubmittedAt: new Date().toISOString() });
+  const d = o.dealId ? await getDoc(doc(db, 'pipelines', o.dealId)) : null;
+  if (d?.exists()) {
+    const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Fixed and sent again for approval: ${o.category} · ${o.payee} (${sen(Number(patch.amount ?? o.amount))}, rejected: ${o.rejectReason || 'no reason'})` };
+    batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
+  }
+  await batch.commit();
+}
+
+/** Fix a rejected training cost: what it's for and the amount. (Company payments reopen their own form.) */
+export function FixRequest({ o, viewer, onDone }: { o: MoneyOut; viewer: Viewer; onDone: () => void }) {
+  const [f, setF] = useState({ description: o.description || '', amount: String(o.amount ?? '') });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    const amount = num(f.amount);
+    if (!f.description.trim()) return setError('Say what it is for.');
+    if (!(amount > 0)) return setError('Enter the amount, for example 5000.');
+    setBusy(true); setError('');
+    try { await resubmitRequest(o, { description: f.description.trim(), amount: Math.round(amount * 100) / 100 }, viewer); onDone(); }
+    catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface p-3">
+      {o.rejectReason && <p className="text-sm text-danger">Rejected: {o.rejectReason}</p>}
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem]">
+        <div><label className={small} htmlFor={`fx-d-${o.id}`}>What for</label><input id={`fx-d-${o.id}`} value={f.description} onChange={e => setF(x => ({ ...x, description: e.target.value }))} className={input} /></div>
+        <div><label className={small} htmlFor={`fx-a-${o.id}`}>Amount (RM)</label><input id={`fx-a-${o.id}`} inputMode="decimal" value={f.amount} onChange={e => setF(x => ({ ...x, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
+      </div>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <div className="flex gap-2">
+        <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
+        <button type="button" disabled={busy} className={btnPrimary} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Send for approval again</button>
+      </div>
+    </div>
   );
 }
 

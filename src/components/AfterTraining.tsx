@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Plus } from 'lucide-react';
 import { formatDate, formatRM, trainingEndDate } from '../lib/deals';
-import { InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, isPaid } from '../lib/money';
+import { InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, TIMING_LABELS, isPaid, isPayable, payableFrom } from '../lib/money';
 import { INVOICE_WORDS, Receipt, invoicesNeeded, postTraining, receiptsFor } from '../lib/postTraining';
 import { progress } from '../lib/checklist';
 import DealChecklist from './DealChecklist';
@@ -10,7 +10,8 @@ import { useReceipts } from './PaymentReceipts';
 
 // A won deal's "After training" section (Joel, 2026-10-20): one journey to "Case closed".
 //   1. Issue invoice (HRDC claim and/or client invoice), 2. the post-training documents (JD14, T3, training report,
-//   output assessment; certificates optional), 3. Payment received, with the receipt. Logic: lib/postTraining.ts.
+//   output assessment; certificates optional), 3. Payment received, with the receipt, 4. Payments out (2026-10-21:
+//   the training's payment requests approved and paid). Logic: lib/postTraining.ts.
 // Admin and Management do it; reps see where it stands (no amounts' actions, no receipts).
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -37,6 +38,7 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
   const docsPr = progress(checklist?.tasks, deal.fundingType, 'after');
   const end = trainingEndDate(deal);
   const sortedIns = [...ins].sort((a, b) => String(a.invoiceDate).localeCompare(String(b.invoiceDate)));
+  const sortedOuts = outs.filter(o => o.status !== 'rejected').sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
 
   const banner = st.closed
     ? { tone: 'bg-accent-soft text-accent', text: `Case closed${st.closedOn ? ` on ${formatDate(st.closedOn)}` : ''}. Every step is done and every payment is in${staff ? ' with its receipt' : ''}.` }
@@ -93,7 +95,7 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
       </Step>
 
       {/* 3. Payment received */}
-      <Step n={3} title="Payment received" done={st.paymentDone}
+      <Step n={3} title="Payment received" done={st.paymentInDone}
         sub={staff ? 'Mark each invoice or claim received and upload the receipt from the client or HRDC. Also in Payment tracking.' : undefined}>
         {sortedIns.length === 0 ? (
           <p className="text-[15px] text-ink-soft">Record the invoice{needed.includes('hrdc') ? ' or HRDC claim' : ''} first (step 1).</p>
@@ -109,12 +111,34 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
               ))}
           </ul>
         )}
-        {staff && st.outsOpen.length > 0 && (
-          <p className="text-sm text-ink-soft">
-            Also needed to close: {st.outsOpen.map(o => `${o.category} ${o.payee} (${OUT_STATUS_LABELS[o.status].toLowerCase()})`).join(', ')}. See this deal's Money out and P&amp;L.
-          </p>
-        )}
       </Step>
+
+      {/* 4. Payments out (2026-10-21): what we still owe on this training before the case can close */}
+      {staff && (
+        <Step n={4} title="Payments out" done={st.outsDone}
+          sub="Every payment request on this training approved and paid. Post-training payments go on the accounts summary from the day after the training.">
+          {sortedOuts.length === 0 ? (
+            <p className="text-[15px] text-ink-soft">No payment requests on this training.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {sortedOuts.map(o => {
+                const from = o.status === 'approved' && !isPayable(o, deal) ? payableFrom(o, deal) : '';
+                return (
+                  <li key={o.id} className="flex flex-wrap items-baseline gap-x-2 rounded-lg border border-line bg-white px-3 py-2 text-[15px]">
+                    <span className="font-semibold">{o.category} · {o.payee}</span>
+                    <span className="tabular-nums">{formatRM(o.amount)}</span>
+                    <span className="text-sm text-ink-soft">{TIMING_LABELS[o.timing] || TIMING_LABELS.after}</span>
+                    <span className={`text-sm font-semibold ${o.status === 'paid' ? 'text-accent' : 'text-attention'}`}>
+                      {OUT_STATUS_LABELS[o.status]}{from ? `, payable from ${formatDate(from)}` : ''}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="text-sm text-ink-soft">Costs are added on the Before training checklist; approved ones are sent to accounts from Admin work → Money → Payment summary.</p>
+        </Step>
+      )}
     </div>
   );
 }
@@ -141,5 +165,5 @@ export function afterTrainingHint(deal: any, checklist: any | null, ins: MoneyIn
   const st = postTraining(deal, checklist?.tasks, ins, outs, receipts);
   if (st.closed) return 'Case closed';
   if (!st.ended) return 'Starts after the training';
-  return `Step ${Math.min(st.step, 3)} of 3: ${st.next}`;
+  return `Step ${Math.min(st.step, 4)} of 4: ${st.next}`;
 }

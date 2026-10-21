@@ -7,6 +7,8 @@
 // - payment_links/{token}: { moneyOutId, forText, status open/stopped, createdAt, byId, byName }. No database rule,
 //   so only this server reads or writes it. money_out.accountsLink keeps the token so the CRM can show the link again.
 // - The link has no open limit (accounts may check it several times while it waits for approval); Stop link ends it.
+// Since 2026-10-21 new links are made only for payment summaries (below): each payment can be on one summary at a
+// time, so accounts never get it twice. Single-payment links made before keep working until stopped.
 
 import type { Express, Request } from 'express';
 import crypto from 'crypto';
@@ -15,7 +17,7 @@ import { admin, UserError, callerFrom, route } from './serverAuth';
 import { addDealHistory } from './serverDocLinks';
 import { isLinkToken } from './src/lib/docLinks';
 import { ACCOUNTS_PAID_BY, paymentRef } from './src/lib/money';
-import { buildSummary, summaryRef } from './src/lib/paymentSummary';
+import { buildSummary, summaryProblem, summaryRef } from './src/lib/paymentSummary';
 import { COMPANY } from './src/lib/company';
 
 const hits = new Map<string, { n: number; since: number }>();
@@ -66,7 +68,7 @@ export function registerPaymentLinkRoutes(app: Express) {
 
   // Make the link (or give back the one the request already has).
   app.post('/api/pay-link/create', route(async req => {
-    const caller = await staffFrom(req);
+    await staffFrom(req);
     const id = String(req.body?.id || '');
     const { db } = admin();
     const outRef = id ? db.collection('money_out').doc(id) : null;
@@ -75,14 +77,9 @@ export function registerPaymentLinkRoutes(app: Express) {
     if (o.status === 'rejected') throw new UserError(409, 'rejected', 'This request was rejected, so there is nothing to pay.');
     const had = o.accountsLink?.token;
     if (had && (await db.collection('payment_links').doc(had).get()).data()?.status === 'open') return { token: had };
-    const byName = String((await db.collection('team').doc(caller.memberId).get()).data()?.name || '');
-    const token = crypto.randomBytes(16).toString('hex');
-    await db.collection('payment_links').doc(token).set({
-      moneyOutId: id, forText: String(req.body?.forText || '').slice(0, 200), status: 'open',
-      createdAt: Date.now(), byId: caller.memberId, byName,
-    });
-    await outRef.update({ accountsLink: { token, at: new Date().toISOString(), byName } });
-    return { token };
+    // Since 2026-10-21 accounts are sent payment summaries only (one summary per payment, so nothing is paid twice);
+    // links made before keep working until stopped.
+    throw new UserError(410, 'use-summary', 'Payments now go to accounts on a payment summary (Admin work → Money).');
   }));
 
   // Stop the link. Making one again gives a new link.
@@ -219,6 +216,14 @@ function registerBatchRoutes(app: Express) {
     const docs = await Promise.all(ids.map(id => db.collection('money_out').doc(id).get()));
     const bad = docs.find(d => !d.exists || (d.data() as any).dealDeleted || (d.data() as any).status !== 'approved');
     if (bad) throw new UserError(409, 'not-approved', 'Only approved payments that are not paid yet can go on a summary. Reload and try again.');
+    // One summary per payment, and post-training payments only after the training (2026-10-21; summaryProblem).
+    const dealIds = [...new Set(docs.map(d => (d.data() as any).dealId).filter(Boolean))] as string[];
+    const deals = new Map((await Promise.all(dealIds.map(id => db.collection('pipelines').doc(id).get()))).map(d => [d.id, d.data()]));
+    for (const d of docs) {
+      const o: any = { ...d.data(), id: d.id };
+      const problem = summaryProblem(o, deals.get(o.dealId), todayMY());
+      if (problem) throw new UserError(409, 'cannot-add', `${o.payee || 'A payment'}: ${problem}. Reload and try again.`);
+    }
     const byName = String((await db.collection('team').doc(caller.memberId).get()).data()?.name || '');
     const token = crypto.randomBytes(16).toString('hex');
     await db.collection('payment_links').doc(token).set({ kind: 'batch', moneyOutIds: ids, status: 'open', createdAt: Date.now(), byId: caller.memberId, byName });
@@ -226,5 +231,31 @@ function registerBatchRoutes(app: Express) {
     docs.forEach(d => batch.update(d.ref, { summaryToken: token }));
     await batch.commit();
     return { token };
+  }));
+
+  // Take one payment off the summary it's on (2026-10-21), so it can go on another one. The summary's link no longer
+  // shows it; a summary left with nothing on it is stopped.
+  app.post('/api/pay-batch/remove', route(async req => {
+    const caller = await staffFrom(req);
+    const id = String(req.body?.id || '');
+    const { db } = admin();
+    const outRef = id ? db.collection('money_out').doc(id) : null;
+    const o: any = outRef ? (await outRef.get()).data() : null;
+    if (!outRef || !o) throw new UserError(404, 'not-found', 'That payment request was not found.');
+    if (o.status === 'paid') throw new UserError(409, 'paid', 'This payment is already paid, so it stays on its summary.');
+    const token = String(o.summaryToken || '');
+    if (!token) return {};
+    const ref = db.collection('payment_links').doc(token);
+    const byName = String((await db.collection('team').doc(caller.memberId).get()).data()?.name || '');
+    await db.runTransaction(async tx => {
+      const link: any = (await tx.get(ref)).data();
+      if (link) {
+        const left = (link.moneyOutIds || []).filter((x: string) => x !== id);
+        tx.update(ref, left.length ? { moneyOutIds: left } : { moneyOutIds: left, status: 'stopped', stoppedAt: Date.now(), stoppedByName: byName });
+      }
+      tx.update(outRef, { summaryToken: '' });
+    });
+    if (o.dealId) await addDealHistory(db, o.dealId, caller.memberId, byName, `Taken off the payment summary: ${o.category} · ${o.payee} (${money(o.amount)})`);
+    return {};
   }));
 }

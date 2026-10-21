@@ -13,7 +13,7 @@ import TrainingTimeBox from './TrainingTimeBox';
 import HrdcQueries from './HrdcQueries';
 import MoneyPanel, { MoneyOverview, useMoneySettings } from './Money';
 import VendorsPage from './VendorsPage';
-import { MoneyIn, MoneyOut, moneyFlags } from '../lib/money';
+import { MoneyIn, MoneyOut, moneyFlags, prePaymentFlags } from '../lib/money';
 import AfterTraining from './AfterTraining';
 import { useReceipts } from './PaymentReceipts';
 import { postTraining, postTrainingFlags } from '../lib/postTraining';
@@ -75,7 +75,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
         </div>
       </div>
       {view === 'queue' ? <Queue key={focusDeal} viewer={viewer} people={people} onOpenQuotations={onOpenQuotations} initialOpenId={focusDeal} />
-        : view === 'money' ? <MoneyOverview viewer={viewer} onOpenPayments={openPayments} />
+        : view === 'money' ? <MoneyOverview viewer={viewer} onOpenPayments={openPayments} onOpenDeal={id => { setFocusDeal(id); setView('queue'); }} />
         : view === 'payments' && viewer.role === 'admin' ? (
           <React.Suspense fallback={<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}>
             <PaymentTracking pipelinesSync={linkedOnly(deals)} people={people} viewer={viewer} onOpenDeal={d => { setFocusDeal(d.id); setView('queue'); }} />
@@ -158,6 +158,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     // Up to training day: money reminders; from the day after: one after-training journey (lib/postTraining.ts).
     flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, moneySettings, today));
     flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
+    flags.push(...prePaymentFlags(p, mOut, settings.flagDays, today));
     // A trainer asked for their fee in the trainer portal (2026-10-21) and it isn't approved yet.
     const trainerTask = (cl.tasks || []).find((t: any) => t.kind === 'trainer' && t.trainerId);
     if (trainerTask) {
@@ -303,7 +304,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
                     <ProgressBar done={pr.done} total={pr.total} />
                     {complete
                       ? <span className="block text-sm font-semibold text-accent">Case closed</span>
-                      : post.ended && post.started && <span className="block text-sm text-ink-soft">After training, step {Math.min(post.step, 3)} of 3: {post.next}</span>}
+                      : post.ended && post.started && <span className="block text-sm text-ink-soft">After training, step {Math.min(post.step, 4)} of 4: {post.next}</span>}
                     {flags.map((f, i) => (
                       <span key={i} className={`flex items-center gap-1 text-sm font-semibold ${f.level === 'danger' ? 'text-danger' : 'text-attention'}`}>
                         <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {f.text}

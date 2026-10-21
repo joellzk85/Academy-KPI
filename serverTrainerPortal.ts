@@ -20,7 +20,7 @@ import { effectiveVenue } from './src/lib/checklist';
 import { cancelledTraining, lastMove } from './src/lib/trainingChange';
 import { isDeletedRecord, ownedByTeam } from './src/lib/linked';
 import {
-  bankProblem, buildPo, calendarPath, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeStatusText,
+  bankProblem, buildPo, calendarPath, claimFilesText, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeStatusText,
   icsCalendar, inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -494,7 +494,7 @@ export function registerTrainerPortalRoutes(app: Express) {
       dealId: deal.id, trainerId,
       claim: { status: 'submitted', photos, t3, submittedAt: at, returnNote: '', history: [...(before?.history || []), { at, byName: by, action: before ? 'Sent again' : 'Fee requested' }].slice(-20) },
     }, { merge: true });
-    await addDealHistory(db, deal.id, '', by, `Trainer requested their fee (${photos.length} photo${photos.length === 1 ? '' : 's'}, T3 attached)`);
+    await addDealHistory(db, deal.id, '', by, `Trainer requested their fee (${claimFilesText(photos, t3)})`);
     return {};
   }));
 }

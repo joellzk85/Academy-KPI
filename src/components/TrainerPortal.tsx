@@ -15,7 +15,7 @@ import { sizeText } from './TrainerExtrasFields';
 import { ProfileSubmission, cleanProfile, profileProblem } from '../lib/trainerLinks';
 import { PROFILE_PARTS, emptyExtras, profileGaps, safeName, trainerFileProblem, trainerFileType } from '../lib/trainerProfile';
 import {
-  MIN_PORTAL_PASSWORD, PORTAL_PATH, PortalFile, STAR_WORDS, bankProblem, calendarLinks, claimFolder, cleanBank, cleanEmail, cleanTin, emailProblem, passwordProblem, portalFolder,
+  MIN_PORTAL_PASSWORD, PORTAL_PATH, PortalFile, STAR_WORDS, bankProblem, calendarLinks, claimFilesText, claimFolder, cleanBank, cleanEmail, cleanTin, emailProblem, passwordProblem, portalFolder,
 } from '../lib/trainerPortal';
 import { formatDateRange, formatRM, daysText } from '../lib/deals';
 import { COMPANY } from '../lib/company';
@@ -109,7 +109,7 @@ export default function TrainerPortal({ inviteToken }: { inviteToken?: string })
 const FEATURES: { icon: React.ReactNode; title: string; text: string }[] = [
   { icon: <CalendarDays className="h-5 w-5" />, title: 'Your trainings', text: 'Upcoming trainings with dates and venue, and your training history with us.' },
   { icon: <FileText className="h-5 w-5" />, title: 'Purchase orders', text: 'Download and accept your PO as soon as a training is confirmed.' },
-  { icon: <Upload className="h-5 w-5" />, title: 'Request your fee', text: 'Send the training photos and T3 form, and follow your payment until it is paid.' },
+  { icon: <Upload className="h-5 w-5" />, title: 'Request your fee', text: 'Ask for your fee (photos and T3 optional), and follow your payment until it is paid.' },
   { icon: <UserIcon className="h-5 w-5" />, title: 'Your profile', text: 'Keep your profile, topics and HRDC biodata up to date in one place.' },
   { icon: <Landmark className="h-5 w-5" />, title: 'Payment details', text: 'Your bank account, tax number (TIN) and address, kept safely.' },
   { icon: <Star className="h-5 w-5" />, title: 'Your rating', text: 'See how NEXT Academy rated each training, with comments.' },
@@ -499,7 +499,7 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
             ))}
           </ul>
         ) : <p className="mt-1 text-sm text-ink-soft">NEXT Academy will set up your fee from the PO.</p>}
-        {t.claim?.status === 'submitted' && <p className="mt-2 flex items-center gap-1.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4" /> Fee requested on {isoDay(t.claim.submittedAt)} ({t.claim.photos.length} photo{t.claim.photos.length === 1 ? '' : 's'}, T3). NEXT Academy is checking it.</p>}
+        {t.claim?.status === 'submitted' && <p className="mt-2 flex items-center gap-1.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4" /> Fee requested on {isoDay(t.claim.submittedAt)} ({claimFilesText(t.claim.photos, t.claim.t3)}). NEXT Academy is checking it.</p>}
         {t.claim?.status === 'returned' && <p className="mt-2 rounded-lg bg-attention-soft px-3 py-2 text-sm"><strong>Please fix and send again:</strong> {t.claim.returnNote || 'NEXT Academy asked for changes.'}</p>}
         {!allPaid && !t.cancelled && (t.started
           ? !claiming && <button type="button" className={`${t.claim?.status === 'submitted' ? btnSecondary : btnPrimary} mt-3`} onClick={() => setClaiming(true)}>{t.claim?.status === 'returned' ? 'Fix and send again' : t.claim ? 'Change what I sent' : 'Request training fee'}</button>
@@ -629,7 +629,7 @@ function CalendarLinkBox() {
   );
 }
 
-// Request training fee: training photos and the T3 form (the training report comes later).
+// Request training fee: training photos and the T3 form, both optional (Joel, 2026-10-21; the training report comes later).
 function ClaimForm({ t, trainerId, onCancel, onDone }: { t: any; trainerId: string; onCancel: () => void; onDone: () => void }) {
   const [photos, setPhotos] = useState<PortalFile[]>(t.claim?.photos || []);
   const [t3, setT3] = useState<PortalFile[]>(t.claim?.t3 || []);
@@ -637,8 +637,6 @@ function ClaimForm({ t, trainerId, onCancel, onDone }: { t: any; trainerId: stri
   const [error, setError] = useState('');
   const send = async () => {
     setError('');
-    if (!photos.length) return setError('Add at least one training photo.');
-    if (!t3.length) return setError('Add the T3 attendance form.');
     setBusy(true);
     try { await api('/api/portal/claim', { dealId: t.dealId, photos, t3 }); onDone(); }
     catch (e: any) { setError(e.message); } finally { setBusy(false); }
@@ -646,9 +644,9 @@ function ClaimForm({ t, trainerId, onCancel, onDone }: { t: any; trainerId: stri
   const folder = claimFolder(trainerId, t.dealId);
   return (
     <div className="mt-3 space-y-4 rounded-xl bg-surface p-4">
-      <p className="text-[15px]">Send us the training photos and the signed T3 attendance form. Your fee is then approved and paid by NEXT Academy as per your PO.</p>
-      <FileDrop title="Training photos" hint="Several photos of the training (JPG or PNG)." photo folder={folder} kind="photo" files={photos} setFiles={setPhotos} />
-      <FileDrop title="T3 attendance form" hint="The signed T3 form (PDF, JPG or PNG; a clear phone photo is fine)." folder={folder} kind="t3" files={t3} setFiles={setT3} />
+      <p className="text-[15px]">Ask for your fee. Training photos and the signed T3 attendance form help us, but they are optional. Your fee is then approved and paid by NEXT Academy as per your PO.</p>
+      <FileDrop title="Training photos (optional)" hint="Photos of the training (JPG or PNG)." photo folder={folder} kind="photo" files={photos} setFiles={setPhotos} />
+      <FileDrop title="T3 attendance form (optional)" hint="The signed T3 form (PDF, JPG or PNG; a clear phone photo is fine)." folder={folder} kind="t3" files={t3} setFiles={setT3} />
       <div className="rounded-xl border border-dashed border-line bg-white px-3 py-2 text-sm text-ink-soft">Training report: coming soon. Not needed for now.</div>
       {error && <p role="alert" className={alertBox}>{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">

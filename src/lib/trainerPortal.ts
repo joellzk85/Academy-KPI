@@ -142,10 +142,15 @@ export function cleanFiles(list: any, prefix: string, most = 30): PortalFile[] {
   }).filter(Boolean) as PortalFile[];
 }
 
-export function claimProblem(photos: PortalFile[], t3: PortalFile[]): string {
-  if (!photos.length) return 'Add at least one training photo.';
-  if (!t3.length) return 'Add the T3 attendance form.';
+// Photos and the T3 are optional (Joel, 2026-10-21): a fee request can be sent with or without them.
+export function claimProblem(_photos: PortalFile[], _t3: PortalFile[]): string {
   return '';
+}
+
+/** "2 photos, T3" / "no files": what came with a fee request (deal History, the portal). */
+export function claimFilesText(photos: unknown[] = [], t3: unknown[] = []): string {
+  const parts = [photos.length ? `${photos.length} photo${photos.length === 1 ? '' : 's'}` : '', t3.length ? 'T3' : ''].filter(Boolean);
+  return parts.length ? parts.join(', ') : 'no files';
 }
 
 // ---------- The trainer's PO (TrainerPoDocument.tsx) ----------
@@ -258,5 +263,5 @@ export function claimFlag(job: TrainerJob | undefined, feeLines: { status?: stri
   const live = feeLines.filter(o => o.status !== 'rejected');
   if (!live.length) return `${trainerName} asked for their fee, but there's no trainer fee line yet: add it on the Trainer step`;
   if (live.every(o => o.status === 'approved' || o.status === 'paid')) return '';
-  return `${trainerName} asked for their fee: check the photos and T3, then approve`;
+  return `${trainerName} asked for their fee: check what they sent, then approve`;
 }

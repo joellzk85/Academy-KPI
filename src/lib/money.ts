@@ -5,7 +5,7 @@
 // - config/money_settings: HRDC deduction %, days before a payment counts as overdue,
 //   and the HRDC claim deadline (blank until Joel confirms HRD Corp's current rule).
 
-import { formatRM, todayIso, trainingEndDate } from './deals';
+import { addDays, formatRM, todayIso, trainingEndDate } from './deals';
 import { daysUntil, Flag } from './checklist';
 
 export type InSource = 'hrdc' | 'client';
@@ -94,6 +94,31 @@ export interface MoneyOut {
   // Stopped (status 'rejected', reason "Training cancelled") when Management approved the training's cancellation
   // (2026-10-21, lib/trainingChange.ts); not shown to the requester as a rejection to redo.
   trainingCancelled?: boolean;
+  resubmittedAt?: string;  // the requester fixed a rejected request and sent it again (2026-10-21)
+}
+
+// ---------- When a payment can be paid (Joel, 2026-10-21: the payment-out flowchart) ----------
+// Pre-training and company payments can be paid once approved. Post-training payments can be approved any time,
+// but go on the accounts summary only from the day after the training's last day (a cancelled training's at once).
+
+/** The first day this request can be paid ('' = now). */
+export function payableFrom(o: MoneyOut, deal: any): string {
+  if (!o.dealId || o.timing !== 'after' || !deal || deal.trainingCancelled) return '';
+  const end = trainingEndDate(deal);
+  return end ? addDays(end, 1) : '';
+}
+export const isPayable = (o: MoneyOut, deal: any, today = todayIso()) => { const from = payableFrom(o, deal); return !from || from <= today; };
+
+/** Pre-training payments still not paid as the training gets close (within flagDays): red in the work queue and My home. */
+export function prePaymentFlags(deal: any, outs: MoneyOut[], flagDays: number, today = todayIso()): Flag[] {
+  if (!deal || deal.trainingCancelled) return [];
+  const start = daysUntil(deal.trainingDate, today);
+  if (start === null || start < 0 || start > flagDays) return [];
+  const open = outs.filter(o => o.dealId === deal.id && o.timing === 'before' && (o.status === 'pending' || o.status === 'approved'));
+  if (!open.length) return [];
+  const total = open.reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  const when = start === 0 ? 'training is today' : `training in ${start} day${start === 1 ? '' : 's'}`;
+  return [{ level: 'danger', text: `Pre-training payment not paid yet: ${open.map(o => `${o.category} ${o.payee}`).join(', ')} (${formatRM(total)}, ${when})` }];
 }
 
 /** Counted in the training's P&L? Missing = yes (requests made before the tick existed). Company payments never are. */
