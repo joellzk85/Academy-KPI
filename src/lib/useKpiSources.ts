@@ -20,6 +20,7 @@ export function useKpiSources(opts: { months?: string[]; people?: RepLike[] } = 
   const [gp, setGp] = useState<Record<string, Record<string, GpFigure>>>({});
   const [trainingReports, setTrainingReports] = useState<Record<string, any>>({});
   const [activities, setActivities] = useState<any[]>([]);
+  const [rating360, setRating360] = useState<Record<string, Record<string, { avg: number; count: number }>>>({});
   useEffect(() => {
     const subs = [
       onSnapshot(query(collection(db, 'money_in')), s => setClaims(withoutDeleted(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => setClaims([])),
@@ -45,6 +46,17 @@ export function useKpiSources(opts: { months?: string[]; people?: RepLike[] } = 
     return () => { live = false; };
   }, [needGp, monthKey]);
 
-  return useMemo(() => ({ claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities }),
-    [claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities]);
+  // 360 rating KPI: average stars from closed rounds, from the server (ratings are private).
+  const need360 = (opts.people || []).some(p => metricsFor(p).some(m => m.auto === 'rating_360'));
+  useEffect(() => {
+    if (!need360 || !monthKey) return;
+    let live = true;
+    callServer<{ scores: Record<string, Record<string, { avg: number; count: number }>> }>('/api/ratings/scores', { months: monthKey.split(',') }, true)
+      .then(r => { if (live) setRating360(g => ({ ...g, ...(r.scores || {}) })); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [need360, monthKey]);
+
+  return useMemo(() => ({ claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360 }),
+    [claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360]);
 }

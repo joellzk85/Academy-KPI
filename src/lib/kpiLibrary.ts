@@ -72,6 +72,8 @@ export const MEASURE_INFO: Record<string, MeasureInfo> = {
   output_rating: { label: 'output assessment rating by participants, trainings ended this month', unit: 'rating', trainer: true },
   report_days: { label: 'days from last training day to training report sent, trainings ended this month', unit: 'days', trainer: true },
   new_activities: { label: 'new teambuilding activities approved by Management this month', unit: 'count', weekly: true },
+  // 360 rating (Part C): average stars received in closed rating rounds of this month (lib/rating360.ts).
+  rating_360: { label: 'average 360 rating received, closed rounds this month', unit: 'rating' },
 };
 
 export const GROUP_LABELS: Record<KpiGroup, string> = { sales: 'Sales', admin: 'Admin and operations', trainer: 'Trainer', management: 'Management', other: 'Other' };
@@ -112,6 +114,8 @@ export const BUILT_IN_KPIS: KpiDef[] = [
   { id: 'output_rating', name: 'Output assessment rating', group: 'trainer', description: 'Average rating (1-5) by participants on the training reports of trainings ended this month.', measure: 'output_rating', unit: 'rating', ...HI(4.5, 4, null) },
   { id: 'report_days', name: 'Trainer feedback speed', group: 'trainer', description: 'Average days from the last training day to the training report sent; reports not sent yet count the days so far.', measure: 'report_days', unit: 'days', ...LO(2, 5, 7) },
   { id: 'new_activities', name: 'Design new activity', group: 'trainer', description: 'New teambuilding activities this person added that Management approved this month.', measure: 'new_activities', unit: 'count', ...HI(3, 2, 1) },
+  // Everyone
+  { id: 'rating_360', name: '360 rating', group: 'other', description: 'Average stars (1-5) teammates gave in the 360 rating rounds of this month, once Management closes the round.', measure: 'rating_360', unit: 'rating', ...HI(4.5, 4, 3) },
   // Management
   { id: 'gp_company', name: 'Company gross profit', group: 'management', description: 'Overall gross profit % of every training held this month. Bands are the company GP setting.', measure: 'gp_company', unit: 'pct', ...HI(50, 40, 30) },
   { id: 'team_avg', name: 'Team average KPI score', group: 'management', description: 'Average KPI score of everyone else with KPIs.', measure: 'team_avg', unit: 'pct', ...T(80) },

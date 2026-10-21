@@ -30,6 +30,7 @@ export interface KpiSources {
   people?: (RepLike & { kpi?: any })[];
   trainingReports?: Record<string, any>;   // training_reports by deal id (trainer KPIs)
   activities?: any[];                      // tb_activities (Design new activity)
+  rating360?: Record<string, Record<string, { avg: number; count: number }>>;   // 'YYYY-MM' → person → 360 rating (server)
 }
 
 // The old templates, kept for screens that list them (they are now the ready-made sets in lib/kpiLibrary.ts).
@@ -379,6 +380,10 @@ const MEASURES: Record<string, (c: Ctx) => Measured> = {
       .map(a => dayOf(a.approval.at));
     const weeks = byWeek(dates, c.prefix);
     return { value: weeks.reduce((a, b) => a + b, 0), weeks };
+  },
+  rating_360: c => {
+    const r = c.sources.rating360?.[c.prefix]?.[c.rep.id];
+    return { value: r && r.count > 0 ? r.avg : null };
   },
   team_avg: c => {
     const others = (c.sources.people || []).filter(p => p.id !== c.rep.id && !metricsFor(p).some(m => m.auto === 'team_avg'));

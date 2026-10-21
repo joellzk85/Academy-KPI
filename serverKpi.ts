@@ -12,10 +12,75 @@ import { malaysiaDay } from './src/lib/backup';
 import { readMoneySettings } from './src/lib/money';
 import { projectRows } from './src/lib/projectPL';
 import { dealOwnerId } from './src/lib/deals';
+import { readRound, RatingRound } from './src/lib/rating360';
 
 const MONTH = /^\d{4}-\d{2}$/;
 
+// 360 rating (Part C, src/lib/rating360.ts). Ratings are readable only by the rater and Management, so:
+// - POST /api/ratings/about-me {} → the ratings about the caller in closed rounds: stars and comments, with who gave
+//   them only when the round's view is open.
+// - POST /api/ratings/scores { months } → { scores: { [month]: { [memberId]: { avg, count } } } } from closed rounds
+//   (the 360 rating KPI). Management gets everyone; anyone else only their own.
+async function closedRounds(db: any, months?: string[]) {
+  const snap = await db.collection('rating_rounds').where('status', '==', 'closed').get();
+  return snap.docs.map((d: any) => readRound(d.id, d.data())).filter((r: RatingRound) => !months || months.includes(r.month));
+}
+
+export function registerRatingRoutes(app: Express) {
+  app.post('/api/ratings/about-me', route(async req => {
+    const caller = await callerFrom(req);
+    const { db } = admin();
+    const rounds: RatingRound[] = await closedRounds(db);
+    const snap = await db.collection('ratings_360').where('rateeId', '==', caller.memberId).get();
+    const all = snap.docs.map(d => d.data() as any);
+    const out = rounds
+      .map(r => {
+        const mine = all.filter(x => x.roundId === r.id);
+        if (!mine.length) return null;
+        return {
+          roundId: r.id, name: r.name, month: r.month, view: r.view, closedAt: r.closedAt || '',
+          avg: Math.round((mine.reduce((t, x) => t + Number(x.stars || 0), 0) / mine.length) * 100) / 100,
+          count: mine.length,
+          items: mine
+            .sort(() => Math.random() - 0.5)   // closed view: no order to guess from
+            .map(x => ({ stars: Number(x.stars || 0), comment: String(x.comment || ''), ...(r.view === 'open' ? { raterName: String(x.raterName || '') } : {}) })),
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => String(b.closedAt).localeCompare(String(a.closedAt)));
+    return { rounds: out };
+  }));
+
+  app.post('/api/ratings/scores', route(async req => {
+    const caller = await callerFrom(req);
+    const months: string[] = Array.isArray(req.body?.months) ? req.body.months.filter((m: any) => typeof m === 'string' && MONTH.test(m)).slice(0, 13) : [];
+    if (!months.length) throw new UserError(400, 'bad-months', 'Choose a month.');
+    const { db } = admin();
+    const rounds: RatingRound[] = await closedRounds(db, months);
+    const scores: Record<string, Record<string, { avg: number; count: number }>> = Object.fromEntries(months.map(m => [m, {}]));
+    if (rounds.length) {
+      const byRound = new Map(rounds.map(r => [r.id, r]));
+      const snap = caller.role === 'management'
+        ? await db.collection('ratings_360').get()
+        : await db.collection('ratings_360').where('rateeId', '==', caller.memberId).get();
+      const sums: Record<string, Record<string, { t: number; n: number }>> = {};
+      snap.docs.forEach(d => {
+        const x: any = d.data();
+        const r = byRound.get(x.roundId);
+        if (!r) return;
+        const s = ((sums[r.month] ||= {})[x.rateeId] ||= { t: 0, n: 0 });
+        s.t += Number(x.stars || 0); s.n += 1;
+      });
+      Object.entries(sums).forEach(([m, people]) => Object.entries(people).forEach(([id, s]) => {
+        scores[m][id] = { avg: Math.round((s.t / s.n) * 100) / 100, count: s.n };
+      }));
+    }
+    return { scores };
+  }));
+}
+
 export function registerKpiRoutes(app: Express) {
+  registerRatingRoutes(app);
   app.post('/api/kpi/gp', route(async req => {
     const caller = await callerFrom(req);
     const months: string[] = Array.isArray(req.body?.months) ? req.body.months.filter((m: any) => typeof m === 'string' && MONTH.test(m)).slice(0, 13) : [];

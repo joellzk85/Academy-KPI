@@ -61,6 +61,39 @@ Joel asked for every KPI to be selectable and editable for reps, Admin and Manag
   - Phone width.
 - Still needs the live site: the GP server route and the rules.
 
+### 360 rating (Joel, 2026-10-22; Part C of 3)
+
+**What it is:** teammates rate each other 1-5 and must always say why (at least 20 characters).
+
+**Where:** the top bar shows **Rate teammates (N)** when someone has people left to rate. The user menu has **360 rating** for everyone. Both open one side panel (`Rating360.tsx`) with three tabs:
+- **To rate:** the people the open rounds give you. Each rating has stars and a reason. You can change it while the round is open; drafts are kept.
+- **About me:** your ratings from closed rounds. It shows the average and every comment. Names show only for open-view rounds, and the order is shuffled.
+- **Rounds (Management):**
+  - **Open a round:** a name, the KPI month it counts in, and an optional "rate by" date.
+  - **Who rates whom:** everyone ticked rates everyone else, or Management picks who rates each person.
+  - **Closed or open view:** closed shows people their ratings without names; open shows names. Management always sees who rated whom.
+  - **Following a round:** see who is still to rate and every rating with names. Close it, or reopen it.
+
+**Data:** `rating_rounds` and `ratings_360` (`lib/rating360.ts`).
+- **Who reads ratings:** only the rater and Management, by rule. People get ratings about themselves from the server (`POST /api/ratings/about-me` in `serverKpi.ts`), and only once the round is **closed**, so the timing can't give names away.
+- **What the rules check:** only assigned pairs, never yourself, stars 1-5, a reason of 20+ characters, the round open, and the document id `<round>_<rater>_<ratee>`.
+
+**360 rating KPI** (library, group Other):
+- **What it counts:** the average stars received in closed rounds of that month, from `POST /api/ratings/scores`. Management gets everyone's; anyone else gets only their own.
+- **Default bands:** 4.5+ green, 4.0-4.49 amber, 3.0-3.99 red, below 3 grey.
+
+**Testing**
+- A temporary local page checked:
+  - Joel opened an "everyone rates everyone" round, closed view.
+  - Missing stars and a too-short reason were refused; a rating was saved with the right shape.
+  - The to-rate counts were right; Amy saw To rate and About me but not Rounds.
+  - About me showed comments without names.
+  - Results showed names and who is still to rate; Close round worked.
+  - A "Management picks" round saved exactly the pairs chosen, open view.
+  - Phone width.
+- A script checked the KPI score.
+- Needs the live site: the two server routes and the rules.
+
 ### Trainer KPIs and activity approval (Joel, 2026-10-22; Part B of 3)
 
 **Internal trainer**

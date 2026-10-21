@@ -404,6 +404,36 @@ service cloud.firestore {
       allow delete: if isManagement() || (isMember() && resource.data.byId == request.auth.uid);
     }
 
+    // 360 rating (2026-10-22, src/lib/rating360.ts). Rounds: everyone reads, Management sets up and closes.
+    match /rating_rounds/{roundId} {
+      allow read: if isMember();
+      allow write: if isManagement();
+    }
+
+    // Ratings: only the rater and Management read them (the person rated gets theirs from the server, without names
+    // unless the round is open view). You rate only the people the open round gives you, never yourself, 1-5 stars,
+    // always with a reason of at least 20 characters. Document id = <roundId>_<raterId>_<rateeId>.
+    match /ratings_360/{ratingId} {
+      function roundOf(d) { return get(/databases/$(database)/documents/rating_rounds/$(d.roundId)).data; }
+      function assigned(d) {
+        return roundOf(d).get('mode', 'all') == 'picked'
+          ? {'raterId': request.auth.uid, 'rateeId': d.rateeId} in roundOf(d).get('pairs', [])
+          : request.auth.uid in roundOf(d).get('people', []) && d.rateeId in roundOf(d).get('people', []);
+      }
+      function validRating(d) {
+        return d.raterId == request.auth.uid && d.rateeId is string && d.rateeId != request.auth.uid
+          && ratingId == d.roundId + '_' + request.auth.uid + '_' + d.rateeId
+          && d.stars is int && d.stars >= 1 && d.stars <= 5
+          && d.comment is string && d.comment.size() >= 20
+          && exists(/databases/$(database)/documents/rating_rounds/$(d.roundId))
+          && roundOf(d).get('status', '') == 'open' && assigned(d);
+      }
+      allow read: if isManagement() || (isMember() && resource.data.raterId == request.auth.uid);
+      allow create: if isMember() && validRating(request.resource.data);
+      allow update: if isMember() && resource.data.raterId == request.auth.uid && validRating(request.resource.data);
+      allow delete: if isManagement();
+    }
+
     // KPI settings per person (template and targets): Management only.
     match /reps/{memberId} {
       allow read: if isMember();

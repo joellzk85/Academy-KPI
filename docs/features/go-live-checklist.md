@@ -65,3 +65,9 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
     - **Teambuilding → Activity library:** as that person add a test activity; it shows "Waiting for approval".
     - **As the other manager:** open it, click Not approved with a reason. The creator changes it and saves; it waits again. Approve it.
     - **Their KPI page:** Design new activity shows 1 (red). After a training they taught ends, check the feedback days and, once Admin types the participants' rating on the report, the output rating.
+46. **360 rating (2026-10-22):** after it is live, **publish `firestore.rules`** (`rating_rounds`, `ratings_360`; until then rounds and ratings can't be saved).
+    - **As Management:** user menu → 360 rating → Rounds → New round (everyone, closed view, this month) → Open round.
+    - **As a rep:** the top bar shows Rate teammates. Try sending with no reason (refused), then rate properly.
+    - **As the other manager:** Rounds shows the rating with the rep's name and who is still to rate. Close round.
+    - **The rated person:** 360 rating → About me shows the stars and comment without a name.
+    - **KPI:** add the 360 rating KPI to a test set and check the score for this month.

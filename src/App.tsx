@@ -20,7 +20,8 @@ import {
   LogOut,
   KeyRound,
   UserCircle2,
-  ArrowLeft
+  ArrowLeft,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -60,6 +61,7 @@ import { useFollowUpRules } from './lib/useFollowUpRules';
 import { linkedOnly, setLinkedTeam } from './lib/linked';
 import { SharedKind } from './lib/sharedInbox';
 import GlobalSearch, { SearchHit, setSearchPrefill } from './components/GlobalSearch';
+import Rating360Panel, { useToRateCount } from './components/Rating360';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -228,6 +230,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   };
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  // 360 rating (KPI Part C): the panel, and how many teammates this person still has to rate.
+  const [show360, setShow360] = useState(false);
+  const toRateCount = useToRateCount(currentMember.id);
   // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
   useFollowUpRules();
   // KPI library (Team → KPI library): every screen's KPIs, colour bands and the company GP bands.
@@ -883,6 +888,12 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               outlines={outlinesSync}
               onOpen={openSearchHit}
             />
+            {toRateCount > 0 && (
+              <button type="button" onClick={() => setShow360(true)}
+                className="hidden items-center gap-1.5 rounded-lg border border-attention/40 bg-attention-soft px-3 py-1.5 text-sm font-semibold text-attention hover:opacity-90 sm:inline-flex">
+                <Star className="h-4 w-4" /> Rate teammates ({toRateCount})
+              </button>
+            )}
             {/* Logged-in person + menu */}
             <div className="relative">
               <button
@@ -904,6 +915,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                     <p className="text-sm font-semibold text-ink">{currentMember.name}</p>
                     <p className="text-xs text-ink-soft">{ROLE_LABELS[currentMember.role]}</p>
                   </div>
+                  <button role="menuitem" onClick={() => { setShowUserMenu(false); setShow360(true); }} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface">
+                    <Star className="h-4 w-4 text-ink-soft" /> 360 rating{toRateCount > 0 ? ` (${toRateCount} to rate)` : ''}
+                  </button>
                   <button role="menuitem" onClick={() => { setShowUserMenu(false); setShowChangePassword(true); }} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface">
                     <KeyRound className="h-4 w-4 text-ink-soft" /> Change my password
                   </button>
@@ -930,6 +944,14 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
         </div>
       </header>
+
+      {show360 && (
+        <Rating360Panel
+          viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+          people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name }))}
+          onClose={() => setShow360(false)}
+        />
+      )}
 
       {/* 2. Main Workspace Layout Area */}
       <main className="flex-1 py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
