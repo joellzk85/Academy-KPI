@@ -14,6 +14,7 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
 import { downloadBiodataPdf } from './TrainerBiodataDocument';
+import TrainerOverview, { useOverviewAllowed } from './TrainerOverview';
 import { BankRequestsBox, PortalAccessBox, PortalInviteDialog, TrainerRatings, useTrainerAccounts } from './TrainerPortalAdmin';
 import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
@@ -187,6 +188,9 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const bookingsOf = (t: Trainer) => trainerBookings(t, deals, checklists, quotes, trainers);
   const accounts = useTrainerAccounts();
   const [portalInvite, setPortalInvite] = useState<string | null>(null);   // null = closed; '' = no one picked yet
+  const overviewAllowed = useOverviewAllowed();
+  const [tab, setTab] = useState<'list' | 'overview'>('list');
+  const canOverview = viewer.role === 'admin' || viewer.role === 'management' || overviewAllowed.includes(viewer.id);
   const dealLabel = (dealId: string) => {
     const d = deals.find(x => x.id === dealId);
     if (!d) return 'Deal no longer exists';
@@ -343,6 +347,19 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         </span>
       </div>
 
+      {/* Trainers / Overview (2026-10-21): Admin and Management, plus people Management ticks */}
+      {canOverview && (
+        <div className="flex gap-1 rounded-xl border border-line bg-white p-1" role="tablist" aria-label="Trainers view">
+          {([['list', 'Trainers'], ['overview', 'Overview']] as const).map(([k, l]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === k ? 'bg-accent-soft text-accent' : 'text-ink-soft hover:bg-surface'}`}>{l}</button>
+          ))}
+        </div>
+      )}
+      {canOverview && tab === 'overview' ? (
+        <TrainerOverview viewer={viewer} people={reps} trainers={trainers} deals={deals} checklists={checklists} programmes={programmes} clients={clients}
+          onOpenTrainer={id => { setOpenId(id); setPanelError(''); }} />
+      ) : (<>
       {waiting.length > 0 && (
         <section className="rounded-2xl border border-attention/40 bg-attention-soft/30 p-4">
           <h3 className="font-bold">Profiles waiting for review ({waiting.length})</h3>
@@ -413,6 +430,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
           </ul>
         )}
       </div>
+
+      </>)}
 
       {/* Trainer panel */}
       {openTrainer && !editing && (
