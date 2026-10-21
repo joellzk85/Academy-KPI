@@ -53,7 +53,7 @@ import { Representative, CalendarEvent, TeamMember, ROLE_LABELS } from './types'
 import { hasKpis, metricsFor } from './lib/kpi';
 import { KpiSetItem } from './lib/kpiLibrary';
 import { useKpiLibrary } from './lib/useKpiLibrary';
-import { appointmentEvents } from './lib/appointments';
+import { appointmentEvents, trainingEvents } from './lib/appointments';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
 import { runBackup } from './lib/backupApi';
 import { useFollowUpRules } from './lib/useFollowUpRules';
@@ -641,6 +641,10 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       showToast('This is a deal appointment. Change or cancel it on the deal.');
       return;
     }
+    if (id.startsWith('train_')) {
+      showToast('This is a won deal\'s training day. Change the date or cancel the training on the deal.');
+      return;
+    }
     setCalendarEvents(prev => prev.filter(e => e.id !== id));
     try {
       await deleteDoc(doc(db, 'events', id));
@@ -722,8 +726,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
   const selectedRep = workspacePeople.find(r => r.id === selectedRepId);
 
-  // Team calendar = typed events + appointments booked on deals (read from the deals, never copied).
-  const allCalendarEvents = [...calendarEvents, ...googleCalEvents, ...appointmentEvents(pipelinesSync, id => teamMembers.find(m => m.id === id)?.name || '')];
+  // Team calendar = typed events + appointments booked on deals + won deals' training days (read from the deals, never copied).
+  const allCalendarEvents = [...calendarEvents, ...googleCalEvents, ...appointmentEvents(pipelinesSync, id => teamMembers.find(m => m.id === id)?.name || ''), ...trainingEvents(pipelinesSync, quotationsSync)];
 
   // The calendar and notices on My home reuse the old home page's parts.
   const homeDashboardProps = {

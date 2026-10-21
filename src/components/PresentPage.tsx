@@ -23,6 +23,7 @@ import {
 } from '../lib/presentTheme';
 import { useAutoSave } from '../lib/useAutoSave';
 import { useKpiSources } from '../lib/useKpiSources';
+import { addDays as addLoginDays, dayKey, useLoginData, weekStart } from '../lib/loginActivity';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 
@@ -137,7 +138,10 @@ export default function PresentPage({ viewer, person, reps, month, companyOnly }
   };
 
   const personKeys = chosenPersonSlides(prefs, person?.role);
-  const companyKeys = chosenCompanySlides(prefs).filter(k => isManager || k !== 'profit');   // profit is Management's
+  // Profit and Login log are Management's.
+  const companyKeys = chosenCompanySlides(prefs).filter(k => isManager || !COMPANY_SLIDES.find(s => s.key === k)?.manager);
+  const loginFrom = useMemo(() => dayKey(addLoginDays(weekStart(new Date()), -21)), []);
+  const loginData = useLoginData(loginFrom, isManager && companyKeys.includes('logins'));
   const periodKey: PeriodKey = (mode === 'company' ? prefs.companyPeriod : prefs.period) || 'week';
   const period = periodOf(periodKey, today);
 
@@ -150,7 +154,7 @@ export default function PresentPage({ viewer, person, reps, month, companyOnly }
     return personSlides({ rep, reps: people, keys: pk, data, period: per, month, today, animate }).map(s => ({ ...s, who: rep.name, whoId: rep.id }));
   };
   const buildCompany = (animate: boolean): ShowSlide[] =>
-    companySlides({ keys: companyKeys, data, period, today, month, animate, reps, people, settings, plRows }).map(s => ({ ...s, who: 'NEXT Academy' }));
+    companySlides({ keys: companyKeys, data, period, today, month, animate, reps, people, settings, plRows, logins: { ...loginData, people: team.filter(p => p.active) } }).map(s => ({ ...s, who: 'NEXT Academy' }));
 
   const [show, setShow] = useState<null | 'one' | 'meeting'>(null);
   const [printing, setPrinting] = useState<null | 'one' | 'meeting'>(null);
@@ -171,7 +175,7 @@ export default function PresentPage({ viewer, person, reps, month, companyOnly }
     const next = list.includes(k) ? list.filter(x => x !== k) : [...list, k];
     return all.map(s => s.key).filter(x => next.includes(x));   // keep the catalogue order
   };
-  const catalogue = mode === 'company' ? COMPANY_SLIDES.filter(s => isManager || s.key !== 'profit') : PERSON_SLIDES.filter(s => !s.admin || person?.role !== 'rep');
+  const catalogue = mode === 'company' ? COMPANY_SLIDES.filter(s => isManager || !s.manager) : PERSON_SLIDES.filter(s => !s.admin || person?.role !== 'rep');
   const chosen: string[] = mode === 'company' ? companyKeys : personKeys;
 
   return (
