@@ -49,3 +49,4 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
 - **Database rules:** `firestore.rules` in the repo must be **published manually** in the Firebase console (Firestore Database, Rules, paste, Publish) after the matching code is live. Walk Joel through it, and remind him whenever rules change. Rules changes must be published after the new build is live, never before.
 - **Commits:** author `joellzk85 <lzk.joel@gmail.com>` is set for this repo. Joel pushes via PowerShell from `C:\Users\Joel\Documents\CRM` if your push needs his GitHub sign-in.
 
+- Costing estimator (2026-10-21; see money.md): `src/lib/costEstimate.ts`, `src/components/CostEstimator.tsx` (opened from the Deals page), collection `cost_estimates`.

@@ -130,7 +130,7 @@ Done and live: Phases 1, 2A, 2B, 2C, 3 and 4A, plus everything in the feature fi
 
 Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which are done):
 - **Setup:** switch on Firebase Storage (needed for proposal files, checklist files, photos, trainer uploads, receipts); Microsoft 365 setup for Outlook sending (email sending is hidden for now); Google Sheets API + backup sheet; check for a Google Workspace Shared Drive.
-- **Rules to publish** (if not yet): `firestore.rules` and `storage.rules` as of the latest push.
+- **Rules to publish** (if not yet): `firestore.rules` and `storage.rules` as of the latest push (2026-10-21: `firestore.rules` adds `cost_estimates` for the Costing estimator).
 - **Data:** link old records in Data tools (ask for a screenshot of the matches first), then clear old data (Joel clicks; KPI history kept); both managers change passwords once; adjust KPI templates and targets; Blueprint import (check HRDC code 1000168564, the duplicate Valmont August line, and the 16 unknown trainer names).
 - **To confirm with Joel:** team-building terms if they differ from course-outline terms; whether HRDC gives a programme code on approval; who usually handles HRDC queries.
 - **Trainer portal (2026-10-21):** switch on Firebase Email/Password sign-in; publish both rules; go-live checklist item 32.

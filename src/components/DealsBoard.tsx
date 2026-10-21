@@ -3,7 +3,7 @@ import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2, PartyPopper, Copy,
-  PauseCircle, PlayCircle,
+  PauseCircle, PlayCircle, Calculator,
 } from 'lucide-react';
 import ProposalTracking from './ProposalTracking';
 import { seesLink } from '../lib/proposalTracking';
@@ -44,6 +44,7 @@ import { activeHold, canHold, holdDue, holdText } from '../lib/dealHold';
 import { HoldBox, ResumeBox } from './DealHold';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
+import CostEstimator from './CostEstimator';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -136,6 +137,7 @@ export default function DealsBoard({
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);   // deal shown in the panel
   const [editing, setEditing] = useState<'new' | string | null>(null);
+  const [estimating, setEstimating] = useState(false);   // Costing estimator open (2026-10-21)
   const [form, setForm] = useState(emptyForm());
   const [formError, setFormError] = useState('');
   // An unfinished new deal or edit is kept in this browser until it's saved (lib/useFormDraft.ts).
@@ -566,6 +568,8 @@ export default function DealsBoard({
   };
 
   // ---------- Render ----------
+  if (estimating) return <CostEstimator viewer={viewer} people={people} onClose={() => setEstimating(false)} />;
+
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -575,11 +579,16 @@ export default function DealsBoard({
             {viewer.id === owner.id ? 'Your deals, from first contact to won.' : `${owner.name}'s deals, from first contact to won.`}
           </p>
         </div>
-        {canCreateHere && (
-          <button type="button" onClick={startNew} className={btnPrimary}>
-            <Plus className="h-4 w-4" /> New deal
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setEstimating(true)} className={btnSecondary}>
+            <Calculator className="h-4 w-4" /> Costing estimator
           </button>
-        )}
+          {canCreateHere && (
+            <button type="button" onClick={startNew} className={btnPrimary}>
+              <Plus className="h-4 w-4" /> New deal
+            </button>
+          )}
+        </div>
       </div>
 
       {viewer.id === owner.id && openTagRequests.length > 0 && (

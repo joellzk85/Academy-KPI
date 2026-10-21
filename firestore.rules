@@ -304,6 +304,13 @@ service cloud.firestore {
       allow read, write: if isMember() && request.auth.uid == memberId;
     }
 
+    // Costing estimator (2026-10-21): each person's mock P&Ls. The owner and Admin/Management read, edit and delete;
+    // a new one must be owned by whoever creates it.
+    match /cost_estimates/{estimateId} {
+      allow read, update, delete: if isStaff() || (isMember() && resource.data.ownerId == request.auth.uid);
+      allow create: if isMember() && request.resource.data.ownerId == request.auth.uid;
+    }
+
     // Clients: every team member can add and edit; only Management can delete.
     match /clients/{clientId} {
       allow read, create, update: if isMember();
