@@ -66,3 +66,10 @@ a **checked report the trainer changes goes back to "submitted"** for Admin to c
 - Code: `src/lib/trainingReport.ts` (revisions, pax, HR's copy), `serverTrainerPortal.ts` (report get / save),
   `serverDocLinks.ts` (kind `report`), `DocLinkPage.tsx`, `TrainingReportAdmin.tsx`, `TrainingReportForm.tsx`
   (`RevisionList`), `TrainingReportDocument.tsx`, `TrainerPortal.tsx`. No rule change.
+
+## Training reports list on Trainers (2026-10-21)
+Joel: training reports get their own place under Trainers, listing them all. **Trainers → Training reports** tab
+(Admin and Management only; `TrainingReportsList.tsx`): every report, plus won trainings that have started with no
+report yet ("Not written yet"). Filters All / Needs checking / With the trainer / Checked, and a search by programme,
+client or trainer; waiting-to-check first, then latest training first. A row opens the same panel as the deal's step
+(`ReportPanel`); Checked / Reopen also tick or untick the deal's "Training report" step (`setReportStep`). No rule change.

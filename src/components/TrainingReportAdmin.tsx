@@ -5,7 +5,7 @@
 // the PDF or a link (/r/<token>); the trainer's changes after sending are listed with date and time (2026-10-21).
 
 import React, { useEffect, useState } from 'react';
-import { collection, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { CheckCircle2, Download, FileText, Link2, Loader2, Lock, Plus, Undo2, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso, trainingDays, trainingEndDate } from '../lib/deals';
@@ -46,6 +46,20 @@ export function useTrainingReports(enabled = true): TrainingReport[] {
     return onSnapshot(collection(db, 'training_reports'), s => setList(s.docs.map(d => ({ ...(d.data() as TrainingReport), dealId: d.id }))), () => setList([]));
   }, [enabled]);
   return list;
+}
+
+// Tick or untick the deal's "Training report" step from outside the deal (the Training reports list on Trainers).
+export async function setReportStep(dealId: string, viewer: Viewer, done: boolean) {
+  const ref = doc(db, 'deal_checklists', dealId);
+  const cl: any = (await getDoc(ref)).data();
+  const t = (cl?.tasks || []).find((x: any) => x.id === 'training_report');
+  if (!t || !!t.done === done) return;
+  const changes = done ? { done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name } : { done: false, doneAt: '', doneById: '', doneByName: '' };
+  await updateDoc(ref, {
+    tasks: clean(cl.tasks.map((x: any) => (x.id === t.id ? { ...x, ...changes } : x))),
+    updatedAt: Date.now(),
+    history: [...(cl.history || []), { at: nowIso(), byId: viewer.id, byName: viewer.name, action: `${t.label}: ${done ? 'checked, done' : 'reopened'}` }].slice(-60),
+  });
 }
 
 async function savePdf(r: TrainingReport, h: ReportHeader) {
@@ -125,7 +139,7 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, header
   );
 }
 
-function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, names, outputFiles, onClose, onChecked, onReopened }: {
+export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, names, outputFiles, onClose, onChecked, onReopened }: {
   deal: any; viewer: Viewer; saved: TrainingReport | null; trainerId: string; trainerName: string; header: ReportHeader;
   names: string[]; outputFiles: string[]; onClose: () => void; onChecked: () => void; onReopened: () => void;
 }) {

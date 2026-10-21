@@ -15,6 +15,7 @@ import DraftBar from './DraftBar';
 import PhotoPicker from './PhotoPicker';
 import { downloadBiodataPdf } from './TrainerBiodataDocument';
 import TrainerOverview, { useOverviewAllowed } from './TrainerOverview';
+import TrainingReportsList from './TrainingReportsList';
 import { BankRequestsBox, PortalAccessBox, PortalInviteDialog, TrainerRatings, useTrainerAccounts } from './TrainerPortalAdmin';
 import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
@@ -190,7 +191,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const accounts = useTrainerAccounts();
   const [portalInvite, setPortalInvite] = useState<string | null>(null);   // null = closed; '' = no one picked yet
   const overviewAllowed = useOverviewAllowed();
-  const [tab, setTab] = useState<'list' | 'overview'>('list');
+  const [tab, setTab] = useState<'list' | 'overview' | 'reports'>('list');
   const canOverview = viewer.role === 'admin' || viewer.role === 'management' || overviewAllowed.includes(viewer.id);
   const dealLabel = (dealId: string) => {
     const d = deals.find(x => x.id === dealId);
@@ -348,16 +349,19 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         </span>
       </div>
 
-      {/* Trainers / Overview (2026-10-21): Admin and Management, plus people Management ticks */}
+      {/* Trainers / Overview (2026-10-21): Admin and Management, plus people Management ticks.
+          Training reports (2026-10-21): Admin and Management only. */}
       {canOverview && (
-        <div className="flex gap-1 rounded-xl border border-line bg-white p-1" role="tablist" aria-label="Trainers view">
-          {([['list', 'Trainers'], ['overview', 'Overview']] as const).map(([k, l]) => (
+        <div className="flex gap-1 overflow-x-auto rounded-xl border border-line bg-white p-1" role="tablist" aria-label="Trainers view">
+          {([['list', 'Trainers'], ['overview', 'Overview'], ...(isStaff ? [['reports', 'Training reports'] as const] : [])] as const).map(([k, l]) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
               className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === k ? 'bg-accent-soft text-accent' : 'text-ink-soft hover:bg-surface'}`}>{l}</button>
           ))}
         </div>
       )}
-      {canOverview && tab === 'overview' ? (
+      {isStaff && tab === 'reports' ? (
+        <TrainingReportsList viewer={viewer} deals={deals} checklists={checklists} quotes={quotes} trainers={trainers} />
+      ) : canOverview && tab === 'overview' ? (
         <TrainerOverview viewer={viewer} people={reps} trainers={trainers} deals={deals} checklists={checklists} programmes={programmes} clients={clients}
           onOpenTrainer={id => { setOpenId(id); setPanelError(''); }} />
       ) : (<>
