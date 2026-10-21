@@ -37,7 +37,7 @@ async function uploadOne(dealId: string, task: { id: string; label: string }, fi
   return rec;
 }
 
-export default function StepFiles({ dealId, task, files, viewer, editable, onUploaded, onLastRemoved, what, ticks = true }: {
+export default function StepFiles({ dealId, task, files, viewer, editable, onUploaded, onLastRemoved, onPicked, what, ticks = true }: {
   dealId: string;
   task: { id: string; label: string; done?: boolean };
   files: ChecklistFile[];                 // this step's files
@@ -45,6 +45,7 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
   editable: boolean;                      // Admin and Management
   onUploaded: (files: ChecklistFile[]) => void;
   onLastRemoved: () => void;              // the step's last file was deleted
+  onPicked?: (files: File[]) => void;     // the files chosen, before uploading (the Attendance list reads HR's list for the T3 form)
   what?: string;                          // e.g. "venue documents" (default: "<step> file")
   ticks?: boolean;                        // uploading ticks the step (false: venue, bus, facilitator documents, trainer PO)
 }) {
@@ -65,6 +66,7 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
     setError('');
     const problem = chosen.map(f => checklistFileProblem(f.name, f.size)).find(Boolean);
     if (problem) return setError(problem);
+    onPicked?.(chosen);
     const done: ChecklistFile[] = [];
     try {
       for (const [i, f] of chosen.entries()) {
