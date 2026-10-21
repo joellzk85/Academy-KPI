@@ -4,7 +4,8 @@
 // It counts toward KPI only once logged (appointmentDate is set then).
 
 import { CalendarEvent } from '../types';
-import { dealOwnerId, dealAppointmentDate, todayIso } from './deals';
+import { addDays, dealAppointmentDate, dealOwnerId, dealStage, todayIso, trainingDays } from './deals';
+import { trainingTimeOf } from './trainingTime';
 
 export type ApptMode = 'face' | 'online' | 'call';
 
@@ -66,6 +67,28 @@ export function appointmentEvents(deals: any[], nameOf: (id: string) => string):
       title: `Appointment: ${d.client || 'client'}${owner ? ` (${owner})` : ''}${a.status === 'held' ? ' · held' : ''}`,
       color: 'bg-emerald-500',
     });
+  });
+  return out;
+}
+
+// Calendar entries for won deals' training dates (Joel, 2026-10-22), read from the deals like appointments.
+// A training of several days shows on every day; the time is the deal's or the quotation's, else all day.
+export function trainingEvents(deals: any[], quotes: any[]): CalendarEvent[] {
+  const out: CalendarEvent[] = [];
+  deals.forEach(d => {
+    if (dealStage(d) !== 'won' || !isDate(d?.trainingDate)) return;
+    const time = trainingTimeOf(d, quotes.filter(q => q.pipelineId === d.id))?.text || 'All day';
+    const prog = d.courseName ? ` – ${d.courseName}` : '';
+    const count = Math.max(1, Math.ceil(trainingDays(d)));
+    for (let i = 0; i < count; i++) {
+      out.push({
+        id: `train_${d.id}${i ? `_d${i + 1}` : ''}`,
+        date: addDays(d.trainingDate.slice(0, 10), i),
+        time,
+        title: `Training: ${d.client || 'client'}${prog}${count > 1 ? ` (day ${i + 1} of ${count})` : ''}`,
+        color: 'bg-sky-600',
+      });
+    }
   });
   return out;
 }
