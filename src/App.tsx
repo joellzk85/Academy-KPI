@@ -38,7 +38,7 @@ const RepDetailDashboard = React.lazy(() => import('./components/RepDetailDashbo
 const ManagementDashboard = React.lazy(() => import('./components/ManagementDashboard'));
 const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
 const PaymentTracking = React.lazy(() => import('./components/PaymentTracking'));
-import { useActivityTracker } from './lib/loginActivity';
+import { useActivityTracker, usePlace } from './lib/loginActivity';
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
 const FollowUpRulesPage = React.lazy(() => import('./components/FollowUpRulesPage'));
@@ -283,6 +283,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     if (!isManagement) return 'operations';
     return (saved as 'operations' | 'management') || 'operations';
   });
+
+  // Login log: which screen the time is spent on (the tab inside it reports too).
+  usePlace(currentTab === 'admin' && isStaff ? 'admin' : currentTab === 'management' ? `mgmt_${managementView}` : !selectedRepId ? 'home' : 'workspace', 1);
 
   useEffect(() => {
     if (selectedRepId) {

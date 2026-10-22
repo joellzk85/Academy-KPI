@@ -636,24 +636,53 @@ service cloud.firestore {
     // Login history (2026-10-22), one document per person per day: "<memberId>_<YYYY-MM-DD>".
     // Each person writes only their own: the CRM adds one active minute at a time (at most once every 50 seconds)
     // or counts one more opening. Nobody can change a day's date, person or first time. Only Management reads them.
+    // Since 2026-10-22 also: actions (work saved; up to 20 added at a time, at most every 10 seconds) and places
+    // (minutes per screen; each new minute adds 1 to exactly one screen, named in place).
     match /login_days/{dayId} {
+      function placeOk(d) {
+        return d.place is string && d.place.matches('^[A-Za-z0-9_]{1,40}$') && d.places is map && d.places.size() <= 60;
+      }
       allow read: if isManagement();
       allow create: if isMember()
-        && request.resource.data.keys().hasOnly(['memberId', 'date', 'minutes', 'logins', 'firstAt', 'lastAt'])
+        && request.resource.data.keys().hasOnly(['memberId', 'date', 'minutes', 'logins', 'firstAt', 'lastAt', 'actions', 'lastActionAt', 'places', 'place'])
         && request.resource.data.memberId == request.auth.uid
         && request.resource.data.date is string
         && dayId == request.auth.uid + '_' + request.resource.data.date
         && request.resource.data.minutes in [0, 1]
         && request.resource.data.logins in [0, 1]
+        && request.resource.data.get('actions', 0) is int
+        && request.resource.data.get('actions', 0) >= 0 && request.resource.data.get('actions', 0) <= 20
+        && (!('lastActionAt' in request.resource.data) || request.resource.data.lastActionAt == request.time)
+        && (request.resource.data.get('places', {}).size() == 0
+            || (placeOk(request.resource.data) && request.resource.data.minutes == 1
+                && request.resource.data.places.keys().hasOnly([request.resource.data.place])
+                && request.resource.data.places[request.resource.data.place] == 1))
         && request.resource.data.firstAt == request.time
         && request.resource.data.lastAt == request.time;
       allow update: if isMember()
         && resource.data.memberId == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['minutes', 'logins', 'lastAt'])
-        && request.resource.data.lastAt == request.time
-        && ((request.resource.data.minutes == resource.data.minutes && request.resource.data.logins == resource.data.logins + 1)
-            || (request.resource.data.logins == resource.data.logins && request.resource.data.minutes == resource.data.minutes + 1
-                && request.time > resource.data.lastAt + duration.value(50, 's')));
+        && (
+          // opened the CRM once more
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['logins', 'lastAt'])
+            && request.resource.data.lastAt == request.time
+            && request.resource.data.logins == resource.data.logins + 1)
+          // one more active minute, on one screen (older CRM versions send no screen)
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['minutes', 'lastAt', 'places', 'place'])
+            && request.resource.data.lastAt == request.time
+            && request.resource.data.minutes == resource.data.minutes + 1
+            && request.time > resource.data.lastAt + duration.value(50, 's')
+            && (request.resource.data.get('places', {}) == resource.data.get('places', {})
+                || (placeOk(request.resource.data)
+                    && request.resource.data.places.diff(resource.data.get('places', {})).affectedKeys().hasOnly([request.resource.data.place])
+                    && request.resource.data.places[request.resource.data.place] == resource.data.get('places', {}).get(request.resource.data.place, 0) + 1)))
+          // work saved
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['actions', 'lastActionAt'])
+            && request.resource.data.lastActionAt == request.time
+            && request.resource.data.actions is int
+            && request.resource.data.actions > resource.data.get('actions', 0)
+            && request.resource.data.actions <= resource.data.get('actions', 0) + 20
+            && (!('lastActionAt' in resource.data) || request.time > resource.data.lastActionAt + duration.value(10, 's')))
+        );
       allow delete: if false;
     }
 

@@ -144,6 +144,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Trainer outlines and teambuilding proposals (2026-10-21):** publish `firestore.rules` (`trainer_docs`); go-live checklist item 41.
 - **Search, client logo, KPI colours, potential, projection (2026-10-21):** publish `storage.rules` (logos) and `firestore.rules` (`forecast_settings`); go-live checklist item 42.
 - **Login log (2026-10-22):** publish `firestore.rules` (`login_days`, `login_rules`); go-live checklist item 43.
+- **Login log work done and screens (2026-10-22):** publish `firestore.rules` (`login_days` actions and places); go-live checklist item 50.
 - **KPI library (2026-10-22):** publish `firestore.rules` (`kpi_library`); go-live checklist item 44.
 - **Trainer KPIs and activity approval (2026-10-22):** publish `firestore.rules` (`tb_activities`); go-live checklist item 45.
 - **360 rating (2026-10-22):** publish `firestore.rules` (`rating_rounds`, `ratings_360`); go-live checklist item 47.

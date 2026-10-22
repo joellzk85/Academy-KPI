@@ -79,3 +79,4 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
 49. **Month lock (2026-10-22):** same rules publish as 48.
     - **On the 3rd of a month, as a rep:** the KPI page for last month says locked and has no edit buttons; logging a follow-up or appointment dated last month is refused.
     - **As Management:** Deal checks → Month lock → pick last month, give a reason, Open. The rep can now edit it. Lock again closes it.
+50. **Login log: work done and where the time goes (2026-10-22):** after it is live, **publish `firestore.rules`** (until then the new counts are refused and only minutes keep counting). Next day: Team → Login log shows "N actions" under each day and a **Most time on** column; open a person for **Where the time went**. Test: leave the CRM open without clicking for 6 minutes, minutes stop. Rules button shows the clock (5 min) and "Online, no work" (2 h, 3 actions).

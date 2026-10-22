@@ -28,6 +28,7 @@ import { Flag } from '../lib/checklist';
 import { HrdcQuery, Programme, grantBlockReason, isQueryOpen, isQueryOverdue } from '../lib/programmes';
 import { ClientLastTouch } from './ClientContactDot';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
+import { usePlace } from '../lib/loginActivity';
 import TrainingChangePanel from './TrainingChange';
 import { cancelledTraining, changeFlagText, dateLocked, openTodos, pendingChange } from '../lib/trainingChange';
 import PanelResizer from './PanelResizer';
@@ -56,6 +57,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
   onOpenManagementPayments?: () => void;       // Management's Payment tracking (Management → Payment tracking)
 }) {
   const [view, setView] = useState<AdminView>(initialView);
+  usePlace(`admin_${view}`, 2);
   const [focusDeal, setFocusDeal] = useState(initialDealId);
   // Payment tracking is in Admin work for Admin; Management has it under Management (with profit), so it isn't repeated.
   const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['vendors', 'Vendors'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ['backup', 'Backup']];

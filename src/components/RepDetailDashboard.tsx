@@ -22,6 +22,7 @@ import { dealNeedsAttention, dealOwnerId, todayIso } from '../lib/deals';
 import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, friendlyError } from '../lib/firebase';
 import { linkedOnly } from '../lib/linked';
+import { usePlace } from '../lib/loginActivity';
 
 interface RepDetailDashboardProps {
   rep: Representative;
@@ -114,6 +115,7 @@ export default function RepDetailDashboard({
   const presentOnMenu = !!rep.noKpis && rep.role === 'management' && viewer?.role === 'management';
   const activeSubTab: SubTab = RETIRED_TABS.includes(chosenSubTab) || (rep.noKpis && chosenSubTab === 'kpi') || (chosenSubTab === 'present' && !presentOnMenu) ? 'pipeline' : chosenSubTab;
   const [subTabHistory, setSubTabHistory] = useState<SubTab[]>(() => [savedSubTab()]);
+  usePlace(`ws_${activeSubTab}`, 2);   // Login log: where the time goes
 
   const handleSubTabChange = (newTab: SubTab) => {
     setSubTabHistory(prev => {
