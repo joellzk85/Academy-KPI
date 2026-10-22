@@ -64,11 +64,12 @@ service cloud.firestore {
       // forecast_settings (2026-10-21): Hot / Warm / Cold chances for the sales projection; Management only.
       // login_rules (2026-10-22): green / amber / red rules of Team → Login log; Management only.
       // kpi_library (2026-10-22): the KPI library, colour points and company GP bands (Team → KPI library); Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library']))
+      // rating_items (2026-10-22): the 360 attitude items; reliability: the appraisal's reliability score settings. Management only.
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'rating_items', 'reliability']))
                             || (docId in ['checklist_tasks', 'money_settings'] && isStaff())
-                            || (docId in ['sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library'] && isManagement());
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library']));
+                            || (docId in ['sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'rating_items', 'reliability'] && isManagement());
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'rating_items', 'reliability'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'rating_items', 'reliability']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -411,8 +412,10 @@ service cloud.firestore {
     }
 
     // Ratings: only the rater and Management read them (the person rated gets theirs from the server, without names
-    // unless the round is open view). You rate only the people the open round gives you, never yourself, 1-5 stars,
-    // always with a reason of at least 20 characters. Document id = <roundId>_<raterId>_<rateeId>.
+    // unless the round is open view). You rate only the people the open round gives you, never yourself.
+    // Since 2026-10-22 a rating has stars per attitude item (items: { itemId: 1-5 }) with reasons for scores of 1 or 2
+    // (comments, checked by the CRM; the rules can't look inside each item) and an optional general comment. Older
+    // ratings: 1-5 stars, always with a reason of at least 20 characters. Document id = <roundId>_<raterId>_<rateeId>.
     match /ratings_360/{ratingId} {
       function roundOf(d) { return get(/databases/$(database)/documents/rating_rounds/$(d.roundId)).data; }
       function assigned(d) {
@@ -423,8 +426,9 @@ service cloud.firestore {
       function validRating(d) {
         return d.raterId == request.auth.uid && d.rateeId is string && d.rateeId != request.auth.uid
           && ratingId == d.roundId + '_' + request.auth.uid + '_' + d.rateeId
-          && d.stars is int && d.stars >= 1 && d.stars <= 5
-          && d.comment is string && d.comment.size() >= 20
+          && ((d.stars is int && d.stars >= 1 && d.stars <= 5 && d.comment is string && d.comment.size() >= 20)
+              || (!('stars' in d) && d.items is map && d.items.size() > 0 && d.items.size() <= 30
+                  && d.get('comments', {}) is map && d.get('comment', '') is string))
           && exists(/databases/$(database)/documents/rating_rounds/$(d.roundId))
           && roundOf(d).get('status', '') == 'open' && assigned(d);
       }
@@ -432,6 +436,21 @@ service cloud.firestore {
       allow create: if isMember() && validRating(request.resource.data);
       allow update: if isMember() && resource.data.raterId == request.auth.uid && validRating(request.resource.data);
       allow delete: if isManagement();
+    }
+
+    // Appraisal (2026-10-22, src/lib/reliability.ts, components/Appraisal.tsx).
+    // Days out of office: Admin and Management note and read them. Incidents and appraisal notes: Management only.
+    match /reliability_excused/{dayId} {
+      allow read, delete: if isStaff();
+      allow create, update: if isStaff()
+        && request.resource.data.memberId is string && request.resource.data.date is string
+        && dayId == request.resource.data.memberId + '_' + request.resource.data.date;
+    }
+    match /reliability_incidents/{incidentId} {
+      allow read, write: if isManagement();
+    }
+    match /appraisal_notes/{noteId} {
+      allow read, write: if isManagement();
     }
 
     // KPI settings per person (template and targets): Management only.

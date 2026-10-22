@@ -40,6 +40,7 @@ const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
 const PaymentTracking = React.lazy(() => import('./components/PaymentTracking'));
 import { useActivityTracker } from './lib/loginActivity';
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
+const Appraisal = React.lazy(() => import('./components/Appraisal'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
 const FollowUpRulesPage = React.lazy(() => import('./components/FollowUpRulesPage'));
 const TeamFollowUpsPage = React.lazy(() => import('./components/TeamFollowUps'));
@@ -239,7 +240,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   useKpiLibrary();
   // Login history (Team → Login log): counts this person's active minutes in the CRM.
   useActivityTracker(currentMember.id);
-  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'data'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data'>('dashboard');
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
   const [adminView, setAdminView] = useState<AdminView>('queue');
   const [adminDealId, setAdminDealId] = useState('');   // a won deal to open in the work queue (My home's After training card)
@@ -803,7 +804,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
-    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'data') => {
+    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data') => {
       if (!isManagement) return;
       if (view) setManagementView(view);
       handleSwitchTab('management');
@@ -1015,7 +1016,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['data', 'Data tools']] as const).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'Appraisal'], ['data', 'Data tools']] as const).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -1039,6 +1040,22 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
               ) : managementView === 'team' ? (
                 <TeamManager currentMember={currentMember} teamMembers={teamMembers} />
+              ) : managementView === 'appraisal' ? (
+                <Appraisal
+                  viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+                  people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name, role: m.role }))}
+                  settingsOf={(id) => {
+                    const m = teamMembers.find(x => x.id === id);
+                    const s = repDocs[id] || {};
+                    return { id, role: m?.role, kpiTemplate: s.kpiTemplate, kpiSet: s.kpiSet, targets: s.targets || DEFAULT_TARGETS };
+                  }}
+                  kpiOf={(id, month) => {
+                    const m = teamMembers.find(x => x.id === id);
+                    const s = repDocs[id] || {};
+                    return withoutAutoKpis({ id, role: m?.role, kpiTemplate: s.kpiTemplate, kpiSet: s.kpiSet, targets: s.targets || DEFAULT_TARGETS }, monthKpiDocs[`${id}_${month}`]);
+                  }}
+                  deals={pipelinesSync}
+                />
               ) : managementView === 'data' ? (
                 <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'payments' ? (

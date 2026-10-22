@@ -7,6 +7,9 @@
 //   "bands" KPIs score by colour: green, amber, red or grey earn `points` (default 100 / 60 / 30 / 0) of their weight.
 // - The gross profit bands (gpBands) are one company setting, also used by Project P&L and the Costing estimator.
 // How each KPI is counted lives in lib/kpi.ts (MEASURES); the plain words for it are in MEASURE_INFO below.
+// - Appraisal (Joel, 2026-10-22): KPIs are results only. Attitude (360 rating) and reliability are separate parts of
+//   the appraisal (components/Appraisal.tsx), so the 360 rating KPI is hidden for new sets and left out of a saved
+//   set's score on the appraisal (appraisalSetItems). Its library entry stays so old months still show it.
 
 export type KpiUnit = 'rm' | 'count' | 'pct' | 'days' | 'rating';
 export type KpiGroup = 'sales' | 'admin' | 'trainer' | 'management' | 'other';
@@ -114,8 +117,8 @@ export const BUILT_IN_KPIS: KpiDef[] = [
   { id: 'output_rating', name: 'Output assessment rating', group: 'trainer', description: 'Average rating (1-5) by participants on the training reports of trainings ended this month.', measure: 'output_rating', unit: 'rating', ...HI(4.5, 4, null) },
   { id: 'report_days', name: 'Trainer feedback speed', group: 'trainer', description: 'Average days from the last training day to the training report sent; reports not sent yet count the days so far.', measure: 'report_days', unit: 'days', ...LO(2, 5, 7) },
   { id: 'new_activities', name: 'Design new activity', group: 'trainer', description: 'New teambuilding activities this person added that Management approved this month.', measure: 'new_activities', unit: 'count', ...HI(3, 2, 1) },
-  // Everyone
-  { id: 'rating_360', name: '360 rating', group: 'other', description: 'Average stars (1-5) teammates gave in the 360 rating rounds of this month, once Management closes the round.', measure: 'rating_360', unit: 'rating', ...HI(4.5, 4, 3) },
+  // Everyone. Hidden (appraisal Part B now, not a KPI); kept so old months still show it.
+  { id: 'rating_360', name: '360 rating', group: 'other', description: 'Average stars (1-5) teammates gave in the 360 rating rounds of this month, once Management closes the round. Now part of the appraisal (attitude), not a KPI.', measure: 'rating_360', unit: 'rating', ...HI(4.5, 4, 3), hidden: true },
   // Management
   { id: 'gp_company', name: 'Company gross profit', group: 'management', description: 'Overall gross profit % of every training held this month. Bands are the company GP setting.', measure: 'gp_company', unit: 'pct', ...HI(50, 40, 30) },
   { id: 'team_avg', name: 'Team average KPI score', group: 'management', description: 'Average KPI score of everyone else with KPIs.', measure: 'team_avg', unit: 'pct', ...T(80) },
@@ -294,6 +297,10 @@ export const KPI_PRESETS: KpiPreset[] = [
 ];
 
 export const presetById = (id?: string) => KPI_PRESETS.find(p => p.id === id);
+
+// KPIs that are not results and so never count in the appraisal's KPI part (Part A): attitude is Part B.
+export const NOT_IN_APPRAISAL = ['rating_360'];
+export const appraisalSetItems = (items: KpiSetItem[]): KpiSetItem[] => items.filter(i => !NOT_IN_APPRAISAL.includes(i.kpiId));
 
 // The usual typed-number slot for a KPI added to a set: the old keys for the three deal KPIs (other screens
 // still look them up by these keys), the KPI's id for the rest; never one already used in the set.

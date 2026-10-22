@@ -1,20 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { Check, ChevronDown, ChevronRight, Loader2, Lock, Plus, Star, Unlock, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Loader2, Lock, Plus, Star, Unlock, Users, X } from 'lucide-react';
 import PanelResizer from './PanelResizer';
 import DraftBar from './DraftBar';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { useFormDraft } from '../lib/useFormDraft';
 import { formatDate, todayIso } from '../lib/deals';
 import {
-  commentProblem, MIN_COMMENT, Rating360, RatingPair, RatingRound, RoundMode, RoundView, ratingId, readRound, roundPairs, STAR_WORDS, toRate,
+  activeItems, itemProblem, itemStars, MIN_COMMENT, needsComment, newItemId, Rating360, RatingItem, RatingPair, RatingRound, RoundMode, RoundView,
+  ratingId, ratingOverall, readRatingItems, readRound, roundPairs, STAR_WORDS, summarise, toRate,
 } from '../lib/rating360';
 
 // 360 rating (Joel, 2026-10-22; KPI Part C): one side panel with three tabs.
-// - To rate: the people your open rounds give you; 1-5 stars and a reason (at least 20 characters) for each.
+// - To rate: the people your open rounds give you; 1-5 stars on each attitude item, a reason (at least 20
+//   characters) for any item scored 1 or 2, and an optional general comment.
 // - About me: your ratings and comments from closed rounds (from the server; names only for open-view rounds).
 // - Rounds (Management): open a round (everyone rates everyone, or picked pairs; open or closed view), follow who
-//   has rated, read every rating with who gave it, close or reopen it. Data and rules: lib/rating360.ts.
+//   has rated, read every rating with who gave it, close or reopen it, and keep the list of attitude items.
+//   Data and rules: lib/rating360.ts.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 type Person = { id: string; name: string };
@@ -33,6 +36,17 @@ export function useRatingRounds(): RatingRound[] {
     s => setRounds(s.docs.map(d => readRound(d.id, d.data())).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))),
     () => setRounds([])), []);
   return rounds;
+}
+
+// The attitude items Management keeps (config/rating_items), in order; the starting three until it is saved.
+export function useRatingItems(): RatingItem[] {
+  const [items, setItems] = useState<RatingItem[]>(() => readRatingItems(null));
+  useEffect(() => onSnapshot(doc(db, 'config', 'rating_items'), d => setItems(readRatingItems(d.data())), () => {}), []);
+  return items;
+}
+
+function StarsAvg({ avg, size = 'h-4 w-4' }: { avg: number; size?: string }) {
+  return <span className="inline-flex items-center gap-1.5"><Stars value={Math.round(avg)} size={size} /><strong className="tabular-nums">{avg.toFixed(1)}</strong></span>;
 }
 
 // Your own ratings (the rules let you read only these, unless you are Management).
@@ -65,7 +79,7 @@ export default function Rating360Panel({ viewer, people, onClose, startTab }: {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-lg font-bold">360 rating</h3>
-              <p className="text-sm text-ink-soft">Rate your teammates 1 to 5 and always say why.</p>
+              <p className="text-sm text-ink-soft">Rate your teammates 1 to 5 on each item. Say why for any 1 or 2.</p>
             </div>
             <button type="button" onClick={onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
           </div>
@@ -129,7 +143,7 @@ function ToRate({ viewer, people }: { viewer: Viewer; people: Person[] }) {
                   <li key={id}>
                     <button type="button" onClick={() => setEditing({ round: r, rateeId: id })} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface">
                       <span className="flex-1 font-semibold">{nameOf(id)}</span>
-                      {x ? <><Stars value={x.stars} size="h-4 w-4" /><span className="text-sm text-accent">Change</span></> : <span className="rounded-full bg-attention-soft px-2.5 py-0.5 text-sm font-semibold text-attention">Rate now</span>}
+                      {x ? <><Stars value={Math.round(ratingOverall(x) || 0)} size="h-4 w-4" /><span className="text-sm text-accent">Change</span></> : <span className="rounded-full bg-attention-soft px-2.5 py-0.5 text-sm font-semibold text-attention">Rate now</span>}
                     </button>
                   </li>
                 );
@@ -145,24 +159,33 @@ function ToRate({ viewer, people }: { viewer: Viewer; people: Person[] }) {
 function RateForm({ viewer, round, rateeId, rateeName, existing, onDone }: {
   viewer: Viewer; round: RatingRound; rateeId: string; rateeName: string; existing?: Rating360; onDone: () => void; key?: string;
 }) {
-  const [v, setV] = useState({ stars: existing?.stars || 0, comment: existing?.comment || '' });
+  const items = activeItems(useRatingItems());
+  const [v, setV] = useState<{ items: Record<string, number>; comments: Record<string, string>; comment: string }>(() => ({
+    items: itemStars(existing || {}), comments: { ...(existing?.comments || {}) }, comment: existing?.comment || '',
+  }));
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const draft = useFormDraft(viewer.id, `rating:${round.id}:${rateeId}`, v, setV);
+  const draft = useFormDraft(viewer.id, `rating-items:${round.id}:${rateeId}`, v, setV);
+  const setStars = (id: string, n: number) => { setV(x => ({ ...x, items: { ...x.items, [id]: n } })); setError(''); };
+  const setWhy = (id: string, t: string) => { setV(x => ({ ...x, comments: { ...x.comments, [id]: t } })); setError(''); };
   const save = async () => {
-    if (!v.stars) return setError('Choose 1 to 5 stars.');
-    const p = commentProblem(v.comment);
-    if (p) return setError(p);
+    if (!items.length) return setError('Management has not set any items to rate yet.');
+    for (const it of items) {
+      const p = itemProblem(it, v.items[it.id] || 0, v.comments[it.id] || '');
+      if (p) return setError(p);
+    }
     setBusy(true); setError('');
     try {
+      // Only the active items are saved; a reason is kept only where the score needs one.
+      const stars = Object.fromEntries(items.map(it => [it.id, v.items[it.id]]));
+      const why = Object.fromEntries(items.filter(it => needsComment(v.items[it.id])).map(it => [it.id, (v.comments[it.id] || '').trim()]));
       await setDoc(doc(db, 'ratings_360', ratingId(round.id, viewer.id, rateeId)), {
-        roundId: round.id, raterId: viewer.id, raterName: viewer.name, rateeId, stars: v.stars, comment: v.comment.trim(), at: new Date().toISOString(),
+        roundId: round.id, raterId: viewer.id, raterName: viewer.name, rateeId, items: stars, comments: why, comment: v.comment.trim(), at: new Date().toISOString(),
       });
       draft.clear();
       onDone();
     } catch (e) { setError(friendlyError(e)); setBusy(false); }
   };
-  const left = Math.max(0, MIN_COMMENT - v.comment.trim().length);
   return (
     <div className="space-y-4">
       <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={onDone}>← Back to the list</button>
@@ -170,17 +193,30 @@ function RateForm({ viewer, round, rateeId, rateeName, existing, onDone }: {
       <section className="space-y-4 rounded-2xl border border-line bg-white p-5">
         <div>
           <h4 className="text-lg font-bold">{rateeName}</h4>
-          <p className="text-sm text-ink-soft">{round.name} · {round.view === 'open' ? `${rateeName} will see your name with this rating.` : `${rateeName} sees the rating and comment, not your name. Management sees who gave it.`}</p>
+          <p className="text-sm text-ink-soft">{round.name} · {round.view === 'open' ? `${rateeName} will see your name with this rating.` : `${rateeName} sees the rating and comments, not your name. Management sees who gave it.`}</p>
         </div>
+        {items.map(it => {
+          const n = v.items[it.id] || 0;
+          const left = Math.max(0, MIN_COMMENT - (v.comments[it.id] || '').trim().length);
+          return (
+            <div key={it.id} className="rounded-xl bg-surface p-3.5">
+              <span className={label}>{it.name}</span>
+              <span className="flex flex-wrap items-center gap-3"><Stars value={n} onChange={x => setStars(it.id, x)} /><span className="text-sm text-ink-soft">{STAR_WORDS[n]}</span></span>
+              {needsComment(n) && (
+                <div className="mt-2">
+                  <label htmlFor={`r360-why-${it.id}`} className={label}>Why {n} star{n > 1 ? 's' : ''}?</label>
+                  <textarea id={`r360-why-${it.id}`} value={v.comments[it.id] || ''} onChange={e => setWhy(it.id, e.target.value)} className={`${input} min-h-[80px]`}
+                    placeholder="What happened, and what would make it better. Give an example." />
+                  <p className={`mt-1 text-sm ${left ? 'text-ink-soft' : 'text-accent'}`}>{left ? `${left} more character${left === 1 ? '' : 's'} needed` : 'Thank you'}</p>
+                </div>
+              )}
+            </div>
+          );
+        })}
         <div>
-          <span className={label}>Your rating</span>
-          <span className="flex flex-wrap items-center gap-3"><Stars value={v.stars} onChange={n => { setV(x => ({ ...x, stars: n })); setError(''); }} /><span className="text-sm text-ink-soft">{STAR_WORDS[v.stars]}</span></span>
-        </div>
-        <div>
-          <label htmlFor="r360-why" className={label}>Why this rating?</label>
-          <textarea id="r360-why" value={v.comment} onChange={e => { setV(x => ({ ...x, comment: e.target.value })); setError(''); }} className={`${input} min-h-[110px]`}
-            placeholder="What they did well, and what would make it better. Give an example." />
-          <p className={`mt-1 text-sm ${left ? 'text-ink-soft' : 'text-accent'}`}>{left ? `${left} more character${left === 1 ? '' : 's'} needed` : 'Thank you'}</p>
+          <label htmlFor="r360-why" className={label}>Anything else? (optional)</label>
+          <textarea id="r360-why" value={v.comment} onChange={e => { setV(x => ({ ...x, comment: e.target.value })); setError(''); }} className={`${input} min-h-[80px]`}
+            placeholder="What they did well, and what would make it better." />
         </div>
         {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -192,9 +228,50 @@ function RateForm({ viewer, round, rateeId, rateeName, existing, onDone }: {
   );
 }
 
+// One rating's stars per item and its comments (older ratings: one row of stars).
+export function RatingDetail({ r, items, who }: {
+  r: { stars?: number; itemStars?: Record<string, number>; itemComments?: Record<string, string>; comment: string }; items: RatingItem[]; who?: React.ReactNode;
+}) {
+  const nameOf = (id: string) => items.find(i => i.id === id)?.name || 'Item no longer used';
+  const per = Object.entries(r.itemStars || {});
+  return (
+    <>
+      <span className="flex flex-wrap items-center gap-2 text-sm">{!per.length && r.stars ? <Stars value={r.stars} size="h-4 w-4" /> : null}{who}</span>
+      {per.length > 0 && (
+        <ul className="mt-1 space-y-1">
+          {per.sort(([a], [b]) => (items.find(i => i.id === a)?.order ?? 99) - (items.find(i => i.id === b)?.order ?? 99)).map(([id, n]) => (
+            <li key={id} className="text-[15px]">
+              <span className="flex items-center gap-2"><span className="w-32 text-sm text-ink-soft">{nameOf(id)}</span><Stars value={n} size="h-3.5 w-3.5" /></span>
+              {r.itemComments?.[id] && <p className="ml-34 whitespace-pre-line text-sm">{r.itemComments[id]}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {r.comment && <p className="mt-1 whitespace-pre-line text-[15px]">{r.comment}</p>}
+    </>
+  );
+}
+
+// Average per item, in the items' order (items no longer used still show if they were rated).
+export function ItemAverages({ avgs, items }: { avgs: Record<string, { avg: number; count: number }>; items: RatingItem[] }) {
+  const ids = [...items.map(i => i.id).filter(id => avgs[id]), ...Object.keys(avgs).filter(id => !items.some(i => i.id === id))];
+  if (!ids.length) return null;
+  return (
+    <ul className="grid gap-1.5 sm:grid-cols-2">
+      {ids.map(id => (
+        <li key={id} className="flex items-center justify-between gap-2 rounded-lg bg-surface px-3 py-1.5 text-sm">
+          <span>{items.find(i => i.id === id)?.name || 'Item no longer used'}</span><StarsAvg avg={avgs[id].avg} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // ---------- About me ----------
-type AboutRound = { roundId: string; name: string; month: string; view: RoundView; avg: number; count: number; items: { stars: number; comment: string; raterName?: string }[] };
+type AboutItem = { stars: number; itemStars?: Record<string, number>; itemComments?: Record<string, string>; comment: string; raterName?: string };
+type AboutRound = { roundId: string; name: string; month: string; view: RoundView; avg: number; count: number; itemAvgs?: Record<string, { avg: number; count: number }>; items: AboutItem[] };
 function AboutMe() {
+  const ratingItems = useRatingItems();
   const [rounds, setRounds] = useState<AboutRound[] | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -212,13 +289,13 @@ function AboutMe() {
               <p className="font-bold">{r.name}</p>
               <p className="text-sm text-ink-soft">{monthText(r.month)} · {r.count} rating{r.count === 1 ? '' : 's'}</p>
             </div>
-            <span className="flex items-center gap-2"><Stars value={Math.round(r.avg)} size="h-5 w-5" /><strong className="tabular-nums">{r.avg.toFixed(1)}</strong></span>
+            <StarsAvg avg={r.avg} size="h-5 w-5" />
           </div>
+          {r.itemAvgs && <div className="mt-3"><ItemAverages avgs={r.itemAvgs} items={ratingItems} /></div>}
           <ul className="mt-3 space-y-2">
             {r.items.map((x, i) => (
               <li key={i} className="rounded-xl bg-surface px-3.5 py-2.5">
-                <span className="flex items-center gap-2"><Stars value={x.stars} size="h-4 w-4" />{x.raterName && <span className="text-sm font-semibold">{x.raterName}</span>}</span>
-                <p className="mt-1 whitespace-pre-line text-[15px]">{x.comment}</p>
+                <RatingDetail r={x} items={ratingItems} who={x.raterName && <span className="font-semibold">{x.raterName}</span>} />
               </li>
             ))}
           </ul>
@@ -229,7 +306,7 @@ function AboutMe() {
 }
 
 // ---------- Rounds (Management) ----------
-function useAllRatings(): Rating360[] {
+export function useAllRatings(): Rating360[] {
   const [list, setList] = useState<Rating360[]>([]);
   useEffect(() => onSnapshot(query(collection(db, 'ratings_360')), s => setList(s.docs.map(d => ({ ...(d.data() as any), id: d.id }))), () => setList([])), []);
   return list;
@@ -238,7 +315,9 @@ function useAllRatings(): Rating360[] {
 function Rounds({ viewer, people }: { viewer: Viewer; people: Person[] }) {
   const rounds = useRatingRounds();
   const ratings = useAllRatings();
+  const ratingItems = useRatingItems();
   const [creating, setCreating] = useState(false);
+  const [editingItems, setEditingItems] = useState(false);
   const [open, setOpen] = useState('');
   const [error, setError] = useState('');
   const nameOf = (id: string) => people.find(p => p.id === id)?.name || 'Former team member';
@@ -248,11 +327,15 @@ function Rounds({ viewer, people }: { viewer: Viewer; people: Person[] }) {
     catch (e) { setError(friendlyError(e)); }
   };
   if (creating) return <RoundForm viewer={viewer} people={people} onDone={() => setCreating(false)} />;
+  if (editingItems) return <ItemsForm viewer={viewer} items={ratingItems} onDone={() => setEditingItems(false)} />;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-ink-soft">People see their ratings once you close the round. The 360 rating KPI counts closed rounds in their month.</p>
-        <button type="button" className={primaryBtn} onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New round</button>
+        <p className="text-sm text-ink-soft">People see their ratings once you close the round. Closed rounds show as attitude on the appraisal for their month.</p>
+        <span className="flex gap-2">
+          <button type="button" className={secondaryBtn} onClick={() => setEditingItems(true)}>Items to rate ({activeItems(ratingItems).length})</button>
+          <button type="button" className={primaryBtn} onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New round</button>
+        </span>
       </div>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
       {rounds.length === 0 && <p className="rounded-2xl border border-line bg-white p-6 text-center text-ink-soft">No rounds yet.</p>}
@@ -291,17 +374,18 @@ function Rounds({ viewer, people }: { viewer: Viewer; people: Person[] }) {
                 <ul className="space-y-3">
                   {rateeIds.map(id => {
                     const got = mine.filter(x => x.rateeId === id);
-                    const avg = got.length ? got.reduce((t, x) => t + x.stars, 0) / got.length : 0;
+                    const sum = summarise(got);
                     return (
                       <li key={id} className="rounded-xl bg-surface p-3">
                         <p className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-semibold">{nameOf(id)}</span>
-                          <span className="flex items-center gap-2 text-sm">{got.length ? <><Stars value={Math.round(avg)} size="h-4 w-4" /><strong>{avg.toFixed(1)}</strong></> : null} <span className="text-ink-soft">{got.length} rating{got.length === 1 ? '' : 's'}</span></span>
+                          <span className="flex items-center gap-2 text-sm">{sum.overall ? <StarsAvg avg={sum.overall.avg} /> : null} <span className="text-ink-soft">{got.length} rating{got.length === 1 ? '' : 's'}</span></span>
                         </p>
+                        {got.length > 0 && <div className="mt-2"><ItemAverages avgs={sum.items} items={ratingItems} /></div>}
                         {got.map(x => (
                           <div key={x.id} className="mt-2 rounded-lg bg-white px-3 py-2 text-[15px]">
-                            <span className="flex items-center gap-2 text-sm"><Stars value={x.stars} size="h-3.5 w-3.5" /><strong>{x.raterName}</strong><span className="text-ink-soft">{formatDate(myDay(x.at))}</span></span>
-                            <p className="mt-0.5 whitespace-pre-line">{x.comment}</p>
+                            <RatingDetail r={{ stars: x.stars, itemStars: itemStars(x), itemComments: x.comments, comment: x.comment }} items={ratingItems}
+                              who={<><strong>{x.raterName}</strong><span className="text-ink-soft">{formatDate(myDay(x.at))}</span></>} />
                           </div>
                         ))}
                       </li>
@@ -410,6 +494,63 @@ function RoundForm({ viewer, people, onDone }: { viewer: Viewer; people: Person[
         <div className="flex justify-end gap-2">
           <button type="button" className={secondaryBtn} onClick={onDone}>Cancel</button>
           <button type="button" className={primaryBtn} disabled={busy} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Open round</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ---------- Attitude items (Management) ----------
+// Add, rename, turn off and reorder. Items are never deleted, so older ratings keep their names.
+function ItemsForm({ viewer, items, onDone }: { viewer: Viewer; items: RatingItem[]; onDone: () => void }) {
+  const [list, setList] = useState<RatingItem[]>(() => items.map(i => ({ ...i })));
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const draft = useFormDraft(viewer.id, 'rating-items:settings', list, setList);
+  const change = (id: string, c: Partial<RatingItem>) => { setList(l => l.map(i => (i.id === id ? { ...i, ...c } : i))); setError(''); };
+  const move = (idx: number, by: number) => setList(l => {
+    const next = l.slice();
+    const [x] = next.splice(idx, 1);
+    next.splice(idx + by, 0, x);
+    return next;
+  });
+  const save = async () => {
+    if (list.some(i => !i.name.trim())) return setError('Give every item a name.');
+    if (!list.some(i => i.active)) return setError('Keep at least one item turned on.');
+    setBusy(true);
+    try {
+      await setDoc(doc(db, 'config', 'rating_items'), {
+        items: list.map((i, n) => ({ id: i.id, name: i.name.trim(), active: i.active, order: n + 1 })),
+        updatedAt: new Date().toISOString(), updatedById: viewer.id, updatedByName: viewer.name,
+      });
+      draft.clear();
+      onDone();
+    } catch (e) { setError(friendlyError(e)); setBusy(false); }
+  };
+  return (
+    <div className="space-y-4">
+      <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={onDone}>← Back to rounds</button>
+      <DraftBar draft={draft} what="items to rate" />
+      <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
+        <div>
+          <h4 className="text-lg font-bold">Items to rate</h4>
+          <p className="text-sm text-ink-soft">Everyone scores each item that is on, 1 to 5. Turning an item off keeps its past ratings.</p>
+        </div>
+        <ul className="space-y-2">
+          {list.map((it, idx) => (
+            <li key={it.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2">
+              <input className={`${input} flex-1 min-w-[10rem]`} value={it.name} onChange={e => change(it.id, { name: e.target.value })} aria-label="Item name" />
+              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="accent-[#0E6E62]" checked={it.active} onChange={e => change(it.id, { active: e.target.checked })} /> On</label>
+              <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-white disabled:opacity-30" disabled={idx === 0} onClick={() => move(idx, -1)} aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
+              <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-white disabled:opacity-30" disabled={idx === list.length - 1} onClick={() => move(idx, 1)} aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
+            </li>
+          ))}
+        </ul>
+        <button type="button" className={secondaryBtn} onClick={() => setList(l => [...l, { id: newItemId(), name: '', active: true, order: l.length + 1 }])}><Plus className="h-4 w-4" /> Add an item</button>
+        {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className={secondaryBtn} onClick={onDone}>Cancel</button>
+          <button type="button" className={primaryBtn} disabled={busy} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save items</button>
         </div>
       </section>
     </div>

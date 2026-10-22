@@ -12,15 +12,15 @@ import { malaysiaDay } from './src/lib/backup';
 import { readMoneySettings } from './src/lib/money';
 import { projectRows } from './src/lib/projectPL';
 import { dealOwnerId } from './src/lib/deals';
-import { readRound, RatingRound } from './src/lib/rating360';
+import { itemStars, readRound, RatingRound, ratingOverall, summarise } from './src/lib/rating360';
 
 const MONTH = /^\d{4}-\d{2}$/;
 
 // 360 rating (Part C, src/lib/rating360.ts). Ratings are readable only by the rater and Management, so:
-// - POST /api/ratings/about-me {} → the ratings about the caller in closed rounds: stars and comments, with who gave
-//   them only when the round's view is open.
+// - POST /api/ratings/about-me {} → the ratings about the caller in closed rounds: stars per attitude item, the
+//   average per item and overall, and comments, with who gave them only when the round's view is open.
 // - POST /api/ratings/scores { months } → { scores: { [month]: { [memberId]: { avg, count } } } } from closed rounds
-//   (the 360 rating KPI). Management gets everyone; anyone else only their own.
+//   (the old 360 rating KPI; avg = overall attitude). Management gets everyone; anyone else only their own.
 async function closedRounds(db: any, months?: string[]) {
   const snap = await db.collection('rating_rounds').where('status', '==', 'closed').get();
   return snap.docs.map((d: any) => readRound(d.id, d.data())).filter((r: RatingRound) => !months || months.includes(r.month));
@@ -35,15 +35,22 @@ export function registerRatingRoutes(app: Express) {
     const all = snap.docs.map(d => d.data() as any);
     const out = rounds
       .map(r => {
-        const mine = all.filter(x => x.roundId === r.id);
+        const mine = all.filter(x => x.roundId === r.id && ratingOverall(x) !== null);
         if (!mine.length) return null;
+        const sum = summarise(mine);
+        const comments = (x: any) => Object.fromEntries(Object.entries(x.comments && typeof x.comments === 'object' ? x.comments : {})
+          .filter(([, v]) => typeof v === 'string' && v.trim()).map(([k, v]) => [k, String(v)]));
         return {
           roundId: r.id, name: r.name, month: r.month, view: r.view, closedAt: r.closedAt || '',
-          avg: Math.round((mine.reduce((t, x) => t + Number(x.stars || 0), 0) / mine.length) * 100) / 100,
+          avg: sum.overall?.avg || 0,
           count: mine.length,
+          itemAvgs: sum.items,
           items: mine
             .sort(() => Math.random() - 0.5)   // closed view: no order to guess from
-            .map(x => ({ stars: Number(x.stars || 0), comment: String(x.comment || ''), ...(r.view === 'open' ? { raterName: String(x.raterName || '') } : {}) })),
+            .map(x => ({
+              stars: Math.round((ratingOverall(x) || 0) * 10) / 10, itemStars: itemStars(x), itemComments: comments(x),
+              comment: String(x.comment || ''), ...(r.view === 'open' ? { raterName: String(x.raterName || '') } : {}),
+            })),
         };
       })
       .filter(Boolean)
@@ -67,9 +74,10 @@ export function registerRatingRoutes(app: Express) {
       snap.docs.forEach(d => {
         const x: any = d.data();
         const r = byRound.get(x.roundId);
-        if (!r) return;
+        const overall = ratingOverall(x);
+        if (!r || overall === null) return;
         const s = ((sums[r.month] ||= {})[x.rateeId] ||= { t: 0, n: 0 });
-        s.t += Number(x.stars || 0); s.n += 1;
+        s.t += overall; s.n += 1;
       });
       Object.entries(sums).forEach(([m, people]) => Object.entries(people).forEach(([id, s]) => {
         scores[m][id] = { avg: Math.round((s.t / s.n) * 100) / 100, count: s.n };

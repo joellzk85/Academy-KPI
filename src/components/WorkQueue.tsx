@@ -13,6 +13,7 @@ import TrainingTimeBox from './TrainingTimeBox';
 import HrdcQueries from './HrdcQueries';
 import MoneyPanel, { MoneyOverview, useMoneySettings } from './Money';
 import VendorsPage from './VendorsPage';
+import DaysOut from './DaysOut';
 import { MoneyIn, MoneyOut, moneyFlags, prePaymentFlags } from '../lib/money';
 import AfterTraining from './AfterTraining';
 import { useReceipts } from './PaymentReceipts';
@@ -44,7 +45,7 @@ const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink disabled:opacity-30';
 
-export type AdminView = 'queue' | 'money' | 'payments' | 'vendors' | 'programmes' | 'tasks' | 'backup';
+export type AdminView = 'queue' | 'money' | 'payments' | 'vendors' | 'days_out' | 'programmes' | 'tasks' | 'backup';
 
 export default function WorkQueue({ viewer, people, onOpenQuotations, initialView = 'queue', initialDealId = '', deals = [], onOpenManagementPayments }: {
   viewer: Viewer;
@@ -58,7 +59,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
   const [view, setView] = useState<AdminView>(initialView);
   const [focusDeal, setFocusDeal] = useState(initialDealId);
   // Payment tracking is in Admin work for Admin; Management has it under Management (with profit), so it isn't repeated.
-  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['vendors', 'Vendors'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ['backup', 'Backup']];
+  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['vendors', 'Vendors'], ['days_out', 'Days out'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ['backup', 'Backup']];
   const openPayments = viewer.role === 'admin' ? () => setView('payments') : onOpenManagementPayments;
   return (
     <div className="space-y-5 font-sans text-ink">
@@ -84,6 +85,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
           </React.Suspense>
         )
         : view === 'vendors' ? <VendorsPage viewer={viewer} />
+        : view === 'days_out' ? <DaysOut viewer={viewer} people={people} />
         : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : view === 'tasks' ? <TaskSettings viewer={viewer} /> : <BackupPanel />}
     </div>
   );

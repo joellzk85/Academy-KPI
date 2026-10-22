@@ -72,3 +72,9 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
     - **As the other manager:** Rounds shows the rating with the rep's name and who is still to rate. Close round.
     - **The rated person:** 360 rating → About me shows the stars and comment without a name.
     - **KPI:** add the 360 rating KPI to a test set and check the score for this month.
+48. **Appraisal: KPI, attitude, reliability (2026-10-22):** after it is live, **publish `firestore.rules`** (`ratings_360` with items, `config/rating_items`, `config/reliability`, `reliability_excused`, `reliability_incidents`, `appraisal_notes`).
+    - **360 items:** 360 rating → Rounds → Items to rate: rename one, add one, turn one off, move it up; save.
+    - **Rating:** as a rep in an open round, score each item; give a 2 and try to send with no reason (refused), then add one. A 3 to 5 needs no reason.
+    - **Days out:** as Admin, Admin work → Days out → add MC for a rep on a past working day.
+    - **Appraisal:** Management → Appraisal → that rep, this month: Part A has no 360 rating KPI; Part B shows each item and overall once the round is closed, with names; Part C shows the score, green / amber / red counts and the MC day left out. Add an incident: the score drops by the setting. Change Score settings and check the score moves. Type a note, change month and back: the note is kept.
+    - **As the rep:** About me shows items and comments only after the round closes; no appraisal or reliability screen anywhere.
