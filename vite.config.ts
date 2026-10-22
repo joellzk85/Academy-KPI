@@ -1,11 +1,28 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import {defineConfig, type Plugin} from 'vite';
+
+// Login log (2026-10-22): the CRM's own code imports 'firebase/firestore' through src/lib/firestoreTracked.ts,
+// which counts each save as work done ("actions"). Everything else about the database stays the same.
+const TRACKED_FILE = path.resolve(__dirname, 'src/lib/firestoreTracked.ts');
+const TRACKED = TRACKED_FILE.replace(/\\/g, '/').toLowerCase();
+const SRC = path.resolve(__dirname, 'src').replace(/\\/g, '/').toLowerCase() + '/';
+function countSaves(): Plugin {
+  return {
+    name: 'count-crm-saves',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (source !== 'firebase/firestore' || !importer) return null;
+      const from = importer.split('?')[0].replace(/\\/g, '/').toLowerCase();
+      return from.startsWith(SRC) && from !== TRACKED ? TRACKED_FILE : null;
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [countSaves(), react(), tailwindcss()],
     build: {
       rollupOptions: {
         output: {

@@ -72,7 +72,15 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
     - **As the other manager:** Rounds shows the rating with the rep's name and who is still to rate. Close round.
     - **The rated person:** 360 rating → About me shows the stars and comment without a name.
     - **KPI:** add the 360 rating KPI to a test set and check the score for this month.
-48. **Appraisal: KPI, attitude, reliability (2026-10-22):** after it is live, **publish `firestore.rules`** (`ratings_360` with items, `config/rating_items`, `config/reliability`, `reliability_excused`, `reliability_incidents`, `appraisal_notes`).
+48. **Deal checks and won-deal locks (2026-10-22):** after it is live, **publish `firestore.rules`** (won date, won-deal locks, `integrityChecks`, `config/month_locks`).
+    - **As a rep:** Client signed on a test deal: no date box, "Today, …". Won. Edit details: programme, value and funding type are greyed; the quotation ticks are off.
+    - **Change date / value / Cancel training → Change value / pax:** try the same value (refused), a 2-word note (refused), then send a lower value. **As the other manager:** Approve new value. The deal shows the new value, a to-do list, and the KPI page shows "Original RM x, adjusted RM y".
+    - **Management → Deal checks:** the deal is under Reduced. Move a test deal's date 4 times (each approved): a red flag shows in the deal panel and Team performance shows the red bar. Mark it Checked, OK with a note; it goes, and History has a line.
+49. **Month lock (2026-10-22):** same rules publish as 48.
+    - **On the 3rd of a month, as a rep:** the KPI page for last month says locked and has no edit buttons; logging a follow-up or appointment dated last month is refused.
+    - **As Management:** Deal checks → Month lock → pick last month, give a reason, Open. The rep can now edit it. Lock again closes it.
+50. **Login log: work done and where the time goes (2026-10-22):** after it is live, **publish `firestore.rules`** (until then the new counts are refused and only minutes keep counting). Next day: Team → Login log shows "N actions" under each day and a **Most time on** column; open a person for **Where the time went**. Test: leave the CRM open without clicking for 6 minutes, minutes stop. Rules button shows the clock (5 min) and "Online, no work" (2 h, 3 actions).
+51. **Appraisal: KPI, attitude, reliability (2026-10-22):** after it is live, **publish `firestore.rules`** (`ratings_360` with items, `config/rating_items`, `config/reliability`, `reliability_excused`, `reliability_incidents`, `appraisal_notes`).
     - **360 items:** 360 rating → Rounds → Items to rate: rename one, add one, turn one off, move it up; save.
     - **Rating:** as a rep in an open round, score each item; give a 2 and try to send with no reason (refused), then add one. A 3 to 5 needs no reason.
     - **Days out:** as Admin, Admin work → Days out → add MC for a rep on a past working day.

@@ -1,6 +1,7 @@
 // Reliability (Joel, 2026-10-22; appraisal Part C). Read from the Login log (lib/loginActivity.ts): no new tracking.
 // - We work flexi time, so the time of day someone starts is never scored. Each past working day (the Login log's
-//   working days) gets its light from that day's CRM minutes (dayLight): green, amber or red; no time at all = red.
+//   working days) gets its light from that day's counted CRM minutes (dayLight on useLoginData's countedOf, the same
+//   minutes the Login log's lights use; online with no work counts 0): green, amber or red; no time at all = red.
 // - Excused days are left out of the count: reliability_excused/{memberId}_{YYYY-MM-DD}: { memberId, date, reason,
 //   note, byId, byName, at }. Admin and Management mark them (Admin work → Days out; the appraisal). Reasons below.
 // - Incidents: reliability_incidents/{id}: { memberId, date, kind, note, byId, byName, at }. Management only.

@@ -223,13 +223,13 @@ function useReliabilitySettings(): ReliabilitySettings {
 }
 
 function ReliabilityCard({ viewer, person, people, from, to }: { viewer: Viewer; person: Person; people: Person[]; from: string; to: string }) {
-  const { rules, days, error, minutesOf } = useLoginData(from);
+  const { rules, days, error, countedOf } = useLoginData(from);
   const excusedAll = useExcusedDays(from, person.id);
   const incidents = useIncidents(person.id);
   const settings = useReliabilitySettings();
   const [show, setShow] = useState<'' | 'days' | 'incident' | 'settings'>('');
   const excused = (excusedAll || []).filter(e => e.date <= to);
-  const r = reliabilityFor({ from, to, today: todayIso(), rules, minutesOf: d => minutesOf(person.id, d), excused, incidents, settings });
+  const r = reliabilityFor({ from, to, today: todayIso(), rules, minutesOf: d => countedOf(person.id, d), excused, incidents, settings });
   const byReason = Object.entries(r.excused.reduce((m, e) => ({ ...m, [e.reason]: (m[e.reason] || 0) + 1 }), {} as Record<string, number>));
   const removeIncident = async (i: Incident) => { try { await deleteDoc(doc(db, 'reliability_incidents', i.id)); } catch { /* shown by the list staying */ } };
   return (

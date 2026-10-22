@@ -1,16 +1,20 @@
 // Login history (2026-10-22): how long each team member uses the CRM each day.
 // One document per person per day in login_days/<memberId>_<YYYY-MM-DD> (the person's own computer's date):
-// minutes = active minutes (CRM open and visible, with mouse or keyboard use in the last 10 minutes),
+// minutes = active minutes (CRM open and visible, with a click, typing or scrolling in the last `idleMinutes`),
 // logins = times the CRM was opened that day, firstAt / lastAt = first and last activity.
+// Since 2026-10-22 (anti "open but idle"): actions = real work saved that day (anything the person saved to the
+// database: deals, appointments, follow-ups, quotations, checklist ticks, payments…, counted by
+// lib/firestoreTracked.ts; the same record saved again within 5 minutes counts once), and places = active minutes
+// per screen (place = the screen of the last minute), so Management sees where the time goes.
 // The database rules let each person add only their own minutes, one at a time and at most once a minute,
 // and only Management can read them (Team → Login log).
 // The green / amber / red rules live in config/login_rules, editable by Management only.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, doc, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db, friendlyError } from './firebase';
+import { setWriteListener } from './firestoreTracked';
 import type { KpiLight } from './kpi';
 
-export const IDLE_MINUTES = 10;
 
 export interface LoginDay {
   memberId: string;
@@ -19,6 +23,8 @@ export interface LoginDay {
   logins: number;
   firstAt?: { toMillis(): number } | null;
   lastAt?: { toMillis(): number } | null;
+  actions?: number;                      // missing on days recorded before 2026-10-22 (not judged)
+  places?: Record<string, number>;       // minutes per screen (PLACE_LABELS)
 }
 
 export interface LoginRules {
@@ -27,9 +33,15 @@ export interface LoginRules {
   greenMinutes: number;   // …with at least this many minutes each
   amberDays: number;      // amber: at least this many working days…
   amberMinutes: number;   // …with at least this many minutes each
+  idleMinutes: number;    // the clock stops after this many minutes with no click, typing or scrolling
+  noWorkMinutes: number;  // "Online, no work": a day with at least this many minutes…
+  noWorkActions: number;  // …and fewer than this many actions; such a day doesn't count towards the light
 }
 
-export const DEFAULT_LOGIN_RULES: LoginRules = { workDays: [1, 2, 3, 4, 5], greenDays: 5, greenMinutes: 60, amberDays: 3, amberMinutes: 30 };
+export const DEFAULT_LOGIN_RULES: LoginRules = {
+  workDays: [1, 2, 3, 4, 5], greenDays: 5, greenMinutes: 60, amberDays: 3, amberMinutes: 30,
+  idleMinutes: 5, noWorkMinutes: 120, noWorkActions: 3,
+};
 
 export function readLoginRules(d: any): LoginRules {
   const num = (v: any, def: number) => (typeof v === 'number' && v >= 0 ? v : def);
@@ -40,7 +52,40 @@ export function readLoginRules(d: any): LoginRules {
     greenMinutes: num(d?.greenMinutes, DEFAULT_LOGIN_RULES.greenMinutes),
     amberDays: num(d?.amberDays, DEFAULT_LOGIN_RULES.amberDays),
     amberMinutes: num(d?.amberMinutes, DEFAULT_LOGIN_RULES.amberMinutes),
+    idleMinutes: Math.max(1, num(d?.idleMinutes, DEFAULT_LOGIN_RULES.idleMinutes)),
+    noWorkMinutes: num(d?.noWorkMinutes, DEFAULT_LOGIN_RULES.noWorkMinutes),
+    noWorkActions: num(d?.noWorkActions, DEFAULT_LOGIN_RULES.noWorkActions),
   };
+}
+
+/** "Online, no work": long in the CRM but almost nothing saved. Days from before actions were counted are never flagged. */
+export function isNoWorkDay(day: LoginDay | undefined, rules: LoginRules): boolean {
+  return !!day && typeof day.actions === 'number' && day.minutes >= rules.noWorkMinutes && day.actions < rules.noWorkActions;
+}
+
+// Screens the CRM reports its time on (usePlace). Keys are stored in login_days.places.
+export const PLACE_LABELS: Record<string, string> = {
+  home: 'My home', workspace: 'Workspace', admin: 'Admin work',
+  ws_kpi: 'KPI page', ws_present: 'Present', ws_pipeline: 'Deals', ws_quotation: 'Quotations', ws_course_outline: 'Course outlines',
+  ws_teambuilding: 'Teambuilding', ws_client: 'Clients', ws_trainerList: 'Trainers', ws_venue: 'Venues', ws_tasks: 'To-do',
+  ws_faci: 'Facilitators',
+  admin_queue: 'Admin: work queue', admin_money: 'Admin: money', admin_payments: 'Admin: payment tracking', admin_vendors: 'Admin: vendors',
+  admin_programmes: 'Admin: programmes', admin_tasks: 'Admin: checklist tasks', admin_backup: 'Admin: backup',
+  mgmt_dashboard: 'Management: dashboard', mgmt_team_followups: 'Management: team follow-ups', mgmt_checks: 'Management: deal checks',
+  mgmt_pl: 'Management: project P&L', mgmt_payments: 'Management: payment tracking', mgmt_links: 'Management: client links',
+  mgmt_followups: 'Management: follow-up rules', mgmt_lost: 'Management: lost and deleted', mgmt_team: 'Management: team',
+  mgmt_data: 'Management: data tools',
+};
+export const placeLabel = (key: string) => PLACE_LABELS[key] || 'Other';
+
+/** Minutes per screen over some days, biggest first. */
+export function placeTotals(days: (LoginDay | undefined)[]): { key: string; label: string; minutes: number }[] {
+  const t = new Map<string, number>();
+  days.forEach(d => Object.entries(d?.places || {}).forEach(([k, v]) => {
+    const label = placeLabel(k);
+    t.set(label, (t.get(label) || 0) + (typeof v === 'number' ? v : 0));
+  }));
+  return [...t.entries()].map(([label, minutes]) => ({ key: label, label, minutes })).filter(x => x.minutes > 0).sort((a, b) => b.minutes - a.minutes);
 }
 
 export const dayKey = (d: Date) =>
@@ -145,7 +190,12 @@ export function useLoginData(fromKey: string, enabled = true) {
     return m;
   }, [days]);
   const minutesOf = useCallback((memberId: string, day: string) => byKey.get(`${memberId}_${day}`)?.minutes || 0, [byKey]);
-  return { rules, days, error, byKey, minutesOf };
+  // For the lights: an "Online, no work" day counts as no time.
+  const countedOf = useCallback((memberId: string, day: string) => {
+    const d = byKey.get(`${memberId}_${day}`);
+    return !d || isNoWorkDay(d, rules) ? 0 : d.minutes || 0;
+  }, [byKey, rules]);
+  return { rules, days, error, byKey, minutesOf, countedOf };
 }
 
 export function formatMinutes(m: number): string {
@@ -158,43 +208,104 @@ export function formatMinutes(m: number): string {
 // ------------------------------------------------------------
 // The tracker: runs while a team member is signed in to the CRM.
 // ------------------------------------------------------------
-async function bump(memberId: string, field: 'minutes' | 'logins') {
+const SAFE_PLACE = /^[A-Za-z0-9_]{1,40}$/;
+
+// Where the person is: the deepest screen that says so wins (App's area = 1, a tab inside it = 2).
+const placeByDepth = new Map<number, string>();
+function currentPlace(): string {
+  const depth = Math.max(0, ...placeByDepth.keys());
+  const key = placeByDepth.get(depth) || 'other';
+  return SAFE_PLACE.test(key) ? key : 'other';
+}
+
+/** Tells the Login log which screen this is while it's on show (`depth` 1 = main area, 2 = a tab inside it). */
+export function usePlace(key: string, depth: 1 | 2) {
+  useEffect(() => {
+    placeByDepth.set(depth, key);
+    return () => { if (placeByDepth.get(depth) === key) placeByDepth.delete(depth); };
+  }, [key, depth]);
+}
+
+// Updates today's record; if it doesn't exist yet, creates it with `created` instead. Returns whether it saved.
+async function writeToday(memberId: string, changes: Record<string, any>, created: Record<string, any>): Promise<boolean> {
   const date = dayKey(new Date());
   const ref = doc(db, 'login_days', `${memberId}_${date}`);
   try {
-    await updateDoc(ref, { [field]: increment(1), lastAt: serverTimestamp() });
+    await updateDoc(ref, changes);
+    return true;
   } catch {
     // Today's record may not exist yet: the database answers "permission denied" (not "not found") because its
     // rules check the existing record, so always try to create it. If it already exists (e.g. a second CRM tab
     // already counted this minute) the rules refuse this too, which is fine.
     try {
-      await setDoc(ref, {
-        memberId, date,
-        minutes: field === 'minutes' ? 1 : 0,
-        logins: field === 'logins' ? 1 : 0,
-        firstAt: serverTimestamp(), lastAt: serverTimestamp(),
-      });
-    } catch { /* another tab created it first */ }
+      await setDoc(ref, { memberId, date, minutes: 0, logins: 0, actions: 0, places: {}, firstAt: serverTimestamp(), lastAt: serverTimestamp(), ...created });
+      return true;
+    } catch { return false; /* another tab created it first, or too soon after the last one */ }
   }
 }
 
+const bumpLogin = (memberId: string) => writeToday(memberId, { logins: increment(1), lastAt: serverTimestamp() }, { logins: 1 });
+
+const bumpMinute = (memberId: string) => {
+  const place = currentPlace();
+  return writeToday(memberId,
+    { minutes: increment(1), [`places.${place}`]: increment(1), place, lastAt: serverTimestamp() },
+    { minutes: 1, places: { [place]: 1 }, place });
+};
+
+const MAX_ACTIONS_PER_SAVE = 20;   // matches firestore.rules
+const bumpActions = (memberId: string, n: number) =>
+  writeToday(memberId, { actions: increment(n), lastActionAt: serverTimestamp() }, { actions: n, lastActionAt: serverTimestamp() });
+
 export function useActivityTracker(memberId: string) {
+  const idleMinutes = useRef(DEFAULT_LOGIN_RULES.idleMinutes);
+  useEffect(() => onSnapshot(doc(db, 'config', 'login_rules'), d => { idleMinutes.current = readLoginRules(d.data()).idleMinutes; }, () => {}), []);
+
   useEffect(() => {
-    let lastActive = Date.now();
+    let lastActive = Date.now();   // any click, typing or scrolling (plain mouse movement doesn't count: "mouse jigglers")
+    let lastInput = Date.now();    // a click or a key: a save soon after is the person's own work
     const onActivity = () => { lastActive = Date.now(); };
-    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'wheel'];
-    events.forEach(ev => window.addEventListener(ev, onActivity, { passive: true, capture: true }));
+    const onInput = () => { lastActive = lastInput = Date.now(); };
+    const activityEvents = ['scroll', 'wheel'];
+    const inputEvents = ['mousedown', 'keydown', 'touchstart'];
+    activityEvents.forEach(ev => window.addEventListener(ev, onActivity, { passive: true, capture: true }));
+    inputEvents.forEach(ev => window.addEventListener(ev, onInput, { passive: true, capture: true }));
     const onVisible = () => { if (document.visibilityState === 'visible') onActivity(); };
     document.addEventListener('visibilitychange', onVisible);
 
-    bump(memberId, 'logins');
+    // Work saved: counted only soon after a click or key (not the CRM's own background saves), and the same
+    // record saved again within 5 minutes (e.g. an editor's autosave) counts once.
+    const seen = new Map<string, number>();
+    let pending = 0;
+    setWriteListener(path => {
+      const now = Date.now();
+      if (now - lastInput > 60_000) return;
+      if (now - (seen.get(path) || 0) < 5 * 60_000) return;
+      seen.set(path, now);
+      pending++;
+    });
+    let flushing = false;
+    const flush = async () => {
+      if (!pending || flushing) return;
+      flushing = true;
+      const n = Math.min(pending, MAX_ACTIONS_PER_SAVE);
+      if (await bumpActions(memberId, n)) pending -= n;
+      flushing = false;
+    };
+    const actionTimer = window.setInterval(flush, 15_000);
+
+    bumpLogin(memberId);
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && Date.now() - lastActive < IDLE_MINUTES * 60_000) bump(memberId, 'minutes');
+      if (document.visibilityState === 'visible' && Date.now() - lastActive < idleMinutes.current * 60_000) bumpMinute(memberId);
     }, 60_000);
 
     return () => {
       window.clearInterval(timer);
-      events.forEach(ev => window.removeEventListener(ev, onActivity, { capture: true } as any));
+      window.clearInterval(actionTimer);
+      flush();
+      setWriteListener(null);
+      activityEvents.forEach(ev => window.removeEventListener(ev, onActivity, { capture: true } as any));
+      inputEvents.forEach(ev => window.removeEventListener(ev, onInput, { capture: true } as any));
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [memberId]);

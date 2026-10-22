@@ -38,7 +38,7 @@ const RepDetailDashboard = React.lazy(() => import('./components/RepDetailDashbo
 const ManagementDashboard = React.lazy(() => import('./components/ManagementDashboard'));
 const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
 const PaymentTracking = React.lazy(() => import('./components/PaymentTracking'));
-import { useActivityTracker } from './lib/loginActivity';
+import { useActivityTracker, usePlace } from './lib/loginActivity';
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
 const Appraisal = React.lazy(() => import('./components/Appraisal'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
@@ -59,6 +59,9 @@ import { appointmentEvents, trainingEvents } from './lib/appointments';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
 import { runBackup } from './lib/backupApi';
 import { useFollowUpRules } from './lib/useFollowUpRules';
+import { useMonthLocks } from './lib/useMonthLocks';
+import { canEditMonth, kpiMonthYm, ymLabel as lockYmLabel } from './lib/monthLock';
+import DealChecksPage from './components/DealChecksPage';
 import { linkedOnly, setLinkedTeam } from './lib/linked';
 import { SharedKind } from './lib/sharedInbox';
 import GlobalSearch, { SearchHit, setSearchPrefill } from './components/GlobalSearch';
@@ -236,11 +239,13 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const toRateCount = useToRateCount(currentMember.id);
   // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
   useFollowUpRules();
+  // Month lock (2026-10-22): which locked months Management reopened (lib/monthLock.ts).
+  useMonthLocks();
   // KPI library (Team → KPI library): every screen's KPIs, colour bands and the company GP bands.
   useKpiLibrary();
   // Login history (Team → Login log): counts this person's active minutes in the CRM.
   useActivityTracker(currentMember.id);
-  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks'>('dashboard');
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
   const [adminView, setAdminView] = useState<AdminView>('queue');
   const [adminDealId, setAdminDealId] = useState('');   // a won deal to open in the work queue (My home's After training card)
@@ -279,6 +284,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     if (!isManagement) return 'operations';
     return (saved as 'operations' | 'management') || 'operations';
   });
+
+  // Login log: which screen the time is spent on (the tab inside it reports too).
+  usePlace(currentTab === 'admin' && isStaff ? 'admin' : currentTab === 'management' ? `mgmt_${managementView}` : !selectedRepId ? 'home' : 'workspace', 1);
 
   useEffect(() => {
     if (selectedRepId) {
@@ -711,6 +719,10 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   // Saves typed-in weekly KPI numbers for one person for the selected month.
   const handleUpdateRepKpi = async (repId: string, updatedKpi: Representative['kpi']) => {
     const key = `${repId}_${selectedMonth}`;
+    if (!canEditMonth(kpiMonthYm(selectedMonth), currentMember?.role || 'rep')) {
+      showToast(`${lockYmLabel(kpiMonthYm(selectedMonth))} is locked. Only Management can change it.`);
+      return;
+    }
     setMonthKpiDocs(prev => ({ ...prev, [key]: updatedKpi }));
     try {
       await setDoc(doc(db, 'month_kpis', key), { kpi: sanitizeKpiForFirestore(updatedKpi), repId, month: selectedMonth });
@@ -804,7 +816,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
-    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data') => {
+    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks') => {
       if (!isManagement) return;
       if (view) setManagementView(view);
       handleSwitchTab('management');
@@ -1016,7 +1028,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'Appraisal'], ['data', 'Data tools']] as const).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'Appraisal'], ['data', 'Data tools']] as const).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -1060,6 +1072,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'payments' ? (
                 <PaymentTracking pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }} onOpenDeal={homeNav.openDeal} />
+              ) : managementView === 'checks' ? (
+                <DealChecksPage deals={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }} onOpenDeal={homeNav.openDeal} />
               ) : managementView === 'pl' ? (
                 <ProjectPL pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : (
@@ -1073,6 +1087,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                 selectedMonth={selectedMonth}
                 onMonthChange={handleMonthChange}
                 onOpenTeam={() => setManagementView('team')}
+                onOpenDealChecks={() => setManagementView('checks')}
                 onOpenDeal={homeNav.openDeal}
                 viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                 pipelinesSync={pipelinesSync}

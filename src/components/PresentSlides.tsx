@@ -294,7 +294,7 @@ function dayOfSaved(v: any): string {
 export function companySlides(args: {
   keys: CompanySlide[]; data: PresentData; period: Period; today: string; month: string; animate: boolean;
   reps: Representative[]; people: { id: string; name: string }[]; settings: MoneySettings; plRows: ProjectRow[];
-  logins?: { rules: LoginRules; days: unknown[] | null; minutesOf: (memberId: string, day: string) => number; people: { id: string; name: string }[] };
+  logins?: { rules: LoginRules; days: unknown[] | null; minutesOf: (memberId: string, day: string) => number; countedOf?: (memberId: string, day: string) => number; people: { id: string; name: string }[] };
 }): Slide[] {
   const { keys, data, period, today, month, animate, reps, people, settings, plRows, logins } = args;
   const nameOf = (id: string) => people.find(r => r.id === id)?.name || 'Former team member';
@@ -470,7 +470,7 @@ export function companySlides(args: {
       const rows = logins.people.map(p => {
         const mins = (d: string) => logins.minutesOf(p.id, d);
         const total = recent.reduce((s, d) => s + mins(d), 0);
-        return { p, light: loginLight(recent, mins, logins.rules), avg: Math.round(total / Math.max(1, recent.length)) };
+        return { p, light: loginLight(recent, d => (logins.countedOf || logins.minutesOf)(p.id, d), logins.rules), avg: Math.round(total / Math.max(1, recent.length)) };
       }).sort((a, b) => b.avg - a.avg);
       out.push({
         key, title: 'Login log', subtitle: `Time in the CRM · light for the last ${recent.length} working days, heatmap for the last 4 weeks`,
