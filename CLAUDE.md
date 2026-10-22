@@ -10,7 +10,7 @@ Working rules, agreed and non-negotiable:
 
 1. **Always check the latest code first.** Run `git pull` and `git status` before planning or changing anything.
 2. **Always ask before producing fix code.** Explain the plan in plain language and wait for a clear "yes" before writing code.
-3. **Always ask before pushing.** After building and testing, summarise what changed and ask permission before `git push`. Pushing to `main` deploys to the live CRM automatically.
+3. **Always ask before pushing.** After building and testing, summarise what changed and ask permission before `git push`. Push straight to `main`, not a side branch (Joel, 2026-10-22); pushing to `main` deploys to the live CRM automatically.
 4. **Change only the files that need changing.** Never rewrite the whole app for a fix.
 5. **Never tell Joel to find or edit a line of code.** You make the changes.
 6. **Explain everything in plain language.** No jargon without a one-line explanation. Give click-by-click steps for anything new Joel must do in Firebase, Google Cloud or GitHub.
