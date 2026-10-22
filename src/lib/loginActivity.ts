@@ -163,8 +163,10 @@ async function bump(memberId: string, field: 'minutes' | 'logins') {
   const ref = doc(db, 'login_days', `${memberId}_${date}`);
   try {
     await updateDoc(ref, { [field]: increment(1), lastAt: serverTimestamp() });
-  } catch (e: any) {
-    if (e?.code !== 'not-found') return;   // e.g. a second CRM tab already counted this minute
+  } catch {
+    // Today's record may not exist yet: the database answers "permission denied" (not "not found") because its
+    // rules check the existing record, so always try to create it. If it already exists (e.g. a second CRM tab
+    // already counted this minute) the rules refuse this too, which is fine.
     try {
       await setDoc(ref, {
         memberId, date,
