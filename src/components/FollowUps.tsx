@@ -6,6 +6,7 @@ import { dealOwnerId, dealStage, formatDate, todayIso, STAGE_LABELS } from '../l
 import { useTeamList } from '../lib/useClientHistory';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
+import { lockedDateProblem, minOpenDate } from '../lib/monthLock';
 import { FollowUpAlert, FollowUpHow, FollowUpNote, HOW_LABELS, alertText, followUpNotes, newNoteId } from '../lib/followUps';
 
 // Follow-up notes on a deal (Joel, 2026-10-18): "Log follow-up" in the deal panel's Next step box, and the
@@ -46,6 +47,9 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
   const save = async () => {
     setErr('');
     if (!date || date > today) return setErr('The follow-up date can\'t be in the future.');
+    // Month lock (2026-10-22): a note dated in a locked month is for Management only.
+    const locked = lockedDateProblem(date, viewer.role);
+    if (locked) return setErr(locked);
     if (!text.trim()) return setErr('Say what happened.');
     if (decision && !reason.trim()) return setErr('Say why the deal should stay open.');
     if (!nextDate) return setErr(decision ? 'Pick the next follow-up date.' : 'Pick the next follow-up date, or mark the deal lost.');
@@ -90,7 +94,7 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label htmlFor="fu-date" className={label}>Date</label>
-          <input id="fu-date" type="date" max={today} value={date} onChange={e => setDate(e.target.value)} className={input} />
+          <input id="fu-date" type="date" min={minOpenDate(viewer.role) || undefined} max={today} value={date} onChange={e => setDate(e.target.value)} className={input} />
         </div>
         <div>
           <span className={label}>How</span>

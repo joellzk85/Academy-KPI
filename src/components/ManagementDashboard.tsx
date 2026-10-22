@@ -15,6 +15,7 @@ import { SalesTarget, monthsBetween, periodFor, ymLabel } from '../lib/salesTarg
 import { useSalesTarget } from '../lib/useSalesTarget';
 import FollowUpAlerts from './FollowUpAlerts';
 import SalesProjection from './SalesProjection';
+import { allFlags, closingTotals, totalsDiffer } from '../lib/dealIntegrity';
 
 // Management → Dashboard: Team performance (rebuilt 2026-10-17).
 // Everything is counted from deals by the same rules as the KPI page and My home rings
@@ -28,6 +29,7 @@ interface Props {
   onMonthChange: (m: string) => void;
   onSelectRep: (rep: Representative) => void;
   onOpenTeam?: () => void;
+  onOpenDealChecks?: () => void;        // Management → Deal checks (2026-10-22)
   people?: { id: string; name: string }[];   // everyone on the Team list, for owner names
   onOpenDeal?: (deal: any) => void;     // opens the deal's panel in its owner's workspace
   viewer?: { id: string; name: string; role: string };   // for the sales projection's settings
@@ -36,7 +38,7 @@ interface Props {
 const card = 'rounded-2xl border border-line bg-white p-5';
 const OPEN_JOURNEY: DealStage[] = ['lead', 'proposal', 'agreed', 'quoted'];
 
-export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam, people = [], onOpenDeal, viewer }: Props) {
+export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam, onOpenDealChecks, people = [], onOpenDeal, viewer }: Props) {
   const deals = pipelinesSync || [];
   const [clients, setClients] = useState<any[]>([]);
   useEffect(() => onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))), []);
@@ -67,6 +69,13 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
       proposals: sum(dealProposalDate, inMonth), proposalsYear: sum(dealProposalDate, inYearToMonth),
     };
   }, [deals, prefix, period.start, period.end]);
+
+  // ---------- Deal checks (2026-10-22): original vs adjusted Closing RM, and red flags to look at ----------
+  const ym = prefix;
+  const closing = useMemo(() => closingTotals(deals, '', ym, ym), [deals, ym]);
+  const flagsOpen = useMemo(() => allFlags(deals).filter(f => !f.checked).length, [deals]);
+  const closingNote = (t: { original: number; adjusted: number; cancelledCount: number; reducedCount: number }) =>
+    `Original ${formatRM(t.original)}, adjusted ${formatRM(t.adjusted)}${t.cancelledCount ? ` · ${t.cancelledCount} cancelled` : ''}${t.reducedCount ? ` · ${t.reducedCount} reduced` : ''}`;
 
   // ---------- Team table ----------
   const kpiSources = useKpiSources({ months: [selectedMonth], people: reps });
@@ -106,6 +115,13 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
         </label>
       </div>
 
+      {flagsOpen > 0 && (
+        <button type="button" onClick={onOpenDealChecks} disabled={!onOpenDealChecks}
+          className="flex w-full items-center justify-between gap-2 rounded-2xl bg-danger px-5 py-3 text-left font-semibold text-white enabled:hover:bg-[#931C13]">
+          <span>{flagsOpen} deal check{flagsOpen === 1 ? '' : 's'} to look at</span><ChevronRight className="h-4 w-4" />
+        </button>
+      )}
+
       <CompanyTarget target={target} sumMonthly={sumMonthly} />
 
       {/* Tiles */}
@@ -116,6 +132,9 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
         <Tile label="Appointments held" value={String(tiles.appts)} year={`${period.label} so far: ${tiles.apptsYear}`} />
         <Tile label="Proposals sent" value={String(tiles.proposals)} year={`${period.label} so far: ${tiles.proposalsYear}`} />
       </div>
+      {totalsDiffer(closing) && (
+        <p className="-mt-2 text-sm text-ink-soft">Sales won in {monthLabel(selectedMonth)}: {closingNote(closing)} (cancellations and approved value changes).</p>
+      )}
 
       {/* Team table */}
       <section className={card}>
@@ -126,6 +145,7 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
               <li key={rep.id} className="flex flex-col gap-3 py-3 lg:flex-row lg:items-center">
                 <div className="w-full shrink-0 lg:w-56">
                   <p className="font-semibold">{rep.name}</p>
+                  {(() => { const t = closingTotals(deals, rep.id, ym, ym); return totalsDiffer(t) ? <p className="text-xs text-ink-soft">{closingNote(t)}</p> : null; })()}
                   <div className="mt-1 flex items-center gap-2">
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-line" role="progressbar" aria-valuenow={score} aria-valuemin={0} aria-valuemax={100} aria-label={`${rep.name} KPI score`}>
                       <div className={`h-full rounded-full ${kpiBarClass(score)}`} style={{ width: `${Math.min(100, score)}%` }} />

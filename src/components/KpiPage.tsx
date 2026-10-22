@@ -4,11 +4,13 @@ import { Check, HandHelping, Loader2, Pencil, Presentation, UserCheck } from 'lu
 import PresentPage from './PresentPage';
 import { db } from '../lib/firebase';
 import { Representative } from '../types';
-import { KpiRow, kpiValueText, LIGHT_BADGE, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, ResolvedMetric, rowBarClass, takesTyped, weekIndexOf } from '../lib/kpi';
+import { KpiRow, closingMetric, kpiValueText, LIGHT_BADGE, metricsFor, monthChoices, monthKpi, monthLabel, monthPrefix, ResolvedMetric, rowBarClass, takesTyped, weekIndexOf } from '../lib/kpi';
 import { bandsText, LIGHT_LABELS, MEASURE_INFO } from '../lib/kpiLibrary';
 import { useKpiSources } from '../lib/useKpiSources';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 import { linkedOnly } from '../lib/linked';
+import { canEditMonth, kpiMonthYm, ymLabel } from '../lib/monthLock';
+import { closingTotals, totalsDiffer } from '../lib/dealIntegrity';
 
 // The KPI page (redesigned 2026-10-16).
 // - Numbers: automatic KPIs are counted from deals (or, for Admin, HRDC claims recorded and venues
@@ -65,13 +67,22 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
   const sources = useKpiSources({ months: [selectedMonth], people: reps });
 
   const isMe = !viewer || viewer.id === rep.id;
-  const canEdit = isMe || (viewer && viewer.role !== 'rep');
+  // Month lock (2026-10-22): a locked month is read-only except for Management.
+  const ym = kpiMonthYm(selectedMonth);
+  const monthOpen = canEditMonth(ym, viewer?.role || rep.role || 'rep');
+  const canEdit = monthOpen && (isMe || (viewer && viewer.role !== 'rep'));
   const metrics = metricsFor(rep);
   const kpi: any = rep.kpi || {};
   const thisMonth = monthPrefix(selectedMonth) === todayIso().slice(0, 7);
 
   // Shared with Management's Team performance (lib/kpi.ts), so both show the same numbers.
   const { rows, score } = monthKpi(rep, deals, selectedMonth, { ...sources, people: reps });
+  // Original vs adjusted Closing RM (Deal checks, 2026-10-22): shown under the Closing RM line when they differ.
+  const closingKey = closingMetric(rep)?.key;
+  const closing = ym ? closingTotals(deals, rep.id, ym, ym) : null;
+  const closingNote = closing && totalsDiffer(closing)
+    ? `Original ${formatRM(closing.original)}, adjusted ${formatRM(closing.adjusted)}${closing.cancelledCount ? ` (${closing.cancelledCount} cancelled)` : ''}${closing.reducedCount ? ` (${closing.reducedCount} reduced)` : ''}`
+    : '';
   const typed = metrics.filter(takesTyped);
 
   const save = (changes: Record<string, any>) => onUpdateRepKpi(rep.id, { ...JSON.parse(JSON.stringify(rep.kpi || {})), ...changes });
@@ -114,6 +125,12 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
         </label>
       </div>
 
+      {!monthOpen && (
+        <p className="rounded-xl bg-surface px-4 py-3 text-sm text-ink-soft">
+          {ymLabel(ym)} is locked, so its numbers and check-ins are read-only. Only Management can change them (or reopen the month).
+        </p>
+      )}
+
       {/* This month */}
       <section className="rounded-2xl border border-line bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -128,7 +145,7 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
           <p className="mt-4 flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Counting from deals…</p>
         ) : (
           <ul className="mt-4 space-y-3">
-            {rows.map(row => <KpiLine key={row.m.key} row={row} fmt={fmt} />)}
+            {rows.map(row => <KpiLine key={row.m.key} row={row} fmt={fmt} note={row.m.key === closingKey ? closingNote : ''} />)}
           </ul>
         )}
       </section>
@@ -142,7 +159,7 @@ export default function KpiPage({ rep, reps, viewer, selectedMonth, onMonthChang
 
 // ---------- One KPI this month ----------
 // Target KPIs: "12 of 20 · 60%". Band KPIs (lib/kpiLibrary.ts): the figure and its colour, with the bands.
-function KpiLine({ row, fmt }: { row: KpiRow; fmt: (m: ResolvedMetric, v: number) => string }) {
+function KpiLine({ row, fmt, note }: { row: KpiRow; fmt: (m: ResolvedMetric, v: number) => string; note?: string }) {
   const { m, total, pct, autoTotal, typedTotal, hasData, light } = row;
   const how = !m.auto ? 'typed in weekly' : `${MEASURE_INFO[m.auto]?.label || 'automatic'}${m.plusTyped ? ', plus any typed' : ''}`;
   return (
@@ -165,6 +182,7 @@ function KpiLine({ row, fmt }: { row: KpiRow; fmt: (m: ResolvedMetric, v: number
       </div>
       <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-line"><div className={`h-full rounded-full ${rowBarClass(row)}`} style={{ width: `${hasData ? Math.max(pct, 3) : 0}%` }} /></div>
       {m.scoring === 'bands' && <p className="mt-1 text-xs text-ink-soft">{bandsText(m.bands, m.unit)}{m.perWeek ? ', per week' : ''}</p>}
+      {note && <p className="mt-1 text-sm text-ink-soft">{note}</p>}
     </li>
   );
 }
@@ -304,7 +322,7 @@ function CheckIn({ rep, reps, canEdit, isMe, thisMonth, onSave }: {
 
   return (
     <section className="space-y-4">
-      {isMe && open.length > 0 && (
+      {isMe && canEdit && open.length > 0 && (
         <div className="rounded-2xl border border-attention/30 bg-attention-soft p-4">
           <p className="flex items-center gap-2 font-semibold text-attention"><HandHelping className="h-4 w-4" /> Teammates asking for your help ({open.length})</p>
           <ul className="mt-2 space-y-2">

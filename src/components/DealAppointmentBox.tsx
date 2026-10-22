@@ -9,6 +9,8 @@ import { ProgrammePicker } from './Programmes';
 import { dealContact } from '../lib/contacts';
 import { forgetDraft, useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
+import { lockedDateProblem, minOpenDate } from '../lib/monthLock';
+import { valueLocked } from '../lib/trainingChange';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -69,7 +71,9 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
   if (mode === 'log') return <LogForm deal={deal} a={a} client={client} programmes={programmes} viewer={viewer} busy={busy} error={error} onCancel={() => setMode(null)}
     onSave={(v) => {
       const stage = st === 'lead' ? 'appointment' : st;
-      const prog = programmes.find(p => p.id === v.programmeId);
+      // A won deal's programme, value, pax and funding type are locked (2026-10-22): the log doesn't change them.
+      const locked = valueLocked(deal);
+      const prog = locked ? undefined : programmes.find(p => p.id === v.programmeId);
       return write({
         appointment: {
           ...(deal.appointment || {}), status: 'held', date: v.date, time: v.time, mode: v.mode, metWith: v.metWith.trim(), outcome: v.outcome.trim(), nextStep: v.nextStep.trim(),
@@ -79,11 +83,11 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
         stage, status: statusForStage(stage as any),
         followUpDate: v.followUpDate,
         ...(prog ? { programmeId: prog.id, courseName: prog.name } : {}),
-        ...(v.trainingDate ? { trainingDate: v.trainingDate } : {}),
-        ...(v.trainingDays.trim() && parseTrainingDays(v.trainingDays) ? { trainingDays: parseTrainingDays(v.trainingDays) } : {}),
-        ...(v.participants ? { participants: v.participants } : {}),
-        ...(v.value ? { proposalValue: Number(v.value) } : {}),
-        ...(v.fundingType ? { fundingType: v.fundingType } : {}),
+        ...(v.trainingDate && !locked ? { trainingDate: v.trainingDate } : {}),
+        ...(v.trainingDays.trim() && parseTrainingDays(v.trainingDays) && !locked ? { trainingDays: parseTrainingDays(v.trainingDays) } : {}),
+        ...(v.participants && !locked ? { participants: v.participants } : {}),
+        ...(v.value && !locked ? { proposalValue: Number(v.value) } : {}),
+        ...(v.fundingType && !locked ? { fundingType: v.fundingType } : {}),
         history: history(deal, viewer, a?.status === 'held' && !a.legacy ? 'Appointment details updated' : `Appointment held on ${formatDate(v.date)}`),
       }, 'Appointment logged');
     }} />;
@@ -208,6 +212,12 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
   const submit = () => {
     if (!v.date) return setErr('Enter the date of the meeting.');
     if (v.date > todayIso()) return setErr('The meeting date is in the future. Use "Book appointment" for upcoming meetings.');
+    // Month lock (2026-10-22): a meeting date in a locked month, or moving one out of it, is for Management only.
+    const oldDate = /^\d{4}-\d{2}-\d{2}/.test(deal.appointmentDate || '') ? deal.appointmentDate.slice(0, 10) : '';
+    if (v.date !== oldDate) {
+      const locked = lockedDateProblem(v.date, viewer.role) || (oldDate ? lockedDateProblem(oldDate, viewer.role) : '');
+      if (locked) return setErr(locked);
+    }
     if (!v.outcome.trim()) return setErr('Write one line on what was agreed.');
     if (!v.nextStep.trim()) return setErr('Write the next step.');
     if (!v.followUpDate) return setErr('Set the follow-up date.');
@@ -221,12 +231,12 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
       <p className="font-semibold">Log appointment</p>
       <DraftBar draft={draft} what="appointment log" />
       <div className="grid gap-3 sm:grid-cols-3">
-        <div><label className={label} htmlFor="lg-d">Date of meeting</label><input id="lg-d" type="date" value={v.date} max={todayIso()} onChange={e => set({ date: e.target.value })} className={input} /></div>
+        <div><label className={label} htmlFor="lg-d">Date of meeting</label><input id="lg-d" type="date" value={v.date} min={minOpenDate(viewer.role) || undefined} max={todayIso()} onChange={e => set({ date: e.target.value })} className={input} /></div>
         <div className="sm:col-span-2"><label className={label} htmlFor="lg-m">Met with</label><input id="lg-m" value={v.metWith} onChange={e => set({ metWith: e.target.value })} className={input} placeholder="Contact person" /></div>
       </div>
       <ModePick value={v.mode} onChange={m => set({ mode: m })} />
 
-      <div className="rounded-xl bg-white p-3.5">
+      {!valueLocked(deal) && <div className="rounded-xl bg-white p-3.5">
         <p className="mb-2 text-sm font-semibold text-ink-soft">What the client wants (saved on the deal)</p>
         <div className="space-y-3">
           <div>
@@ -251,7 +261,7 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2"><label className={label} htmlFor="lg-o">Outcome: what was agreed</label><input id="lg-o" value={v.outcome} onChange={e => set({ outcome: e.target.value })} className={input} placeholder="e.g. Interested in a 2-day run in November for 20 staff" /></div>

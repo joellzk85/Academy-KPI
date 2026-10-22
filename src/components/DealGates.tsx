@@ -3,8 +3,9 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { Loader2, Trophy } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import {
-  DealField, FundingType, FUNDING_LABELS, GAP_LABELS, dealGaps, dealStage, dealValue, formatRM, statusForStage, todayIso,
+  DealField, FundingType, FUNDING_LABELS, GAP_LABELS, dealGaps, dealStage, dealValue, formatDate, formatRM, statusForStage, todayIso,
 } from '../lib/deals';
+import { paxOf } from '../lib/trainingChange';
 import { ProgrammePicker } from './Programmes';
 import { Programme } from '../lib/programmes';
 import { startChecklist, useChecklistSettings } from './DealChecklist';
@@ -137,10 +138,15 @@ export function GapsBox({ deal, gaps, step, programmes, clients, viewer, onSaved
 }
 
 // Mark a deal won and hand it to admin (its checklist starts straight away, unless it already has one).
+// KPI integrity (2026-10-22): wonOriginal keeps what the deal was worth the moment it was won (Deal checks compare
+// it with the value now), and winCount counts every win (a second win is a red flag).
 export async function markDealWon(deal: any, wonDate: string, extra: Record<string, any>, viewer: Viewer, settings: any): Promise<string> {
   const value = Number(extra.proposalValue ?? deal.proposalValue) || 0;
+  const participants = paxOf({ participants: extra.participants ?? deal.participants });
   await updateDoc(doc(db, 'pipelines', deal.id), {
     ...extra, stage: 'won', status: statusForStage('won'), wonDate, lostReason: '', lostNote: '',
+    wonOriginal: { value, participants, date: wonDate, at: new Date().toISOString(), byId: viewer.id, byName: viewer.name },
+    winCount: (Number(deal.winCount) || 0) + 1,
     history: history(deal, viewer, `Won (${formatRM(value)})`),
   });
   try {
@@ -155,11 +161,13 @@ export async function markDealWon(deal: any, wonDate: string, extra: Record<stri
 
 // "Client signed": the won date, plus any missing details (client, value, funding type), then Confirm.
 // Same checks as before: a deal is won only from "Quotation sent".
+// No backdating (2026-10-22): the won date is today. Only Management gets a date box (for a deal signed on another day).
 export function MarkWonBox({ deal, programmes, clients, viewer, onDone, onCancel }: {
   deal: any; programmes: Programme[]; clients: any[]; viewer: Viewer;
   onDone: (msg: string) => void; onCancel: () => void;
 }) {
   const settings = useChecklistSettings();
+  const canPickDate = viewer.role === 'management';
   const [wonDate, setWonDate] = useState(todayIso());
   const [v, setV] = useState<GapValues>(emptyGapValues());
   const [err, setErr] = useState('');
@@ -168,12 +176,13 @@ export function MarkWonBox({ deal, programmes, clients, viewer, onDone, onCancel
   const confirm = async () => {
     if (dealStage(deal) !== 'quoted') return setErr('A deal is won when the client signs the quotation. Send the quotation first.');
     if (!wonDate) return setErr('Enter the date the client signed.');
+    if (canPickDate && wonDate > todayIso()) return setErr('The date the client signed can\'t be in the future.');
     const ch = gapChanges(gaps, v, programmes, clients);
     if (typeof ch === 'string') return setErr(ch);
     setBusy(true);
     setErr('');
     try {
-      onDone(await markDealWon(deal, wonDate, ch, viewer, settings));
+      onDone(await markDealWon(deal, canPickDate ? wonDate : todayIso(), ch, viewer, settings));
     } catch (e) {
       setErr(friendlyError(e));
       setBusy(false);
@@ -181,8 +190,14 @@ export function MarkWonBox({ deal, programmes, clients, viewer, onDone, onCancel
   };
   return (
     <div className="rounded-xl border border-accent/30 bg-accent-soft p-4 text-left">
-      <label htmlFor={`won-date-${deal.id}`} className="mb-1.5 block text-sm font-semibold text-accent">Date the client signed the quotation</label>
-      <input id={`won-date-${deal.id}`} type="date" value={wonDate} onChange={e => setWonDate(e.target.value)} className={input} />
+      {canPickDate ? (
+        <>
+          <label htmlFor={`won-date-${deal.id}`} className="mb-1.5 block text-sm font-semibold text-accent">Date the client signed the quotation</label>
+          <input id={`won-date-${deal.id}`} type="date" value={wonDate} max={todayIso()} onChange={e => setWonDate(e.target.value)} className={input} />
+        </>
+      ) : (
+        <p className="text-sm font-semibold text-accent">Today, {formatDate(todayIso())}. Signed on another day? Ask Management.</p>
+      )}
       {gaps.length > 0 && (
         <div className="mt-3">
           <p className="mb-2 text-sm font-semibold text-accent">Also add {gaps.map(g => GAP_LABELS[g]).join(' and ')}:</p>

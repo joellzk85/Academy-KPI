@@ -53,3 +53,5 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
 
 - Costing estimator (2026-10-21; see money.md): `src/lib/costEstimate.ts`, `src/components/CostEstimator.tsx` (opened from the Deals page), collection `cost_estimates`.
 - Change date / Cancel training on won deals (2026-10-21; see deals.md): `src/lib/trainingChange.ts`, `src/components/TrainingChange.tsx`; fields `trainingChange`, `trainingTodo`, `trainingCancelled` on `pipelines`, `trainingCancelled` on `money_out`.
+- Deal checks and won-deal locks (2026-10-22; see deals.md): `src/lib/dealIntegrity.ts` (original vs adjusted, red flags), `src/components/DealChecksPage.tsx` (Management → Deal checks, `DealFlagsBox` in the deal panel); "Change value / pax" is the `value` kind in `trainingChange.ts`. Fields on `pipelines`: `wonOriginal`, `winCount`, `valueChanges`, `dateChangeCount`, `firstTrainingDate`, `integrityChecks`.
+- Month lock (2026-10-22; see deals.md): `src/lib/monthLock.ts`, `src/lib/useMonthLocks.ts` (loaded once in `App.tsx`); `config/month_locks`.

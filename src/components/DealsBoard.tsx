@@ -46,7 +46,8 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import CostEstimator from './CostEstimator';
 import TrainingChangePanel from './TrainingChange';
-import { cancelledTraining, dateLocked } from '../lib/trainingChange';
+import { cancelledTraining, dateLocked, valueLocked } from '../lib/trainingChange';
+import { DealFlagsBox } from './DealChecksPage';
 import PanelResizer from './PanelResizer';
 import { PotentialBox, PotentialButtons, PotentialChip, monthOptions } from './DealPotential';
 import { POTENTIAL_LABELS, Potential, forecastMonthLabel, potentialOf } from '../lib/forecast';
@@ -302,6 +303,8 @@ export default function DealsBoard({
 
   // A won deal's training date changes only through Change date / Cancel training (Management approves; 2026-10-21).
   const formDateLocked = !!editing && editing !== 'new' && dateLocked(deals.find(p => p.id === editing));
+  // Won deals (2026-10-22): value, participants, programme and funding type change only through "Change value / pax".
+  const formValueLocked = !!editing && editing !== 'new' && valueLocked(deals.find(p => p.id === editing));
 
   const saveForm = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -313,7 +316,7 @@ export default function DealsBoard({
     const programme = programmes.find(x => x.id === form.programmeId);
     const existingDeal = editing && editing !== 'new' ? deals.find(p => p.id === editing) : null;
     const legacyCourse = !programme && existingDeal && !existingDeal.programmeId ? (existingDeal.courseName || '') : '';
-    if (!programme && !form.enquiryNote.trim() && !legacyCourse) return setFormError('Say what the client asked for: pick the programme from the list, or type a short note.');
+    if (!(existingDeal && valueLocked(existingDeal)) && !programme && !form.enquiryNote.trim() && !legacyCourse) return setFormError('Say what the client asked for: pick the programme from the list, or type a short note.');
     const value = form.proposalValue.trim() === '' ? 0 : Number(form.proposalValue);
     if (!Number.isFinite(value) || value < 0) return setFormError('Enter the deal value as a number, for example 15000.');
     if (!form.requestDate) return setFormError('Enter the date the client asked.');
@@ -370,6 +373,7 @@ export default function DealsBoard({
         notes: form.notes.trim(),
       };
       if (existing && dateLocked(existing)) { delete data.trainingDate; delete data.trainingDays; }
+      if (existing && valueLocked(existing)) { ['programmeId', 'courseName', 'enquiryNote', 'fundingType', 'proposalValue', 'participants'].forEach(k => delete data[k]); }
       if (!existing) {
         Object.assign(data, {
           stage: 'lead', status: 'Pending', proposalSentDate: 'not yet', creatorId: viewer.id, creatorName: viewer.name,
@@ -742,6 +746,7 @@ export default function DealsBoard({
           <PanelResizer />
           <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <DealPanel
+              allDeals={deals}
               deal={openDeal}
               clientName={clientName(openDeal)}
               client={clientOf(openDeal)}
@@ -859,7 +864,12 @@ export default function DealsBoard({
                   </div>
                 );
               })()}
-              <div>
+              {formValueLocked && (
+                <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">
+                  This deal is won, so its programme, value, participants and funding type are locked. Value and participants change through "Change date / value / Cancel training" on the deal, which Management approves.
+                </p>
+              )}
+              <div className={formValueLocked ? 'pointer-events-none opacity-60' : ''} aria-disabled={formValueLocked || undefined}>
                 <span className={label}>What they asked for</span>
                 <ProgrammePicker
                   programmes={programmes}
@@ -887,15 +897,15 @@ export default function DealsBoard({
                 </div>
                 <div>
                   <label htmlFor="d-value" className={label}>Deal value (RM) <span className="font-normal text-ink-soft">(optional for now)</span></label>
-                  <input id="d-value" inputMode="decimal" value={form.proposalValue} onChange={e => setForm(f => ({ ...f, proposalValue: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} placeholder="15000" />
+                  <input id="d-value" inputMode="decimal" value={form.proposalValue} disabled={formValueLocked} onChange={e => setForm(f => ({ ...f, proposalValue: e.target.value.replace(/[^0-9.]/g, '') }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} placeholder="15000" />
                 </div>
               </div>
-              <div>
+              <div className={formValueLocked ? 'pointer-events-none opacity-60' : ''} aria-disabled={formValueLocked || undefined}>
                 <span className={label}>How will it be paid? <span className="font-normal text-ink-soft">(optional for now; needed before Won)</span></span>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {(Object.keys(FUNDING_LABELS) as FundingType[]).map(ft => (
                     <label key={ft} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${form.fundingType === ft ? 'border-accent bg-accent-soft text-accent' : 'border-line hover:bg-surface'}`}>
-                      <input type="radio" name="d-funding" checked={form.fundingType === ft} onChange={() => setForm(f => ({ ...f, fundingType: ft }))} className="accent-[#0E6E62]" />
+                      <input type="radio" name="d-funding" disabled={formValueLocked} checked={form.fundingType === ft} onChange={() => setForm(f => ({ ...f, fundingType: ft }))} className="accent-[#0E6E62]" />
                       {FUNDING_LABELS[ft]}
                     </label>
                   ))}
@@ -1009,6 +1019,7 @@ function defaultSection(st: DealStage, deal?: any): SectionKey {
 }
 
 function DealPanel(props: {
+  allDeals: any[];
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
   clientBadge?: React.ReactNode;
   editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; tbs: any[]; checklist: any | null; busy: boolean;
@@ -1283,6 +1294,9 @@ function DealPanel(props: {
         )}
       </section>
 
+      {/* Deal checks (2026-10-22): open red flags, Management only */}
+      {props.viewer.role === 'management' && <DealFlagsBox deal={p} allDeals={props.allDeals} viewer={props.viewer} />}
+
       {st !== 'lost' && grantBlock && (
         <p className="rounded-lg bg-attention-soft px-3.5 py-2.5 text-sm text-attention">HRDC: {grantBlock}</p>
       )}
@@ -1510,6 +1524,9 @@ function QuoteRows({ deal, quotes, viewer, canTick, onOpen, onCreate, onAdd }: {
   const ids = countedIds(deal).filter(id => quotes.some(q => q.id === id));
   const total = countedTotal(deal, quotes);
   const value = dealValue(deal);
+  // A won deal's value changes only through "Change value / pax" (2026-10-22).
+  const wonLock = valueLocked(deal);
+  canTick = canTick && !wonLock;
   const differs = ids.length > 0 && Math.abs(total - value) >= 0.01;
   const what = (q: any) => {
     const items = q.items || [];
@@ -1575,14 +1592,14 @@ function QuoteRows({ deal, quotes, viewer, canTick, onOpen, onCreate, onAdd }: {
             {ids.length === 0 ? (
               <p>
                 Deal value <strong className="text-ink">{formatRM(value)}</strong> (typed).{' '}
-                {canTick ? 'Tick the quotations that make up the final total, and the deal value will follow them.' : 'The deal owner, Admin or Management can tick the quotations that make up the final total.'}
+                {wonLock ? 'The deal is won, so its value changes only through "Change value / pax".' : canTick ? 'Tick the quotations that make up the final total, and the deal value will follow them.' : 'The deal owner, Admin or Management can tick the quotations that make up the final total.'}
               </p>
             ) : (
               <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span>Ticked quotations: <strong className="text-ink">{formatRM(total)}</strong>.</span>
                 {differs
                   ? <>
-                    <span className="text-attention">The deal value is {formatRM(value)}.</span>
+                    <span className="text-attention">The deal value is {formatRM(value)}.{wonLock ? ' The deal is won: ask for "Change value / pax" if it should change.' : ''}</span>
                     {canTick && <button type="button" disabled={busy} className="font-semibold text-accent hover:underline" onClick={() => save(ids)}>Update the deal value to {formatRM(total)}</button>}
                   </>
                   : <span>This is the deal value.</span>}

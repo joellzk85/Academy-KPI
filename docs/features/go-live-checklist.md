@@ -72,3 +72,10 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
     - **As the other manager:** Rounds shows the rating with the rep's name and who is still to rate. Close round.
     - **The rated person:** 360 rating → About me shows the stars and comment without a name.
     - **KPI:** add the 360 rating KPI to a test set and check the score for this month.
+48. **Deal checks and won-deal locks (2026-10-22):** after it is live, **publish `firestore.rules`** (won date, won-deal locks, `integrityChecks`, `config/month_locks`).
+    - **As a rep:** Client signed on a test deal: no date box, "Today, …". Won. Edit details: programme, value and funding type are greyed; the quotation ticks are off.
+    - **Change date / value / Cancel training → Change value / pax:** try the same value (refused), a 2-word note (refused), then send a lower value. **As the other manager:** Approve new value. The deal shows the new value, a to-do list, and the KPI page shows "Original RM x, adjusted RM y".
+    - **Management → Deal checks:** the deal is under Reduced. Move a test deal's date 4 times (each approved): a red flag shows in the deal panel and Team performance shows the red bar. Mark it Checked, OK with a note; it goes, and History has a line.
+49. **Month lock (2026-10-22):** same rules publish as 48.
+    - **On the 3rd of a month, as a rep:** the KPI page for last month says locked and has no edit buttons; logging a follow-up or appointment dated last month is refused.
+    - **As Management:** Deal checks → Month lock → pick last month, give a reason, Open. The rep can now edit it. Lock again closes it.

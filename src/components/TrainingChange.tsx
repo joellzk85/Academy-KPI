@@ -1,6 +1,7 @@
 // Change date / Cancel training on a won deal (Joel, 2026-10-21; logic in src/lib/trainingChange.ts).
 // One panel used by the deal panel (Deals) and the work queue (Admin work):
-// - "Change date / Cancel training" opens the request form (deal owner, Admin, Management);
+// - "Change date / value / Cancel training" opens the request form (deal owner, Admin, Management);
+//   "Change value / pax" (2026-10-22) is the only way a won deal's value or participants change;
 // - a request waiting shows who asked and why, with Approve / Reject for Management (never their own) and Withdraw;
 // - approving a cancellation lists the deal's payment requests not yet paid, to stop or keep;
 // - after approval, Admin ticks off what still has to be updated (revised quotation, PO, HRDC grant, venue…).
@@ -12,8 +13,9 @@ import { dealValue, formatDate, formatRM, parseTrainingDays, statusForStage, tod
 import { MoneyOut, inPL } from '../lib/money';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import {
-  CANCEL_LOST_REASON, CANCEL_REASONS, ChangeKind, DATE_REASONS, KIND_TEXT, TodoItem, TrainingChange, canDecideChange, canRequestChange,
-  cancelledTraining, changeProblem, changeSummary, changeWhy, movedText, pendingChange, todoFor,
+  CANCEL_LOST_REASON, CANCEL_REASONS, ChangeKind, DATE_REASONS, KIND_TEXT, MAX_VALUE_CHANGES, TodoItem, TrainingChange, VALUE_REASONS,
+  canDecideChange, canRequestChange, cancelledTraining, changeProblem, changeSummary, changeWhy, movedText, paxOf, pendingChange, todoFor,
+  valueChangeProblem,
 } from '../lib/trainingChange';
 import TrainingDaysPicker from './TrainingDaysPicker';
 
@@ -55,7 +57,7 @@ export default function TrainingChangePanel({ deal, viewer, onDone }: { deal: an
       {asking && <RequestBox deal={deal} viewer={viewer} onDone={done} onCancel={() => setAsking(false)} />}
       {!pending && !asking && canRequestChange(deal, viewer) && (
         <button type="button" className={`${smallLink} text-accent`} onClick={() => setAsking(true)}>
-          <CalendarClock className="h-3.5 w-3.5" /> Change date / Cancel training
+          <CalendarClock className="h-3.5 w-3.5" /> Change date / value / Cancel training
         </button>
       )}
     </div>
@@ -67,15 +69,19 @@ function RequestBox({ deal, viewer, onDone, onCancel }: { deal: any; viewer: Vie
   const [kind, setKind] = useState<ChangeKind>('date');
   const [date, setDate] = useState(ymd(deal.trainingDate));
   const [days, setDays] = useState(String(trainingDays(deal)));
+  const [value, setValue] = useState(dealValue(deal) ? String(dealValue(deal)) : '');
+  const [pax, setPax] = useState(paxOf(deal) ? String(paxOf(deal)) : '');
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const reasons = kind === 'date' ? DATE_REASONS : CANCEL_REASONS;
+  const reasons = kind === 'date' ? DATE_REASONS : kind === 'value' ? VALUE_REASONS : CANCEL_REASONS;
+  const newValue = Math.round(Number(value) * 100) / 100;
+  const newPax = pax.trim() === '' ? 0 : Number(pax);
 
   const send = async () => {
     const n = kind === 'date' ? parseTrainingDays(days) : trainingDays(deal);
-    const problem = changeProblem(kind, deal, date, n, reason, note);
+    const problem = kind === 'value' ? valueChangeProblem(deal, value.trim() ? newValue : NaN, newPax, reason, note) : changeProblem(kind, deal, date, n, reason, note);
     if (problem) return setError(problem);
     setBusy(true);
     setError('');
@@ -83,6 +89,7 @@ function RequestBox({ deal, viewer, onDone, onCancel }: { deal: any; viewer: Vie
       const c: TrainingChange = {
         id: `tc_${Date.now()}`, kind, status: 'pending',
         ...(kind === 'date' ? { newDate: date, newDays: n as number } : {}),
+        ...(kind === 'value' ? { newValue, newPax, oldValue: dealValue(deal), oldPax: paxOf(deal) } : {}),
         oldDate: ymd(deal.trainingDate), oldDays: trainingDays(deal),
         reason, note: note.trim().slice(0, 500),
         byId: viewer.id, byName: viewer.name, byRole: viewer.role, at: new Date().toISOString(),
@@ -102,14 +109,28 @@ function RequestBox({ deal, viewer, onDone, onCancel }: { deal: any; viewer: Vie
   return (
     <div className="space-y-3 rounded-xl border border-line bg-surface p-4">
       <div className="inline-flex rounded-lg border border-line bg-white p-0.5" role="radiogroup" aria-label="What to change">
-        {(['date', 'cancel'] as const).map(k => (
+        {(['date', 'value', 'cancel'] as const).map(k => (
           <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => { setKind(k); setReason(''); setError(''); }}
             className={`rounded-md px-3 py-1.5 text-sm font-semibold ${kind === k ? (k === 'cancel' ? 'bg-danger text-white' : 'bg-ink text-white') : 'text-ink-soft hover:text-ink'}`}>
-            {k === 'date' ? 'Change the date' : 'Cancel the training'}
+            {k === 'date' ? 'Change the date' : k === 'value' ? 'Change value / pax' : 'Cancel the training'}
           </button>
         ))}
       </div>
-      <p className="text-sm text-ink-soft">Now: {trainingDateText(deal, true) || 'no date'}. Nothing changes until Management approves.</p>
+      <p className="text-sm text-ink-soft">
+        Now: {kind === 'value' ? `${formatRM(dealValue(deal))}, ${paxOf(deal) ? `${paxOf(deal)} participants` : 'participants not set'}` : trainingDateText(deal, true) || 'no date'}. Nothing changes until Management approves.
+      </p>
+      {kind === 'value' && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="tc-value" className="mb-1.5 block text-sm font-semibold">New deal value (RM)</label>
+            <input id="tc-value" inputMode="decimal" value={value} onChange={e => setValue(e.target.value.replace(/[^0-9.]/g, ''))} className={input} placeholder="15000" />
+          </div>
+          <div>
+            <label htmlFor="tc-pax" className="mb-1.5 block text-sm font-semibold">Participants</label>
+            <input id="tc-pax" inputMode="numeric" value={pax} onChange={e => setPax(e.target.value.replace(/[^0-9]/g, ''))} className={input} placeholder="e.g. 20" />
+          </div>
+        </div>
+      )}
       {kind === 'date' && (
         <div className="space-y-2">
           <label htmlFor="tc-date" className="block text-sm font-semibold">New training date</label>
@@ -118,7 +139,7 @@ function RequestBox({ deal, viewer, onDone, onCancel }: { deal: any; viewer: Vie
         </div>
       )}
       <div>
-        <span className="mb-1.5 block text-sm font-semibold">{kind === 'date' ? 'Why is it moving?' : 'Why is it cancelled?'}</span>
+        <span className="mb-1.5 block text-sm font-semibold">{kind === 'date' ? 'Why is it moving?' : kind === 'value' ? 'Why is the value changing?' : 'Why is it cancelled?'}</span>
         <div className="flex flex-wrap gap-2">
           {reasons.map(r => (
             <button key={r} type="button" onClick={() => setReason(r)} aria-pressed={reason === r}
@@ -130,10 +151,10 @@ function RequestBox({ deal, viewer, onDone, onCancel }: { deal: any; viewer: Vie
       </div>
       <div>
         <label htmlFor="tc-note" className="mb-1.5 block text-sm font-semibold">
-          {kind === 'date' ? 'More detail' : 'What happened?'} <span className="font-normal text-ink-soft">{kind === 'cancel' || reason === 'Other' ? '(required, a few words)' : '(optional)'}</span>
+          {kind === 'date' ? 'More detail' : 'What happened?'} <span className="font-normal text-ink-soft">{kind !== 'date' || reason === 'Other' ? '(required, a few words)' : '(optional)'}</span>
         </label>
         <textarea id="tc-note" value={note} onChange={e => setNote(e.target.value)} maxLength={500} className={`${input} min-h-[64px]`}
-          placeholder={kind === 'date' ? 'e.g. HR moved it because of their year-end closing' : 'e.g. Client froze all training budgets until next year'} />
+          placeholder={kind === 'date' ? 'e.g. HR moved it because of their year-end closing' : kind === 'value' ? 'e.g. HR confirmed only 18 staff can attend' : 'e.g. Client froze all training budgets until next year'} />
       </div>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       <div className="flex flex-wrap gap-2">
@@ -183,9 +204,22 @@ function PendingBox({ deal, change: c, viewer, onDone }: { deal: any; change: Tr
       const decided = { ...c, status: 'approved' as const, decidedById: viewer.id, decidedByName: viewer.name, decidedAt: now };
       const todo = todoFor(c.kind, deal, tasks, quotes, paidCosts);
       const batch = writeBatch(db);
-      if (c.kind === 'date') {
+      if (c.kind === 'value') {
+        const entry = {
+          at: now, byId: viewer.id, byName: viewer.name, askedById: c.byId, askedByName: c.byName,
+          oldValue: c.oldValue ?? dealValue(deal), newValue: c.newValue, oldPax: c.oldPax ?? paxOf(deal), newPax: c.newPax, reason: c.reason, note: c.note,
+        };
+        batch.update(doc(db, 'pipelines', deal.id), {
+          proposalValue: c.newValue, participants: c.newPax,
+          valueChanges: [...(Array.isArray(deal.valueChanges) ? deal.valueChanges : []), entry].slice(-MAX_VALUE_CHANGES),
+          trainingChange: decided, trainingTodo: todo,
+          history: withHistory(deal, viewer, `Value change approved (asked by ${c.byName}): ${changeSummary(c).replace(/^Change /, '')}. ${changeWhy(c)}`),
+        });
+      } else if (c.kind === 'date') {
         batch.update(doc(db, 'pipelines', deal.id), {
           trainingDate: c.newDate, trainingDays: c.newDays,
+          dateChangeCount: (Number(deal.dateChangeCount) || 0) + 1,
+          firstTrainingDate: ymd(deal.firstTrainingDate) || c.oldDate,
           trainingChange: decided, trainingTodo: todo,
           history: withHistory(deal, viewer, `Date change approved (asked by ${c.byName}): ${movedText(c)}${c.newDays !== c.oldDays ? `, ${trainingDateText({ trainingDate: c.newDate, trainingDays: c.newDays }, true)}` : ''}. ${changeWhy(c)}`),
         });
@@ -209,7 +243,7 @@ function PendingBox({ deal, change: c, viewer, onDone }: { deal: any; change: Tr
         });
       }
       await batch.commit();
-      onDone(c.kind === 'date' ? 'Date change approved' : 'Cancellation approved');
+      onDone(c.kind === 'date' ? 'Date change approved' : c.kind === 'value' ? 'Value change approved' : 'Cancellation approved');
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -271,7 +305,7 @@ function PendingBox({ deal, change: c, viewer, onDone }: { deal: any; change: Tr
       <div className="flex flex-wrap gap-2">
         {decide && !rejecting && (
           <button type="button" disabled={busy} className={c.kind === 'cancel' ? btnDanger : btnPrimary} onClick={approve}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {c.kind === 'cancel' ? 'Approve cancellation' : 'Approve new date'}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {c.kind === 'cancel' ? 'Approve cancellation' : c.kind === 'value' ? 'Approve new value' : 'Approve new date'}
           </button>
         )}
         {decide && !rejecting && <button type="button" disabled={busy} className={btnSecondary} onClick={() => { setRejecting(true); setError(''); }}><XCircle className="h-4 w-4" /> Reject</button>}
@@ -295,6 +329,7 @@ function TodoBox({ deal, viewer }: { deal: any; viewer: Viewer }) {
   const todo: TodoItem[] = deal.trainingTodo || [];
   const staff = viewer.role !== 'rep';
   const cancelled = !!cancelledTraining(deal);
+  const valueKind = !cancelled && deal.trainingChange?.kind === 'value';
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const tick = async (key: string) => {
@@ -305,7 +340,7 @@ function TodoBox({ deal, viewer }: { deal: any; viewer: Viewer }) {
       const next = todo.map(t => (t.key === key ? { ...t, done: !t.done, doneByName: !t.done ? viewer.name : '', doneAt: !t.done ? new Date().toISOString() : '' } : t));
       await updateDoc(doc(db, 'pipelines', deal.id), {
         trainingTodo: next,
-        ...(item && !item.done ? { history: withHistory(deal, viewer, `${cancelled ? 'Cancellation' : 'Date change'}: done "${item.label}"`) } : {}),
+        ...(item && !item.done ? { history: withHistory(deal, viewer, `${cancelled ? 'Cancellation' : valueKind ? 'Value change' : 'Date change'}: done "${item.label}"`) } : {}),
       });
     } catch (err) {
       setError(friendlyError(err));
@@ -316,8 +351,8 @@ function TodoBox({ deal, viewer }: { deal: any; viewer: Viewer }) {
   const c: TrainingChange | null = deal.trainingChange || null;
   return (
     <div className="rounded-xl border border-line bg-white p-4">
-      <p className="font-semibold">{cancelled ? 'Training cancelled: still to wrap up' : 'New date: still to update'}</p>
-      {c && c.status === 'approved' && <p className="mt-0.5 text-sm text-ink-soft">{cancelled ? `Approved by ${c.decidedByName} on ${formatDate(c.decidedAt || '')}` : `${movedText(c)}, approved by ${c.decidedByName}`}</p>}
+      <p className="font-semibold">{cancelled ? 'Training cancelled: still to wrap up' : valueKind ? 'New value: still to update' : 'New date: still to update'}</p>
+      {c && c.status === 'approved' && <p className="mt-0.5 text-sm text-ink-soft">{cancelled || valueKind ? `${valueKind ? `${changeSummary(c)}, a` : 'A'}pproved by ${c.decidedByName} on ${formatDate(c.decidedAt || '')}` : `${movedText(c)}, approved by ${c.decidedByName}`}</p>}
       <ul className="mt-2 space-y-1.5">
         {todo.map(t => (
           <li key={t.key}>
