@@ -13,7 +13,7 @@
 // and before HRDC's %, i.e. income minus SST. It comes off profit; it isn't a payment request (it's for payslips later).
 
 import { dealOwnerId, dealStage, dealValue, todayIso, trainingEndDate } from './deals';
-import { MoneyIn, MoneyOut, MoneySettings, dealMoneySums, inPL, moneySettled } from './money';
+import { MoneyIn, MoneyOut, MoneySettings, dealMoneySums, inPL, moneySettled, settingsAt } from './money';
 import { mainQuote } from './checklist';
 import { quoteSst } from './quoteSst';
 import { cancelledTraining } from './trainingChange';
@@ -71,11 +71,14 @@ export function quoteSstRate(dealQuotes: any[]): number {
   return quoteSst(mainQuote(dealQuotes) || {}).rate;
 }
 
-export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], s: MoneySettings, today = todayIso(), x: PLExtras = NO_EXTRAS): ProjectRow {
+export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], allRates: MoneySettings, today = todayIso(), x: PLExtras = NO_EXTRAS): ProjectRow {
   const ins = allIns.filter(m => m.dealId === deal.id);
   const outs = allOuts.filter(o => o.dealId === deal.id);
-  const pl = dealMoneySums(ins, outs, s);
+  const pl = dealMoneySums(ins, outs, allRates);
   const trainingDate = isoDate(deal?.trainingDate);
+  // The HRDC % and commission % that applied at the training (process audit, 2026-10-22: changing a rate later
+  // doesn't change this training's P&L).
+  const s = settingsAt(allRates, trainingDate || today);
   const lastDay = trainingEndDate(deal) || trainingDate;   // a training of several days is done after its last day
   // A cancelled training (2026-10-21) keeps only real money: costs already paid or kept, and any cancellation fee invoiced.
   const cancelled = !!cancelledTraining(deal);

@@ -9,6 +9,7 @@ import { admin, UserError, route } from './serverAuth';
 import {
   cleanOutline, cleanProfile, isExpired, outlineProblem, profileProblem,
 } from './src/lib/trainerLinks';
+import { privateOf, splitTrainerPrivate, withPrivate } from './src/lib/trainerProfile';
 
 // Light protection against someone hammering the links: 40 requests a minute per address.
 const hits = new Map<string, { n: number; since: number }>();
@@ -48,13 +49,16 @@ export function registerTrainerLinkRoutes(app: Express) {
     if (link.kind === 'profile') {
       const progs = await db.collection('programmes').get();
       out.programmes = progs.docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name));
-      const t: any = link.trainerId ? (await db.collection('trainers_directory').doc(link.trainerId).get()).data() || {} : null;
+      // Their personal details (gender, address, emergency contact, race, nationality, rate) are kept apart, in
+      // trainer_private / trainer_link_private (process audit, 2026-10-22: PDPA); the trainer still sees their own.
+      const ownPriv: any = link.trainerId ? (await db.collection('trainer_private').doc(link.trainerId).get()).data() : undefined;
+      const linkPriv: any = (await db.collection('trainer_link_private').doc(String(req.body?.token)).get()).data();
+      const t: any = link.trainerId ? withPrivate((await db.collection('trainers_directory').doc(link.trainerId).get()).data() || {}, ownPriv) : null;
       // Files and photo already on their record: the form says so (a new upload replaces them). Links aren't sent.
       if (t) out.onFile = { photo: !!t.photoUrl, docs: Object.keys(t.docs || {}).filter(k => t.docs[k]) };
       // Whether we already have their IC / passport number (the number itself is never sent back).
-      out.icOnFile = (await db.collection('trainer_link_private').doc(String(req.body?.token)).get()).exists
-        || (!!link.trainerId && ((await db.collection('trainer_private').doc(link.trainerId).get()).exists || !!t?.icOnFile));
-      if (link.submission) out.prefill = link.submission;
+      out.icOnFile = !!linkPriv?.icNumber || !!ownPriv?.icNumber || !!t?.icOnFile;
+      if (link.submission) out.prefill = { ...link.submission, ...privateOf(linkPriv) };
       else if (t) {
         out.prefill = {
           name: t.name || '', contact: t.contact || '', email: t.email || '', bio: t.bio || '', experienceYears: t.experienceYears || 0,
@@ -92,11 +96,15 @@ export function registerTrainerLinkRoutes(app: Express) {
       if (problem) throw new UserError(400, 'invalid', problem);
       // The IC / passport number never goes in the link (which every team member can read): it's kept in
       // trainer_link_private/{token}, which only Admin and Management can read. Left blank = keep the earlier one.
+      // The personal details go there too (process audit, 2026-10-22: PDPA); the link keeps just privateSent.
       const ic = submission.icNumber;
       delete submission.icNumber;
+      const { publicPart, privatePart } = splitTrainerPrivate(submission);
+      submission = publicPart;
       const priv = db.collection('trainer_link_private').doc(ref.id);
-      if (ic) await priv.set({ icNumber: ic, at: Date.now() });
-      submission.icSent = !!ic || (await priv.get()).exists;
+      await priv.set({ ...privatePart, detailsAt: Date.now(), ...(ic ? { icNumber: ic, at: Date.now() } : {}) }, { merge: true });
+      submission.icSent = !!ic || !!(await priv.get()).data()?.icNumber;
+      submission.privateSent = true;
     } else {
       submission = cleanOutline(req.body?.data);
       const problem = outlineProblem(submission);

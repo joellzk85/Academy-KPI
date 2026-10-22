@@ -18,7 +18,7 @@
 
 import { ChecklistTask, Flag, applicableTasks, daysUntil, isOptional } from './checklist';
 import { formatDate, formatRM, todayIso, trainingEndDate } from './deals';
-import { InSource, MoneyIn, MoneyOut, MoneySettings, isPaid, shortfall } from './money';
+import { DEFAULT_MONEY_SETTINGS, InSource, MoneyIn, MoneyOut, MoneySettings, isPaid, openShortfalls, shortfall } from './money';
 import { BehalfStatus, ClaimBack, behalfFlags, behalfNext, behalfStatus } from './onBehalf';
 
 export interface Receipt {
@@ -70,6 +70,8 @@ export interface PostStatus {
   unpaid: MoneyIn[];
   noReceipt: MoneyIn[];             // received, receipt still to upload
   outsOpen: MoneyOut[];             // payment requests waiting for approval or to be paid
+  shortfallsOpen: MoneyIn[];        // HRDC paid less, no top-up invoice raised and not written off (process audit, 2026-10-22)
+  beforeOpen: ChecklistTask[];      // before-training steps still open (the case can't close with them open)
   paymentInDone: boolean;           // step 3: every invoice and claim received with its receipt
   outsDone: boolean;                // step 4: no payment request waiting for approval or to be paid
   paymentDone: boolean;             // both
@@ -82,7 +84,7 @@ export interface PostStatus {
 }
 
 export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[],
-  claims: ClaimBack[] = [], today = todayIso()): PostStatus {
+  claims: ClaimBack[] = [], today = todayIso(), s: MoneySettings = DEFAULT_MONEY_SETTINGS): PostStatus {
   const daysSince = daysSinceTraining(deal, today);
   const ended = daysSince !== null;
   const needed = invoicesNeeded(deal?.fundingType);
@@ -95,12 +97,16 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   const unpaid = ins.filter(m => !isPaid(m));
   const noReceipt = ins.filter(m => needsReceipt(m) && !receiptsFor(m, receipts).length);
   const outsOpen = outs.filter(o => o.status === 'pending' || o.status === 'approved');
-  const paymentInDone = invoiceDone && ins.length > 0 && unpaid.length === 0 && noReceipt.length === 0;
+  // Process audit (2026-10-22): an HRDC shortfall needs a top-up invoice to the client (or Management writes it off),
+  // and the before-training steps must be done too, before the case can close (the same "closed" everywhere).
+  const shortfallsOpen = openShortfalls(ins, s);
+  const beforeOpen = applicableTasks(tasks, deal?.fundingType).filter(t => !t.after && !t.done && !isOptional(t));
+  const paymentInDone = invoiceDone && ins.length > 0 && unpaid.length === 0 && noReceipt.length === 0 && shortfallsOpen.length === 0;
   const outsDone = outsOpen.length === 0;
   const paymentDone = paymentInDone && outsDone;
   const behalf = behalfStatus(deal?.id, outs, claims, receipts);
   const steps = behalf.has ? 5 : 4;
-  const closed = ended && paymentDone && behalf.done && docsOpen.length === 0;
+  const closed = ended && paymentDone && behalf.done && docsOpen.length === 0 && beforeOpen.length === 0;
   const started = ins.length > 0 || after.some(t => t.done);
 
   let next = '';
@@ -115,6 +121,7 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
     step = 3;
     next = unpaid.length ? `Waiting for payment: ${plural(unpaid.length, 'invoice or claim')}`
       : noReceipt.length ? `Upload the receipt for ${plural(noReceipt.length, 'payment')}`
+      : shortfallsOpen.length ? `HRDC paid ${formatRM(shortfallsOpen.reduce((t, m) => t + shortfall(m, s), 0))} less: raise a top-up invoice to the client`
       : 'Record the payment received';
   } else if (!outsDone) {
     step = 4;
@@ -122,6 +129,9 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   } else if (!behalf.done) {
     step = 5;
     next = behalfNext(behalf);
+  } else if (ended && beforeOpen.length) {
+    step = 2;
+    next = `Before-training step still open: ${beforeOpen.map(t => t.label).join(', ')}`;
   } else if (!ended) {
     step = 2;
     next = 'Starts after the training';
@@ -133,13 +143,13 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
     ? [...ins.map(m => m.paidDate || ''), ...docs.map(t => t.doneAt || ''), ...receipts.filter(r => ins.some(m => m.id === r.moneyInId)).map(r => r.at.slice(0, 10)),
       ...outs.map(o => o.paidDate || ''), ...behalf.claims.map(c => c.paidDate || '')].filter(isDay).map(d => d.slice(0, 10)).sort().pop() || ''
     : '';
-  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
+  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, shortfallsOpen, beforeOpen, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
 }
 
 /** Reminders from the day after the training until the case is closed (the work queue, My home's After training card). */
 export function postTrainingFlags(deal: any, tasks: ChecklistTask[] | undefined, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[],
   claims: ClaimBack[], s: MoneySettings, today = todayIso()): Flag[] {
-  const st = postTraining(deal, tasks, ins, outs, receipts, claims, today);
+  const st = postTraining(deal, tasks, ins, outs, receipts, claims, today, s);
   if (!st.ended || st.closed) return [];
   const since = st.daysSince!;
   const flags: Flag[] = [];
@@ -167,7 +177,7 @@ export function postTrainingFlags(deal: any, tasks: ChecklistTask[] | undefined,
     const age = -(daysUntil(m.invoiceDate, today) ?? 0);
     if (age > s.overdueDays) flags.push({ level: 'danger', text: `${m.source === 'hrdc' ? 'HRDC' : 'Client'} payment overdue (${age} days since ${m.source === 'hrdc' ? 'claim' : 'invoice'})` });
   });
-  ins.forEach(m => { const gap = shortfall(m, s); if (gap) flags.push({ level: 'danger', text: `HRDC paid ${formatRM(gap)} less than expected` }); });
+  st.shortfallsOpen.forEach(m => flags.push({ level: 'danger', text: `HRDC paid ${formatRM(shortfall(m, s))} less than expected: raise a top-up invoice to the client` }));
   st.noReceipt.forEach(m => flags.push({ level: 'attention', text: `Payment received ${formatDate(m.paidDate || '')}, receipt not uploaded yet` }));
   flags.push(...behalfFlags(st.behalf, since, s, today));
   return flags;

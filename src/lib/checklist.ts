@@ -159,6 +159,9 @@ export const DEFAULT_SETTINGS: ChecklistSettings = {
     // After training day, in Joel's order (2026-10-20): the invoice comes first (recorded in the deal's
     // "After training" section, lib/postTraining.ts), then JD14, T3, training report, output assessment.
     // Certificates is optional (not in Joel's list): shown last, never needed for "Case closed".
+    // Training delivered (process audit, 2026-10-22): proof the training took place (photos, the signed attendance
+    // sheet), before the HRDC claim is recorded or the trainer's fee approved.
+    { id: 'delivered', label: 'Training delivered (photos and signed attendance)', kind: 'basic', appliesTo: 'all', after: true, files: true },
     { id: 'jd14', label: 'JD14', kind: 'basic', appliesTo: 'hrdc', after: true, files: true },
     { id: 't3', label: 'Verify T3 attendance', kind: 'basic', appliesTo: 'hrdc', after: true, files: true },
     { id: 'training_report', label: 'Training report', kind: 'basic', appliesTo: 'all', after: true },
@@ -192,7 +195,35 @@ export const upgradeTasks = (tasks: ChecklistTask[] | undefined): ChecklistTask[
 // Steps added in later updates (Bus, Facilitator, Output assessment QR on 2026-10-20; Co-trainer on 2026-10-22).
 // A won deal whose training hasn't ended gets them on its checklist (DealChecklist.tsx), placed after the built-in
 // step before them.
-export const NEW_STEPS = ['bus', 'facilitator', 'output_qr', 'cotrainer'];
+export const NEW_STEPS = ['bus', 'facilitator', 'output_qr', 'cotrainer', 'delivered'];
+
+// ---------- Process audit (2026-10-22) ----------
+// Steps HRDC (and the training's proof) depend on: they can't be removed from a deal's checklist or stopped in the
+// master list, except by Management (with a reason, in the History).
+export const LOCKED_STEPS = ['grant', 'jd14', 't3', 'delivered', 'training_report'];
+export const isLockedStep = (t: { id?: string }) => LOCKED_STEPS.includes(t.id || '');
+
+/** HRDC deals: "Grant approved" ticked (a deal with no grant step counts as not approved). Other deals: always true. */
+export function grantApproved(deal: any, tasks: ChecklistTask[] | undefined): boolean {
+  if (!isHrdc(deal?.fundingType)) return true;
+  return !!(tasks || []).find(t => t.kind === 'grant')?.done;
+}
+
+/** "Training delivered" ticked (photos or the signed attendance uploaded). A checklist made before the step existed
+ *  counts as delivered once any after-training document is done. */
+export function trainingDelivered(tasks: ChecklistTask[] | undefined): boolean {
+  const list = tasks || [];
+  const step = list.find(t => t.id === 'delivered');
+  return step ? !!step.done : list.some(t => t.after && t.done);
+}
+
+/** Why the HRDC claim can't be recorded yet ('' = it can): the grant approved and the training delivered. */
+export function hrdcClaimBlock(deal: any, tasks: ChecklistTask[] | undefined): string {
+  if (!isHrdc(deal?.fundingType)) return '';
+  if (!grantApproved(deal, tasks)) return 'The HRDC grant is not approved on the checklist yet.';
+  if (!trainingDelivered(tasks)) return 'Training delivered (photos and signed attendance) is not done yet.';
+  return '';
+}
 export function withSteps(tasks: ChecklistTask[], add: TaskTemplate[]): ChecklistTask[] {
   const next = [...tasks];
   add.forEach(m => {
@@ -310,6 +341,8 @@ export function dealVenue(checklist: any | null, quotes: any[], venues: any[]): 
 // fileCount: files uploaded on this step (the drop box steps, and the trainer's PO).
 export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = '', hasVenue = !!t.venueId, hasTrainer = !!t.trainerId, fileCount = 0): string {
   if (hasFiles(t) && fileCount === 0) return `Upload the ${t.label} file first (drop it in the box).`;
+  // Ticked only when the training report is checked (process audit, 2026-10-22: no tick without a report).
+  if (t.id === 'training_report') return 'This is ticked when the training report is checked, ready for HR (in the training report box).';
   if (t.kind === 'grant' && grantBlock) return grantBlock;
   if (asksNeeded(t) && t.needed === undefined) return 'Answer "Needed for this training?" first.';
   if (notNeeded(t)) return '';

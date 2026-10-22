@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { FUNDING_LABELS, FundingType, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso, trainingDateText, trainingDays, trainingEndDate, parseTrainingDays, TRAINING_DAYS_PROBLEM } from '../lib/deals';
 import TrainingDaysPicker from './TrainingDaysPicker';
 import {
-  APPLIES_LABELS, AppliesTo, ChecklistSettings, KIND_LABELS, RETIRED_BUILTINS, TaskTemplate, checklistFlags, daysUntil, grantNotAppliedFlag, leadTrainerTask, newTaskId, progress,
+  APPLIES_LABELS, AppliesTo, ChecklistSettings, KIND_LABELS, RETIRED_BUILTINS, TaskTemplate, checklistFlags, daysUntil, grantNotAppliedFlag, isLockedStep, leadTrainerTask, newTaskId, progress,
 } from '../lib/checklist';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import DealChecklist, { ProgressBar, startChecklist, useChecklistSettings } from './DealChecklist';
@@ -34,6 +34,7 @@ import { usePlace } from '../lib/loginActivity';
 import TrainingChangePanel from './TrainingChange';
 import { cancelledTraining, changeFlagText, dateLocked, openTodos, pendingChange } from '../lib/trainingChange';
 import PanelResizer from './PanelResizer';
+import { moveT3Lists } from './T3Maker';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -132,6 +133,17 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     return () => subs.forEach(u => u());
   }, []);
 
+  // T3 name lists (participants' IC numbers) saved on checklists before the process audit (2026-10-22) are moved to
+  // deal_t3, which only Admin and Management can read (PDPA). Runs once when Admin or Management opens the work queue.
+  const movedT3 = useRef(false);
+  useEffect(() => {
+    if (movedT3.current || viewer.role === 'rep') return;
+    const legacy = Object.entries(checklists).filter(([, c]) => (c as any)?.t3).map(([id, c]) => ({ id, t3: (c as any).t3 }));
+    if (!legacy.length) return;
+    movedT3.current = true;
+    moveT3Lists(legacy).catch(e => console.error('Moving T3 lists:', e));
+  }, [checklists]);
+
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
   const today = todayIso();
   const personName = (id: string) => people.find(p => p.id === id)?.name || 'Former team member';
@@ -184,7 +196,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     // Change date / Cancel training (2026-10-21): a request waiting for Management, or things still to update after a new date.
     const change = changeFlagText(p);
     if (change) flags.unshift({ level: pendingChange(p) ? 'attention' : 'danger', text: change });
-    const post = postTraining(p, cl.tasks, mIn, mOut, rc, claims, today);
+    const post = postTraining(p, cl.tasks, mIn, mOut, rc, claims, today, moneySettings);
     // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).
     const complete = pr.done === pr.total && open.length === 0 && post.closed;
     return { deal: p, pr, overdue: overdue.length > 0, complete, after: post.ended && !complete, post, flags };
@@ -514,7 +526,7 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
               </select>
               <label className={`flex items-center gap-1.5 text-sm ${t.retired || t.kind !== 'basic' ? 'opacity-40' : ''}`}
                 title="Admin drops the file (e.g. the signed JD14) on the step. Uploading ticks the step, and it can't be ticked without a file.">
-                <input type="checkbox" checked={!!t.files && t.kind === 'basic'} disabled={t.retired || t.kind !== 'basic'}
+                <input type="checkbox" checked={!!t.files && t.kind === 'basic'} disabled={t.retired || t.kind !== 'basic' || (isLockedStep(t) && viewer.role !== 'management')}
                   onChange={e => update(t.id, { files: e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
                 Has a file upload
               </label>
@@ -529,7 +541,10 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
                 ) : t.retired ? (
                   <button type="button" className={`${btnSecondary} ml-1 py-1.5`} onClick={() => update(t.id, { retired: false })}><RotateCcw className="h-3.5 w-3.5" /> Bring back</button>
                 ) : (
-                  <button type="button" className={`${btnSecondary} ml-1 py-1.5 text-danger hover:bg-danger-soft`} onClick={() => update(t.id, { retired: true })}>Stop using</button>
+                  // HRDC and proof-of-training steps: only Management stops using them (process audit, 2026-10-22).
+                  isLockedStep(t) && viewer.role !== 'management'
+                    ? <span className="ml-1 px-2 text-sm text-ink-soft" title="HRDC and the case depend on this step. Only Management can stop using it.">Required</span>
+                    : <button type="button" className={`${btnSecondary} ml-1 py-1.5 text-danger hover:bg-danger-soft`} onClick={() => update(t.id, { retired: true })}>Stop using</button>
                 )}
               </span>
             </li>
@@ -604,7 +619,7 @@ function TrainingDate({ deal, viewer, label }: { deal: any; viewer: Viewer; labe
       await updateDoc(doc(db, 'pipelines', deal.id), {
         trainingDate: value,
         trainingDays: n,
-        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Training date set to ${trainingDateText({ trainingDate: value, trainingDays: n }, true) || 'none'}` }].slice(-40),
+        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Training date set to ${trainingDateText({ trainingDate: value, trainingDays: n }, true) || 'none'}` }],
       });
       setEditing(false);
     } catch (e) {

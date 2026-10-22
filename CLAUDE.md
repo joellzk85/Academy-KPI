@@ -39,8 +39,8 @@ Everything hangs off a single deal record that moves through stages. Nothing is 
 | 3 | Proposal sent | Sales | deal value entered |
 | 4 | Won / Lost | Sales | Won: client, value, funding type. Lost: reason |
 | 5 | Grant + logistics | Admin | HRDC deals: grant applied, then approved (grant number) before training day |
-| 6 | Training day | Admin | attendance, photos |
-| 7 | Post-training | Admin | JD14, certificates, training report |
+| 6 | Training day | Admin | Training delivered: photos and signed attendance uploaded (HRDC claim needs it) |
+| 7 | Post-training | Admin | JD14, T3, training report checked (certificates optional, Joel's choice) |
 | 8 | Invoice + claim | Admin | invoice sent; HRDC claim submitted; payment received; P&L closed |
 
 Funding types: `hrdc` (HRDC claimable), `direct` (Direct pay), `hrdc_topup` (HRDC + top-up). The CRM shows only the steps that apply. For HRDC deals, track claim amount vs amount HRDC actually paid; any shortfall becomes a top-up invoice to the client. Warn admin as the HRDC claim deadline approaches. Make the deadline window a setting, and ask Joel to confirm the current period against HRD Corp's latest guidelines; do not hardcode an assumption.
@@ -106,8 +106,9 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 - **Won deals: date changes and cancellations** are asked by the owner, Admin or Management and need a manager's approval (never your own); a cancellation makes the deal lost ("Training cancelled") and removes its Closing RM. See `deals.md`.
 - **KPIs** (`src/lib/kpi.ts`): Closing RM counts in the month a deal is won, for the deal owner only; Proposal on `proposalSentDate`; Appointment when logged. Since 2026-10-22 Management picks each person's KPIs from the **KPI library** (Team → KPI library, `lib/kpiLibrary.ts`, `config/kpi_library`): any KPI, own target or colour bands (green / amber / red / grey, points per colour editable), weights adding up to 100%; the old templates are ready-made sets. The company GP bands are one setting, also used by Project P&L and the Costing estimator; GP % comes from the server (`serverKpi.ts`) because reps and Admin can't read costs. Management has no KPIs unless a set is chosen, but always has a workspace. Every KPI bar and ring is a traffic light: 0–35% red, 36–75% amber, 76%+ green (`kpiLight`). Full table in `docs/features/home-kpi-dashboards.md`.
 - **KPI integrity (2026-10-22):** won date is today (only Management picks another); a won deal's value, pax, programme and funding type are locked, value and pax change only through an approved "Change value / pax"; Management → Deal checks shows original vs adjusted Closing RM and red flags; months lock at 00:00 MYT on the 3rd of the next month (Management can reopen). See `deals.md`.
-- **Who sees what:** only Management opens other people's workspaces. Client link tracking: Management, plus people Management ticks, on their own deals. Payment tracking: Management full; Admin without costs or profit.
-- **Money:** HRDC always keeps 4% (`hrdcDeductionPct`). Claim deadline default 180 days, red reminder after 14. Payment requests: cross-approval, never your own, only approved can be paid. Training costs are raised from the deal's before-training checklist (no separate form); accounts get approved payments only on a payment summary (PDF or link, one summary per payment), post-training ones from the day after the training; vendors with bank details live in Admin work → Vendors (Admin and Management only). Sales commission (`commissionPct`, default 3%) of the price before SST and HRDC's % is taken off each training's profit, for the deal owner. Management can delete anything (deals are kept and restorable).
+- **Enforced in the database, not just on screen (process audit, 2026-10-22):** only Management undoes a win, changes a won deal's owner, undoes a payment, changes money settings or erases money; deal History is add-only; new or changed vendor bank details reach accounts only after another manager checks them; Include in P&L starts ticked (unticking needs a reason); HRDC claim needs Grant approved and Training delivered; an HRDC shortfall needs a top-up invoice or a Management write-off before Case closed; IC numbers and trainers' personal details are Admin and Management only. See `process-audit.md`.
+- **Who sees what:** only Management opens other people's workspaces. Client link tracking: Management, plus people Management ticks, on their own deals. Payment tracking: Management and Admin (costs and profit included, Joel 2026-10-22).
+- **Money:** HRDC always keeps 4% (`hrdcDeductionPct`). Claim deadline default 180 days, red reminder after 14. Payment requests: cross-approval, never your own, only approved can be paid. Training costs are raised from the deal's before-training checklist (no separate form); accounts get approved payments only on a payment summary (PDF or link, one summary per payment), post-training ones from the day after the training; vendors with bank details live in Admin work → Vendors (Admin and Management only). Sales commission (`commissionPct`, default 3%) of the price before SST and HRDC's % is taken off each training's profit, for the deal owner. Management can delete anything (deals and money records are kept and restorable).
 - **Data policy:** keep clients, venues, trainers, quotations, deals, course outlines, KPI history (`month_kpis`), tasks. Clear (only Joel, via Data tools, after linking old records): appointments, admin_records, payments, client_payments, events, project_pls, links, old `reps` docs.
 
 ## 5. Feature files (`docs/features/`)
@@ -127,6 +128,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `home-kpi-dashboards.md` | KPI templates, My home, rings, cards, workspace menu, KPI page, Team performance, weekly presentation (Present tab, action points), Login log, Appraisal |
 | `clients-directories-calendar.md` | Client history, Clients, Trainers, Venues, To-do, Google Calendar |
 | `backup-and-tidyup.md` | Data backup, tidy-up done and still open |
+| `process-audit.md` | Process audit fixes (2026-10-22): money controls, deal rules, HRDC gates, PDPA |
 
 ## 6. Status and Joel's open to-dos
 
@@ -152,6 +154,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Co-trainer and facilitator days (2026-10-22):** nothing to publish; go-live checklist item 46.
 - **Paid on behalf of client (2026-10-22):** "Pay on behalf of client" tick on checklist cost lines, never in the P&L, claimed back on a reimbursement invoice in After training step 5; publish `firestore.rules` (`claim_backs`); go-live checklist item 52.
 - **Appraisal (2026-10-22):** KPI, 360 attitude items and reliability as three separate parts (Management → Appraisal); publish `firestore.rules`; go-live checklist item 51.
+- **Process audit fixes (2026-10-22):** money controls, deal and KPI rules, HRDC gates, PDPA (`process-audit.md`); publish **both** rules files straight after it is live (until then approvals and T3 saves fail); go-live checklist item 53.
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.

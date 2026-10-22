@@ -33,7 +33,7 @@ const smallLink = 'inline-flex items-center gap-1 text-sm font-semibold hover:un
 
 const ymd = (v: any): string => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : '');
 const historyEntry = (viewer: Viewer, action: string) => ({ at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action });
-const withHistory = (deal: any, viewer: Viewer, action: string) => [...(deal.history || []), historyEntry(viewer, action)].slice(-40);
+const withHistory = (deal: any, viewer: Viewer, action: string) => [...(deal.history || []), historyEntry(viewer, action)];
 
 export default function TrainingChangePanel({ deal, viewer, onDone }: { deal: any; viewer: Viewer; onDone?: (msg: string) => void }) {
   const [asking, setAsking] = useState(false);

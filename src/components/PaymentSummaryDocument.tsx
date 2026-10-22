@@ -37,7 +37,9 @@ export default function PaymentSummaryDocument({ summary, refText, madeBy, madeA
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{gi + 1}. Pay to</p>
               <p className="text-base font-extrabold text-slate-800">{g.payee}</p>
-              {(g.bankName || g.accountNo) ? (
+              {g.bankUnchecked ? (
+                <p className="mt-0.5 font-semibold text-red-700">Bank details are being checked: don't pay yet</p>
+              ) : (g.bankName || g.accountNo) ? (
                 <p className="mt-0.5 font-semibold text-slate-700">{[g.bankName, g.accountNo, g.accountName].filter(Boolean).join(' · ')}</p>
               ) : g.paymentDetails ? (
                 <p className="mt-0.5 font-semibold text-slate-700">{g.paymentDetails}</p>

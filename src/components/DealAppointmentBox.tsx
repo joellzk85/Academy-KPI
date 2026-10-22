@@ -23,7 +23,7 @@ const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
 const history = (deal: any, viewer: Viewer, action: string) =>
-  [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-40);
+  [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }];
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 // The deal's one appointment: book it, log it (meeting + what the client wants), or see it.

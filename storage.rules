@@ -34,8 +34,9 @@ service firebase.storage {
 
     // Files on admin checklist steps (JD14, T3, Output assessment; 2026-10-19): checklist_files/{dealId}/{fileId}_{name}.
     // Admin and Management upload; up to 100 MB; PDF, Word, Excel, JPG or PNG. Records are in Firestore checklist_files.
+    // Process audit (2026-10-22, PDPA): attendance lists, T3 and JD14 carry IC numbers, so only Admin and Management read.
     match /checklist_files/{dealId}/{fileName} {
-      allow read: if isMember();
+      allow read: if isStaff();
       allow create: if isStaff()
         && request.resource.size < 100 * 1024 * 1024
         && request.resource.contentType.matches('application/(pdf|msword|vnd[.]ms-excel|vnd[.]openxmlformats-officedocument[.](wordprocessingml[.]document|spreadsheetml[.]sheet))|image/(jpeg|png)')

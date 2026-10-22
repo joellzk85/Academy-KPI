@@ -4,7 +4,7 @@
 // - A trainer or venue isn't typed twice: its vendor record points to it (trainerId / venueId) and takes its name
 //   from the Trainers or Venues list, so picking the trainer on a checklist finds their bank details.
 // - Payment requests raised from a deal's checklist (money_out) keep vendorId; the payment summary for accounts
-//   reads the bank details live from here.
+//   reads the bank details live from here, but only once a manager has checked them (process audit, 2026-10-22).
 
 export type VendorType = 'trainer' | 'venue' | 'transport' | 'facilitator' | 'materials' | 'other';
 
@@ -34,7 +34,42 @@ export interface Vendor {
   createdByName?: string;
   updatedAt?: string;
   updatedByName?: string;
+  // Bank check (process audit, 2026-10-22; firestore.rules): who last set the bank details, the log of every change,
+  // and the manager (not the one who set them) who checked them. No bankSetById = saved before this, counts as checked.
+  bankSetById?: string;
+  bankSetByName?: string;
+  bankSetAt?: string;
+  bankCheckedById?: string;
+  bankCheckedByName?: string;
+  bankCheckedAt?: string;
+  bankLog?: BankLogEntry[];
 }
+
+export interface BankLogEntry { at: string; byId: string; byName: string; bankName: string; accountNo: string; accountName: string }
+
+const bankKey = (v?: Partial<Vendor> | null) => [v?.bankName || '', v?.accountNo || '', v?.accountName || ''].join('|');
+
+/** The bank details may be shown to accounts: checked by a manager, or saved before the check existed. */
+export const bankChecked = (v?: Partial<Vendor> | null) => !!v && (!v.bankSetById || !!v.bankCheckedById);
+
+/** The fields to save with a vendor: when its bank details are new or changed, stamped and logged, waiting for a
+ *  manager's check (firestore.rules checks the same). */
+export function withBankStamp(next: Vendor, before: Partial<Vendor> | null | undefined, viewer: { id: string; name: string }): Vendor {
+  if (bankKey(next) === bankKey(before)) return next;
+  const at = new Date().toISOString();
+  const entry: BankLogEntry = { at, byId: viewer.id, byName: viewer.name, bankName: next.bankName || '', accountNo: next.accountNo || '', accountName: next.accountName || '' };
+  return {
+    ...next, bankSetById: viewer.id, bankSetByName: viewer.name, bankSetAt: at,
+    bankCheckedById: '', bankCheckedByName: '', bankCheckedAt: '', bankLog: [...(before?.bankLog || []), entry],
+  };
+}
+
+/** The fields Management saves to confirm a vendor's bank details. */
+export const bankCheckFields = (viewer: { id: string; name: string }) => ({ bankCheckedById: viewer.id, bankCheckedByName: viewer.name, bankCheckedAt: new Date().toISOString() });
+
+/** Can this person confirm the bank details? A manager who did not set them. */
+export const canCheckBank = (v: Partial<Vendor>, viewer: { id: string; role: string }) =>
+  viewer.role === 'management' && !!v.bankSetById && !v.bankCheckedById && v.bankSetById !== viewer.id;
 
 // The checklist step's kind → the vendor type listed first in the picker.
 export const STEP_VENDOR_TYPE: Record<string, VendorType> = {

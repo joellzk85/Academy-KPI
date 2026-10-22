@@ -1078,7 +1078,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         const ins = c.moneyIn.filter(m => m.dealId === p.id);
         const outs = c.moneyOut.filter(o => o.dealId === p.id);
         const rc = c.receipts.filter(r => r.dealId === p.id);
-        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.claims, c.today);
+        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.claims, c.today, c.moneySettings);
         if (!st.ended || st.closed) return;
         const flags = postTrainingFlags(p, cl?.tasks, ins, outs, rc, c.claims, c.moneySettings, c.today);
         const level = flags.some(f => f.level === 'danger') ? 'danger' as const : 'attention' as const;

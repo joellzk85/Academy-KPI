@@ -100,7 +100,7 @@ export async function addDealHistory(db: Firestore, dealId: string, byId: string
   await db.runTransaction(async tx => {
     const deal: any = (await tx.get(dealRef)).data();
     if (!deal) return;
-    tx.update(dealRef, { history: [...(deal.history || []), { at: new Date().toISOString(), byId, byName, action }].slice(-40) });
+    tx.update(dealRef, { history: [...(deal.history || []), { at: new Date().toISOString(), byId, byName, action }] });
   }).catch(e => console.error('[doc-link] deal history', e));
 }
 

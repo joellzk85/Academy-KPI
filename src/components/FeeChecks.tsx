@@ -4,7 +4,7 @@ import { AlertTriangle, Check, CheckCircle2, Circle, Loader2, X } from 'lucide-r
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM } from '../lib/deals';
 import { MoneyOut } from '../lib/money';
-import { FeeCheck, FeeCheckKey, allChecked, feeChecks } from '../lib/feeChecks';
+import { AUTO_ONLY, FeeCheck, FeeCheckKey, allChecked, feeChecks } from '../lib/feeChecks';
 import { TrainerJob, jobId } from '../lib/trainerPortal';
 
 // Trainer fee checks (lib/feeChecks.ts, Joel 2026-10-21): the box on the deal's Trainer step where the CRM ticks
@@ -75,7 +75,7 @@ export function FeeChecksBox({ dealId, taskId, viewer }: { dealId: string; taskI
       <ul className="space-y-1.5">
         {checks.map(c => (
           <CheckRow key={c.key} c={c} busy={busy}
-            onMark={staff && trainerId ? save(c.key, { byId: viewer.id, byName: viewer.name, at: new Date().toISOString() }) : undefined}
+            onMark={staff && trainerId && !AUTO_ONLY.includes(c.key) ? save(c.key, { byId: viewer.id, byName: viewer.name, at: new Date().toISOString() }) : undefined}
             onUnmark={staff && trainerId ? save(c.key, deleteField()) : undefined} />
         ))}
       </ul>

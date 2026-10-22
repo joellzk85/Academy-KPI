@@ -53,6 +53,30 @@ export interface MoneyIn {
   paidById?: string;
   paidByName?: string;
   note?: string;
+  // HRDC paid less than expected (process audit, 2026-10-22): the gap is billed to the client on a top-up invoice (a
+  // client invoice with topUpFor = this claim's id), or Management writes it off with a reason.
+  topUpFor?: string;
+  shortfallWriteOff?: { byId: string; byName: string; at: string; reason: string; amount: number };
+  // Process audit (2026-10-22): only Management undoes a payment (stamped), and nothing is erased (marked deleted).
+  lastUndo?: UndoStamp;
+  deleted?: boolean;
+  deletedById?: string;
+  deletedByName?: string;
+  deletedAt?: string;
+  deletedReason?: string;
+}
+
+/** Who undid a payment, when, and what it was (firestore.rules: Management only). */
+export interface UndoStamp { byId: string; byName: string; at: string; paidDate: string; amount: number; ref?: string }
+
+/** The stamp to save when Management undoes a payment. */
+export function undoStamp(viewer: { id: string; name: string }, paidDate: string | undefined, amount: number, ref = ''): UndoStamp {
+  return { byId: viewer.id, byName: viewer.name, at: new Date().toISOString(), paidDate: paidDate || '', amount: Number(amount) || 0, ...(ref ? { ref } : {}) };
+}
+
+/** The fields that mark a money record deleted (kept, restorable by Management). */
+export function deletedStamp(viewer: { id: string; name: string }, reason: string) {
+  return { deleted: true, deletedById: viewer.id, deletedByName: viewer.name, deletedAt: new Date().toISOString(), deletedReason: reason.trim() };
 }
 
 export interface MoneyOut {
@@ -89,8 +113,17 @@ export interface MoneyOut {
   vendorId?: string;
   // On a payment summary sent to accounts (payment_links kind 'batch'): the summary's link token.
   summaryToken?: string;
-  // Include in P&L (Joel, 2026-10-21): new cost lines start unticked (false); older requests without it count.
+  // Include in P&L (Joel, 2026-10-21): older requests without it count. Since the process audit (2026-10-22) new
+  // cost lines start ticked, and leaving one out needs a short reason (notInPLReason).
   inPL?: boolean;
+  notInPLReason?: string;
+  decidedTs?: any;         // the database's own time of the approval or rejection (firestore.rules)
+  lastUndo?: UndoStamp;    // Management undid "paid" (process audit, 2026-10-22)
+  deleted?: boolean;       // approved or paid requests are marked deleted, never erased (process audit, 2026-10-22)
+  deletedById?: string;
+  deletedByName?: string;
+  deletedAt?: string;
+  deletedReason?: string;
   // Stopped (status 'rejected', reason "Training cancelled") when Management approved the training's cancellation
   // (2026-10-21, lib/trainingChange.ts); not shown to the requester as a rejection to redo.
   trainingCancelled?: boolean;
@@ -155,6 +188,20 @@ export interface MoneySettings {
   claimReminderDays: number;           // claim still not submitted this many days after training = red
   commissionPct: number;               // sales person's commission: % of the selling price before SST and HRDC's % (Joel, 2026-10-20: 3)
   behalfReminderDays: number;          // paid on behalf of the client, not claimed back this many days after training = red
+  // Earlier HRDC % and commission % (process audit, 2026-10-22): each applied up to and including 'until', so changing
+  // a rate never changes past P&Ls, commissions or HRDC amounts. Oldest first.
+  rates?: RatePeriod[];
+}
+
+export interface RatePeriod { until: string; hrdcDeductionPct: number; commissionPct: number }
+
+const isDate = (d: any) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d);
+
+/** The settings with the HRDC % and commission % that applied on this date (YYYY-MM-DD; blank = today's). */
+export function settingsAt(s: MoneySettings, date?: string): MoneySettings {
+  const d = isDate(date) ? String(date).slice(0, 10) : '';
+  const old = d ? (s.rates || []).find(r => d <= r.until) : undefined;
+  return old ? { ...s, hrdcDeductionPct: old.hrdcDeductionPct, commissionPct: old.commissionPct } : s;
 }
 
 // HRD Corp allows 6 months to claim (Joel, 2026-10-16); he wants a red reminder after 14 days.
@@ -171,11 +218,14 @@ export function readMoneySettings(data: any): MoneySettings {
     claimReminderDays: num(data?.claimReminderDays, DEFAULT_MONEY_SETTINGS.claimReminderDays),
     commissionPct: num(data?.commissionPct, DEFAULT_MONEY_SETTINGS.commissionPct),
     behalfReminderDays: num(data?.behalfReminderDays, DEFAULT_MONEY_SETTINGS.behalfReminderDays) || DEFAULT_MONEY_SETTINGS.behalfReminderDays,
+    rates: (Array.isArray(data?.rates) ? data.rates : [])
+      .filter((r: any) => isDate(r?.until))
+      .map((r: any) => ({ until: String(r.until).slice(0, 10), hrdcDeductionPct: num(r.hrdcDeductionPct, DEFAULT_MONEY_SETTINGS.hrdcDeductionPct), commissionPct: num(r.commissionPct, DEFAULT_MONEY_SETTINGS.commissionPct) }))
+      .sort((a: RatePeriod, b: RatePeriod) => a.until.localeCompare(b.until)),
   };
 }
 
 const money = (n: any) => (Number.isFinite(Number(n)) ? Number(n) : 0);
-const isDate = (d: any) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d);
 
 export function isPaid(m: MoneyIn): boolean {
   return isDate(m.paidDate);
@@ -184,7 +234,7 @@ export function isPaid(m: MoneyIn): boolean {
 // What we expect to receive for one invoice or claim (HRDC keeps its %).
 export function expectedFor(m: MoneyIn, s: MoneySettings): number {
   const amt = money(m.amount);
-  return m.source === 'hrdc' ? amt * (1 - s.hrdcDeductionPct / 100) : amt;
+  return m.source === 'hrdc' ? amt * (1 - settingsAt(s, m.invoiceDate).hrdcDeductionPct / 100) : amt;
 }
 
 // HRDC paid less than expected (beyond rounding).
@@ -192,6 +242,11 @@ export function shortfall(m: MoneyIn, s: MoneySettings): number {
   if (m.source !== 'hrdc' || !isPaid(m)) return 0;
   const gap = expectedFor(m, s) - money(m.paidAmount);
   return gap > 1 ? gap : 0;
+}
+
+/** HRDC claims paid short with nothing done about it yet: no top-up invoice to the client and not written off. */
+export function openShortfalls(ins: MoneyIn[], s: MoneySettings): MoneyIn[] {
+  return ins.filter(m => shortfall(m, s) > 0 && !m.shortfallWriteOff && !ins.some(x => x.source === 'client' && x.topUpFor === m.id));
 }
 
 // The money sums for one deal. Profit is not here: the one P&L is projectRow in lib/projectPL.ts (SST, HRDC's %,
@@ -209,7 +264,7 @@ export interface DealMoneySums {
 
 export function dealMoneySums(ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings): DealMoneySums {
   const invoiced = ins.reduce((t, m) => t + money(m.amount), 0);
-  const hrdcFee = ins.filter(m => m.source === 'hrdc').reduce((t, m) => t + money(m.amount) * (s.hrdcDeductionPct / 100), 0);
+  const hrdcFee = ins.filter(m => m.source === 'hrdc').reduce((t, m) => t + money(m.amount) * (settingsAt(s, m.invoiceDate).hrdcDeductionPct / 100), 0);
   const received = ins.filter(isPaid).reduce((t, m) => t + money(m.paidAmount), 0);
   const toComeIn = ins.filter(m => !isPaid(m)).reduce((t, m) => t + expectedFor(m, s), 0);
   // Only lines ticked "Include in P&L" count as costs; every approved line still has to be paid (toPayOut).

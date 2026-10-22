@@ -13,7 +13,7 @@ type Update = { ref: DocumentReference; data: Record<string, any> };
 
 const all = async (name: string) => (await getDocs(collection(db, name))).docs.map(d => ({ ...(d.data() as any), id: d.id, _ref: d.ref }));
 const historyEntry = (viewer: Viewer, action: string) => ({ at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action });
-const addHistory = (deal: any, viewer: Viewer, text: string) => [...(deal.history || []), historyEntry(viewer, text)].slice(-40);
+const addHistory = (deal: any, viewer: Viewer, text: string) => [...(deal.history || []), historyEntry(viewer, text)];
 
 // Up to 450 writes per batch (Firestore allows 500); the record itself is deleted last.
 async function commitThenDelete(updates: Update[], target: DocumentReference): Promise<void> {

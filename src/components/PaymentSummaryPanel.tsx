@@ -6,7 +6,7 @@ import { pdfErrorText } from '../lib/oldTab';
 import { formatDate, todayIso } from '../lib/deals';
 import { MoneyOut, TIMING_LABELS, isCompanyPayment } from '../lib/money';
 import { buildSummary, summaryProblem, summaryRef } from '../lib/paymentSummary';
-import { Vendor, hasBank } from '../lib/vendors';
+import { Vendor, bankChecked, hasBank } from '../lib/vendors';
 import { useVendors } from './VendorsPage';
 import PaymentSummaryDocument from './PaymentSummaryDocument';
 
@@ -147,6 +147,7 @@ function SummaryRow({ o, viewer, vendors, forText, problem, ticked, onToggle }: 
         <td className="px-3 py-2">
           <span className="block font-semibold">{o.payee}</span>
           {!hasBank(v) && !o.paymentDetails && <span className="block text-xs font-semibold text-attention">No bank details yet</span>}
+          {hasBank(v) && !bankChecked(v) && <span className="block text-xs font-semibold text-attention">Bank details waiting for a manager's check (Vendors)</span>}
         </td>
         <td className="px-3 py-2">
           <span className="block">{o.category}{o.description ? `: ${o.description}` : ''}</span>

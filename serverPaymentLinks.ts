@@ -59,7 +59,7 @@ async function openLink(token: string) {
   if (link.kind === 'batch') return { db, link, outRef: db.collection('money_out').doc('_batch'), o: null as any };  // a summary: see payBatch
   const outRef = db.collection('money_out').doc(link.moneyOutId);
   const o: any = (await outRef.get()).data();
-  if (!o || o.dealDeleted) throw new UserError(410, 'payment-gone', `This payment request was cancelled. Please contact NEXT Academy (${COMPANY.phone}).`);
+  if (!o || o.dealDeleted || o.deleted) throw new UserError(410, 'payment-gone', `This payment request was cancelled. Please contact NEXT Academy (${COMPANY.phone}).`);
   return { db, link, outRef, o };
 }
 
@@ -73,7 +73,7 @@ export function registerPaymentLinkRoutes(app: Express) {
     const { db } = admin();
     const outRef = id ? db.collection('money_out').doc(id) : null;
     const o: any = outRef ? (await outRef.get()).data() : null;
-    if (!outRef || !o || o.dealDeleted) throw new UserError(404, 'not-found', 'That payment request was not found.');
+    if (!outRef || !o || o.dealDeleted || o.deleted) throw new UserError(404, 'not-found', 'That payment request was not found.');
     if (o.status === 'rejected') throw new UserError(409, 'rejected', 'This request was rejected, so there is nothing to pay.');
     const had = o.accountsLink?.token;
     if (had && (await db.collection('payment_links').doc(had).get()).data()?.status === 'open') return { token: had };
@@ -154,7 +154,7 @@ const dayText = (iso: string) => {
 async function loadBatch(db: Firestore, link: any) {
   const ids: string[] = (link.moneyOutIds || []).slice(0, 200);
   const docs = await Promise.all(ids.map(id => db.collection('money_out').doc(id).get()));
-  const outs: any[] = docs.filter(d => d.exists).map(d => ({ ...(d.data() as any), id: d.id })).filter(o => !o.dealDeleted);
+  const outs: any[] = docs.filter(d => d.exists).map(d => ({ ...(d.data() as any), id: d.id })).filter(o => !o.dealDeleted && !o.deleted);
   const vendorIds = [...new Set(outs.map(o => o.vendorId).filter(Boolean))] as string[];
   const vendors = (await Promise.all(vendorIds.map(id => db.collection('vendors').doc(id).get()))).filter(d => d.exists).map(d => ({ ...(d.data() as any), id: d.id }));
   const dealIds = [...new Set(outs.map(o => o.dealId).filter(Boolean))] as string[];
@@ -183,13 +183,14 @@ async function payBatch(db: Firestore, token: string, link: any, rawIds: any, pa
   const groupKey = String(Array.isArray(rawIds) ? rawIds[0] : rawIds || '');
   const group = summary.groups.find((_, i) => `g${i}` === groupKey);
   if (!group) throw new UserError(404, 'not-found', 'That vendor is not on this summary. Reload the page.');
+  if (group.bankUnchecked) throw new UserError(409, 'bank-unchecked', "The bank details of this vendor are being checked by NEXT Academy. Please don't pay yet.");
   const now = new Date().toISOString();
   const paid: any[] = [];
   for (const line of group.lines) {
     const ref = db.collection('money_out').doc(line.id);
     const o: any = await db.runTransaction(async tx => {
       const cur: any = (await tx.get(ref)).data();
-      if (!cur || cur.status !== 'approved') return null;          // pending, rejected or already paid: left alone
+      if (!cur || cur.status !== 'approved' || cur.deleted) return null;          // pending, rejected or already paid: left alone
       const patch = { status: 'paid', paidDate: todayMY(), paidAt: now, paidRef, paidById: '', paidByName: ACCOUNTS_PAID_BY };
       tx.update(ref, patch);
       return { ...cur, ...patch };
@@ -214,7 +215,7 @@ function registerBatchRoutes(app: Express) {
     if (ids.length > 200) throw new UserError(400, 'too-many', 'A summary can have up to 200 payments.');
     const { db } = admin();
     const docs = await Promise.all(ids.map(id => db.collection('money_out').doc(id).get()));
-    const bad = docs.find(d => !d.exists || (d.data() as any).dealDeleted || (d.data() as any).status !== 'approved');
+    const bad = docs.find(d => !d.exists || (d.data() as any).dealDeleted || (d.data() as any).deleted || (d.data() as any).status !== 'approved');
     if (bad) throw new UserError(409, 'not-approved', 'Only approved payments that are not paid yet can go on a summary. Reload and try again.');
     // One summary per payment, and post-training payments only after the training (2026-10-21; summaryProblem).
     const dealIds = [...new Set(docs.map(d => (d.data() as any).dealId).filter(Boolean))] as string[];

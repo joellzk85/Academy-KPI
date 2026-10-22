@@ -6,7 +6,7 @@ import { formatDate, todayIso, trainingDateText, trainingDayList, trainingEndDat
 import { TrainingReportBox } from './TrainingReportAdmin';
 import {
   ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS, Picked, applicableTasks, asksNeeded, buildChecklist,
-  coTrainerShort, coTrainerText, effectiveTrainer, isCoTrainer, leadTrainerTask, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
+  coTrainerShort, coTrainerText, isLockedStep, effectiveTrainer, isCoTrainer, leadTrainerTask, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
   upgradeTasks, withSteps,
 } from '../lib/checklist';
 import { ChecklistFile } from '../lib/checklistFiles';
@@ -14,7 +14,7 @@ import { MoneyOut } from '../lib/money';
 import { withoutDeleted } from '../lib/linked';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import StepFiles from './ChecklistFiles';
-import T3Maker from './T3Maker';
+import T3Maker, { useT3 } from './T3Maker';
 import StepCosts, { VendorHint } from './StepCosts';
 import { useVendors } from './VendorsPage';
 import { useReceipts } from './PaymentReceipts';
@@ -22,6 +22,7 @@ import { TrainerClash, TrainerJobBox } from './TrainerPortalAdmin';
 import { MakePoButton } from './TrainerPoDocument';
 import { hasAutoPo } from '../lib/trainerPortal';
 import { vendorForTrainer } from '../lib/vendors';
+import { askReason } from '../lib/moneyActions';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -108,6 +109,7 @@ export default function DealChecklist({
   const filesOf = (t: ChecklistTask) => files.filter(f => f.taskId === t.id);
   // The T3 form maker on the Attendance list step: HRDC deals, Admin and Management.
   const t3Shown = editable && isHrdc(deal.fundingType);
+  const t3 = useT3(deal.id, editable, checklist?.t3);
   const [nameList, setNameList] = useState<{ files: File[]; at: number } | null>(null);
 
   // Costs raised from the steps (money_out), their receipts, and the vendors: Admin and Management only.
@@ -211,7 +213,15 @@ export default function DealChecklist({
     return save(next, 'Steps reordered');
   };
 
+  // Grant, JD14, T3, Training delivered and Training report can't be removed except by Management, with a reason
+  // (process audit, 2026-10-22: removing them switched their reminders off).
   const remove = (t: ChecklistTask) => {
+    if (isLockedStep(t)) {
+      if (viewer.role !== 'management') return setError(`"${t.label}" can't be removed: HRDC and the case depend on it. Ask Management if it really doesn't apply.`);
+      const reason = askReason(`Remove "${t.label}" from this deal's checklist? Its reminders stop.\n\nWhy doesn't it apply to this deal?`);
+      if (!reason) return;
+      return save(allTasks.filter(x => x.id !== t.id), `${t.label}: removed from this deal by Management (${reason})`);
+    }
     if (!window.confirm(`Remove "${t.label}" from this deal's checklist?`)) return;
     return save(allTasks.filter(x => x.id !== t.id), `${t.label}: removed from this deal`);
   };
@@ -309,7 +319,7 @@ export default function DealChecklist({
               ) : editable && (
                 t.done
                   ? <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => (notNeeded(t) ? answerNeeded(t, true) : undo(t))}><Undo2 className="h-3.5 w-3.5" /> {notNeeded(t) ? 'It is needed' : 'Undo'}</button>
-                  : !(hasFiles(t) && !filesOf(t).length) && t.kind !== 'materials' && !(asksNeeded(t) && t.needed === undefined) &&
+                  : !(hasFiles(t) && !filesOf(t).length) && t.kind !== 'materials' && !(asksNeeded(t) && t.needed === undefined) && t.id !== 'training_report' &&
                     <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => markDone(t)}><Check className="h-3.5 w-3.5" /> Done</button>
               )}
             </div>
@@ -339,7 +349,7 @@ export default function DealChecklist({
                     onPicked={t.id === 'attendance' && t3Shown ? files => setNameList({ files, at: Date.now() }) : undefined} />
                 )}
                 {/* HRDC deals: HR's name list fills the T3 attendance form (T3Maker.tsx) */}
-                {t.id === 'attendance' && t3Shown && <T3Maker deal={deal} saved={checklist.t3} viewer={viewer} incoming={nameList} />}
+                {t.id === 'attendance' && t3Shown && <T3Maker deal={deal} saved={t3} viewer={viewer} incoming={nameList} />}
                 {DOCS_WORD[t.kind] && ((t.kind === 'trainer' && !asksNeeded(t)) || t.needed === true) && (
                   <div className="mt-2">
                     <p className="text-sm font-semibold">{t.kind === 'trainer' ? 'PO' : 'Documents'}</p>
@@ -380,7 +390,7 @@ export default function DealChecklist({
                   return (
                     <TrainingReportBox deal={deal} viewer={viewer} trainerId={tr?.id || ''} trainerName={tr?.name || 'The trainer'}
                       header={{ programme: deal.courseName || '', client: deal.client || '', dates: trainingDateText(deal, true), venue: effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || '', trainer: tr?.name || '', grantNumber: grant?.grantNumber || '' }}
-                      names={(checklist.t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
+                      names={(t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
                       onChecked={() => { if (!t.done) patch(t.id, doneBy(), `${t.label}: checked, done`); }}
                       onReopened={() => { if (t.done) patch(t.id, openAgain, `${t.label}: reopened`); }} />
                   );

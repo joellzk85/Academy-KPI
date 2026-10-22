@@ -158,9 +158,12 @@ function BioList({ list, rows, onChange, idPrefix }: { list: typeof BIO_LISTS[nu
   );
 }
 
-export default function TrainerExtrasFields({ value, onChange, uploader, wrap, onFile, photoSlot, idPrefix = 'tx', only, ic }: {
+export default function TrainerExtrasFields({ value, onChange, uploader, wrap, onFile, photoSlot, idPrefix = 'tx', only, ic, hidePrivate }: {
   // IC / passport number (kept apart from the rest, for Admin and Management only). Not given = the box isn't shown.
   ic?: { value: string; onChange: (v: string) => void; note?: string };
+  // Hide the personal details (gender, nationality, race, address, emergency contact): a rep editing a trainer
+  // can't see or save them (trainer_private, process audit 2026-10-22: PDPA).
+  hidePrivate?: boolean;
   only?: ExtrasPart[];                           // which groups to show (default all)
   value: TrainerExtras;
   onChange: (patch: Partial<TrainerExtras> | ((cur: TrainerExtras) => Partial<TrainerExtras>)) => void;
@@ -176,13 +179,13 @@ export default function TrainerExtrasFields({ value, onChange, uploader, wrap, o
   const toggle = <T extends string>(list: T[], x: T, on: boolean) => (on ? [...list.filter(y => y !== x), x] : list.filter(y => y !== x));
   const [otherLang, setOtherLang] = useState(!!v.languagesOther);
   const id = (s: string) => `${idPrefix}-${s}`;
-  const show = (p: ExtrasPart) => !only || only.includes(p);
+  const show = (p: ExtrasPart) => (!only || only.includes(p)) && !(hidePrivate && p === 'emergency');
 
   return (
     <>
       {show('about') && wrap('About you', (
         <>
-          <div>
+          {!hidePrivate && <div>
             <span className={label}>Gender</span>
             <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Gender">
               {GENDERS.map(g => (
@@ -190,7 +193,7 @@ export default function TrainerExtrasFields({ value, onChange, uploader, wrap, o
                   className={`rounded-lg border px-4 py-2 text-[15px] font-semibold ${v.gender === g ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>{g}</button>
               ))}
             </div>
-          </div>
+          </div>}
           <div className="grid gap-3 sm:grid-cols-2">
             {ic && (
               <div className="sm:col-span-2">
@@ -199,14 +202,14 @@ export default function TrainerExtrasFields({ value, onChange, uploader, wrap, o
                 <p className="mt-1 text-sm text-ink-soft">{ic.note || 'Kept private: only NEXT Academy Admin and Management can see it.'}</p>
               </div>
             )}
-            <div><label className={label} htmlFor={id('nat')}>Nationality</label><input id={id('nat')} value={v.nationality} onChange={e => onChange({ nationality: e.target.value })} className={input} placeholder="e.g. Malaysian" /></div>
-            <div><label className={label} htmlFor={id('race')}>Race</label><input id={id('race')} value={v.race} onChange={e => onChange({ race: e.target.value })} className={input} /></div>
+            {!hidePrivate && <div><label className={label} htmlFor={id('nat')}>Nationality</label><input id={id('nat')} value={v.nationality} onChange={e => onChange({ nationality: e.target.value })} className={input} placeholder="e.g. Malaysian" /></div>}
+            {!hidePrivate && <div><label className={label} htmlFor={id('race')}>Race</label><input id={id('race')} value={v.race} onChange={e => onChange({ race: e.target.value })} className={input} /></div>}
             <div className="sm:col-span-2"><label className={label} htmlFor={id('ttt')}>TTT certification / exemption number</label><input id={id('ttt')} value={v.tttNumber} onChange={e => onChange({ tttNumber: e.target.value })} className={input} placeholder="From your HRD Corp Train the Trainer certificate" /></div>
           </div>
-          <div>
+          {!hidePrivate && <div>
             <label className={label} htmlFor={id('addr')}>Address</label>
             <textarea id={id('addr')} rows={2} value={v.address} onChange={e => onChange({ address: e.target.value })} className={`${input} resize-y`} placeholder="Street, postcode, city, state" />
-          </div>
+          </div>}
         </>
       ))}
 

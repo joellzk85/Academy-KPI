@@ -74,7 +74,7 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
   const owners = [...new Set(list.map(dealOwnerId))].map(id => ({ id, name: nameOf(id) })).sort((a, b) => a.name.localeCompare(b.name));
   const totalValue = filtered.reduce((t, p) => t + dealValue(p), 0);
 
-  const history = (p: any, action: string) => [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-40);
+  const history = (p: any, action: string) => [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }];
 
   const reopen = async (p: any) => {
     if (!window.confirm(`Reopen the deal for ${clientName(p)}? It goes back to ${STAGE_LABELS[reachedStage(p)]} in ${nameOf(dealOwnerId(p))}'s Deals.`)) return;
@@ -221,6 +221,62 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
         )}
       </div>
       <p className="text-sm text-ink-soft">Old deals not yet linked to a Team member (Data tools) aren't listed.</p>
+
+      <DeletedMoney viewer={viewer} deals={deals} clientName={clientName} />
     </div>
+  );
+}
+
+// Deleted money records (process audit, 2026-10-22): invoices, HRDC claims, reimbursement invoices and approved or
+// paid payment requests are never erased, only marked deleted with a reason. Management sees them here and can
+// restore them (firestore.rules: restoreOk).
+const MONEY_KINDS = [['money_in', 'Invoice or HRDC claim'], ['money_out', 'Payment request'], ['claim_backs', 'Reimbursement invoice']] as const;
+
+function DeletedMoney({ viewer, deals, clientName }: { viewer: Viewer; deals: any[]; clientName: (p: any) => string }) {
+  const [recs, setRecs] = useState<Record<string, any[]>>({});
+  const [busyId, setBusyId] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const subs = MONEY_KINDS.map(([coll]) => onSnapshot(query(collection(db, coll), where('deleted', '==', true)),
+      s => setRecs(r => ({ ...r, [coll]: s.docs.map(d => ({ ...d.data(), id: d.id, coll })) })), () => setRecs(r => ({ ...r, [coll]: [] }))));
+    return () => subs.forEach(u => u());
+  }, []);
+  const all = MONEY_KINDS.flatMap(([coll]) => recs[coll] || []).sort((a, b) => String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
+  if (!all.length) return null;
+  const label = (r: any) => MONEY_KINDS.find(([c]) => c === r.coll)?.[1] || 'Money record';
+  const forText = (r: any) => {
+    if (!r.dealId) return 'Company payment';
+    const d = deals.find(x => x.id === r.dealId);
+    return d ? `${clientName(d)} · ${d.courseName || 'Training'}` : 'Deal not found';
+  };
+  const restore = async (r: any) => {
+    if (!window.confirm(`Restore this ${label(r).toLowerCase()} (${formatRM(r.amount)})? It counts again in the deal's money and P&L.`)) return;
+    setBusyId(r.id); setError('');
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, r.coll, r.id), { deleted: false, restoredById: viewer.id, restoredByName: viewer.name, restoredAt: new Date().toISOString() });
+      await batch.commit();
+    } catch (e) { setError(friendlyError(e)); } finally { setBusyId(''); }
+  };
+  return (
+    <section className="space-y-2">
+      <h3 className="text-lg font-bold">Deleted money records <span className="font-normal text-ink-soft">({all.length})</span></h3>
+      <p className="text-[15px] text-ink-soft">Invoices, HRDC claims, reimbursement invoices and approved or paid payment requests are kept when deleted. Restore one to count it again.</p>
+      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
+      <ul className={`${card} divide-y divide-line`}>
+        {all.map(r => (
+          <li key={`${r.coll}:${r.id}`} className="flex flex-wrap items-start gap-3 px-5 py-3">
+            <div className="min-w-[14rem] flex-1">
+              <p className="font-semibold">{label(r)}{r.invoiceNo ? ` ${r.invoiceNo}` : ''}{r.payee ? ` · ${r.payee}` : ''} · {formatRM(r.amount)}{r.status ? ` (${r.status})` : ''}</p>
+              <p className="text-sm text-ink-soft">{forText(r)}</p>
+              <p className="text-sm"><strong className="text-danger">{r.deletedReason || 'No reason given'}</strong> <span className="text-ink-soft">· deleted {formatDate(ymd(r.deletedAt))} by {r.deletedByName || 'someone'}</span></p>
+            </div>
+            <button type="button" disabled={busyId === r.id} className={btnSecondary} onClick={() => restore(r)}>
+              {busyId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Restore
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

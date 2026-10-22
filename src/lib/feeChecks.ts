@@ -7,11 +7,14 @@
 import { isHrdc } from './checklist';
 import type { TrainerJob } from './trainerPortal';
 
-export type FeeCheckKey = 't3' | 'photos' | 'report';
+export type FeeCheckKey = 'grant' | 't3' | 'photos' | 'report';
 export interface FeeCheckMark { byId: string; byName: string; at: string }
 export interface FeeCheck { key: FeeCheckKey; label: string; auto: string; manual: FeeCheckMark | null; ok: boolean }
 
-export const FEE_CHECK_LABELS: Record<FeeCheckKey, string> = { t3: 'T3', photos: 'Training photos', report: 'Training report' };
+export const FEE_CHECK_LABELS: Record<FeeCheckKey, string> = { grant: 'HRDC grant approved', t3: 'T3', photos: 'Training photos', report: 'Training report' };
+// Process audit (2026-10-22): the grant (HRDC deals) and the training report can't be ticked by hand: only the
+// checklist's "Grant approved" and a checked training report count.
+export const AUTO_ONLY: FeeCheckKey[] = ['grant', 'report'];
 
 // A trainer fee that needs the checks: a cost on the deal's Trainer step, paid after the training.
 export function isTrainerFee(o: { category?: string; checklistTaskId?: string; timing?: string; dealId?: string }): boolean {
@@ -25,14 +28,16 @@ export function feeChecks(deal: { fundingType?: string } | null | undefined, job
   const claim = job?.claim;
   const manual = (job as any)?.feeChecks || {};
   const found: Partial<Record<FeeCheckKey, string>> = {
+    grant: step('grant')?.done ? 'Grant approved is ticked' : '',
     t3: step('t3')?.done ? 'Verify T3 attendance step is ticked' : claim?.t3?.length ? 'the trainer sent the T3' : '',
-    photos: claim?.photos?.length ? `the trainer sent ${claim.photos.length} photo${claim.photos.length === 1 ? '' : 's'}`
+    photos: step('delivered')?.done ? 'the Training delivered step has its files'
+      : claim?.photos?.length ? `the trainer sent ${claim.photos.length} photo${claim.photos.length === 1 ? '' : 's'}`
       : report?.photos?.length ? `${report.photos.length} photo${report.photos.length === 1 ? '' : 's'} in the training report` : '',
-    report: report?.status === 'checked' ? 'the training report is checked' : step('training_report')?.done ? 'Training report step is ticked' : '',
+    report: report?.status === 'checked' ? 'the training report is checked' : '',
   };
-  const keys: FeeCheckKey[] = isHrdc(deal?.fundingType) ? ['t3', 'photos', 'report'] : ['photos', 'report'];
+  const keys: FeeCheckKey[] = isHrdc(deal?.fundingType) ? ['grant', 't3', 'photos', 'report'] : ['photos', 'report'];
   return keys.map(key => {
-    const m: FeeCheckMark | null = manual[key]?.byName ? manual[key] : null;
+    const m: FeeCheckMark | null = manual[key]?.byName && !AUTO_ONLY.includes(key) ? manual[key] : null;
     const auto = found[key] || '';
     return { key, label: FEE_CHECK_LABELS[key], auto, manual: m, ok: !!auto || !!m };
   });

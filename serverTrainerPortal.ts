@@ -14,7 +14,7 @@ import firebaseConfig from './firebase-applet-config.json';
 import { UserError, admin, callerFrom, route } from './serverAuth';
 import { addDealHistory } from './serverDocLinks';
 import { cleanProfile, profileProblem } from './src/lib/trainerLinks';
-import { DOC_KINDS } from './src/lib/trainerProfile';
+import { DOC_KINDS, PRIVATE_TRAINER_FIELDS, splitTrainerPrivate, withPrivate } from './src/lib/trainerProfile';
 import { dealStage, todayIso, trainingDateText, trainingDays, trainingEndDate } from './src/lib/deals';
 import { effectiveVenue, isCoTrainer, isLeadTrainer } from './src/lib/checklist';
 import { cancelledTraining, lastMove } from './src/lib/trainingChange';
@@ -49,13 +49,15 @@ export async function trainerFrom(req: Request) {
   catch { throw new UserError(401, 'not-logged-in', 'Your login has expired. Log in again.'); }
   const trainerId = trainerIdFromUid(uid);
   if (!trainerId) throw new UserError(403, 'no-access', 'This login is not a trainer portal login.');
-  const [acc, tr] = await Promise.all([db.collection('trainer_accounts').doc(trainerId).get(), db.collection('trainers_directory').doc(trainerId).get()]);
+  // Their personal details (gender, address, emergency contact, race, nationality, rate) live in trainer_private
+  // (process audit, 2026-10-22: PDPA) and are merged in, so the portal, the PO and the fee read them as before.
+  const [acc, tr, priv] = await Promise.all([db.collection('trainer_accounts').doc(trainerId).get(), db.collection('trainers_directory').doc(trainerId).get(), db.collection('trainer_private').doc(trainerId).get()]);
   if (!acc.exists || !acc.data()?.active || !tr.exists) throw new UserError(403, 'no-access', 'Your portal access has been turned off. Contact NEXT Academy if you think this is a mistake.');
   if (Date.now() - (seen.get(trainerId) || 0) > 10 * 60_000) {
     seen.set(trainerId, Date.now());
     acc.ref.update({ lastSeenAt: nowIso() }).catch(() => {});
   }
-  return { db, trainerId, trainer: { ...(tr.data() as any), id: trainerId }, account: acc.data() as any };
+  return { db, trainerId, trainer: { ...withPrivate(tr.data() as any, priv.data()), id: trainerId }, account: acc.data() as any };
 }
 
 async function logAccount(db: Firestore, trainerId: string, byName: string, action: string) {
@@ -334,7 +336,7 @@ export function registerTrainerPortalRoutes(app: Express) {
     return {
       trainerId, email: account.email,
       programmes: progs.docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name)),
-      icOnFile: priv.exists || !!t.icOnFile,
+      icOnFile: !!priv.data()?.icNumber || !!t.icOnFile,
       profile: {
         name: t.name || '', contact: t.contact || '', email: t.email || '', bio: t.bio || '', experienceYears: t.experienceYears || 0,
         qualifications: t.qualifications || '', pastClients: t.pastClients || '', programmeIds: t.programmeIds || [],
@@ -368,8 +370,16 @@ export function registerTrainerPortalRoutes(app: Express) {
     const ic = s.icNumber;
     delete s.icNumber; delete s.icSent;
     const name = s.name || t.name;
-    await db.collection('trainers_directory').doc(trainerId).update({ ...s, name, ...(ic ? { icOnFile: true } : {}), updatedAt: Date.now(), portalUpdatedAt: nowIso() });
-    if (ic) await db.collection('trainer_private').doc(trainerId).set({ icNumber: ic, at: Date.now(), byName: name + PORTAL });
+    // Personal details to trainer_private (process audit, 2026-10-22: PDPA); any old copy comes off the shared record.
+    const { publicPart, privatePart } = splitTrainerPrivate(s);
+    await db.collection('trainers_directory').doc(trainerId).update({
+      ...publicPart, name, ...(ic ? { icOnFile: true } : {}), ...Object.fromEntries(PRIVATE_TRAINER_FIELDS.map(k => [k, FieldValue.delete()])),
+      updatedAt: Date.now(), portalUpdatedAt: nowIso(),
+    });
+    await db.collection('trainer_private').doc(trainerId).set({
+      ...privatePart, detailsAt: Date.now(), detailsByName: name + PORTAL,
+      ...(ic ? { icNumber: ic, at: Date.now(), byName: name + PORTAL } : {}),
+    }, { merge: true });
     await logAccount(db, trainerId, name, 'Profile updated');
     return {};
   }));
@@ -386,7 +396,9 @@ export function registerTrainerPortalRoutes(app: Express) {
     const bankChanged = !!(bank.bankName || bank.accountNo || bank.accountName) && !sameBank(bank, vendor);
     if (bankChanged) { const p = bankProblem(bank); if (p) throw new UserError(400, 'invalid', p); }
 
-    await db.collection('trainers_directory').doc(trainerId).update({ address, updatedAt: Date.now(), portalUpdatedAt: nowIso() });
+    // The address is a personal detail: trainer_private (process audit, 2026-10-22: PDPA).
+    await db.collection('trainer_private').doc(trainerId).set({ address, detailsAt: Date.now(), detailsByName: by }, { merge: true });
+    await db.collection('trainers_directory').doc(trainerId).update({ updatedAt: Date.now(), portalUpdatedAt: nowIso(), address: FieldValue.delete() });
     if (vDoc) { if ((vendor.tin || '') !== tin) await vDoc.ref.update({ tin, updatedAt: nowIso(), updatedByName: by }); }
     else if (tin) await db.collection('vendors').add({ name: t.name || '', type: 'trainer', trainerId, tin, createdAt: nowIso(), createdById: '', createdByName: by, updatedAt: nowIso(), updatedByName: by });
     const reqRef = db.collection('trainer_bank_requests').doc(trainerId);
@@ -552,6 +564,15 @@ export function registerTrainerPortalRoutes(app: Express) {
     const by = (t.name || 'Trainer') + PORTAL;
 
     if (before?.submittedAt && before.trainerId === trainerId) {
+      // Process audit (2026-10-22): once the checked report has gone to HR, or the trainer's fee is paid, it is frozen
+      // until the team sends it back (status 'returned').
+      if (before.status === 'checked') {
+        const hrLink = !(await db.collection('doc_links').where('dealId', '==', deal.id).where('kind', '==', 'report').where('status', '==', 'open').limit(1).get()).empty;
+        const feePaid = (await feeLines(db, deal.id, task.id, trainerId)).some((o: any) => o.status === 'paid');
+        if (hrLink || feePaid) {
+          throw new UserError(409, 'frozen', `This report has been ${hrLink ? 'sent to the client\'s HR' : 'closed (your fee is paid)'}, so it can't be changed here. Please contact NEXT Academy if something needs correcting.`);
+        }
+      }
       if (!submit) {
         await ref.update({ trainerDraft: part });
         return { status: before.status, pending: true };

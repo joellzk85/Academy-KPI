@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import { Landmark, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
-import { VENDOR_TYPES, Vendor, VendorType, bankText, hasBank, vendorName, vendorProblem, vendorTypeLabel } from '../lib/vendors';
+import { VENDOR_TYPES, Vendor, VendorType, bankCheckFields, bankChecked, bankText, canCheckBank, hasBank, vendorName, vendorProblem, vendorTypeLabel, withBankStamp } from '../lib/vendors';
+import { formatDate } from '../lib/deals';
 import { useSearchPrefill } from './GlobalSearch';
 
 // Admin work → Vendors (2026-10-20): who NEXT Academy pays for trainings, with bank details for accounts.
@@ -84,9 +85,11 @@ export function VendorForm({ vendor, start, vendors, trainers, venues, viewer, o
     if (problem) return setError(problem);
     setBusy(true); setError('');
     try {
-      await setDoc(doc(db, 'vendors', id), rec);
+      // New or changed bank details wait for a manager's check (process audit, 2026-10-22).
+      const saved = withBankStamp(rec, vendor, viewer);
+      await setDoc(doc(db, 'vendors', id), saved);
       draft.clear();
-      onSaved(rec);
+      onSaved(saved);
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -128,6 +131,7 @@ export function VendorForm({ vendor, start, vendors, trainers, venues, viewer, o
       </div>
       <div className="rounded-lg border border-line bg-white p-3">
         <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><Landmark className="h-4 w-4 text-accent" /> Bank details, for accounts</p>
+        <p className="mb-2 text-sm text-ink-soft">New or changed bank details go to accounts only after a manager who didn't make the change checks them.</p>
         <div className="grid gap-3 sm:grid-cols-3">
           <div><label className={small} htmlFor="vd-bank">Bank</label><input id="vd-bank" value={f.bankName} onChange={e => set('bankName', e.target.value)} className={input} placeholder="e.g. Maybank" /></div>
           <div><label className={small} htmlFor="vd-acc">Account number</label><input id="vd-acc" value={f.accountNo} onChange={e => set('accountNo', e.target.value)} className={input} inputMode="numeric" /></div>
@@ -166,6 +170,13 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
     setError('');
     try { await deleteDoc(doc(db, 'vendors', v.id)); } catch (e) { setError(friendlyError(e)); }
   };
+  // A manager who didn't set the bank details confirms them (process audit, 2026-10-22), e.g. after calling the vendor.
+  const checkBank = async (v: Vendor) => {
+    if (!window.confirm(`Confirm ${vendorName(v, trainers, venues)}'s bank details?\n\n${bankText(v) || 'No bank details'}\n\nChanged by ${v.bankSetByName}. Check them with the vendor (for example by phone) before confirming.`)) return;
+    setError('');
+    try { await updateDoc(doc(db, 'vendors', v.id), bankCheckFields(viewer)); } catch (e) { setError(friendlyError(e)); }
+  };
+  const waiting = vendors.filter(v => !bankChecked(v));
 
   return (
     <div className="space-y-4">
@@ -176,6 +187,12 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
         </div>
         {!editing && <button type="button" className={`${btnPrimary} ml-auto`} onClick={() => setEditing('new')}><Plus className="h-4 w-4" /> Add vendor</button>}
       </div>
+
+      {waiting.length > 0 && (
+        <p className="rounded-lg bg-attention-soft px-3 py-2.5 text-sm font-semibold text-attention">
+          {waiting.length} vendor{waiting.length === 1 ? '' : 's'} with new or changed bank details waiting for a manager's check: {waiting.map(v => vendorName(v, trainers, venues)).join(', ')}
+        </p>
+      )}
 
       {editing && (
         <VendorForm vendor={editing === 'new' ? null : editing} vendors={vendors} trainers={trainers} venues={venues} viewer={viewer}
@@ -210,7 +227,14 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
                   {(v.trainerId || v.venueId) && <span className="ml-1 text-xs font-medium text-accent">From the {v.trainerId ? 'Trainers' : 'Venues'} list</span>}</p>
                 <p className="text-sm text-ink-soft">{[v.contactName, v.phone, v.email].filter(Boolean).join(' · ') || 'No contact details'}</p>
                 <p className={`text-sm ${hasBank(v) ? 'text-ink' : 'font-semibold text-attention'}`}>{hasBank(v) ? bankText(v) : 'No bank details yet'}</p>
+                {!bankChecked(v) && (
+                  <p className="text-sm font-semibold text-attention">Bank details {hasBank(v) ? 'changed' : 'removed'} by {v.bankSetByName} on {formatDate(v.bankSetAt || '')}: waiting for a manager's check. Accounts don't see them yet.</p>
+                )}
+                {(v.bankLog || []).length > 1 && <p className="text-xs text-ink-soft">Bank changed {(v.bankLog || []).length} times; last by {v.bankSetByName}{v.bankCheckedByName ? `, checked by ${v.bankCheckedByName}` : ''}</p>}
               </button>
+              {canCheckBank(v, viewer) && (
+                <button type="button" onClick={() => checkBank(v)} className={`${btnSecondary} py-1.5`}>Bank details checked</button>
+              )}
               {viewer.role === 'management' && (
                 <button type="button" onClick={() => remove(v)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Delete ${name}`}><Trash2 className="h-4 w-4" /></button>
               )}
