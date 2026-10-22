@@ -29,6 +29,7 @@ import { apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import MoneyPanel, { useMoneySettings } from './Money';
 import AfterTraining, { afterTrainingHint } from './AfterTraining';
 import { useReceipts } from './PaymentReceipts';
+import { useClaimBacks } from './ClaimBacks';
 import { daysSinceTraining } from '../lib/postTraining';
 import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
@@ -1068,6 +1069,7 @@ function DealPanel(props: {
   const skipped = !!p.proposalSkipped && !stageDate(p, 'proposal');
   const pr = props.checklist ? progress(props.checklist.tasks, p.fundingType, 'before') : null;
   const receipts = useReceipts(props.viewer.role !== 'rep' && st === 'won', p.id);
+  const claims = useClaimBacks(props.viewer.role !== 'rep' && st === 'won', p.id);
   const ap = apptOf(p);
   // A follow-up alert opens the Follow-ups section first.
   const def: SectionKey = props.alert && OPEN_STAGES.includes(st) ? 'followups' : defaultSection(st, p);
@@ -1425,7 +1427,7 @@ function DealPanel(props: {
         {/* After training: invoice, post-training documents, payment received → Case closed (2026-10-20).
             Reps see where it stands. */}
         {st === 'won' && (
-          <Fold title="After training" hint={afterTrainingHint(p, props.checklist, props.moneyIn, props.moneyOut, receipts)} defaultOpen={def === 'after'} id={p.id}>
+          <Fold title="After training" hint={afterTrainingHint(p, props.checklist, props.moneyIn, props.moneyOut, receipts, claims)} defaultOpen={def === 'after'} id={p.id}>
             <AfterTraining deal={p} checklist={props.checklist} quotes={props.quotes} viewer={props.viewer}
               ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} />
           </Fold>

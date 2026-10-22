@@ -17,6 +17,7 @@ import DaysOut from './DaysOut';
 import { MoneyIn, MoneyOut, moneyFlags, prePaymentFlags } from '../lib/money';
 import AfterTraining from './AfterTraining';
 import { useReceipts } from './PaymentReceipts';
+import { useClaimBacks } from './ClaimBacks';
 import { postTraining, postTrainingFlags } from '../lib/postTraining';
 import { claimFlag, jobId, poDeclinedFlag } from '../lib/trainerPortal';
 import { useTrainerJobs } from './TrainerPortalAdmin';
@@ -107,6 +108,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
   const moneySettings = useMoneySettings();
   const [loaded, setLoaded] = useState(false);
   const receipts = useReceipts(true);
+  const claims = useClaimBacks(true);   // paid on behalf of the client, to claim back (2026-10-22)
   const trainerJobs = useTrainerJobs();
   const trainingReports = useTrainingReports();
   const [filter, setFilter] = useState<'open' | 'flagged' | 'after' | 'done'>('open');
@@ -163,7 +165,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     const mOut = moneyOut.filter(m => m.dealId === p.id);
     const rc = receipts.filter(r => r.dealId === p.id);
     // Up to training day: money reminders; from the day after: one after-training journey (lib/postTraining.ts).
-    flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, moneySettings, today));
+    flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, claims, moneySettings, today));
     flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
     flags.push(...prePaymentFlags(p, mOut, settings.flagDays, today));
     // A trainer asked for their fee in the trainer portal (2026-10-21) and it isn't approved yet.
@@ -182,11 +184,11 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     // Change date / Cancel training (2026-10-21): a request waiting for Management, or things still to update after a new date.
     const change = changeFlagText(p);
     if (change) flags.unshift({ level: pendingChange(p) ? 'attention' : 'danger', text: change });
-    const post = postTraining(p, cl.tasks, mIn, mOut, rc, today);
+    const post = postTraining(p, cl.tasks, mIn, mOut, rc, claims, today);
     // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).
     const complete = pr.done === pr.total && open.length === 0 && post.closed;
     return { deal: p, pr, overdue: overdue.length > 0, complete, after: post.ended && !complete, post, flags };
-  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts, trainerJobs, trainingReports]);
+  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts, claims, trainerJobs, trainingReports]);
   const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
   // Cancelled trainings with things still to wrap up (cancel the grant, the venue, refunds…).
   const cancelled = useMemo(() => deals.filter(p => cancelledTraining(p) && openTodos(p).length > 0), [deals]);
@@ -315,7 +317,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
                     <ProgressBar done={pr.done} total={pr.total} />
                     {complete
                       ? <span className="block text-sm font-semibold text-accent">Case closed</span>
-                      : post.ended && post.started && <span className="block text-sm text-ink-soft">After training, step {Math.min(post.step, 4)} of 4: {post.next}</span>}
+                      : post.ended && post.started && <span className="block text-sm text-ink-soft">After training, step {Math.min(post.step, post.steps)} of {post.steps}: {post.next}</span>}
                     {flags.map((f, i) => (
                       <span key={i} className={`flex items-center gap-1 text-sm font-semibold ${f.level === 'danger' ? 'text-danger' : 'text-attention'}`}>
                         <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {f.text}

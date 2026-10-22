@@ -16,7 +16,7 @@ import { openProposalFile, storageError } from './ProposalFiles';
 // Same file types and size as the checklist files: PDF, Word, Excel or a photo, up to 100 MB.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
-export type ReceiptTarget = { dealId: string; moneyInId: string; recordId: string; moneyOutId?: string };
+export type ReceiptTarget = { dealId: string; moneyInId: string; recordId: string; moneyOutId?: string; claimBackId?: string };
 
 /** Receipts, live: one deal's, or (no dealId) all of them. Only Admin and Management may read them. */
 export function useReceipts(enabled: boolean, dealId?: string): Receipt[] {

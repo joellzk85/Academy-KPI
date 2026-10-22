@@ -95,6 +95,9 @@ export interface MoneyOut {
   // (2026-10-21, lib/trainingChange.ts); not shown to the requester as a rejection to redo.
   trainingCancelled?: boolean;
   resubmittedAt?: string;  // the requester fixed a rejected request and sent it again (2026-10-21)
+  // Paid on behalf of the client (2026-10-22): the client pays us back on a reimbursement invoice (lib/onBehalf.ts).
+  // Never a cost in the P&L.
+  onBehalf?: boolean;
 }
 
 // ---------- When a payment can be paid (Joel, 2026-10-21: the payment-out flowchart) ----------
@@ -121,8 +124,9 @@ export function prePaymentFlags(deal: any, outs: MoneyOut[], flagDays: number, t
   return [{ level: 'danger', text: `Pre-training payment not paid yet: ${open.map(o => `${o.category} ${o.payee}`).join(', ')} (${formatRM(total)}, ${when})` }];
 }
 
-/** Counted in the training's P&L? Missing = yes (requests made before the tick existed). Company payments never are. */
-export const inPL = (o: Pick<MoneyOut, 'inPL'>) => o.inPL !== false;
+/** Counted in the training's P&L? Missing = yes (requests made before the tick existed). Company payments never are,
+ *  nor costs paid on behalf of the client (the client pays them back; lib/onBehalf.ts). */
+export const inPL = (o: Pick<MoneyOut, 'inPL' | 'onBehalf'>) => o.inPL !== false && !o.onBehalf;
 
 // PR-YYYYMMDD-NNNN, from the request date and the record's id (fixed, so it never changes).
 export function paymentRef(o: Pick<MoneyOut, 'id' | 'requestDate' | 'requestedAt'>): string {
@@ -150,10 +154,11 @@ export interface MoneySettings {
   claimDeadlineDays: number | null;    // days after training to submit the HRDC claim (blank = no deadline countdown)
   claimReminderDays: number;           // claim still not submitted this many days after training = red
   commissionPct: number;               // sales person's commission: % of the selling price before SST and HRDC's % (Joel, 2026-10-20: 3)
+  behalfReminderDays: number;          // paid on behalf of the client, not claimed back this many days after training = red
 }
 
 // HRD Corp allows 6 months to claim (Joel, 2026-10-16); he wants a red reminder after 14 days.
-export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14, commissionPct: 3 };
+export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14, commissionPct: 3, behalfReminderDays: 14 };
 
 export function readMoneySettings(data: any): MoneySettings {
   const num = (v: any, d: number) => (Number.isFinite(Number(v)) && Number(v) >= 0 && v !== '' && v !== null ? Number(v) : d);
@@ -165,6 +170,7 @@ export function readMoneySettings(data: any): MoneySettings {
       : data.claimDeadlineDays === null || data.claimDeadlineDays === '' ? null : num(data.claimDeadlineDays, 0),
     claimReminderDays: num(data?.claimReminderDays, DEFAULT_MONEY_SETTINGS.claimReminderDays),
     commissionPct: num(data?.commissionPct, DEFAULT_MONEY_SETTINGS.commissionPct),
+    behalfReminderDays: num(data?.behalfReminderDays, DEFAULT_MONEY_SETTINGS.behalfReminderDays) || DEFAULT_MONEY_SETTINGS.behalfReminderDays,
   };
 }
 

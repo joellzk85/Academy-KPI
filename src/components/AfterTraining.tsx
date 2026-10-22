@@ -7,11 +7,14 @@ import { progress } from '../lib/checklist';
 import DealChecklist from './DealChecklist';
 import { InForm, InRow } from './Money';
 import { useReceipts } from './PaymentReceipts';
+import { ClaimBackStep, useClaimBacks } from './ClaimBacks';
+import { ClaimBack } from '../lib/onBehalf';
 
 // A won deal's "After training" section (Joel, 2026-10-20): one journey to "Case closed".
 //   1. Issue invoice (HRDC claim and/or client invoice), 2. the post-training documents (JD14, T3, training report,
 //   output assessment; certificates optional), 3. Payment received, with the receipt, 4. Payments out (2026-10-21:
-//   the training's payment requests approved and paid). Logic: lib/postTraining.ts.
+//   the training's payment requests approved and paid), 5. Claim back from client (2026-10-22, only when something was
+//   paid on the client's behalf). Logic: lib/postTraining.ts.
 // Admin and Management do it; reps see where it stands (no amounts' actions, no receipts).
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -32,7 +35,8 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
 }) {
   const staff = viewer.role !== 'rep';
   const receipts = useReceipts(staff, deal.id);
-  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts);
+  const claims = useClaimBacks(staff, deal.id);
+  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts, claims);
   const [adding, setAdding] = useState<InSource | null>(null);
   const needed = invoicesNeeded(deal.fundingType);
   const docsPr = progress(checklist?.tasks, deal.fundingType, 'after');
@@ -139,6 +143,14 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
           <p className="text-sm text-ink-soft">Costs are added on the Before training checklist; approved ones are sent to accounts from Admin work → Money → Payment summary.</p>
         </Step>
       )}
+
+      {/* 5. Claim back from client (2026-10-22): only when something was paid on the client's behalf */}
+      {staff && st.behalf.has && (
+        <Step n={5} title="Claim back from client" done={st.behalf.done}
+          sub={`Paid on the client's behalf: ${formatRM(st.behalf.owed)}${st.behalf.outstanding > 0 ? `, still to get back ${formatRM(st.behalf.outstanding)}` : ', all paid back'}`}>
+          <ClaimBackStep deal={deal} viewer={viewer} b={st.behalf} receipts={receipts} settings={settings} />
+        </Step>
+      )}
     </div>
   );
 }
@@ -161,9 +173,9 @@ function Step({ n, title, done, sub, children }: { n: number; title: string; don
 }
 
 /** One line for a fold's hint: where the deal's post-training stands. */
-export function afterTrainingHint(deal: any, checklist: any | null, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[]): string {
-  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts);
+export function afterTrainingHint(deal: any, checklist: any | null, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[], claims: ClaimBack[]): string {
+  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts, claims);
   if (st.closed) return 'Case closed';
   if (!st.ended) return 'Starts after the training';
-  return `Step ${Math.min(st.step, 4)} of 4: ${st.next}`;
+  return `Step ${Math.min(st.step, st.steps)} of ${st.steps}: ${st.next}`;
 }

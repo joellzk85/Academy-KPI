@@ -27,6 +27,8 @@ import { projectRow } from '../lib/projectPL';
 import { useChecklistSettings } from './DealChecklist';
 import { useMoneySettings } from './Money';
 import { useReceipts } from './PaymentReceipts';
+import { useClaimBacks } from './ClaimBacks';
+import { ClaimBack } from '../lib/onBehalf';
 import { Receipt, postTraining, postTrainingFlags } from '../lib/postTraining';
 import { MODE_LABELS, apptLateDays, apptOf, apptOverdue, apptTime } from '../lib/appointments';
 import { alertText, followUpAlert } from '../lib/followUps';
@@ -154,6 +156,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
   const receipts = useReceipts(staff);   // payment receipts, for the After training card
+  const claims = useClaimBacks(staff);   // paid on behalf of the client, to claim back (2026-10-22)
   const [clients, setClients] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [plDocs, setPlDocs] = useState<Record<string, any>>({});
@@ -342,7 +345,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
 
   const ctx: CardCtx = {
     kpiSources,
-    viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, receipts, programmes, representatives, venues,
+    viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, receipts, claims, programmes, representatives, venues,
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
@@ -783,7 +786,7 @@ function CompactCalendar({ events, today, showFull, onToggleFull }: { events: Ca
 type CardCtx = {
   kpiSources: KpiSources;
   viewer: Viewer; today: string; deals: any[]; wonDeals: any[]; checklists: Record<string, any>; queries: HrdcQuery[];
-  moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; receipts: Receipt[]; programmes: any[]; representatives: Representative[]; venues: any[];
+  moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; receipts: Receipt[]; claims: ClaimBack[]; programmes: any[]; representatives: Representative[]; venues: any[];
   checklistSettings: any; moneySettings: any; nameOf: (id: string) => string; clientName: (p: any) => string;
   openDeal: (p: any) => void; nav: MyHomeNav; mine: (p: any) => boolean; notices: React.ReactNode;
   shared: SharedItem[];
@@ -1075,14 +1078,14 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         const ins = c.moneyIn.filter(m => m.dealId === p.id);
         const outs = c.moneyOut.filter(o => o.dealId === p.id);
         const rc = c.receipts.filter(r => r.dealId === p.id);
-        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.today);
+        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.claims, c.today);
         if (!st.ended || st.closed) return;
-        const flags = postTrainingFlags(p, cl?.tasks, ins, outs, rc, c.moneySettings, c.today);
+        const flags = postTrainingFlags(p, cl?.tasks, ins, outs, rc, c.claims, c.moneySettings, c.today);
         const level = flags.some(f => f.level === 'danger') ? 'danger' as const : 'attention' as const;
         const since = st.daysSince || 0;
         items.push({
           key: p.id, title: deal(p), level, since, onClick: () => c.nav.openAdminWork('queue', p.id),
-          sub: st.started ? `Ended ${since} day${since === 1 ? '' : 's'} ago · step ${Math.min(st.step, 4)} of 4: ${st.next}${flags[0] && flags[0].level === 'danger' ? ` · ${flags[0].text}` : ''}`
+          sub: st.started ? `Ended ${since} day${since === 1 ? '' : 's'} ago · step ${Math.min(st.step, st.steps)} of ${st.steps}: ${st.next}${flags[0] && flags[0].level === 'danger' ? ` · ${flags[0].text}` : ''}`
             : flags[0]?.text || 'Training ended: start post-training',
         });
       });

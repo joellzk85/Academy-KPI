@@ -123,7 +123,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `hrdc-programmes-trainers.md` | Phase 2C programmes, HRDC queries, trainer links, trainer profile and HRDC biodata |
 | `trainer-portal.md` | Trainer portal (/trainer): email login for trainers given access, profile, bank, TIN, trainings, PO, fee request, rating |
 | `training-report.md` | Training report: trainer writes it in the portal (or Admin on the deal), can change it after sending (change list), pax from the deal, checked, Management picks HR's sections, PDF or link for HR |
-| `money.md` | Phase 3 money, company payments, Link for accounts, Project P&L, manager deletes, Blueprint import, Payment tracking, After training to Case closed |
+| `money.md` | Phase 3 money, company payments, Link for accounts, Project P&L, manager deletes, Blueprint import, Payment tracking, After training to Case closed, paid on behalf of client |
 | `home-kpi-dashboards.md` | KPI templates, My home, rings, cards, workspace menu, KPI page, Team performance, weekly presentation (Present tab, action points), Login log, Appraisal |
 | `clients-directories-calendar.md` | Client history, Clients, Trainers, Venues, To-do, Google Calendar |
 | `backup-and-tidyup.md` | Data backup, tidy-up done and still open |
@@ -150,6 +150,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **360 rating (2026-10-22):** publish `firestore.rules` (`rating_rounds`, `ratings_360`); go-live checklist item 47.
 - **Deal checks and month lock (2026-10-22):** publish `firestore.rules` (won date, won-deal locks, `integrityChecks`, `month_kpis` lock, `config/month_locks`); go-live checklist items 48 and 49.
 - **Co-trainer and facilitator days (2026-10-22):** nothing to publish; go-live checklist item 46.
+- **Paid on behalf of client (2026-10-22):** "Pay on behalf of client" tick on checklist cost lines, never in the P&L, claimed back on a reimbursement invoice in After training step 5; publish `firestore.rules` (`claim_backs`); go-live checklist item 52.
 - **Appraisal (2026-10-22):** KPI, 360 attitude items and reliability as three separate parts (Management → Appraisal); publish `firestore.rules`; go-live checklist item 51.
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.

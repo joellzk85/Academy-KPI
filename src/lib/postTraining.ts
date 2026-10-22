@@ -9,6 +9,8 @@
 //   6. Payment received: each invoice or claim is marked received with the client's or HRDC's receipt uploaded
 //      (payment_receipts), on the deal or in Payment tracking.
 //   7. Payments out (2026-10-21): every payment request on the deal (trainer, venue...) approved and paid.
+//   8. Claim back from client (2026-10-22), only when something was paid on the client's behalf (hotel, bus...):
+//      billed on a reimbursement invoice and paid back with its receipt (lib/onBehalf.ts).
 //   Then the deal is "Case closed": every step done, every invoice and claim received with its receipt, and no
 //   payment request (trainer, venue...) still waiting for approval or to be paid.
 //
@@ -17,6 +19,7 @@
 import { ChecklistTask, Flag, applicableTasks, daysUntil, isOptional } from './checklist';
 import { formatDate, formatRM, todayIso, trainingEndDate } from './deals';
 import { InSource, MoneyIn, MoneyOut, MoneySettings, isPaid, shortfall } from './money';
+import { BehalfStatus, ClaimBack, behalfFlags, behalfNext, behalfStatus } from './onBehalf';
 
 export interface Receipt {
   id: string;
@@ -24,6 +27,7 @@ export interface Receipt {
   moneyInId: string;       // the invoice or claim it's for ('' for an imported line)
   recordId: string;        // the imported Payment tracking line (payment_records) it's for ('' for a deal's)
   moneyOutId?: string;     // a payment we made (money_out), e.g. a venue booking raised from the checklist (2026-10-20)
+  claimBackId?: string;    // the client paying back what we paid on their behalf (claim_backs, 2026-10-22)
   name: string;
   size: number;
   type: string;
@@ -69,13 +73,16 @@ export interface PostStatus {
   paymentInDone: boolean;           // step 3: every invoice and claim received with its receipt
   outsDone: boolean;                // step 4: no payment request waiting for approval or to be paid
   paymentDone: boolean;             // both
+  behalf: BehalfStatus;             // paid on behalf of the client, to claim back (step 5 when there is any)
+  steps: number;                    // 4, or 5 with a claim back
   closed: boolean;
   closedOn: string;                 // the latest date in the journey, once closed
   next: string;                     // the next thing to do, in plain words
-  step: number;                     // 1 invoice, 2 documents, 3 payment received, 4 payments out, 5 closed
+  step: number;                     // 1 invoice, 2 documents, 3 payment received, 4 payments out, (5 claim back), then closed
 }
 
-export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[], today = todayIso()): PostStatus {
+export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[],
+  claims: ClaimBack[] = [], today = todayIso()): PostStatus {
   const daysSince = daysSinceTraining(deal, today);
   const ended = daysSince !== null;
   const needed = invoicesNeeded(deal?.fundingType);
@@ -91,11 +98,13 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   const paymentInDone = invoiceDone && ins.length > 0 && unpaid.length === 0 && noReceipt.length === 0;
   const outsDone = outsOpen.length === 0;
   const paymentDone = paymentInDone && outsDone;
-  const closed = ended && paymentDone && docsOpen.length === 0;
+  const behalf = behalfStatus(deal?.id, outs, claims, receipts);
+  const steps = behalf.has ? 5 : 4;
+  const closed = ended && paymentDone && behalf.done && docsOpen.length === 0;
   const started = ins.length > 0 || after.some(t => t.done);
 
   let next = '';
-  let step = 5;
+  let step = steps + 1;
   if (!invoiceDone) {
     step = 1;
     next = missingInvoices.length ? `Record the ${missingInvoices.map(s => INVOICE_WORDS[s]).join(' and the ')}` : 'Record the invoice or HRDC claim';
@@ -110,6 +119,9 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   } else if (!outsDone) {
     step = 4;
     next = `Payments out: ${plural(outsOpen.length, 'payment request')} still to approve or pay`;
+  } else if (!behalf.done) {
+    step = 5;
+    next = behalfNext(behalf);
   } else if (!ended) {
     step = 2;
     next = 'Starts after the training';
@@ -119,15 +131,15 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
 
   const closedOn = closed
     ? [...ins.map(m => m.paidDate || ''), ...docs.map(t => t.doneAt || ''), ...receipts.filter(r => ins.some(m => m.id === r.moneyInId)).map(r => r.at.slice(0, 10)),
-      ...outs.map(o => o.paidDate || '')].filter(isDay).map(d => d.slice(0, 10)).sort().pop() || ''
+      ...outs.map(o => o.paidDate || ''), ...behalf.claims.map(c => c.paidDate || '')].filter(isDay).map(d => d.slice(0, 10)).sort().pop() || ''
     : '';
-  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, paymentInDone, outsDone, paymentDone, closed, closedOn, next, step };
+  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
 }
 
 /** Reminders from the day after the training until the case is closed (the work queue, My home's After training card). */
 export function postTrainingFlags(deal: any, tasks: ChecklistTask[] | undefined, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[],
-  s: MoneySettings, today = todayIso()): Flag[] {
-  const st = postTraining(deal, tasks, ins, outs, receipts, today);
+  claims: ClaimBack[], s: MoneySettings, today = todayIso()): Flag[] {
+  const st = postTraining(deal, tasks, ins, outs, receipts, claims, today);
   if (!st.ended || st.closed) return [];
   const since = st.daysSince!;
   const flags: Flag[] = [];
@@ -157,5 +169,6 @@ export function postTrainingFlags(deal: any, tasks: ChecklistTask[] | undefined,
   });
   ins.forEach(m => { const gap = shortfall(m, s); if (gap) flags.push({ level: 'danger', text: `HRDC paid ${formatRM(gap)} less than expected` }); });
   st.noReceipt.forEach(m => flags.push({ level: 'attention', text: `Payment received ${formatDate(m.paidDate || '')}, receipt not uploaded yet` }));
+  flags.push(...behalfFlags(st.behalf, since, s, today));
   return flags;
 }

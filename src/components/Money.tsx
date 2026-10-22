@@ -23,6 +23,9 @@ import { isTrainerFee } from '../lib/feeChecks';
 import { ApproveFeeDialog } from './FeeChecks';
 import { VendorForm, useVendors } from './VendorsPage';
 import { bankText, hasBank, vendorName } from '../lib/vendors';
+import { behalfOuts, behalfStatus } from '../lib/onBehalf';
+import { OwedByClients, useClaimBacks } from './ClaimBacks';
+import { useReceipts } from './PaymentReceipts';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -111,6 +114,7 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
   const plDocs = useTypedSst(deal.id);
   const row = projectRow(deal, ins, outs, settings, todayIso(), { quotes, plDocs });
   const approvable = outs.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
+  const behalfTotal = behalfOuts(outs).reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const { busy, error, run } = useRun();
   const stepTotals = Object.values(outs.filter(o => o.checklistTaskId && o.status !== 'rejected').reduce((m, o) => {
     const s = m[o.category] || (m[o.category] = { category: o.category, count: 0, total: 0, pending: 0, approved: 0, paid: 0 });
@@ -134,6 +138,7 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
       <p className="text-sm text-ink-soft">
         Still to come in{row.estimate ? ' (estimate)' : ''}: <strong className="text-ink">{formatRM(row.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(row.toPayOut)}</strong>
         {row.pendingApproval > 0 && <> · Waiting for approval (not counted yet): <strong className="text-ink">{formatRM(row.pendingApproval)}</strong></>}
+        {behalfTotal > 0 && <> · Paid on behalf of client (claimed back in After training, not in the P&L):<strong className="text-ink">{formatRM(behalfTotal)}</strong></>}
       </p>
 
       <p className="text-sm text-ink-soft">Invoices, HRDC claims and payments received are recorded in this deal's <strong className="text-ink">After training</strong> section. Costs are entered in its <strong className="text-ink">Before training</strong> checklist.</p>
@@ -659,6 +664,8 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
   const [clients, setClients] = useState<any[]>([]);
   const [ins, setIns] = useState<MoneyIn[]>([]);
   const [outs, setOuts] = useState<MoneyOut[]>([]);
+  const claims = useClaimBacks(true);
+  const receipts = useReceipts(true);
 
   useEffect(() => {
     const subs = [
@@ -685,10 +692,12 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
   const toPay = outs.filter(o => o.status === 'approved');
   const owed = useMemo(() => ins.filter(m => !isPaid(m)), [ins]);
   const owedTotal = owed.reduce((t, m) => t + expectedFor(m, settings), 0);
+  // Paid on clients' behalf and not yet paid back (2026-10-22).
+  const behalfOwed = deals.reduce((t, d) => t + behalfStatus(d.id, outs, claims, receipts).outstanding, 0);
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label={viewer.role === 'management' ? 'Waiting for your approval' : 'Waiting for approval'} value={String(viewer.role === 'management' ? mine.length : pending.length)} />
         <Stat label="Approved, to pay" value={`${toPay.length} · ${formatRM(toPay.reduce((t, o) => t + o.amount, 0))}`} />
         <button type="button" onClick={onOpenPayments} disabled={!onOpenPayments} className="col-span-2 rounded-xl border border-line bg-white px-3 py-2.5 text-left hover:bg-surface sm:col-span-1">
@@ -696,6 +705,11 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
           <p className="mt-0.5 text-lg font-bold tabular-nums">{formatRM(owedTotal)}</p>
           {onOpenPayments && <p className="text-xs font-semibold text-accent">See them in Payment tracking</p>}
         </button>
+        <a href="#owed-by-clients" className="col-span-2 rounded-xl border border-line bg-white px-3 py-2.5 text-left hover:bg-surface sm:col-span-1">
+          <p className="text-xs font-semibold text-ink-soft">Owed by clients (paid on their behalf)</p>
+          <p className={`mt-0.5 text-lg font-bold tabular-nums ${behalfOwed > 0 ? 'text-attention' : ''}`}>{formatRM(behalfOwed)}</p>
+          <p className="text-xs font-semibold text-accent">See the list below</p>
+        </a>
       </div>
 
       {/* From the trainer portal (2026-10-21): fee requests with photos and T3, and bank accounts to check */}
@@ -718,6 +732,10 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
       {/* Approved payments live in the summary list only, and money still to come in in Payment tracking (2026-10-21). */}
       <PaymentSummaryPanel outs={outs} viewer={viewer} forTextOf={o => dealLabel(o.dealId)} dealOf={o => deals.find(d => d.id === o.dealId)} />
 
+      <div id="owed-by-clients" className="scroll-mt-4">
+        <OwedByClients deals={deals} outs={outs} claims={claims} receipts={receipts} settings={settings} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
+      </div>
+
       <CompanyPayments outs={outs} viewer={viewer} />
 
       <MoneySettingsCard settings={settings} viewer={viewer} />
@@ -735,11 +753,11 @@ function Section({ title, empty, children }: { title: string; empty: string; chi
 }
 
 function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; viewer: Viewer }) {
-  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string; commission: string } | null>(null);
+  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string; commission: string; behalf: string } | null>(null);
   const { busy, error, setError, run } = useRun();
   const [saved, setSaved] = useState(false);
-  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays), commission: String(settings.commissionPct) };
-  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder' | 'commission', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
+  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays), commission: String(settings.commissionPct), behalf: String(settings.behalfReminderDays) };
+  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder' | 'commission' | 'behalf', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
   const save = () => {
     const pct = Number(v.pct);
     const overdue = Number(v.overdue);
@@ -750,9 +768,11 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
     if (v.deadline !== '' && Number(v.deadline) <= reminder) return setError('The claim deadline must be later than the reminder.');
     const commission = Number(v.commission);
     if (!(commission >= 0 && commission < 100)) return setError('The commission must be a percentage, for example 3.');
+    const behalf = Number(v.behalf);
+    if (!(behalf >= 1)) return setError('The claim-back reminder must be at least 1 day.');
     return run(async () => {
       await setDoc(doc(db, 'config', 'money_settings'), {
-        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder, commissionPct: commission,
+        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder, commissionPct: commission, behalfReminderDays: behalf,
         updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name,
       });
       setF(null);
@@ -768,6 +788,7 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
         <div><label className={small} htmlFor="ms-dl">HRDC claim deadline (days after training)</label><input id="ms-dl" inputMode="numeric" value={v.deadline} onChange={e => set('deadline', e.target.value)} className={input} placeholder="Not set" /></div>
         <div><label className={small} htmlFor="ms-rm">Claim reminder turns red after (days after training)</label><input id="ms-rm" inputMode="numeric" value={v.reminder} onChange={e => set('reminder', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="ms-cm">Sales commission (% of the price before SST and HRDC's %)</label><input id="ms-cm" inputMode="decimal" value={v.commission} onChange={e => set('commission', e.target.value)} className={input} /></div>
+        <div><label className={small} htmlFor="ms-bh">Paid on behalf of client, not claimed back: red after (days after training)</label><input id="ms-bh" inputMode="numeric" value={v.behalf} onChange={e => set('behalf', e.target.value)} className={input} /></div>
       </div>
       <p className="text-sm text-ink-soft">HRD Corp allows 6 months (180 days) after training to submit a claim. The work queue shows an amber reminder straight after training and turns it red after the reminder days, well before the deadline.</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}

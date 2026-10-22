@@ -268,8 +268,8 @@ service cloud.firestore {
           && changedOnly(['status', 'trainingCancelled', 'decidedById', 'decidedByName', 'decidedAt', 'rejectReason']))
         // hidden with (or brought back with) a deal Management deleted (2026-10-20)
         || (isManagement() && changedOnly(['dealDeleted']))
-        // "Include in P&L" tick (2026-10-21): Admin or Management, at any status
-        || changedOnly(['inPL'])
+        // "Include in P&L" tick (2026-10-21) and "Pay on behalf of client" tick (2026-10-22): Admin or Management, at any status
+        || changedOnly(['inPL', 'onBehalf'])
         // Fix and send again (2026-10-21): the person who raised a rejected request fixes it; it waits for approval again
         || (resource.data.status == 'rejected'
           && resource.data.get('trainingCancelled', false) != true
@@ -283,6 +283,13 @@ service cloud.firestore {
       // Delete: Management any request at any time (2026-10-20); the requester only while pending or rejected.
       allow delete: if isManagement()
         || (isStaff() && resource.data.status in ['pending', 'rejected'] && resource.data.requestedById == request.auth.uid);
+    }
+
+    // Paid on behalf of the client (2026-10-22): reimbursement invoices to the client for costs we paid on their
+    // behalf (money_out ticked onBehalf), and the client's payment back. Admin and Management only, like money_out.
+    match /claim_backs/{id} {
+      allow read, create, update: if isStaff();
+      allow delete: if isManagement() || (isStaff() && resource.data.get('paidDate', '') == '');
     }
 
     // Quotations: reps change their own, ones shared with them, or ones they're asked to help on;

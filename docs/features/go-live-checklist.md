@@ -86,3 +86,9 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
     - **Days out:** as Admin, Admin work → Days out → add MC for a rep on a past working day.
     - **Appraisal:** Management → Appraisal → that rep, this month: Part A has no 360 rating KPI; Part B shows each item and overall once the round is closed, with names; Part C shows the score, green / amber / red counts and the MC day left out. Add an incident: the score drops by the setting. Change Score settings and check the score moves. Type a note, change month and back: the note is kept.
     - **As the rep:** About me shows items and comments only after the round closes; no appraisal or reliability screen anywhere.
+52. **Paid on behalf of client (2026-10-22):** after it is live, **publish `firestore.rules`** (`claim_backs`; the "Pay on behalf of client" tick on `money_out`). Receipts need Firebase Storage on.
+    - **Before training, as Admin:** on a won test deal's Venue step, Add a cost "Hotel rooms" RM 500 with **Pay on behalf of client** ticked (the Include in P&L tick disappears). The line shows "On behalf of client: claim back after training".
+    - **As a manager:** approve it. Money out and P&L: profit doesn't change; the line "Paid on behalf of client" shows RM 500.
+    - **After the training:** After training shows step 5 **Claim back from client**; the work queue and My home say "Paid on behalf of client, not claimed back yet" (red after 14 days, Money settings).
+    - **Record the reimbursement invoice** → Record payment with a receipt → step 5 ticks; with every other step done the deal is **Case closed**.
+    - **Admin work → Money:** the **Owed by clients** tile and list show the deal until it's paid back; click it to open the deal.
