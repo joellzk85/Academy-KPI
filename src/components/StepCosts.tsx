@@ -15,6 +15,8 @@ import { ReceiptDrop, ReceiptList } from './PaymentReceipts';
 import { isTrainerFee } from '../lib/feeChecks';
 import { ApproveFeeDialog } from './FeeChecks';
 import { askReason, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
+import { feeIsAgreed } from '../lib/trainerPortal';
+import { isSuperManager, superConfirm } from '../lib/superManager';
 
 // Costs on a before-training checklist step (Joel, 2026-10-20: "able to key in amount, e.g. bus RM 5,000 + upload
 // document; all these amounts automated into the training P&L and into payment requests, payable to different
@@ -133,6 +135,14 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
     return run(() => undoPayment('money_out', o, viewer, `${o.category} · ${o.payee}`));
   };
   const canDelete = viewer.role === 'management' || (mine && (o.status === 'pending' || o.status === 'rejected'));
+  // Agree the trainer fee before the PO goes out (2026-10-23): a manager who didn't raise it (the Super Manager may).
+  const toAgree = o.status === 'pending' && !feeIsAgreed(o);
+  const canAgree = toAgree && viewer.role === 'management' && (!mine || isSuperManager(viewer));
+  const agree = () => {
+    if (mine && !superConfirm('agree a trainer fee you raised yourself.', 'Nobody else checks the amount before the PO goes to the trainer.')) return;
+    return run(() => withDealHistory(o.dealId, viewer, `Agreed the trainer fee ${sen(o.amount)} for ${o.payee}: the PO goes to the trainer`,
+      batch => batch.update(doc(db, 'money_out', o.id), { feeAgreed: { byId: viewer.id, byName: viewer.name, at: new Date().toISOString(), amount: o.amount } })));
+  };
 
   return (
     <li className="rounded-lg border border-line bg-white px-3 py-2">
@@ -151,6 +161,9 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
             {o.status === 'approved' && o.summaryToken && <span className="text-accent">on a payment summary sent to accounts</span>}
             {o.onBehalf && o.status !== 'rejected' && <span className="rounded bg-attention-soft px-1.5 py-0.5 font-semibold text-attention">On behalf of client: claim back after training</span>}
             {o.status === 'pending' && <span className="text-attention">{raisedText(o)}</span>}
+            {o.feeAgreeNeeded && o.status === 'pending' && (toAgree
+              ? <span className="rounded bg-attention-soft px-1.5 py-0.5 font-semibold text-attention">Fee to agree: a manager agrees it, then the PO goes to the trainer</span>
+              : <span className="text-accent">fee agreed by {o.feeAgreed?.byName}, PO sent; paid after the training checks</span>)}
             {!inPL(o) && !o.onBehalf && o.notInPLReason && <span className="text-ink-soft">not in the P&L: {o.notInPLReason}</span>}
             {o.lastUndo && <span className="text-ink-soft">"paid" undone by {o.lastUndo.byName} {formatDate(o.lastUndo.at)}</span>}
           </p>
@@ -162,7 +175,8 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
         <span className="flex shrink-0 flex-wrap items-center gap-1">
           {o.status !== 'rejected' && <BehalfTick o={o} viewer={viewer} />}
           {o.status !== 'rejected' && !o.onBehalf && <PLTick o={o} viewer={viewer} />}
-          {decide && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
+          {canAgree && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={agree}><Check className="h-3.5 w-3.5" /> Agree fee</button>}
+          {decide && !toAgree && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
           {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={reject}><X className="h-3.5 w-3.5" /> Reject</button>}
           {o.status === 'rejected' && mine && !o.trainingCancelled && !fixing && <button type="button" disabled={busy} className={btnSmall} onClick={() => setFixing(true)}><Pencil className="h-3.5 w-3.5" /> Fix and send again</button>}
           {o.status === 'paid' && viewer.role === 'management' && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
@@ -221,6 +235,8 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
         notInPLReason: !f.onBehalf && !f.inPL ? f.notInPLReason.trim() : '',
         status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
         decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
+        // A trainer fee is agreed by a manager before the PO goes to the trainer (2026-10-23).
+        ...(task.kind === 'trainer' ? { feeAgreeNeeded: true } : {}),
       });
       draft.clear();
       onDone();
@@ -310,7 +326,9 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
  *  deleting it and starting over. The rejection is cleared; the deal's History keeps a line. */
 export async function resubmitRequest(o: MoneyOut, patch: Partial<MoneyOut>, viewer: Viewer) {
   const batch = writeBatch(db);
-  batch.update(doc(db, 'money_out', o.id), { ...patch, status: 'pending', decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', resubmittedAt: new Date().toISOString() });
+  // A new amount on an agreed trainer fee needs agreeing again, and a new PO (2026-10-23).
+  const reAgree = !!o.feeAgreed && patch.amount !== undefined && Math.abs(Number(patch.amount) - Number(o.amount)) > 0.005;
+  batch.update(doc(db, 'money_out', o.id), { ...patch, ...(reAgree ? { feeAgreed: null } : {}), status: 'pending', decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', resubmittedAt: new Date().toISOString() });
   const d = o.dealId ? await getDoc(doc(db, 'pipelines', o.dealId)) : null;
   if (d?.exists()) {
     const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Fixed and sent again for approval: ${o.category} · ${o.payee} (${sen(Number(patch.amount ?? o.amount))}, rejected: ${o.rejectReason || 'no reason'})` };

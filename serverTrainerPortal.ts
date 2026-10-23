@@ -20,7 +20,7 @@ import { effectiveVenue, isCoTrainer, isLeadTrainer } from './src/lib/checklist'
 import { cancelledTraining, lastMove } from './src/lib/trainingChange';
 import { isDeletedRecord, ownedByTeam } from './src/lib/linked';
 import {
-  bankProblem, buildPo, calendarPath, claimFilesText, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeStatusText,
+  bankProblem, buildPo, calendarPath, claimFilesText, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeIsAgreed, feeStatusText,
   icsCalendar, inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -147,7 +147,8 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
     const job: any = (await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data() || {};
     const rep: any = (await db.collection('training_reports').doc(deal.id).get()).data();
     const report = rep && rep.trainerId === trainerId ? { status: rep.status, returnNote: rep.returnNote || '', submittedAt: rep.submittedAt || '' } : null;
-    const lines = (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected');
+    // Only fees a manager has agreed reach the trainer and the PO (2026-10-23).
+    const lines = (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected' && feeIsAgreed(o));
     const files = await poFiles(db, deal.id, task.id);
     const start = String(deal.trainingDate || '').slice(0, 10);
     const client = String(clients.docs.find((d: any) => d.id === deal.clientId)?.data().companyName || deal.client || '');

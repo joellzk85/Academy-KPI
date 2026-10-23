@@ -118,6 +118,10 @@ export interface MoneyOut {
   // cost lines start ticked, and leaving one out needs a short reason (notInPLReason).
   inPL?: boolean;
   notInPLReason?: string;
+  // Trainer fee agreed by a manager before the PO (Joel, 2026-10-23): new trainer fee lines have feeAgreeNeeded; the PO and
+  // the trainer portal use a line only once feeAgreed matches its amount (older lines count as agreed). See lib/trainerPortal.ts.
+  feeAgreeNeeded?: boolean;
+  feeAgreed?: { byId: string; byName: string; at: string; amount: number } | null;
   decidedTs?: any;         // the database's own time of the approval or rejection (firestore.rules)
   lastUndo?: UndoStamp;    // Management undid "paid" (process audit, 2026-10-22)
   deleted?: boolean;       // approved or paid requests are marked deleted, never erased (process audit, 2026-10-22)

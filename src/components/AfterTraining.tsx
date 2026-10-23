@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CheckCircle2, Plus } from 'lucide-react';
-import { doc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM, todayIso, trainingEndDate } from '../lib/deals';
 import { DEFAULT_MONEY_SETTINGS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, TIMING_LABELS, isPaid, isPayable, payableFrom, shortfall } from '../lib/money';
-import { INVOICE_WORDS, Receipt, invoicesNeeded, postTraining, receiptsFor } from '../lib/postTraining';
+import { INVOICE_WORDS, Receipt, docsFirst, invoicesNeeded, postTraining, receiptsFor } from '../lib/postTraining';
 import { hrdcClaimBlock, progress } from '../lib/checklist';
 import { askReason, withDealHistory } from '../lib/moneyActions';
 import DealChecklist, { HrdcCodes } from './DealChecklist';
@@ -39,7 +39,12 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
   const staff = viewer.role !== 'rep';
   const receipts = useReceipts(staff, deal.id);
   const claims = useClaimBacks(staff, deal.id);
-  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts, claims, todayIso(), settings);
+  // Open HRDC queries keep the case open too (every loop closed, 2026-10-23).
+  const [queries, setQueries] = useState<any[]>([]);
+  useEffect(() => onSnapshot(query(collection(db, 'hrdc_queries'), where('dealId', '==', deal.id)),
+    s => setQueries(s.docs.map(d => ({ ...d.data(), id: d.id })).filter((q: any) => q.deleted !== true)), () => setQueries([])), [deal.id]);
+  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts, claims, todayIso(), settings, queries);
+  const hrdcOrder = docsFirst(deal);   // HRDC deals: documents first, then the claim (2026-10-23)
   const [adding, setAdding] = useState<InSource | null>(null);
   // HRDC claim only once the grant is approved and the training delivered; Management can record it anyway, with a
   // reason in the History (process audit, 2026-10-22).
@@ -79,17 +84,25 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
       : !st.ended
         ? { tone: 'bg-surface text-ink-soft', text: `Post-training starts after the training (last day ${formatDate(end)}). The invoice can be recorded earlier, e.g. direct-pay clients are invoiced before training.` }
         : !st.started
-          ? { tone: 'bg-attention-soft text-attention', text: `Training ended ${st.daysSince} day${st.daysSince === 1 ? '' : 's'} ago. Start post-training: record the invoice${needed.includes('hrdc') ? ' or HRDC claim' : ''} first.` }
+          ? { tone: 'bg-attention-soft text-attention', text: `Training ended ${st.daysSince} day${st.daysSince === 1 ? '' : 's'} ago. Start post-training: ${hrdcOrder ? 'the post-training documents first (step 1), then the HRDC claim' : `record the invoice${needed.includes('hrdc') ? ' or HRDC claim' : ''} first`}.` }
           : { tone: 'bg-attention-soft text-attention', text: `Next: ${st.next}` };
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <p className={`flex items-start gap-2 rounded-lg px-3.5 py-2.5 text-[15px] font-semibold ${banner.tone}`}>
         {st.closed && <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}{banner.text}
       </p>
+      {st.ended && !st.closed && st.loopsOpen.length > 0 && (
+        <div className="rounded-lg border border-attention/40 bg-attention-soft/50 px-3.5 py-2.5">
+          <p className="text-sm font-semibold">Still open before the case can close:</p>
+          <ul className="mt-1 list-disc pl-5 text-sm">
+            {st.loopsOpen.map((l, i) => <li key={i}><span className="font-semibold">{l.what}:</span> {l.text}</li>)}
+          </ul>
+        </div>
+      )}
 
       {/* 1. Issue invoice */}
-      <Step n={1} title="Issue invoice" done={st.invoiceDone}
+      <Step n={st.invoiceStep} order={hrdcOrder ? 'order-3' : 'order-2'} title={hrdcOrder ? `Submit the HRDC claim${needed.includes('client') ? ' and invoice the client' : ''}` : 'Issue invoice'} done={st.invoiceDone}
         sub={needed.length ? `The ${needed.map(s => INVOICE_WORDS[s]).join(' and the ')}: issued by accounts, recorded here` : 'Set how the deal is paid to see what to invoice'}>
         {sortedIns.length > 0 && (
           <ul className="space-y-1.5">
@@ -127,16 +140,16 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
       </Step>
 
       {/* 2. Documents */}
-      <Step n={2} title="Post-training documents" done={!!checklist && st.docsOpen.length === 0 && docsPr.total > 0}
+      <Step n={hrdcOrder ? 1 : 2} order={hrdcOrder ? 'order-2' : 'order-3'} title="Post-training documents" done={!!checklist && st.docsOpen.length === 0 && docsPr.total > 0}
         sub={checklist ? `${docsPr.done} of ${docsPr.total} done` : undefined}>
         <DealChecklist deal={deal} checklist={checklist} quotes={quotes} viewer={viewer} part="after" hideProgress />
       </Step>
 
       {/* 3. Payment received */}
-      <Step n={3} title="Payment received" done={st.paymentInDone}
+      <Step n={3} order="order-4" title="Payment received" done={st.paymentInDone}
         sub={staff ? 'Mark each invoice or claim received and upload the receipt from the client or HRDC. Also in Payment tracking.' : undefined}>
         {sortedIns.length === 0 ? (
-          <p className="text-[15px] text-ink-soft">Record the invoice{needed.includes('hrdc') ? ' or HRDC claim' : ''} first (step 1).</p>
+          <p className="text-[15px] text-ink-soft">Record the invoice{needed.includes('hrdc') ? ' or HRDC claim' : ''} first (step {st.invoiceStep}).</p>
         ) : (
           <ul className="space-y-2">
             {sortedIns.map(m => staff
@@ -171,7 +184,7 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
 
       {/* 4. Payments out (2026-10-21): what we still owe on this training before the case can close */}
       {staff && (
-        <Step n={4} title="Payments out" done={st.outsDone}
+        <Step n={4} order="order-5" title="Payments out" done={st.outsDone}
           sub="Every payment request on this training approved and paid. Post-training payments go on the accounts summary from the day after the training.">
           {sortedOuts.length === 0 ? (
             <p className="text-[15px] text-ink-soft">No payment requests on this training.</p>
@@ -198,7 +211,7 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
 
       {/* 5. Claim back from client (2026-10-22): only when something was paid on the client's behalf */}
       {staff && st.behalf.has && (
-        <Step n={5} title="Claim back from client" done={st.behalf.done}
+        <Step n={5} order="order-6" title="Claim back from client" done={st.behalf.done}
           sub={`Paid on the client's behalf: ${formatRM(st.behalf.owed)}${st.behalf.outstanding > 0 ? `, still to get back ${formatRM(st.behalf.outstanding)}` : ', all paid back'}`}>
           <ClaimBackStep deal={deal} viewer={viewer} b={st.behalf} receipts={receipts} settings={settings} />
         </Step>
@@ -207,9 +220,9 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
   );
 }
 
-function Step({ n, title, done, sub, children }: { n: number; title: string; done: boolean; sub?: string; children: React.ReactNode }) {
+function Step({ n, title, done, sub, children, order = '' }: { n: number; title: string; done: boolean; sub?: string; children: React.ReactNode; order?: string }) {
   return (
-    <section className={`rounded-xl border p-3.5 ${done ? 'border-accent/25 bg-accent-soft/30' : 'border-line bg-white'}`}>
+    <section className={`${order} rounded-xl border p-3.5 ${done ? 'border-accent/25 bg-accent-soft/30' : 'border-line bg-white'}`}>
       <div className="mb-2.5 flex items-start gap-2.5">
         {done
           ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-accent" />

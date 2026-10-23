@@ -7,7 +7,7 @@ import {
 import GridLayout, { WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { db, friendlyError } from '../lib/firebase';
+import { callServer, db, friendlyError } from '../lib/firebase';
 import { CalendarEvent, Representative } from '../types';
 import {
   OPEN_STAGES, STAGE_LABELS, DealStage, journeyStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
@@ -44,6 +44,12 @@ import ProposalActivity from './ProposalActivity';
 import { useProposalSettings } from '../lib/useProposalSettings';
 import { seesLink } from '../lib/proposalTracking';
 import { acceptToConfirm, canDecideDiscount, discountPct, pendingDiscount } from '../lib/dealOffers';
+import { feeIsAgreed } from '../lib/trainerPortal';
+import { isTrainerFee } from '../lib/feeChecks';
+import { isSuperManager } from '../lib/superManager';
+import { trainingEndDate } from '../lib/deals';
+import { GpAlert, gpAlerts } from '../lib/gpAlerts';
+import { activeKpiLibrary } from '../lib/kpiLibrary';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -164,6 +170,14 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const [plDocs, setPlDocs] = useState<Record<string, any>>({});
   const [trainerJobs, setTrainerJobs] = useState<TrainerJob[]>([]);
   const [reportsToCheck, setReportsToCheck] = useState<string[]>([]);   // deal ids whose training report the trainer sent, not checked yet
+  // Strange GP or a cost left out of the P&L on my own deals, from the server (2026-10-23; Management works it out itself).
+  const [ownGpAlerts, setOwnGpAlerts] = useState<GpAlert[]>([]);
+  useEffect(() => {
+    if (viewer.role === 'management') return;
+    let live = true;
+    callServer<{ alerts: GpAlert[] }>('/api/kpi/deal-alerts', {}, true).then(r => live && setOwnGpAlerts(r.alerts || [])).catch(() => {});
+    return () => { live = false; };
+  }, [viewer.id, viewer.role]);
   const touchPoints = useTouchPoints();
   const [savedCards, setSavedCards] = useState<CardId[] | null>(null);
   const [savedShortcuts, setSavedShortcuts] = useState<ShortcutId[] | null>(null);
@@ -359,7 +373,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
-    quotes, plDocs, trainerJobs, reportsToCheck,
+    quotes, plDocs, trainerJobs, reportsToCheck, ownGpAlerts,
   };
 
   return (
@@ -806,6 +820,7 @@ type CardCtx = {
   quotes: any[]; plDocs: Record<string, any>;   // for the one P&L (SST from the quotation, or typed in Project P&L)
   trainerJobs: TrainerJob[];
   reportsToCheck: string[];
+  ownGpAlerts: GpAlert[];
 };
 
 // Trainers who asked for their fee in the portal and aren't approved yet (Admin and Management's notification,
@@ -1001,8 +1016,9 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           sub: `${l.reopenRequest!.name} asked to open your ${docNoun(l.kind)} ${l.refNumber || ''} again${l.reopenRequest!.note ? `: "${l.reopenRequest!.note}"` : ''}. Reopen it from the ${docNoun(l.kind)}.`,
         }));
       // The client accepted online (confirm the amount), and my discount requests once decided (2026-10-23).
+      // Plus strange GP or a cost left out of the P&L on my deals, from the server (no cost amounts).
       const offers: Item[] = c.deals.filter(p => c.mine(p)).flatMap(p => {
-        const out: Item[] = [];
+        const out: Item[] = c.ownGpAlerts.filter(a => a.dealId === p.id).map((a, i) => ({ key: `gp_${p.id}_${i}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: a.level, sub: a.text }));
         const a = acceptToConfirm(p);
         if (a) out.push({ key: `acc_${p.id}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'attention',
           sub: `Client accepted online${a.packageName ? ` ("${a.packageName}"${a.price !== null ? `, ${formatRM(a.price || 0)}` : ''})` : ''}: confirm the amount` });
@@ -1102,9 +1118,9 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         const ins = c.moneyIn.filter(m => m.dealId === p.id);
         const outs = c.moneyOut.filter(o => o.dealId === p.id);
         const rc = c.receipts.filter(r => r.dealId === p.id);
-        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.claims, c.today, c.moneySettings);
+        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.claims, c.today, c.moneySettings, c.queries);
         if (!st.ended || st.closed) return;
-        const flags = postTrainingFlags(p, cl?.tasks, ins, outs, rc, c.claims, c.moneySettings, c.today);
+        const flags = postTrainingFlags(p, cl?.tasks, ins, outs, rc, c.claims, c.moneySettings, c.today, c.queries);
         const level = flags.some(f => f.level === 'danger') ? 'danger' as const : 'attention' as const;
         const since = st.daysSince || 0;
         items.push({
@@ -1177,7 +1193,11 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     case 'approvals': {
       // Trainers asking for their fee (2026-10-21) replace their fee lines here: approved on the deal, after the checks.
       const fees = feeRequestItems(c, deal);
-      const list = c.moneyOut.filter(o => canDecide(o, c.viewer) && !fees.some(f => f.dealId === o.dealId && f.taskId === o.checklistTaskId));
+      // Trainer fees (2026-10-23): agreed before the PO (here as "Agree trainer fee"), approved for payment only from the
+      // day after the training, so they don't wait here from booking day.
+      const ended = (o: MoneyOut) => { const p = c.deals.find(d => d.id === o.dealId); const end = p ? trainingEndDate(p) : ''; return !!end && end < c.today; };
+      const toAgree = c.moneyOut.filter(o => o.status === 'pending' && !feeIsAgreed(o) && c.viewer.role === 'management' && (o.requestedById !== c.viewer.id || isSuperManager(c.viewer)));
+      const list = c.moneyOut.filter(o => canDecide(o, c.viewer) && feeIsAgreed(o) && !(isTrainerFee(o) && !ended(o)) && !fees.some(f => f.dealId === o.dealId && f.taskId === o.checklistTaskId));
       // Training date changes and cancellations (2026-10-21) come first: nothing moves until they're decided.
       const changes = c.deals.filter(p => canDecideChange(pendingChange(p), c.viewer));
       return {
@@ -1187,6 +1207,11 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
             return { key: `${p.id}_tc`, title: `${KIND_TEXT[tc.kind]} · ${deal(p)}`, level: (tc.kind === 'cancel' ? 'danger' : 'attention') as Item['level'], sub: `${changeSummary(tc)} · asked by ${tc.byName}`, onClick: () => c.openDeal(p) };
           }),
           ...fees,
+          ...toAgree.map(o => {
+            const p = c.deals.find(d => d.id === o.dealId);
+            return { key: `${o.id}_agree`, title: `Agree trainer fee · ${o.payee} · ${formatRM(o.amount)}`, level: 'attention' as Item['level'],
+              sub: `${p ? deal(p) : 'Deal'} · raised by ${o.requestedByName} · the PO goes to the trainer once agreed`, onClick: p ? () => c.nav.openAdminWork('queue', p.id) : undefined };
+          }),
           // Discounts on quotations (2026-10-23): never your own.
           ...c.deals.filter(p => canDecideDiscount(pendingDiscount(p), c.viewer)).map(p => {
             const d = pendingDiscount(p)!;
@@ -1204,6 +1229,10 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     case 'money_position': {
       let toComeIn = 0, overdue = 0, toPay = 0, waiting = 0, profitMonth = 0;
       const month = c.today.slice(0, 7);
+      // Strange GP or a cost left out of the P&L on recent trainings (2026-10-23): listed above the tiles.
+      const gpItems: Item[] = [];
+      const since = new Date(Date.parse(c.today) - 90 * 864e5).toISOString().slice(0, 10);
+      const red = activeKpiLibrary().gpBands.red;
       c.wonDeals.forEach(p => {
         const ins = c.moneyIn.filter(m => m.dealId === p.id);
         // The one P&L (projectRow, as in Project P&L and the deal): profit after SST, HRDC's %, commission and costs.
@@ -1211,6 +1240,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         if (!row.estimate) toComeIn += row.toComeIn;   // invoices and claims sent, not yet paid
         toPay += row.toPayOut; waiting += row.pendingApproval;
         if (ymd(p.trainingDate).startsWith(month)) profitMonth += row.profit;
+        if (!ymd(p.trainingDate) || ymd(p.trainingDate) >= since) gpAlerts(row, c.moneyOut, red).forEach((a, i) => gpItems.push({ key: `${p.id}_gp${i}`, title: deal(p), level: a.level, sub: a.text, onClick: () => c.openDeal(p) }));
         ins.filter(m => !isPaid(m) && ymd(m.invoiceDate) && -(daysUntil(ymd(m.invoiceDate), c.today) ?? 0) > c.moneySettings.overdueDays).forEach(() => { overdue++; });
       });
       // Company payments (not tied to a training) still need paying or approving.
@@ -1222,7 +1252,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         <div className="rounded-xl bg-surface px-3 py-2.5"><p className="text-xs font-semibold text-ink-soft">{label}</p><p className={`text-lg font-bold tabular-nums ${tone || ''}`}>{value}</p></div>
       );
       return {
-        items: [], empty: '',
+        items: gpItems, empty: '',
         footer: (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">

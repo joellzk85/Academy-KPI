@@ -91,6 +91,7 @@ export default function DealChecklist({
   const [error, setError] = useState('');
   const [arranging, setArranging] = useState(false);
   const [newTask, setNewTask] = useState('');
+  const client = useClient(deal.clientId);   // its HRD Corp employer code, needed to tick Grant approved (2026-10-23)
   const editable = viewer.role !== 'rep';
   const money = editable && part !== 'after';   // costs, vendors and receipts: Admin and Management, before training
 
@@ -168,6 +169,11 @@ export default function DealChecklist({
     const autoPo = t.kind === 'trainer' && hasAutoPo({ id: t.id, trainerId: trainer?.id }, outs, deal.id) ? 1 : 0;
     const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer, filesOf(t).length + autoPo);
     if (gate) return setError(gate);
+    // HRDC deals: Grant approved needs the Employer code and the Approval code (Joel, 2026-10-23).
+    if (t.kind === 'grant' && isHrdc(deal.fundingType)) {
+      const missing = [!String(client?.employerCode || '').trim() && 'Employer code', !approvalCodeOf(allTasks) && 'Approval code'].filter(Boolean).join(' and ');
+      if (missing) return setError(`Fill in the ${missing} below first: Grant approved needs both.`);
+    }
     // A venue or trainer still coming from the quotation is saved on the checklist when ticked,
     // so later changes to the quotation don't change what Admin confirmed.
     const keep: Partial<ChecklistTask> = {};
@@ -649,7 +655,7 @@ function TaskFields({ t, days, busy, venues, trainers, quotes, onPatch, programm
 // HRDC codes (Joel, 2026-10-23), typed on the Grant approved step by Admin or Management and read wherever HRDC needs
 // them (the HRDC claim, Payment tracking, the training report for HR, search). The Employer code is the client's own
 // HRD Corp code, so it lives on the client and is filled in for its next deals; the Approval code is this deal's.
-// Optional: a missing one is a reminder, never a block. Reps and the After training section see them read-only.
+// Required to tick Grant approved since 2026-10-23 (Joel); on older ticked steps a missing one is a reminder. Reps and the After training section see them read-only.
 export function useClient(clientId?: string) {
   const [client, setClient] = useState<any | null>(null);
   useEffect(() => {
