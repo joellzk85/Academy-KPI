@@ -49,6 +49,8 @@ import CostEstimator from './CostEstimator';
 import TrainingChangePanel from './TrainingChange';
 import { cancelledTraining, dateLocked, valueLocked } from '../lib/trainingChange';
 import { DealFlagsBox } from './DealChecksPage';
+import { AcceptedOnlineBox, DiscountBox } from './DealOffers';
+import { valueDropBlocked } from '../lib/dealOffers';
 import PanelResizer from './PanelResizer';
 import { PotentialBox, PotentialButtons, PotentialChip, monthOptions } from './DealPotential';
 import { POTENTIAL_LABELS, Potential, forecastMonthLabel, potentialOf } from '../lib/forecast';
@@ -326,6 +328,10 @@ export default function DealsBoard({
     if (!Number.isFinite(value) || value < 0) return setFormError('Enter the deal value as a number, for example 15000.');
     const pax = String(form.participants || '').trim() === '' ? 0 : Number(form.participants);   // older saved drafts have no participants
     if (!Number.isInteger(pax) || pax < 0 || pax > 10000) return setFormError('Enter the number of participants as a whole number, for example 25.');
+    // A lower price after the proposal went out is a discount: a manager approves it (2026-10-23).
+    if (existingDeal && valueDropBlocked(existingDeal, value, viewer)) {
+      return setFormError(`Lowering the value after the proposal is sent is a discount. Open the quotation and click "Request discount"; a manager approves it.`);
+    }
     if (!form.requestDate) return setFormError('Enter the date the client asked.');
     const days = parseTrainingDays(form.trainingDays);
     if (days === null) return setFormError(TRAINING_DAYS_PROBLEM);
@@ -883,6 +889,7 @@ export default function DealsBoard({
                   programmes={programmes}
                   value={form.programmeId}
                   legacyName={editing !== 'new' ? form.courseName : ''}
+                  kind={form.type === 'Teambuilding' ? 'teambuilding' : 'training'}
                   viewer={viewer}
                   onChange={pg => setForm(f => ({ ...f, programmeId: pg.id, courseName: pg.name }))}
                 />
@@ -1307,6 +1314,10 @@ function DealPanel(props: {
           <p className="mt-2 text-sm text-ink-soft">Only {props.ownerName}, Admin and Management can change this deal.</p>
         )}
       </section>
+
+      {/* What the client accepted online (confirm the amount) and discount requests (2026-10-23) */}
+      <AcceptedOnlineBox deal={p} viewer={props.viewer} />
+      <DiscountBox deal={p} viewer={props.viewer} />
 
       {/* Deal checks (2026-10-22): open red flags, Management only */}
       {props.viewer.role === 'management' && <DealFlagsBox deal={p} allDeals={props.allDeals} viewer={props.viewer} />}

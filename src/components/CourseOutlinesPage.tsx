@@ -21,7 +21,7 @@ import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
 import { OutlineSubmission, TrainerLink, isLive, outlineFieldsFrom, outlineSummary, previewOutline } from '../lib/trainerLinks';
 import { trainerOptions } from './PickOrType';
-import CustomerCodeBox from './CustomerCodeBox';
+import CustomerCodeBox, { needsCustomerCode, nudgeCustomerCode } from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { FromTrainers, TrainerUpdateBanner, useTrainerDocs } from './TrainerDocsBox';
@@ -715,6 +715,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     ? resolveOutline(!o.courseTitle?.trim() && !o.programmeId ? { ...o, useProgrammeName: true } : o, { ...sources, deals: sources.deals.map(d => (d.id === gapDeal.id ? gapDeal : d)) }).o
     : shownO;
   const startSend = () => {
+    if (!locked && needsCustomerCode(r.client, o.refAuto)) return nudgeCustomerCode();
     if (!locked) {
       const mayMove = dealAtNew && canMoveDeal(deal, me);
       const gaps = mayMove ? dealGaps(deal, 'proposal', { clientIds: sources.clients.map(c => c.id), programmeIds: sources.programmes.map(x => x.id) }) : [];

@@ -43,6 +43,7 @@ import { DOC_NOUN, DocLink, openedText } from '../lib/docLinks';
 import ProposalActivity from './ProposalActivity';
 import { useProposalSettings } from '../lib/useProposalSettings';
 import { seesLink } from '../lib/proposalTracking';
+import { acceptToConfirm, canDecideDiscount, discountPct, pendingDiscount } from '../lib/dealOffers';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -999,8 +1000,21 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           key: `reopen_${l.token}`, title: p ? c.clientName(p) : l.company || 'Client', onClick: p ? () => c.openDeal(p) : undefined, level: 'danger' as const,
           sub: `${l.reopenRequest!.name} asked to open your ${docNoun(l.kind)} ${l.refNumber || ''} again${l.reopenRequest!.note ? `: "${l.reopenRequest!.note}"` : ''}. Reopen it from the ${docNoun(l.kind)}.`,
         }));
+      // The client accepted online (confirm the amount), and my discount requests once decided (2026-10-23).
+      const offers: Item[] = c.deals.filter(p => c.mine(p)).flatMap(p => {
+        const out: Item[] = [];
+        const a = acceptToConfirm(p);
+        if (a) out.push({ key: `acc_${p.id}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'attention',
+          sub: `Client accepted online${a.packageName ? ` ("${a.packageName}"${a.price !== null ? `, ${formatRM(a.price || 0)}` : ''})` : ''}: confirm the amount` });
+        const d = p.discountRequest;
+        if (d && d.byId === c.viewer.id && ['approved', 'rejected'].includes(d.status) && d.decidedAt && Date.now() - Date.parse(d.decidedAt) < 14 * 864e5) {
+          out.push({ key: `disc_${p.id}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: d.status === 'rejected' ? 'danger' : undefined,
+            sub: d.status === 'approved' ? `Discount to ${formatRM(d.toValue)} approved by ${d.decidedByName}` : `Discount rejected by ${d.decidedByName}${d.rejectReason ? `: ${d.rejectReason}` : ''}` });
+        }
+        return out;
+      });
       return {
-        items: [...alerts, ...reopen, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
+        items: [...offers, ...alerts, ...reopen, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
           key: p.id, title: c.clientName(p), onClick: () => c.openDeal(p),
           // On hold (2026-10-19): the potential date is the follow-up date.
           sub: activeHold(p) ? (d <= 0 ? 'On hold date reached: resume, hold longer or mark lost' : holdText(p, c.today))
@@ -1130,6 +1144,12 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     case 'money_jobs': {
       // Trainers asking for their fee in the portal (2026-10-21): Admin checks T3, photos and report first.
       const items: Item[] = [...feeRequestItems(c, deal)];
+      // Discounts waiting for a manager (2026-10-23): Admin is told too; Management approves them in "Waiting for my approval".
+      if (c.viewer.role === 'admin') c.deals.filter(p => pendingDiscount(p)).forEach(p => {
+        const d = pendingDiscount(p)!;
+        items.push({ key: `${p.id}_disc`, title: `Discount asked · ${deal(p)}`, onClick: () => c.openDeal(p),
+          sub: `${formatRM(d.fromValue)} to ${formatRM(d.toValue)} (${discountPct(d).toFixed(1)}% off) by ${d.byName} · waiting for a manager` });
+      });
       // Training reports the trainer sent: Admin or Management checks them (this also unlocks the trainer fee).
       c.wonDeals.filter(p => c.reportsToCheck.includes(p.id)).forEach(p => items.push({
         key: `${p.id}_report`, title: `Training report to check · ${deal(p)}`, level: 'attention',
@@ -1165,6 +1185,12 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
             return { key: `${p.id}_tc`, title: `${KIND_TEXT[tc.kind]} · ${deal(p)}`, level: (tc.kind === 'cancel' ? 'danger' : 'attention') as Item['level'], sub: `${changeSummary(tc)} · asked by ${tc.byName}`, onClick: () => c.openDeal(p) };
           }),
           ...fees,
+          // Discounts on quotations (2026-10-23): never your own.
+          ...c.deals.filter(p => canDecideDiscount(pendingDiscount(p), c.viewer)).map(p => {
+            const d = pendingDiscount(p)!;
+            return { key: `${p.id}_disc`, title: `Discount · ${deal(p)}`, level: 'attention' as Item['level'], onClick: () => c.openDeal(p),
+              sub: `${formatRM(d.fromValue)} to ${formatRM(d.toValue)} (${discountPct(d).toFixed(1)}% off)${d.gpTo !== null && d.gpTo !== undefined ? ` · GP ${d.gpTo.toFixed(1)}%` : ''} · asked by ${d.byName}` };
+          }),
           ...list.map(o => {
             const p = c.deals.find(d => d.id === o.dealId);
             return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · requested by ${o.requestedByName}`, onClick: () => c.nav.openAdminWork('money') };
