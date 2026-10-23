@@ -5,7 +5,7 @@ import { callServer, db, friendlyError } from '../lib/firebase';
 import { addDays, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
   COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, OutStatus, TIMING_LABELS,
-  canDecide, dateTimeMY, ownApprovalOk, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
+  canDecide, dateTimeMY, ownApprovalOk, paidViaLink, raisedText, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
 import { projectRow } from '../lib/projectPL';
@@ -446,7 +446,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
             </p>
           )}
           {o.status === 'approved' && o.summaryToken && <p className="text-sm text-accent">On a payment summary sent to accounts</p>}
-          {o.status === 'pending' && isMine && <p className="text-sm text-attention">{viewer.role === 'management' ? 'Waiting for the other manager to approve.' : 'Waiting for a manager to approve.'}</p>}
+          {o.status === 'pending' && <p className="text-sm font-semibold text-attention">{raisedText(o)}</p>}
           {o.lastUndo && <p className="text-sm text-ink-soft">"Paid" undone by {o.lastUndo.byName} on {formatDate(o.lastUndo.at)} (was paid {formatDate(o.lastUndo.paidDate)})</p>}
         </div>
         {viewer.role !== 'rep' && !mode && (
