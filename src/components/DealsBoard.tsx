@@ -107,6 +107,7 @@ const emptyForm = () => ({
   type: 'Training',
   fundingType: '' as FundingType | '',
   proposalValue: '',
+  participants: '',       // number of participants: lives on the deal; quotation, proposal and report read it (2026-10-23)
   requestDate: todayIso(),
   trainingDate: '',
   trainingDays: '',       // blank = 1 day
@@ -287,6 +288,7 @@ export default function DealsBoard({
       type: p.type || 'Training',
       fundingType: (p.fundingType as FundingType) || '',
       proposalValue: dealValue(p) ? String(dealValue(p)) : '',
+      participants: Number(p.participants) > 0 ? String(Math.round(Number(p.participants))) : '',
       requestDate: (p.requestDate || todayIso()).slice(0, 10),
       trainingDate: /^\d{4}-\d{2}-\d{2}/.test(p.trainingDate || '') ? p.trainingDate.slice(0, 10) : '',
       trainingDays: trainingDays(p) !== 1 ? String(trainingDays(p)) : '',
@@ -322,6 +324,8 @@ export default function DealsBoard({
     if (!(existingDeal && valueLocked(existingDeal)) && !programme && !form.enquiryNote.trim() && !legacyCourse) return setFormError('Say what the client asked for: pick the programme from the list, or type a short note.');
     const value = form.proposalValue.trim() === '' ? 0 : Number(form.proposalValue);
     if (!Number.isFinite(value) || value < 0) return setFormError('Enter the deal value as a number, for example 15000.');
+    const pax = String(form.participants || '').trim() === '' ? 0 : Number(form.participants);   // older saved drafts have no participants
+    if (!Number.isInteger(pax) || pax < 0 || pax > 10000) return setFormError('Enter the number of participants as a whole number, for example 25.');
     if (!form.requestDate) return setFormError('Enter the date the client asked.');
     const days = parseTrainingDays(form.trainingDays);
     if (days === null) return setFormError(TRAINING_DAYS_PROBLEM);
@@ -363,6 +367,7 @@ export default function DealsBoard({
         type: form.type,
         fundingType: form.fundingType || '',
         proposalValue: value,
+        participants: pax,
         requestDate: form.requestDate,
         trainingDate: form.trainingDate || '',
         trainingDays: days,
@@ -890,7 +895,7 @@ export default function DealsBoard({
                   <p className="mt-1.5 text-sm text-attention">This programme isn't approved by HRDC yet. Admin must register it in the HRDC portal before the grant can be applied.</p>
                 )}
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <label htmlFor="d-type" className={label}>Type</label>
                   <select id="d-type" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={input}>
@@ -901,6 +906,10 @@ export default function DealsBoard({
                 <div>
                   <label htmlFor="d-value" className={label}>Deal value (RM) <span className="font-normal text-ink-soft">(optional for now)</span></label>
                   <input id="d-value" inputMode="decimal" value={form.proposalValue} disabled={formValueLocked} onChange={e => setForm(f => ({ ...f, proposalValue: e.target.value.replace(/[^0-9.]/g, '') }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} placeholder="15000" />
+                </div>
+                <div>
+                  <label htmlFor="d-pax" className={label}>Participants <span className="font-normal text-ink-soft">(needed before Won)</span></label>
+                  <input id="d-pax" inputMode="numeric" value={form.participants || ''} disabled={formValueLocked} onChange={e => setForm(f => ({ ...f, participants: e.target.value.replace(/[^0-9]/g, '') }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} placeholder="e.g. 25" />
                 </div>
               </div>
               <div className={formValueLocked ? 'pointer-events-none opacity-60' : ''} aria-disabled={formValueLocked || undefined}>
@@ -1336,6 +1345,7 @@ function DealPanel(props: {
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
               <Detail term="Value" value={dealValue(p) ? formatRM(dealValue(p)) : '—'} />
               <Detail term="Paid by" value={p.fundingType ? FUNDING_LABELS[p.fundingType as FundingType] : 'Not set'} />
+              <Detail term="Participants" value={Number(p.participants) > 0 ? `${Math.round(Number(p.participants))} pax` : 'Not set'} />
               <Detail term="Owner" value={props.ownerName} />
               <Detail term="Type" value={p.type || '—'} />
               <Detail term="Client asked on" value={formatDate(p.requestDate) || '—'} />

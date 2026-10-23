@@ -123,7 +123,7 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
         SST {formatRM(row.sst)}{row.sstTyped ? ' (typed in Project P&L)' : ''} · HRDC {formatRM(row.hrdcFee)} · Commission {row.commissionPct}% {formatRM(row.commission)} (sales person) · Costs approved or paid {formatRM(row.costs)}
       </p>
       <p className="text-sm text-ink-soft">
-        Still to come in{row.estimate ? ' (estimate)' : ''}: <strong className="text-ink">{formatRM(row.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(row.toPayOut)}</strong>
+        {row.estimate ? 'Expected (nothing invoiced yet)' : 'Invoiced, not paid yet'}: <strong className="text-ink">{formatRM(row.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(row.toPayOut)}</strong>
         {row.pendingApproval > 0 && <> · Waiting for approval (not counted yet): <strong className="text-ink">{formatRM(row.pendingApproval)}</strong></>}
         {behalfTotal > 0 && <> · Paid on behalf of client (claimed back in After training, not in the P&L):<strong className="text-ink">{formatRM(behalfTotal)}</strong></>}
       </p>
@@ -720,7 +720,7 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
         <Stat label={viewer.role === 'management' ? 'Waiting for your approval' : 'Waiting for approval'} value={String(viewer.role === 'management' ? mine.length : pending.length)} />
         <Stat label="Approved, to pay" value={`${toPay.length} · ${formatRM(toPay.reduce((t, o) => t + o.amount, 0))}`} />
         <button type="button" onClick={onOpenPayments} disabled={!onOpenPayments} className="col-span-2 rounded-xl border border-line bg-white px-3 py-2.5 text-left hover:bg-surface sm:col-span-1">
-          <p className="text-xs font-semibold text-ink-soft">Still to come in ({owed.length} unpaid)</p>
+          <p className="text-xs font-semibold text-ink-soft">Invoiced, not paid yet ({owed.length})</p>
           <p className="mt-0.5 text-lg font-bold tabular-nums">{formatRM(owedTotal)}</p>
           {onOpenPayments && <p className="text-xs font-semibold text-accent">See them in Payment tracking</p>}
         </button>

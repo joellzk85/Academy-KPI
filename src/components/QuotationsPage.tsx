@@ -8,7 +8,8 @@ import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../typ
 import { STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso, trainingDateText, trainingDays } from '../lib/deals';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { quoteSst } from '../lib/quoteSst';
-import { DEFAULT_TERMS, QuoteSources, isSent, resolveQuotation } from '../lib/quoteResolve';
+import { DEFAULT_TERMS, QuoteSources, isMainDealLine, isSent, resolveQuotation } from '../lib/quoteResolve';
+import SaveVenueButton from './SaveVenueButton';
 import QuotationDocument from './QuotationDocument';
 import { dealContact } from '../lib/contacts';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
@@ -160,6 +161,7 @@ export default function QuotationsPage({ rep, reps, viewer, onOpenTab, openFromD
           onOpenTab={onOpenTab}
           onClose={() => { setDraft(null); setFromDealId(''); }}
           backToDeal={fromDealId && onBackToDeal ? () => onBackToDeal(fromDealId) : undefined}
+          openDeal={onBackToDeal}
         />
       ) : openFromDeal ? (
         <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Opening the quotation…</p>
@@ -373,10 +375,11 @@ const toneClass = { soft: 'text-ink-soft', attention: 'text-attention', danger: 
 // What goes to the database (the Save button and the automatic draft save write the same thing).
 const prepareQuote = (out: Quotation): Quotation => clean({ ...out, items: (out.items || []).map((it, i) => ({ ...it, no: i + 1 })) });
 
-export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, backToDeal }: {
+export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, backToDeal, openDeal }: {
   initial: Quotation; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: QuoteSources; dealsForPicker: any[];
   onOpenTab?: (tab: Tab) => void; onClose: () => void; key?: string;
   backToDeal?: () => void;   // shown as "Back to deal" when opened from a deal
+  openDeal?: (dealId: string) => void;   // a linked deal's panel (participants and days are changed there, 2026-10-23)
 }) {
   const [q, setQ] = useState<Quotation>(initial);
   const [saved, setSaved] = useState<string>(isNew ? '' : JSON.stringify(initial));
@@ -403,6 +406,17 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   // A draft numbered by the CRM takes its client's customer code (added, or swapped when the client changes).
   const wantRef = !locked && q.refAuto ? refWithCode(q.refNumber, clientCode(r.client)) : q.refNumber;
   useEffect(() => { if (wantRef !== q.refNumber) set({ refNumber: wantRef }); }, [wantRef]);
+  // The main programme line's days follow the deal (2026-10-23): keep the saved line (and its total) in step.
+  const mainIdx = (q.items || []).findIndex(it => isMainDealLine(q.items || [], it));
+  const dealDays = r.deal ? trainingDays(r.deal) : 0;
+  useEffect(() => {
+    if (locked || !r.deal || mainIdx < 0 || Number(q.items[mainIdx].days) === dealDays) return;
+    setQ(x => {
+      const items = [...(x.items || [])];
+      items[mainIdx] = { ...items[mainIdx], days: dealDays, totalFee: (Number(items[mainIdx].feePerDay) || 0) * dealDays };
+      return { ...x, items };
+    });
+  }, [dealDays, mainIdx, locked]);
   const shared: string[] = q.sharedWithIds || [];
   const nameOf = (id?: string) => reps.find(p => p.id === id)?.name || '';
   const sub = (shownQ.items || []).reduce((t, i) => t + (Number(i.totalFee) || 0), 0);
@@ -549,6 +563,10 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
   }
 
   const opts = nameOptions;
+  // Opens the linked deal's panel (saving this quotation first), else its Deals list.
+  const dealLink = (what: string) => r.deal && openDeal ? (
+    <button type="button" className={`${linkBtn} mt-1`} onClick={() => leaveAfterSave(auto.flush, () => openDeal(r.deal.id))}>{what}</button>
+  ) : goto('pipeline', what);
   const goto = (tab: Tab, what: string) => onOpenTab ? (
     <button type="button" className={linkBtn} onClick={() => leaveAfterSave(auto.flush, () => onOpenTab(tab))}>{what}</button>
   ) : null;
@@ -679,10 +697,21 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
               <label className={label} htmlFor="q-venue">Venue</label>
               <PickOrType id="q-venue" options={opts(sources.venues)} linkedId={q.venueId || ''} text={q.venue || ''}
                 onChange={v => set({ venueId: v.id, venue: v.text })} placeholder="Pick from the venue list or type one" className={input} />
-              {!q.venueId && q.venue?.trim() && <div className="mt-1">{goto('venue', 'Using it often? Add it in Venues')}</div>}
+              {!q.venueId && q.venue?.trim() && !locked && (
+                <SaveVenueButton name={q.venue} venues={sources.venues} by={me} onSaved={(id, name) => set({ venueId: id, venue: name })} />
+              )}
             </div>
             <div><label className={label} htmlFor="q-time">Time</label><input id="q-time" value={q.time} onChange={e => set({ time: e.target.value })} className={input} placeholder="9:00 AM – 5:00 PM" /></div>
-            <div><label className={label} htmlFor="q-pax">Participants{r.deal?.participants ? ' (from the deal)' : ''}</label><input id="q-pax" value={r.deal?.participants ? shownQ.participants : q.participants} disabled={!!r.deal?.participants} onChange={e => set({ participants: e.target.value })} className={input} placeholder="Up to 25 pax" /></div>
+            {r.deal ? (
+              // Participants live on the deal (Joel, 2026-10-23): shown here, changed on the deal.
+              <div>
+                <label className={label} htmlFor="q-pax">Participants (from the deal)</label>
+                <input id="q-pax" value={r.deal.participants ? shownQ.participants : ''} disabled className={`${input} disabled:bg-surface`} placeholder="Not on the deal yet" />
+                {dealLink(r.deal.participants ? 'Change on the deal' : 'Add on the deal')}
+              </div>
+            ) : (
+              <div><label className={label} htmlFor="q-pax">Participants</label><input id="q-pax" value={q.participants} onChange={e => set({ participants: e.target.value })} className={input} placeholder="Up to 25 pax" /></div>
+            )}
             <div><label className={label} htmlFor="q-prov">Prepared by (as printed)</label><input id="q-prov" value={q.trainingProvider} onChange={e => set({ trainingProvider: e.target.value })} className={input} /></div>
           </div>
         </Card>
@@ -710,8 +739,16 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
                     <>
                       <td className="py-1 pr-2"><NumberCell value={it.feePerDay} onChange={n => setItem(i, { feePerDay: n })} label={`${it.kind === 'item' ? 'Price each' : 'Rate per day'}, line ${i + 1}`} /></td>
                       <td className="py-1 pr-2">
-                        <NumberCell value={it.days} onChange={n => setItem(i, { days: n })} label={`${it.kind === 'item' ? 'Quantity' : 'Days'}, line ${i + 1}`} />
-                        {it.kind !== 'item' && it.days === 0.5 && <span className="mt-0.5 block text-xs text-ink-soft">half day</span>}
+                        {r.deal && isMainDealLine(q.items || [], it) ? (
+                          // The main line's days come from the deal (Joel, 2026-10-23).
+                          <>
+                            <span className="block py-1.5 text-center tabular-nums" title="From the deal">{shown.days}</span>
+                            {!locked && dealLink('Change')}
+                          </>
+                        ) : (
+                          <NumberCell value={it.days} onChange={n => setItem(i, { days: n })} label={`${it.kind === 'item' ? 'Quantity' : 'Days'}, line ${i + 1}`} />
+                        )}
+                        {it.kind !== 'item' && shown.days === 0.5 && <span className="mt-0.5 block text-xs text-ink-soft">half day</span>}
                       </td>
                       <td className="py-2.5 text-right font-semibold tabular-nums">{formatRM(shown.totalFee || 0)}</td>
                       <td className="py-1 pl-1">{!locked && <button type="button" onClick={() => removeItem(i)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove line ${i + 1}`}><X className="h-4 w-4" /></button>}</td>

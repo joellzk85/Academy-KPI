@@ -1198,7 +1198,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         footer: (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              {tile('Still to come in', formatRM(toComeIn))}
+              {tile('Invoiced, not paid yet', formatRM(toComeIn))}
               {tile('Overdue invoices or claims', String(overdue), overdue ? 'text-danger' : '')}
               {tile('Approved, to pay', formatRM(toPay))}
               {tile('Waiting for approval', formatRM(waiting))}

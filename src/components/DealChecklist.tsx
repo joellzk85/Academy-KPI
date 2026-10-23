@@ -14,6 +14,7 @@ import { MoneyOut } from '../lib/money';
 import { withoutDeleted } from '../lib/linked';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import StepFiles from './ChecklistFiles';
+import SaveVenueButton from './SaveVenueButton';
 import T3Maker, { useT3 } from './T3Maker';
 import StepCosts, { VendorHint } from './StepCosts';
 import { useVendors } from './VendorsPage';
@@ -338,7 +339,7 @@ export default function DealChecklist({
                 )}
 
                 {editable && !t.done && t.kind !== 'basic' && (
-                  <TaskFields t={t} days={days} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
+                  <TaskFields t={t} days={days} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId} viewer={viewer}
                     onPatch={(c, a) => patch(t.id, c, a)} />
                 )}
 
@@ -369,7 +370,7 @@ export default function DealChecklist({
                 )}
 
                 {editable && !t.done && t.kind === 'basic' && (
-                  <TaskFields t={t} days={days} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId}
+                  <TaskFields t={t} days={days} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId} viewer={viewer}
                     onPatch={(c, a) => patch(t.id, c, a)} />
                 )}
 
@@ -569,8 +570,8 @@ function NumberBox({ id, label, value, busy, onSave }: { id: string; label: stri
 }
 
 // The inputs each kind of task needs before it can be ticked.
-function TaskFields({ t, days, busy, venues, trainers, quotes, onPatch, programmeId }: {
-  t: ChecklistTask; days: string[]; busy: boolean; venues: any[]; trainers: any[]; quotes: any[]; programmeId?: string;
+function TaskFields({ t, days, busy, venues, trainers, quotes, onPatch, programmeId, viewer }: {
+  t: ChecklistTask; days: string[]; busy: boolean; venues: any[]; trainers: any[]; quotes: any[]; programmeId?: string; viewer: Viewer;
   onPatch: (c: Partial<ChecklistTask>, action: string) => void;
 }) {
   const [note, setNote] = useState(t.note || '');
@@ -585,6 +586,13 @@ function TaskFields({ t, days, busy, venues, trainers, quotes, onPatch, programm
           <ChosenBox id={`v-${t.id}`} busy={busy} options={nameOptions(venues)} picked={effectiveVenue(t, quotes, venues)}
             fromQuote={effectiveVenue(undefined, quotes, venues)} what="venue"
             onSave={(v, action) => onPatch({ venueId: v.id, venueName: v.text }, `${t.label}: ${action}`)} />
+          {(() => {
+            const picked = effectiveVenue(t, quotes, venues);
+            return picked && !picked.id && !busy ? (
+              <SaveVenueButton name={picked.name} venues={venues} by={viewer}
+                onSaved={(id, name) => onPatch({ venueId: id, venueName: name }, `${t.label}: saved "${name}" to Venues`)} />
+            ) : null;
+          })()}
         </div>
       )}
       {t.kind === 'bus' && !waiting && (

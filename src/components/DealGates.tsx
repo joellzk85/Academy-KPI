@@ -28,8 +28,8 @@ const history = (p: any, viewer: Viewer, action: string) =>
   [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }];
 
 // The inputs for the missing fields. Values are kept by the parent so they can be saved with the step.
-export type GapValues = { clientId: string; programmeId: string; programmeName: string; value: string; fundingType: FundingType | '' };
-export const emptyGapValues = (): GapValues => ({ clientId: '', programmeId: '', programmeName: '', value: '', fundingType: '' });
+export type GapValues = { clientId: string; programmeId: string; programmeName: string; value: string; fundingType: FundingType | ''; participants: string };
+export const emptyGapValues = (): GapValues => ({ clientId: '', programmeId: '', programmeName: '', value: '', fundingType: '', participants: '' });
 
 function GapInputs({ gaps, values, set, programmes, clients, viewer }: {
   gaps: DealField[]; values: GapValues; set: (c: Partial<GapValues>) => void;
@@ -71,6 +71,12 @@ function GapInputs({ gaps, values, set, programmes, clients, viewer }: {
           </div>
         </div>
       )}
+      {gaps.includes('participants') && (
+        <div>
+          <label htmlFor="gap-pax" className={label}>Number of participants</label>
+          <input id="gap-pax" inputMode="numeric" value={values.participants} onChange={e => set({ participants: e.target.value.replace(/[^0-9]/g, '') })} className={input} placeholder="e.g. 25" />
+        </div>
+      )}
     </div>
   );
 }
@@ -96,6 +102,11 @@ function gapChanges(gaps: DealField[], v: GapValues, programmes: Programme[], cl
   if (gaps.includes('funding')) {
     if (!v.fundingType) return 'Choose how this training will be paid for.';
     out.fundingType = v.fundingType;
+  }
+  if (gaps.includes('participants')) {
+    const n = Number(v.participants);
+    if (!Number.isInteger(n) || n <= 0 || n > 10000) return 'Enter the number of participants, for example 25.';
+    out.participants = n;
   }
   return out;
 }
