@@ -36,10 +36,18 @@ const btnSecondary =
 const optional = <span className="font-normal text-ink-soft">(optional)</span>;
 
 const emptyForm = () => ({
-  name: '', region: '', distance: '', pictures: '', meetingPackagePrice: '', roomPackagePrice: '', dinnerPackage: '',
+  name: '', region: '', address1: '', address2: '', address3: '', address4: '', postcode: '', state: '', distance: '', pictures: '', meetingPackagePrice: '', roomPackagePrice: '', dinnerPackage: '',
   quotationDate: '', facilities: '', contact: '', remarks: '', renovation: false, photos: [] as string[],
 });
 type Form = ReturnType<typeof emptyForm>;
+
+// Malaysian states and federal territories, for the venue address (Joel, 2026-10-23).
+const MY_STATES = ['Johor', 'Kedah', 'Kelantan', 'Kuala Lumpur', 'Labuan', 'Melaka', 'Negeri Sembilan', 'Pahang', 'Penang', 'Perak', 'Perlis',
+  'Putrajaya', 'Sabah', 'Sarawak', 'Selangor', 'Terengganu'];
+/** The venue's address on one line: lines 1 to 4, then postcode and state. */
+export const venueAddress = (v: Partial<Venue>) =>
+  [v.address1, v.address2, v.address3, v.address4, [v.postcode, v.state].map(x => (x || '').trim()).filter(Boolean).join(' ')]
+    .map(x => (x || '').trim()).filter(Boolean).join(', ');
 
 const norm = (s?: string) => (s || '').trim().toLowerCase();
 const isLink = (s?: string) => /^https?:\/\/\S+$/i.test((s || '').trim());
@@ -110,7 +118,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
   const visible = useMemo(() => {
     const q = norm(search);
     const inRegion = region ? venues.filter(v => (v.region || '').trim() === region) : venues;
-    const list = q ? inRegion.filter(v => [v.name, v.region, v.facilities, v.contact, v.distance, v.remarks].some(x => norm(x).includes(q))) : inRegion;
+    const list = q ? inRegion.filter(v => [v.name, v.region, venueAddress(v), v.facilities, v.contact, v.distance, v.remarks].some(x => norm(x).includes(q))) : inRegion;
     return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }));
   }, [venues, search, region]);
 
@@ -120,7 +128,8 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
   const startNew = () => { setForm({ ...emptyForm(), name: search.trim() }); setFormError(''); setDupId(null); setEditing('new'); };
   const startEdit = (v: Venue) => {
     setForm({
-      name: v.name || '', region: v.region || '', distance: v.distance || '', pictures: v.pictures || '', meetingPackagePrice: v.meetingPackagePrice || '',
+      name: v.name || '', region: v.region || '', address1: v.address1 || '', address2: v.address2 || '', address3: v.address3 || '', address4: v.address4 || '',
+      postcode: v.postcode || '', state: v.state || '', distance: v.distance || '', pictures: v.pictures || '', meetingPackagePrice: v.meetingPackagePrice || '',
       roomPackagePrice: v.roomPackagePrice || '', dinnerPackage: v.dinnerPackage || '', quotationDate: v.quotationDate || '', facilities: v.facilities || '',
       contact: v.contact || '', remarks: v.remarks || '', renovation: v.status === 'Under Renovation', photos: v.photos || [],
     });
@@ -137,7 +146,9 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
     if (dup) { setDupId(dup.id); return setFormError(`"${dup.name}" is already in the venue list.`); }
 
     const details = {
-      name, region: (form.region || '').trim(), distance: form.distance.trim(), pictures: form.pictures.trim(),
+      name, region: (form.region || '').trim() || (form.state || '').trim(),
+      address1: (form.address1 || '').trim(), address2: (form.address2 || '').trim(), address3: (form.address3 || '').trim(), address4: (form.address4 || '').trim(),
+      postcode: (form.postcode || '').trim(), state: (form.state || '').trim(), distance: form.distance.trim(), pictures: form.pictures.trim(),
       meetingPackagePrice: form.meetingPackagePrice.trim(), roomPackagePrice: form.roomPackagePrice.trim(), dinnerPackage: form.dinnerPackage.trim(),
       quotationDate: form.quotationDate || '',
       facilities: form.facilities.trim(), contact: form.contact.trim(), remarks: form.remarks.trim(),
@@ -286,6 +297,21 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
                   <label className={label} htmlFor="v-name">Name</label>
                   <input id="v-name" value={form.name} onChange={e => set({ name: e.target.value })} placeholder="e.g. Happi Village, Janda Baik" className={input} autoFocus />
                 </div>
+                <div className="space-y-2">
+                  <label className={label} htmlFor="v-addr1">Address {optional}</label>
+                  {(['address1', 'address2', 'address3', 'address4'] as const).map((k, i) => (
+                    <input key={k} id={i === 0 ? 'v-addr1' : undefined} value={form[k] || ''} onChange={e => set({ [k]: e.target.value })}
+                      placeholder={`Address line ${i + 1}`} aria-label={`Address line ${i + 1}`} className={input} />
+                  ))}
+                  <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
+                    <input value={form.postcode || ''} onChange={e => set({ postcode: e.target.value.replace(/\D/g, '').slice(0, 5) })} inputMode="numeric"
+                      placeholder="Postcode" aria-label="Postcode" className={input} />
+                    <select value={form.state || ''} onChange={e => set({ state: e.target.value })} aria-label="State" className={input}>
+                      <option value="">State</option>
+                      {MY_STATES.map(st => <option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+                </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className={label} htmlFor="v-region">Region {optional}</label>
@@ -403,6 +429,7 @@ function VenuePanel(props: {
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-lg font-bold"><Building className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{v.name}</span></h3>
           <p className="mt-0.5 text-[15px] text-ink-soft">{[v.region, v.distance, v.status === 'Under Renovation' ? 'Under renovation' : 'Available'].filter(Boolean).join(' · ')}</p>
+          {venueAddress(v) && <p className="mt-0.5 text-[15px] text-ink">{venueAddress(v)}</p>}
         </div>
         <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
       </div>

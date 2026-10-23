@@ -891,6 +891,8 @@ export default function DealsBoard({
                   legacyName={editing !== 'new' ? form.courseName : ''}
                   kind={form.type === 'Teambuilding' ? 'teambuilding' : 'training'}
                   viewer={viewer}
+                  outlines={outlines}
+                  showLinks
                   onChange={pg => setForm(f => ({ ...f, programmeId: pg.id, courseName: pg.name }))}
                 />
                 {!form.programmeId && (

@@ -36,6 +36,18 @@ export interface Programme {
   notes?: string;
   category?: string;         // e.g. "Leadership & Professional Development" (from the Blueprint list, 2026-10-20)
   days?: number | null;      // usual length in days (half days allowed)
+  outlineFiles?: ProgrammeFile[];   // course outline files uploaded on the programme (2026-10-23)
+}
+
+// A course outline file kept on a programme, at programme_files/{programmeId}/{id}_{name} in storage.
+export interface ProgrammeFile {
+  id: string;
+  name: string;
+  size: number;
+  path: string;
+  at: string;
+  byId: string;
+  byName: string;
 }
 
 export interface HrdcQuery {

@@ -345,6 +345,12 @@ export interface Venue {
   contact?: string;
   remarks?: string;
   region?: string;              // state / area, e.g. "Pahang" (from the Blueprint venue list, 2026-10-20)
+  address1?: string;            // address lines 1 to 4, postcode and state (Joel, 2026-10-23)
+  address2?: string;
+  address3?: string;
+  address4?: string;
+  postcode?: string;
+  state?: string;
   quotationDate?: string;       // YYYY-MM-DD: date of the venue's latest quotation (its prices)
   pictures?: string;            // older: a typed link or note
   photos?: string[];            // uploaded photos (2026-10-19); the first is the main one

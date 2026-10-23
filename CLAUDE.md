@@ -160,6 +160,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Full deal test fixes (Joel, 2026-10-23):** decisions and the four batches are in `docs/features/full-deal-test.md`; Batches 1 to 3 done 2026-10-23. Batch 3: publish `firestore.rules` (discount requests); add "(TB)" to existing teambuilding programme names. Grant step to collect Employer code and Approval code (Admin / Management, in Admin work).
+- **Programmes linked to outlines and trainers; venue address (2026-10-23):** publish `storage.rules` (`programme_files`); go-live checklist item 54.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session
