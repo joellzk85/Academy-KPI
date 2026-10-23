@@ -6,7 +6,7 @@ import { formatDate, todayIso, trainingDateText, trainingDayList, trainingEndDat
 import { TrainingReportBox } from './TrainingReportAdmin';
 import {
   ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS, Picked, applicableTasks, asksNeeded, buildChecklist,
-  coTrainerShort, coTrainerText, isLockedStep, effectiveTrainer, isCoTrainer, leadTrainerTask, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
+  approvalCodeOf, coTrainerShort, coTrainerText, isLockedStep, effectiveTrainer, isCoTrainer, leadTrainerTask, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
   upgradeTasks, withSteps,
 } from '../lib/checklist';
 import { ChecklistFile } from '../lib/checklistFiles';
@@ -310,6 +310,11 @@ export default function DealChecklist({
                 <TaskSummary t={t} days={days} venues={venues} trainers={trainers} quotes={quotes} withNote={!(editable && !t.done && !arranging)} />
                 {t.done && <p className="text-sm text-ink-soft">Done {formatDate(t.doneAt || '')} by {t.doneByName}</p>}
                 {t.kind === 'grant' && !t.done && grantBlock && <p className="mt-1 text-sm font-semibold text-attention">{grantBlock}</p>}
+                {t.kind === 'grant' && !arranging && (
+                  <HrdcCodes deal={deal} tasks={allTasks} editable={editable} busy={busy}
+                    onApproval={code => patch(t.id, { approvalCode: code }, `${t.label}: approval code ${code ? `set to ${code}` : 'cleared'}`)}
+                    onEmployerSaved={code => save(allTasks, `${t.label}: employer code ${code ? `set to ${code}` : 'cleared'} (saved on the client)`)} />
+                )}
               </div>
               {editable && arranging ? (
                 <span className="flex shrink-0 items-center">
@@ -386,11 +391,10 @@ export default function DealChecklist({
                 {t.id === 'training_report' && (() => {
                   const trainerTask = leadTrainerTask(allTasks);
                   const tr = effectiveTrainer(trainerTask, quotes, trainers);
-                  const grant = allTasks.find(x => x.kind === 'grant');
                   const outputFiles = files.filter(f => f.taskId === 'output_assessment').map(f => f.name);
                   return (
                     <TrainingReportBox deal={deal} viewer={viewer} trainerId={tr?.id || ''} trainerName={tr?.name || 'The trainer'}
-                      header={{ programme: deal.courseName || '', client: deal.client || '', dates: trainingDateText(deal, true), venue: effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || '', trainer: tr?.name || '', grantNumber: grant?.grantNumber || '' }}
+                      header={{ programme: deal.courseName || '', client: deal.client || '', dates: trainingDateText(deal, true), venue: effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || '', trainer: tr?.name || '', grantNumber: approvalCodeOf(allTasks) }}
                       names={(t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
                       onChecked={() => { if (!t.done) patch(t.id, doneBy(), `${t.label}: checked, done`); }}
                       onReopened={() => { if (t.done) patch(t.id, openAgain, `${t.label}: reopened`); }} />
@@ -499,7 +503,6 @@ function MaterialsList({ t, busy, editable, onChange }: { t: ChecklistTask; busy
 // One line of detail under each task title.
 function TaskSummary({ t, days, venues, trainers, quotes, withNote }: { t: ChecklistTask; days: string[]; venues: any[]; trainers: any[]; quotes: any[]; withNote: boolean }) {
   const bits: string[] = [];
-  if (t.kind === 'grant' && t.grantNumber) bits.push(`Grant no. ${t.grantNumber}`);
   const fromQuote = (p: Picked) => (p.from === 'quotation' ? ' (from quotation)' : '');
   const venue = t.kind === 'venue' && !notNeeded(t) ? effectiveVenue(t, quotes, venues) : null;
   if (venue) bits.push(`${venue.name}${fromQuote(venue)}`);
@@ -639,6 +642,77 @@ function TaskFields({ t, days, busy, venues, trainers, quotes, onPatch, programm
         <input disabled={busy} value={note} onChange={e => setNote(e.target.value)} onBlur={() => note.trim() !== (t.note || '') && onPatch({ note: note.trim() }, `${t.label}: note updated`)}
           className={input} placeholder="Note (optional)" aria-label={`Note for ${t.label}`} />
       )}
+    </div>
+  );
+}
+
+// HRDC codes (Joel, 2026-10-23), typed on the Grant approved step by Admin or Management and read wherever HRDC needs
+// them (the HRDC claim, Payment tracking, the training report for HR, search). The Employer code is the client's own
+// HRD Corp code, so it lives on the client and is filled in for its next deals; the Approval code is this deal's.
+// Optional: a missing one is a reminder, never a block. Reps and the After training section see them read-only.
+export function useClient(clientId?: string) {
+  const [client, setClient] = useState<any | null>(null);
+  useEffect(() => {
+    if (!clientId) { setClient(null); return; }
+    return onSnapshot(doc(db, 'clients', clientId), s => setClient(s.exists() ? { ...s.data(), id: s.id } : null), () => setClient(null));
+  }, [clientId]);
+  return client;
+}
+
+export function HrdcCodes({ deal, tasks, editable, busy = false, onApproval, onEmployerSaved }: {
+  deal: any; tasks: ChecklistTask[] | undefined; editable: boolean; busy?: boolean;
+  onApproval?: (code: string) => void; onEmployerSaved?: (code: string) => void;
+}) {
+  const client = useClient(deal.clientId);
+  const [error, setError] = useState('');
+  if (!isHrdc(deal.fundingType)) return null;
+  const employer = String(client?.employerCode || '').trim();
+  const approval = approvalCodeOf(tasks);
+  const grantDone = !!(tasks || []).find(t => t.kind === 'grant')?.done;
+  const missing = [!employer && 'Employer code', !approval && 'Approval code'].filter(Boolean).join(' and ');
+
+  if (!editable || !onApproval) {
+    return (
+      <p className="mt-1 text-sm text-ink-soft">
+        Employer code <strong className="font-mono text-ink">{employer || '—'}</strong> · Approval code <strong className="font-mono text-ink">{approval || '—'}</strong>
+        {missing && grantDone && <span className="text-attention"> · {missing} not filled in on Grant approved yet</span>}
+      </p>
+    );
+  }
+
+  const saveEmployer = async (code: string) => {
+    if (!client) return setError('Pick the client from the client list on the deal first: the employer code is kept on the client.');
+    setError('');
+    try {
+      await updateDoc(doc(db, 'clients', client.id), { employerCode: code });
+      onEmployerSaved?.(code);
+    } catch (err) {
+      setError(friendlyError(err));
+    }
+  };
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <CodeBox id={`emp-${deal.id}`} label="Employer code" hint={client ? `Kept on ${client.companyName || 'the client'} for its next deals` : 'Kept on the client'}
+          value={employer} busy={busy} onSave={saveEmployer} />
+        <CodeBox id={`apc-${deal.id}`} label="Approval code" hint="HRDC's approval for this training" value={approval} busy={busy} onSave={onApproval} />
+      </div>
+      {missing && grantDone && <p className="text-sm font-semibold text-attention">Fill in the {missing}: the HRDC claim needs {missing.includes(' and ') ? 'them' : 'it'}.</p>}
+      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+    </div>
+  );
+}
+
+// A code typed in a box, saved when you leave it or press Enter.
+function CodeBox({ id, label, hint, value, busy, onSave }: { id: string; label: string; hint: string; value: string; busy: boolean; onSave: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  const commit = () => { const next = v.trim(); if (next !== value) onSave(next); };
+  return (
+    <div>
+      <label className={small} htmlFor={id}>{label} <span className="font-normal">({hint})</span></label>
+      <input id={id} value={v} disabled={busy} onChange={e => setV(e.target.value)} onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} className={`${input} font-mono`} />
     </div>
   );
 }

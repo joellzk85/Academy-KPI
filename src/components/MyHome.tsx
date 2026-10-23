@@ -20,7 +20,7 @@ import { useSalesTarget } from '../lib/useSalesTarget';
 import SalesProjection from './SalesProjection';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, isCoTrainer, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
-import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags } from '../lib/money';
+import { MoneyIn, MoneyOut, canDecide, dateTimeMY, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags, recentlyApproved } from '../lib/money';
 import { TrainerJob, claimFlag, jobId } from '../lib/trainerPortal';
 import { KIND_TEXT, canDecideChange, changeFlagText, changeSummary, pendingChange } from '../lib/trainingChange';
 import { projectRow } from '../lib/projectPL';
@@ -1169,6 +1169,8 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       const ready = c.moneyOut.filter(o => o.status === 'approved' && !o.summaryToken && isPayable(o, c.deals.find(d => d.id === o.dealId), c.today));
       if (ready.length) items.push({ key: 'ready_for_summary', title: `${ready.length} approved payment${ready.length === 1 ? '' : 's'} to send to accounts`, sub: `${formatRM(ready.reduce((t, o) => t + (Number(o.amount) || 0), 0))} · make a payment summary in Admin work → Money`, onClick: () => c.nav.openAdminWork('money') });
       c.moneyOut.filter(o => o.status === 'rejected' && !o.trainingCancelled && o.requestedById === c.viewer.id).forEach(o => items.push({ key: o.id, title: `Rejected: ${o.payee} ${formatRM(o.amount)}`, sub: o.rejectReason || 'See the reason and send a new request', level: 'attention', onClick: () => c.nav.openAdminWork('money') }));
+      // The person who raised a request hears back when it's approved, for 3 days (Joel, 2026-10-23).
+      recentlyApproved(c.moneyOut, c.viewer.id).forEach(o => items.push({ key: `${o.id}_ok`, title: `Approved: ${o.payee} ${formatRM(o.amount)}`, sub: `by ${o.decidedByName}, ${dateTimeMY(o.decidedAt)}`, onClick: () => c.nav.openAdminWork('money') }));
       items.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : b.level === 'danger' ? 1 : a.level ? -1 : 1));
       return { items, empty: 'No money jobs waiting.' };
     }
@@ -1193,7 +1195,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           }),
           ...list.map(o => {
             const p = c.deals.find(d => d.id === o.dealId);
-            return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · requested by ${o.requestedByName}`, onClick: () => c.nav.openAdminWork('money') };
+            return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · raised by ${o.requestedByName}, ${dateTimeMY(o.resubmittedAt || o.requestedAt)}`, onClick: () => c.nav.openAdminWork('money') };
           }),
         ],
         empty: 'Nothing waiting for your approval.',

@@ -182,6 +182,15 @@ export function dateTimeMY(iso?: string): string {
   return d.toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+/** "Payment raised 23 Oct 2026, 2:15 pm · pending boss approval" on a pending request (Joel, 2026-10-23). */
+export const raisedText = (o: Pick<MoneyOut, 'requestedAt' | 'resubmittedAt' | 'requestDate'>) =>
+  `Payment raised ${dateTimeMY(o.resubmittedAt || o.requestedAt) || o.requestDate || ''} · pending boss approval`;
+
+/** The requests this person raised that a manager approved in the last 3 days: their My home notice (2026-10-23). */
+export function recentlyApproved(outs: MoneyOut[], viewerId: string, now = Date.now()): MoneyOut[] {
+  return outs.filter(o => o.status === 'approved' && o.requestedById === viewerId && o.decidedAt && now - Date.parse(o.decidedAt) < 3 * 86400_000);
+}
+
 export interface MoneySettings {
   hrdcDeductionPct: number;            // HRDC keeps this % of each claim
   overdueDays: number;                 // invoice or claim unpaid this long = overdue

@@ -125,7 +125,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
   const shown = inYear
     .filter(l => !month || l.month.slice(5, 7) === month)
     .filter(l => show === 'all' || (show === 'paid' ? linePaid(l) : !linePaid(l)))
-    .filter(l => !q || [l.programme, l.client, l.employer, l.claimId, l.grantId, l.salesPerson, l.trainer].some(x => (x || '').toLowerCase().includes(q)))
+    .filter(l => !q || [l.programme, l.client, l.employer, l.employerCode, l.claimId, l.grantId, l.salesPerson, l.trainer].some(x => (x || '').toLowerCase().includes(q)))
     .sort((a, b) => (b.date || b.month).localeCompare(a.date || a.month) || a.groupNo.localeCompare(b.groupNo) || a.id.localeCompare(b.id));
   const t = totalsOf(shown);
   const byMonth = MONTHS.map((_, i) => String(i + 1).padStart(2, '0'))
@@ -398,7 +398,8 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
               <Item k="Training date" v={open.dateText && !isIsoDay(open.dateText) ? open.dateText : formatDate(open.date)} />
               <Item k="Sales person" v={open.salesPerson} />
               <Item k="Claim ID" v={open.claimId} mono />
-              <Item k="Grant ID" v={open.grantId} mono />
+              <Item k="Grant ID (approval code)" v={open.grantId} mono />
+              {open.employerCode && <Item k="Employer code" v={open.employerCode} mono />}
               <Item k="Approved amount" v={formatRM(open.approved)} />
               <Item k="After HRDC 4%" v={rm(open.afterDeduct)} />
               {open.afterTax !== null && <Item k="After all tax" v={rm(open.afterTax)} />}

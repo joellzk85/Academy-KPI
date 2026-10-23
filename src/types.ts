@@ -276,6 +276,7 @@ export interface Client {
   companyName: string;
   code?: string;         // customer code, e.g. HKL (2026-10-19): starts quotation and proposal numbers (lib/docRefs.ts)
   employerName?: string; // optional, e.g. the employer registered with HRD Corp; shown in Project P&L; a quotation can be addressed to it
+  employerCode?: string; // HRD Corp employer code (2026-10-23), also typed on a deal's Grant approved step; HRDC claim, Payment tracking
   contactName: string;
   designation?: string;
   phone?: string;

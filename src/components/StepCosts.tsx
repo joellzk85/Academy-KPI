@@ -3,7 +3,7 @@ import { doc, serverTimestamp, setDoc, updateDoc, writeBatch, getDoc } from 'fir
 import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
-import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, ownApprovalOk, paidViaLink } from '../lib/money';
+import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, ownApprovalOk, paidViaLink, raisedText } from '../lib/money';
 import { ChecklistTask, costCategory, isCoTrainer, materialItems } from '../lib/checklist';
 import { STEP_VENDOR_TYPE, Vendor, bankText, hasBank, vendorName } from '../lib/vendors';
 import { Receipt } from '../lib/postTraining';
@@ -150,7 +150,7 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
             {o.status === 'paid' && <span className="text-ink-soft">paid {formatDate(o.paidDate || '')}{o.paidRef ? `, ref ${o.paidRef}` : ''}</span>}
             {o.status === 'approved' && o.summaryToken && <span className="text-accent">on a payment summary sent to accounts</span>}
             {o.onBehalf && o.status !== 'rejected' && <span className="rounded bg-attention-soft px-1.5 py-0.5 font-semibold text-attention">On behalf of client: claim back after training</span>}
-            {o.status === 'pending' && mine && <span className="text-attention">{viewer.role === 'management' ? 'the other manager approves' : 'a manager approves'}</span>}
+            {o.status === 'pending' && <span className="text-attention">{raisedText(o)}</span>}
             {!inPL(o) && !o.onBehalf && o.notInPLReason && <span className="text-ink-soft">not in the P&L: {o.notInPLReason}</span>}
             {o.lastUndo && <span className="text-ink-soft">"paid" undone by {o.lastUndo.byName} {formatDate(o.lastUndo.at)}</span>}
           </p>
