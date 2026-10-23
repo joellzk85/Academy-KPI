@@ -9,7 +9,7 @@ import type { TrainerJob } from './trainerPortal';
 
 export type FeeCheckKey = 't3' | 'photos' | 'report';
 export interface FeeCheckMark { byId: string; byName: string; at: string }
-export interface FeeCheck { key: FeeCheckKey; label: string; auto: string; manual: FeeCheckMark | null; ok: boolean }
+export interface FeeCheck { key: FeeCheckKey; label: string; auto: string; manual: FeeCheckMark | null; ok: boolean; waiting?: string }
 
 export const FEE_CHECK_LABELS: Record<FeeCheckKey, string> = { t3: 'T3', photos: 'Training photos', report: 'Training report' };
 
@@ -34,7 +34,9 @@ export function feeChecks(deal: { fundingType?: string } | null | undefined, job
   return keys.map(key => {
     const m: FeeCheckMark | null = manual[key]?.byName ? manual[key] : null;
     const auto = found[key] || '';
-    return { key, label: FEE_CHECK_LABELS[key], auto, manual: m, ok: !!auto || !!m };
+    // Sent by the trainer but not checked yet: say so, not "not found" (full deal test, 2026-10-23).
+    const waiting = key === 'report' && !auto && report?.status === 'submitted' ? 'sent by the trainer, waiting for Admin or Management to check it' : '';
+    return { key, label: FEE_CHECK_LABELS[key], auto, manual: m, ok: !!auto || !!m, waiting };
   });
 }
 

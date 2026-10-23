@@ -15,7 +15,7 @@ import { sizeText } from './TrainerExtrasFields';
 import { ProfileSubmission, cleanProfile, profileProblem } from '../lib/trainerLinks';
 import { PROFILE_PARTS, emptyExtras, profileGaps, safeName, trainerFileProblem, trainerFileType } from '../lib/trainerProfile';
 import {
-  MIN_PORTAL_PASSWORD, PORTAL_PATH, PortalFile, STAR_WORDS, bankProblem, calendarLinks, claimFilesText, claimFolder, cleanBank, cleanEmail, cleanTin, emailProblem, passwordProblem, portalFolder,
+  MIN_PORTAL_PASSWORD, PORTAL_PATH, PortalFile, STAR_WORDS, bankProblem, calendarLinks, claimFilesText, claimFolder, cleanBank, cleanEmail, cleanTin, emailProblem, greetName, passwordProblem, portalFolder,
 } from '../lib/trainerPortal';
 import { formatDateRange, formatRM, daysText } from '../lib/deals';
 import { COMPANY } from '../lib/company';
@@ -191,7 +191,7 @@ function JoinScreen({ token, onDone }: { token: string; onDone: () => void }) {
   return shell(
     <form onSubmit={submit} className={`${card} mx-auto max-w-md space-y-4`}>
       <div>
-        <h1 className="text-xl font-bold">Welcome{info.name ? `, ${info.name.split(' ')[0]}` : ''}!</h1>
+        <h1 className="text-xl font-bold">Welcome{greetName(info.name) ? `, ${greetName(info.name)}` : ''}!</h1>
         <p className="mt-1 text-[15px] text-ink-soft">{info.invitedBy} from NEXT Academy invited you to the trainer portal. Set up your login below; you'll use this email and password from now on.</p>
       </div>
       <div><label className={label} htmlFor="j-name">Full name</label><input id="j-name" autoComplete="name" value={f.name} onChange={e => setF(x => ({ ...x, name: e.target.value }))} className={input} /></div>
@@ -367,7 +367,7 @@ function HomeTab({ info, go, onPassword }: { info: any; go: (t: Tab) => void; on
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-bold">Hi {String(p.name || '').split(' ')[0] || 'there'}</h1>
+        <h1 className="text-xl font-bold">Hi {greetName(p.name) || 'there'}</h1>
         <p className="text-[15px] text-ink-soft">Your trainings with NEXT Academy, your profile and your payments, in one place.</p>
       </div>
       <section className={card}>
@@ -466,8 +466,8 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
           {t.movedFrom && !t.cancelled && <p className="text-sm font-semibold text-attention">Date changed (was {isoDay(t.movedFrom)})</p>}
           {t.venue && <p className="flex items-center gap-1.5 text-sm text-ink-soft"><MapPin className="h-4 w-4" /> {t.venue.name}{t.venue.region ? `, ${t.venue.region}` : ''}</p>}
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${t.cancelled || t.poDeclined ? 'bg-danger-soft text-danger' : t.confirmed ? 'bg-accent-soft text-accent' : 'bg-attention-soft text-ink'}`}>
-          {t.cancelled ? 'Cancelled' : t.poDeclined ? 'You declined' : t.confirmed ? 'Confirmed' : 'Being arranged'}
+        <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${t.cancelled || t.poDeclined ? 'bg-danger-soft text-danger' : t.confirmed || t.ended ? 'bg-accent-soft text-accent' : 'bg-attention-soft text-ink'}`}>
+          {t.cancelled ? 'Cancelled' : t.poDeclined ? 'You declined' : t.ended ? 'Training done' : t.confirmed ? 'Confirmed' : 'Being arranged'}
         </span>
       </div>
       {t.cancelled && <p className={alertBox}>This training was cancelled, so its PO no longer applies. NEXT Academy will contact you about it.</p>}
@@ -534,7 +534,7 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
         {t.claim?.status === 'submitted' && <p className="mt-2 flex items-center gap-1.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4" /> Fee requested on {isoDay(t.claim.submittedAt)} ({claimFilesText(t.claim.photos, t.claim.t3)}). NEXT Academy is checking it.</p>}
         {t.claim?.status === 'returned' && <p className="mt-2 rounded-lg bg-attention-soft px-3 py-2 text-sm"><strong>Please fix and send again:</strong> {t.claim.returnNote || 'NEXT Academy asked for changes.'}</p>}
         {!allPaid && !t.cancelled && (t.started
-          ? !claiming && <button type="button" className={`${t.claim?.status === 'submitted' ? btnSecondary : btnPrimary} mt-3`} onClick={() => setClaiming(true)}>{t.claim?.status === 'returned' ? 'Fix and send again' : t.claim ? 'Change what I sent' : 'Request training fee'}</button>
+          ? !claiming && <button type="button" className={`${t.claim?.status === 'submitted' ? btnSecondary : btnPrimary} mt-3`} onClick={() => setClaiming(true)}>{t.claim?.status === 'returned' ? 'Fix and send again' : t.claim ? 'Change my fee request' : 'Request training fee'}</button>
           : <p className="mt-2 text-sm text-ink-soft">You can request your fee once the training has started.</p>)}
         {claiming && <ClaimForm t={t} trainerId={trainerId} onCancel={() => setClaiming(false)} onDone={async () => { setClaiming(false); await reload(); }} />}
       </div>
@@ -552,7 +552,7 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
           )}
           {t.started
             ? <button type="button" className={`${!t.report || t.report.status === 'draft' || t.report.status === 'returned' ? btnPrimary : btnSecondary} mt-3`} onClick={() => setReporting(true)}>
-                {!t.report ? 'Write the training report' : t.report.status === 'returned' ? 'Fix and send again' : t.report.status === 'draft' ? 'Continue the report' : 'Change what I sent'}
+                {!t.report ? 'Write the training report' : t.report.status === 'returned' ? 'Fix and send again' : t.report.status === 'draft' ? 'Continue the report' : 'Change my report'}
               </button>
             : <p className="mt-1 text-sm text-ink-soft">You can write the report once the training has started.</p>}
         </div>

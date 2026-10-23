@@ -3,7 +3,7 @@ import { collection, deleteField, doc, getDoc, getDocs, onSnapshot, query, setDo
 import { BadgeCheck, Check, Copy, FileText, KeyRound, Landmark, Loader2, MessageCircle, Star, X } from 'lucide-react';
 import { auth, callServer, db, friendlyError } from '../lib/firebase';
 import { sendPortalPasswordEmail } from '../lib/portalEmail';
-import { dealStage, formatDate, formatDateRange, trainingEndDate } from '../lib/deals';
+import { dealStage, formatDate, formatDateRange, todayIso, trainingEndDate } from '../lib/deals';
 import { linkedOnly } from '../lib/linked';
 import { MoneyOut } from '../lib/money';
 import { newToken, whatsappShare } from '../lib/trainerLinks';
@@ -395,6 +395,9 @@ export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
   const [rating, setRating] = useState(false);
   const { busy, error, run } = useRun();
   if (!trainerId) return null;
+  // No rating before the session (Joel, 2026-10-23).
+  const start = String(deal.trainingDate || '').slice(0, 10);
+  const started = !!start && start <= todayIso();
   const ref = doc(db, 'trainer_jobs', jobId(deal.id, trainerId));
   const claim = job?.claim;
   const lines = outs.filter(o => o.dealId === deal.id && o.checklistTaskId === task.id);
@@ -488,9 +491,10 @@ export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
               {staff && <button type="button" className="font-semibold text-accent hover:underline" onClick={startRating}>Change</button>}</p>
             {job.rating.note && <p className="mt-0.5 whitespace-pre-line text-ink-soft">{job.rating.note}</p>}
           </div>
-        ) : staff ? (
+        ) : staff && started ? (
           <button type="button" className={btnSecondary} onClick={startRating}><Star className="h-4 w-4" /> Rate {trainerName} for this training</button>
-        ) : <p className="text-sm text-ink-soft">Not rated yet.</p>}
+        ) : staff ? <p className="text-sm text-ink-soft">You can rate {trainerName} once the training starts.</p>
+        : <p className="text-sm text-ink-soft">Not rated yet.</p>}
       </div>
       {error && <p role="alert" className={alertBox}>{error}</p>}
     </div>

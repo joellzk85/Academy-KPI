@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import {
   AlertTriangle, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardCheck, GripVertical, LayoutGrid, Loader2, Plus, RotateCcw, ShieldCheck, Users, X,
   BarChart3, TrendingUp, FileText, BookOpen, Building2, GraduationCap, MapPin, ListTodo, ListChecks, Wallet, Layers, ListOrdered, DatabaseBackup, LineChart, PieChart, UserCog, Wrench, PartyPopper,
@@ -131,6 +131,7 @@ export interface MyHomeNav {
   openFile?: (kind: SharedKind, id: string) => void;   // a shared quotation or outline, straight in the editor
   openClient?: (clientId: string) => void;             // a client's page (client touch point follow-ups)
   openTeamFollowUps?: (personId?: string) => void;     // Management → Team follow-ups (one person, or '__quiet')
+  openDeal?: (deal: any) => void;                      // the deal's own panel in its owner's workspace
 }
 
 export default function MyHome({ viewer, people, representatives, workspaces, deals, events, calendar, notices, nav }: {
@@ -161,6 +162,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const [quotes, setQuotes] = useState<any[]>([]);
   const [plDocs, setPlDocs] = useState<Record<string, any>>({});
   const [trainerJobs, setTrainerJobs] = useState<TrainerJob[]>([]);
+  const [reportsToCheck, setReportsToCheck] = useState<string[]>([]);   // deal ids whose training report the trainer sent, not checked yet
   const touchPoints = useTouchPoints();
   const [savedCards, setSavedCards] = useState<CardId[] | null>(null);
   const [savedShortcuts, setSavedShortcuts] = useState<ShortcutId[] | null>(null);
@@ -242,6 +244,8 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
       subs.push(onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))));
       // Trainer fee requests from the portal, as a notification (2026-10-21).
       subs.push(onSnapshot(query(collection(db, 'trainer_jobs')), s => setTrainerJobs(s.docs.map(d => ({ ...(d.data() as TrainerJob), id: d.id }))), () => setTrainerJobs([])));
+      // Training reports sent by the trainer and waiting to be checked (full deal test, 2026-10-23).
+      subs.push(onSnapshot(query(collection(db, 'training_reports'), where('status', '==', 'submitted')), s => setReportsToCheck(s.docs.map(d => d.id)), () => setReportsToCheck([])));
     }
     // SST typed in Project P&L, for the Money position card's profit (Management only).
     if (viewer.role === 'management') {
@@ -309,10 +313,15 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const nameOf = (id: string) => people.find(p => p.id === id)?.name || 'Former team member';
   const clientName = (p: any) => clients.find(c => c.id === p.clientId)?.companyName || p.client || 'No client';
   // Management can open anyone's workspace; everyone else only their own (Admin goes to the work queue).
+  // Every card opens the deal's own panel, not just the list (full deal test, 2026-10-23: a won deal isn't in
+  // "Open deals", so the list alone looked empty).
   const openDeal = (p: any) => {
     const owner = dealOwnerId(p);
-    if (owner === viewer.id || viewer.role === 'management') return nav.openWorkspace(hasWorkspace(owner) ? owner : viewer.id, 'pipeline');
-    if (viewer.role === 'admin') return nav.openAdminWork('queue');
+    if (owner === viewer.id || viewer.role === 'management') {
+      if (nav.openDeal) return nav.openDeal(p);
+      return nav.openWorkspace(hasWorkspace(owner) ? owner : viewer.id, 'pipeline');
+    }
+    if (viewer.role === 'admin') return nav.openAdminWork('queue', dealStage(p) === 'won' ? p.id : undefined);
   };
 
   const wonDeals = useMemo(() => deals.filter(p => dealStage(p) === 'won'), [deals]);
@@ -349,7 +358,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
-    quotes, plDocs, trainerJobs,
+    quotes, plDocs, trainerJobs, reportsToCheck,
   };
 
   return (
@@ -795,6 +804,7 @@ type CardCtx = {
   openedLinks: DocLink[];   // the links this person may see opens of
   quotes: any[]; plDocs: Record<string, any>;   // for the one P&L (SST from the quotation, or typed in Project P&L)
   trainerJobs: TrainerJob[];
+  reportsToCheck: string[];
 };
 
 // Trainers who asked for their fee in the portal and aren't approved yet (Admin and Management's notification,
@@ -1120,6 +1130,11 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     case 'money_jobs': {
       // Trainers asking for their fee in the portal (2026-10-21): Admin checks T3, photos and report first.
       const items: Item[] = [...feeRequestItems(c, deal)];
+      // Training reports the trainer sent: Admin or Management checks them (this also unlocks the trainer fee).
+      c.wonDeals.filter(p => c.reportsToCheck.includes(p.id)).forEach(p => items.push({
+        key: `${p.id}_report`, title: `Training report to check · ${deal(p)}`, level: 'attention',
+        sub: 'The trainer sent it. Check it, then click "Checked, ready for HR"', onClick: () => c.nav.openAdminWork('queue', p.id),
+      }));
       // Before training only: invoicing a direct-pay client. From the day after the training it's in the After training card.
       c.wonDeals.forEach(p => {
         moneyFlags(p, c.moneyIn.filter(m => m.dealId === p.id), [], c.moneySettings, c.today).forEach((f, i) => items.push({

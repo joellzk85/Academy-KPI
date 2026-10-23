@@ -530,7 +530,7 @@ function Packages({ r, pax, setPax, pdf, chosenIn, onChosen }: { r: ResolvedTb; 
               return (
                 <li key={row.id} className={`flex items-start gap-3 py-2.5 text-[15px] ${none ? 'text-[#9aa8a3]' : ''}`}>
                   {none ? <Minus className="mt-0.5 h-4 w-4 shrink-0" /> : <Check className="mt-0.5 h-4 w-4 shrink-0" style={{ color: TB.teal }} />}
-                  <span className="flex-1"><span className="font-semibold">{row.label}</span>{!none && !/^yes$/i.test(v.trim()) && <span className="block text-sm text-[#5b6b66]">{v}</span>}</span>
+                  <span className="flex-1"><span className="font-semibold">{row.label}</span>{!none && extraText(row.label, v) && <span className="block text-sm text-[#5b6b66]">{extraText(row.label, v)}</span>}</span>
                 </li>
               );
             })}
@@ -544,6 +544,17 @@ function Packages({ r, pax, setPax, pdf, chosenIn, onChosen }: { r: ResolvedTb; 
 }
 
 const cellText = (v: string) => (v.trim() ? v : '-');
+
+// What a package line adds under its item name, without repeating the name (full deal test, 2026-10-23):
+// "Door gifts" + "Door gifts" shows nothing extra; "Videography and drone" + "Videography and drone (depends on
+// location)" shows only "(depends on location)"; "Yes" shows nothing extra.
+function extraText(label: string, value: string): string {
+  const l = label.trim().toLowerCase();
+  const v = value.trim();
+  if (!v || /^yes$/i.test(v) || v.toLowerCase() === l) return '';
+  if (l && v.toLowerCase().startsWith(l)) return v.slice(l.length).replace(/^[\s,:;·–—-]+/, '');
+  return v;
+}
 
 function Terms({ text }: { text: string }) {
   const terms = parseTerms(text);

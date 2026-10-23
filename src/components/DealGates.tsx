@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { Loader2, Trophy } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
@@ -109,6 +109,15 @@ export function GapsBox({ deal, gaps, step, programmes, clients, viewer, onSaved
   const [v, setV] = useState<GapValues>(emptyGapValues());
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // The box opens after a click on a step, often far down a long editor (full deal test, 2026-10-23):
+  // bring it into view and put the cursor in its first box, so the click never seems to do nothing.
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    box.querySelector<HTMLElement>('input, select, textarea')?.focus({ preventScroll: true });
+  }, []);
   const save = async () => {
     const ch = gapChanges(gaps, v, programmes, clients);
     if (typeof ch === 'string') return setErr(ch);
@@ -125,7 +134,7 @@ export function GapsBox({ deal, gaps, step, programmes, clients, viewer, onSaved
     }
   };
   return (
-    <div className="rounded-xl border border-attention/30 bg-attention-soft p-4">
+    <div ref={boxRef} className="rounded-xl border-2 border-attention bg-attention-soft p-4 shadow-md">
       <p className="mb-3 text-sm font-semibold text-attention">Before "{step}", add {gaps.map(g => GAP_LABELS[g]).join(' and ')}:</p>
       <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} />
       {err && <p role="alert" className="mt-3 text-sm text-danger">{err}</p>}

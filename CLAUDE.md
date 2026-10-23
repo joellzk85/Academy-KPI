@@ -127,6 +127,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `home-kpi-dashboards.md` | KPI templates, My home, rings, cards, workspace menu, KPI page, Team performance, weekly presentation (Present tab, action points), Login log, Appraisal |
 | `clients-directories-calendar.md` | Client history, Clients, Trainers, Venues, To-do, Google Calendar |
 | `backup-and-tidyup.md` | Data backup, tidy-up done and still open |
+| `full-deal-test.md` | Full deal test of 22 Oct 2026: every problem found, Joel's fix / leave decisions, the four fix batches and what is done |
 
 ## 6. Status and Joel's open to-dos
 
@@ -154,6 +155,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Appraisal (2026-10-22):** KPI, 360 attitude items and reliability as three separate parts (Management → Appraisal); publish `firestore.rules`; go-live checklist item 51.
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
+- **Full deal test fixes (Joel, 2026-10-23):** decisions and the four batches are in `docs/features/full-deal-test.md`; Batch 1 done 2026-10-23. Grant step to collect Employer code and Approval code (Admin / Management, in Admin work).
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

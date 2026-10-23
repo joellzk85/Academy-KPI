@@ -149,6 +149,13 @@ export function claimProblem(_photos: PortalFile[], _t3: PortalFile[]): string {
   return '';
 }
 
+// The name to greet a trainer by: their first name, skipping titles (full deal test, 2026-10-23: "Hi Dr").
+const TITLES = new Set(['dr', 'mr', 'mrs', 'ms', 'mdm', 'madam', 'miss', 'puan', 'pn', 'encik', 'en', 'cik', 'tuan', 'dato', "dato'", 'datuk', 'datin', 'tan', 'sri', 'prof', 'ir', 'ts', 'sir', 'haji', 'hj', 'hajah', 'hjh', 'ustaz', 'ustazah']);
+export function greetName(name: unknown): string {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return words.find(w => !TITLES.has(w.toLowerCase().replace(/\.$/, ''))) || words[0] || '';
+}
+
 /** "2 photos, T3" / "no files": what came with a fee request (deal History, the portal). */
 export function claimFilesText(photos: unknown[] = [], t3: unknown[] = []): string {
   const parts = [photos.length ? `${photos.length} photo${photos.length === 1 ? '' : 's'}` : '', t3.length ? 'T3' : ''].filter(Boolean);
