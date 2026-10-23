@@ -73,7 +73,7 @@ interface DealsBoardProps {
   onOpenDealHandled?: () => void;
 }
 
-type Filter = 'open' | DealStage | 'tagged' | 'on_hold';
+type Filter = 'open' | 'all' | DealStage | 'tagged' | 'on_hold';
 type StagePanel = null | 'won' | 'lost' | 'followup' | 'skip' | 'duplicate' | 'hold' | 'resume';
 type DuplicateOptions = { client: { id: string; companyName: string }; trainingDate: string; trainingDays: number; start: DuplicateStart };
 type GateStep = 'proposal' | 'quote' | 'skip';
@@ -146,6 +146,12 @@ export default function DealsBoard({
   const [loaded, setLoaded] = useState(false);
 
   const [filter, setFilter] = useState<Filter>('open');
+  // Admin and Management on their own Deals page can look at anyone's deals, or everyone's (Joel, 2026-10-23).
+  const canPickWho = viewer.role !== 'rep' && viewer.id === owner.id;
+  const [who, setWho] = useState<string>('me');   // 'me', 'all' or a team member ID
+  const scopeAll = canPickWho && who === 'all';
+  const scopeId = canPickWho && who !== 'me' && who !== 'all' ? who : owner.id;
+  const showOwner = scopeAll || scopeId !== owner.id;
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);   // deal shown in the panel
   const [editing, setEditing] = useState<'new' | string | null>(null);
@@ -209,7 +215,7 @@ export default function DealsBoard({
   const canEdit = (p: any) => viewer.role !== 'rep' || dealOwnerId(p) === viewer.id;
   const canCreateHere = viewer.role !== 'rep' || viewer.id === owner.id;
 
-  const myDeals = useMemo(() => deals.filter(p => dealOwnerId(p) === owner.id), [deals, owner.id]);
+  const myDeals = useMemo(() => (scopeAll ? deals : deals.filter(p => dealOwnerId(p) === scopeId)), [deals, scopeAll, scopeId]);
   const taggedDeals = useMemo(
     () => deals.filter(p => dealOwnerId(p) !== owner.id && (p.taggedRepIds || []).includes(owner.id)),
     [deals, owner.id]
@@ -228,6 +234,7 @@ export default function DealsBoard({
 
   const visible = useMemo(() => {
     const base = filter === 'tagged' ? taggedDeals : filter === 'on_hold' ? myDeals.filter(p => activeHold(p))
+      : filter === 'all' ? myDeals
       : myDeals.filter(p => (filter === 'open' ? OPEN_STAGES.includes(dealStage(p)) : journeyStage(dealStage(p)) === filter));
     const q = search.trim().toLowerCase();
     const list = q ? base.filter(p => `${clientName(p)} ${courseOf(p)} ${p.enquiryNote || ''}`.toLowerCase().includes(q)) : base;
@@ -271,7 +278,7 @@ export default function DealsBoard({
 
   // ---------- Create / edit ----------
   const startNew = () => {
-    setForm({ ...emptyForm(), ownerId: owner.id });
+    setForm({ ...emptyForm(), ownerId: scopeId });
     setFormError('');
     setEditing('new');
     setOpenId(null);
@@ -609,10 +616,19 @@ export default function DealsBoard({
         <div>
           <h2 className="text-xl font-bold">Deals</h2>
           <p className="mt-0.5 text-[15px] text-ink-soft">
-            {viewer.id === owner.id ? 'Your deals, from first contact to won.' : `${owner.name}'s deals, from first contact to won.`}
+            {scopeAll ? "Everyone's deals, from first contact to won."
+              : scopeId === viewer.id ? 'Your deals, from first contact to won.'
+              : `${personName(scopeId)}'s deals, from first contact to won.`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {canPickWho && (
+            <select value={who} onChange={e => { setWho(e.target.value); if (filter === 'tagged') setFilter('open'); }} className="rounded-lg border border-line bg-white px-3 py-2 text-[15px] font-semibold text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15" aria-label="Whose deals">
+              <option value="me">My deals</option>
+              <option value="all">Everyone</option>
+              {people.filter(r => r.id !== viewer.id).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
           <button type="button" onClick={() => setEstimating(true)} className={btnSecondary}>
             <Calculator className="h-4 w-4" /> Costing estimator
           </button>
@@ -671,7 +687,7 @@ export default function DealsBoard({
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
-          {([['open', 'Open deals'], ['on_hold', `On hold (${onHoldDeals.length})`], ['tagged', `Helping on (${taggedDeals.length})`]] as const).map(([k, t]) => (
+          {([['open', 'Open deals'], ['all', 'All stages'], ['on_hold', `On hold (${onHoldDeals.length})`], ...(showOwner ? [] : [['tagged', `Helping on (${taggedDeals.length})`]])] as [Filter, string][]).map(([k, t]) => (
             <button
               key={k}
               type="button"
@@ -682,7 +698,7 @@ export default function DealsBoard({
             </button>
           ))}
         </div>
-        {filter !== 'open' && filter !== 'tagged' && filter !== 'on_hold' && (
+        {filter !== 'open' && filter !== 'all' && filter !== 'tagged' && filter !== 'on_hold' && (
           <span className="text-sm text-ink-soft">Showing {STAGE_LABELS[filter as DealStage].toLowerCase()} deals</span>
         )}
         {filter === 'on_hold' && onHoldDeals.length > 0 && (
@@ -717,6 +733,7 @@ export default function DealsBoard({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{clientName(p)}</span>
                       <span className="block truncate text-sm text-ink-soft">{askedFor(p) || 'No programme yet'}{p.type ? `, ${p.type}` : ''}</span>
+                      {showOwner && <span className="block truncate text-sm font-medium text-accent">{personName(dealOwnerId(p))}</span>}
                     </span>
                     <span className="flex flex-wrap items-center gap-2 sm:justify-end">
                       <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${STAGE_TONE[st]}`}>{STAGE_LABELS[st]}</span>
