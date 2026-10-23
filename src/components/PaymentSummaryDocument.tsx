@@ -2,33 +2,36 @@
 // and the grand total. Used for the PDF (makeDocumentPdf finds "print-paper") and on accounts' link page.
 
 import React from 'react';
-import Logo from './Logo';
-import { COMPANY_ADDRESS } from '../lib/company';
 import { TIMING_LABELS, dateTimeMY } from '../lib/money';
 import { formatDate } from '../lib/deals';
-import { PaymentSummary } from '../lib/paymentSummary';
+import { PaymentSummary, SummaryGroup } from '../lib/paymentSummary';
 
 const sen = (n: number) => 'RM ' + (Number(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/** Where to pay one vendor, each detail on its own labelled line (2026-10-23), also on accounts' link page. */
+export function PayTo({ g }: { g: SummaryGroup }) {
+  if (g.bankUnchecked) return <p className="mt-0.5 font-semibold text-red-700">Bank details are being checked: don't pay yet</p>;
+  const rows: [string, string][] = g.bankName || g.accountNo
+    ? [['Bank', g.bankName], ['Account no.', g.accountNo], ['Account name', g.accountName]]
+    : g.paymentDetails ? [['Payment details', g.paymentDetails]] : [];
+  if (g.contact) rows.push(['Contact', g.contact]);
+  if (!rows.some(([k, x]) => k !== 'Contact' && x)) return <p className="mt-0.5 font-semibold text-amber-700">Bank details not recorded: don't pay yet</p>;
+  return (
+    <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+      {rows.filter(([, x]) => x).map(([k, x]) => (
+        <React.Fragment key={k}><dt className="text-slate-500">{k}</dt><dd className={`font-semibold ${k === 'Account no.' ? 'font-mono tracking-wide' : ''}`}>{x}</dd></React.Fragment>
+      ))}
+    </dl>
+  );
+}
+
 export default function PaymentSummaryDocument({ summary, refText, madeBy, madeAt }: { summary: PaymentSummary; refText: string; madeBy: string; madeAt: string }) {
   return (
-    <div className="print-paper space-y-6 bg-white p-12 font-sans text-sm text-slate-900">
-      <div className="flex items-start justify-between border-b-2 border-slate-100 pb-5">
-        <Logo className="h-[90px] w-auto object-contain" />
-        <div className="space-y-1 text-right font-mono text-xs text-slate-500">
-          <p className="font-bold text-slate-800">NEXT ACADEMY SDN BHD</p>
-          <p>(Company No. 202401030750)</p>
-          <p>{COMPANY_ADDRESS}</p>
-        </div>
-      </div>
-
-      <div className="flex items-end justify-between border-b border-slate-200 pb-2">
-        <h2 className="text-xl font-extrabold uppercase tracking-widest text-slate-800">Payment summary</h2>
-        <span className="font-mono text-xs font-bold text-slate-500">REF: {refText}</span>
-      </div>
-      <div className="flex flex-wrap justify-between gap-2 text-slate-600">
-        <span>Prepared by <strong className="text-slate-800">{madeBy}</strong> on {formatDate(madeAt)}</span>
-        <span>{summary.count} payment{summary.count === 1 ? '' : 's'} to {summary.groups.length} vendor{summary.groups.length === 1 ? '' : 's'} · all approved in the CRM</span>
+    <div className="print-paper space-y-4 bg-white p-8 font-sans text-sm text-slate-900">
+      {/* One thin line instead of the letterhead (Joel, 2026-10-23: the header took up too much space). */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-slate-200 pb-2">
+        <h2 className="text-base font-extrabold text-slate-800">NEXT Academy · Payment summary <span className="font-mono text-xs font-bold text-slate-500">{refText}</span></h2>
+        <span className="text-slate-600">{summary.count} payment{summary.count === 1 ? '' : 's'} · {summary.groups.length} vendor{summary.groups.length === 1 ? '' : 's'} · by {madeBy}, {formatDate(madeAt)}</span>
       </div>
 
       {summary.groups.map((g, gi) => (
@@ -37,15 +40,7 @@ export default function PaymentSummaryDocument({ summary, refText, madeBy, madeA
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{gi + 1}. Pay to</p>
               <p className="text-base font-extrabold text-slate-800">{g.payee}</p>
-              {g.bankUnchecked ? (
-                <p className="mt-0.5 font-semibold text-red-700">Bank details are being checked: don't pay yet</p>
-              ) : (g.bankName || g.accountNo) ? (
-                <p className="mt-0.5 font-semibold text-slate-700">{[g.bankName, g.accountNo, g.accountName].filter(Boolean).join(' · ')}</p>
-              ) : g.paymentDetails ? (
-                <p className="mt-0.5 font-semibold text-slate-700">{g.paymentDetails}</p>
-              ) : (
-                <p className="mt-0.5 font-semibold text-amber-700">Bank details not recorded</p>
-              )}
+              <PayTo g={g} />
             </div>
             <p className="text-right"><span className="block text-xs font-bold uppercase tracking-wider text-slate-500">Subtotal</span><span className="text-base font-extrabold tabular-nums">{sen(g.total)}</span></p>
           </div>

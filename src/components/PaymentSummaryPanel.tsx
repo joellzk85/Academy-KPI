@@ -5,9 +5,9 @@ import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
 import { formatDate, todayIso } from '../lib/deals';
 import { MoneyOut, TIMING_LABELS, isCompanyPayment } from '../lib/money';
-import { buildSummary, summaryProblem, summaryRef } from '../lib/paymentSummary';
-import { Vendor, bankChecked, hasBank } from '../lib/vendors';
-import { useVendors } from './VendorsPage';
+import { buildSummary, payToProblem, summaryProblem, summaryRef, waitsForTraining } from '../lib/paymentSummary';
+import { Vendor } from '../lib/vendors';
+import { VendorForm, useTrainersVenues, useVendors } from './VendorsPage';
 import PaymentSummaryDocument from './PaymentSummaryDocument';
 
 // Admin work → Money → "Payment summary for accounts" (Joel, 2026-10-20). The approved payments not paid yet, with
@@ -15,7 +15,9 @@ import PaymentSummaryDocument from './PaymentSummaryDocument';
 // accounts as a PDF or a link (lib/paymentSummary.ts). Accounts click "Payment made" per vendor on the link.
 // Since 2026-10-21 this is the only way payments go to accounts: each payment can be on one summary only (until it's
 // taken off or the summary is cancelled), post-training ones only from the day after the training, and payments
-// paid from a PDF are marked paid here.
+// paid from a PDF are marked paid here. Since 2026-10-23 a payment goes on a summary only when accounts can see where
+// to pay (the vendor's checked bank details, or payment details typed on the request); "Add bank details" opens the
+// vendor right here.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -41,7 +43,8 @@ export default function PaymentSummaryPanel({ outs, viewer, forTextOf, dealOf }:
   const approved = outs.filter(o => o.status === 'approved');
   const kindOf = (o: MoneyOut): 'before' | 'after' | 'company' => (isCompanyPayment(o) ? 'company' : o.timing === 'before' ? 'before' : 'after');
   // Can go on a new summary first, then the ones already on a summary, then post-training ones still waiting.
-  const problemOf = (o: MoneyOut) => summaryProblem(o, dealOf(o), today);
+  const vendorOf = (o: MoneyOut) => vendors.find(v => v.id === o.vendorId);
+  const problemOf = (o: MoneyOut) => summaryProblem(o, dealOf(o), vendorOf(o), today);
   const rank = (o: MoneyOut) => (!problemOf(o) ? 0 : o.summaryToken ? 1 : 2);
   const list = approved.filter(o => show[kindOf(o)])
     .sort((a, b) => rank(a) - rank(b) || ORDER[kindOf(a)] - ORDER[kindOf(b)] || String(a.payee).localeCompare(String(b.payee)));
@@ -60,7 +63,7 @@ export default function PaymentSummaryPanel({ outs, viewer, forTextOf, dealOf }:
     <section className="space-y-3 rounded-2xl border border-line bg-white p-4">
       <div>
         <h4 className="font-bold">Payment summary for accounts</h4>
-        <p className="text-sm text-ink-soft">Approved payments not paid yet. Tick the ones to pay, make a summary, and send it to accounts as a PDF or a link. Each payment can be on one summary only. Post-training payments can be added from the day after the training.</p>
+        <p className="text-sm text-ink-soft">Approved payments not paid yet. Tick the ones to pay, make a summary, and send it to accounts as a PDF or a link. Each payment can be on one summary only, and only once its bank details are in. Post-training payments can be added from the day after the training.</p>
       </div>
       <div className="flex flex-wrap gap-3 text-[15px]">
         {([['before', 'Pre-training payments'], ['after', 'Post-training payments'], ['company', 'Company payments']] as const).map(([k, l]) => (
@@ -88,7 +91,8 @@ export default function PaymentSummaryPanel({ outs, viewer, forTextOf, dealOf }:
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {list.map(o => <SummaryRow key={o.id} o={o} viewer={viewer} vendors={vendors} forText={forTextOf(o)} problem={problemOf(o)} ticked={ticked.has(o.id)} onToggle={() => toggle(o.id)} />)}
+              {list.map(o => <SummaryRow key={o.id} o={o} viewer={viewer} vendors={vendors} forText={forTextOf(o)} problem={problemOf(o)}
+                waiting={waitsForTraining(o, dealOf(o), today)} ticked={ticked.has(o.id)} onToggle={() => toggle(o.id)} />)}
             </tbody>
           </table>
         </div>
@@ -113,9 +117,11 @@ export default function PaymentSummaryPanel({ outs, viewer, forTextOf, dealOf }:
 
 // One approved payment in the list: tick it for a summary, or (once paid from a PDF or another way) mark it paid
 // here, the one place payments are marked paid in the CRM (2026-10-21). A payment on a summary can be taken off it.
-function SummaryRow({ o, viewer, vendors, forText, problem, ticked, onToggle }: {
-  o: MoneyOut; viewer: Viewer; vendors: Vendor[]; forText: string; problem: string; ticked: boolean; onToggle: () => void; key?: string;
+function SummaryRow({ o, viewer, vendors, forText, problem, waiting, ticked, onToggle }: {
+  o: MoneyOut; viewer: Viewer; vendors: Vendor[]; forText: string; problem: string; waiting: boolean; ticked: boolean; onToggle: () => void; key?: string;
 }) {
+  const { trainers, venues } = useTrainersVenues();
+  const [editingVendor, setEditingVendor] = useState(false);
   const [paying, setPaying] = useState(false);
   const [pay, setPay] = useState({ date: todayIso(), ref: '' });
   const [busy, setBusy] = useState(false);
@@ -136,7 +142,8 @@ function SummaryRow({ o, viewer, vendors, forText, problem, ticked, onToggle }: 
     if (!window.confirm('Take this payment off its summary? Accounts will no longer see it on that link, so tell them not to pay it from the PDF either. It can then go on a new summary.')) return;
     return run(async () => { await callServer('/api/pay-batch/remove', { id: o.id }, true); });
   };
-  const waitingForTraining = !!problem && !o.summaryToken;
+  const waitingForTraining = waiting && !o.summaryToken;
+  const payTo = o.summaryToken ? '' : payToProblem(o, v);
 
   return (
     <>
@@ -146,13 +153,15 @@ function SummaryRow({ o, viewer, vendors, forText, problem, ticked, onToggle }: 
         </td>
         <td className="px-3 py-2">
           <span className="block font-semibold">{o.payee}</span>
-          {!hasBank(v) && !o.paymentDetails && <span className="block text-xs font-semibold text-attention">No bank details yet</span>}
-          {hasBank(v) && !bankChecked(v) && <span className="block text-xs font-semibold text-attention">Bank details waiting for a manager's check (Vendors)</span>}
+          {payTo && <span className="block text-xs font-semibold text-attention">{payTo}{v && payTo !== 'No bank details yet' ? ' (Admin work → Vendors)' : ''}</span>}
+          {payTo === 'No bank details yet' && (v
+            ? !editingVendor && <button type="button" className="text-xs font-semibold text-accent hover:underline" onClick={e => { e.stopPropagation(); setEditingVendor(true); }}>Add bank details</button>
+            : <span className="block text-xs text-ink-soft">{isCompanyPayment(o) ? 'No vendor or payment details on this request' : "No vendor picked: pick one on the deal's checklist"}</span>)}
         </td>
         <td className="px-3 py-2">
           <span className="block">{o.category}{o.description ? `: ${o.description}` : ''}</span>
           <span className="block text-sm text-ink-soft">{forText}</span>
-          {problem && <span className={`block text-xs font-semibold ${o.summaryToken ? 'text-accent' : 'text-ink-soft'}`}>{problem}</span>}
+          {problem && problem !== payTo && <span className={`block text-xs font-semibold ${o.summaryToken ? 'text-accent' : 'text-ink-soft'}`}>{problem}</span>}
         </td>
         <td className="whitespace-nowrap px-3 py-2 text-sm">{isCompanyPayment(o) ? 'Company' : TIMING_LABELS[o.timing]}</td>
         <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums">{sen(o.amount)}</td>
@@ -161,6 +170,14 @@ function SummaryRow({ o, viewer, vendors, forText, problem, ticked, onToggle }: 
           {o.summaryToken && <button type="button" disabled={busy} className={`${btnSecondary} ml-1 px-2.5 py-1`} onClick={takeOff}>Take off summary</button>}
         </td>
       </tr>
+      {editingVendor && v && (
+        <tr>
+          <td colSpan={6} className="px-3 pb-3">
+            <VendorForm vendor={v} vendors={vendors} trainers={trainers} venues={venues} viewer={viewer}
+              onSaved={() => setEditingVendor(false)} onCancel={() => setEditingVendor(false)} />
+          </td>
+        </tr>
+      )}
       {(paying || error) && (
         <tr>
           <td />

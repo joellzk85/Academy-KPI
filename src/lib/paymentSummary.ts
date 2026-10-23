@@ -10,16 +10,27 @@ import { formatDate, todayIso } from './deals';
 
 /** Why this request can't go on a new summary ('' = it can). One summary per payment, so accounts never pay twice
  *  (2026-10-21): a request already on a summary (summaryToken) or with its own open accounts link stays there until
- *  it's taken off or the link is stopped (the server clears both then). Post-training ones wait for the training. */
-export function summaryProblem(o: MoneyOut, deal: any, today = todayIso()): string {
+ *  it's taken off or the link is stopped (the server clears both then). Post-training ones wait for the training.
+ *  Accounts must always see where to pay (Joel, 2026-10-23): the vendor's checked bank details, or the payment
+ *  details typed on the request. */
+export function summaryProblem(o: MoneyOut, deal: any, vendor: Vendor | null | undefined, today = todayIso()): string {
   if (o.status !== 'approved') return o.status === 'paid' ? 'Already paid' : 'Not approved';
   if (o.summaryToken) return 'Already on a summary sent to accounts';
   if (o.accountsLink?.token) return 'Has its own accounts link: stop that link first';
-  const from = payableFrom(o, deal);
-  if (from && from > today) return `Post-training: payable from ${formatDate(from)}`;
-  return '';
+  if (waitsForTraining(o, deal, today)) return `Post-training: payable from ${formatDate(payableFrom(o, deal))}`;
+  return payToProblem(o, vendor);
 }
-import { Vendor, bankChecked } from './vendors';
+
+/** A post-training payment before the day after the training. */
+export const waitsForTraining = (o: MoneyOut, deal: any, today = todayIso()) => { const from = payableFrom(o, deal); return !!from && from > today; };
+
+/** What's missing for accounts to know where to pay ('' = nothing). */
+export function payToProblem(o: Pick<MoneyOut, 'paymentDetails'>, vendor: Vendor | null | undefined): string {
+  if (vendor && hasBank(vendor)) return bankChecked(vendor) ? '' : "Bank details waiting for a manager's check";
+  if ((o.paymentDetails || '').trim()) return '';
+  return 'No bank details yet';
+}
+import { Vendor, bankChecked, hasBank } from './vendors';
 
 export interface SummaryLine {
   id: string;
@@ -42,6 +53,7 @@ export interface SummaryGroup {
   bankName: string;
   accountNo: string;
   accountName: string;
+  contact: string;          // the vendor's contact person, phone and email, for accounts' questions (2026-10-23)
   paymentDetails: string;   // typed on a company payment ("Payment details")
   // The vendor's new or changed bank details wait for a manager's check (process audit, 2026-10-22): no bank details
   // are shown and accounts can't mark it paid until then.
@@ -64,9 +76,10 @@ export function buildSummary(outs: MoneyOut[], vendors: Vendor[], forTextOf: (o:
       key, payee: String(o.payee || v?.name || 'Not named').trim(),
       bankName: v && bankChecked(v) ? v.bankName || '' : '', accountNo: v && bankChecked(v) ? v.accountNo || '' : '', accountName: v && bankChecked(v) ? v.accountName || '' : '',
       bankUnchecked: !!v && !bankChecked(v),
+      contact: v ? [v.contactName, v.phone, v.email].map(x => (x || '').trim()).filter(Boolean).join(' · ') : '',
       paymentDetails: '', lines: [], total: 0,
     };
-    if (!v && o.paymentDetails && !g.paymentDetails) g.paymentDetails = o.paymentDetails;
+    if (o.paymentDetails && !g.paymentDetails) g.paymentDetails = o.paymentDetails;
     g.lines.push({
       id: o.id, forText: forTextOf(o), category: o.category, description: o.description || (o.items || []).map(i => i.description).join(', '),
       amount: Number(o.amount) || 0, timing: o.timing, company: !o.dealId, status: o.status,
