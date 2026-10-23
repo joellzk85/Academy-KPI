@@ -3,7 +3,7 @@ import { doc, serverTimestamp, setDoc, updateDoc, writeBatch, getDoc } from 'fir
 import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
-import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, paidViaLink } from '../lib/money';
+import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, ownApprovalOk, paidViaLink } from '../lib/money';
 import { ChecklistTask, costCategory, isCoTrainer, materialItems } from '../lib/checklist';
 import { STEP_VENDOR_TYPE, Vendor, bankText, hasBank, vendorName } from '../lib/vendors';
 import { Receipt } from '../lib/postTraining';
@@ -106,7 +106,8 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
   };
   const decide = canDecide(o, viewer);
   const mine = o.requestedById === viewer.id;
-  const approveNow = () => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), decidedTs: serverTimestamp(), rejectReason: '' });
+  const approveNow = async () => { if (ownApprovalOk(o, viewer)) await approveWrite(); };
+  const approveWrite = () => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), decidedTs: serverTimestamp(), rejectReason: '' });
   // A trainer fee first shows "Are you sure?" with the T3, photos and report checks (lib/feeChecks.ts).
   const approve = () => (isTrainerFee(o) ? setConfirming(true) : run(approveNow));
   const reject = () => {
@@ -169,7 +170,7 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
         </span>
       </div>
       {fixing && <FixRequest o={o} viewer={viewer} onDone={() => setFixing(false)} />}
-      {confirming && <ApproveFeeDialog o={o} payee={vendor ? vendorName(vendor, trainers, venues) : o.payee} onApprove={approveNow} onClose={() => setConfirming(false)} />}
+      {confirming && <ApproveFeeDialog o={o} viewer={viewer} payee={vendor ? vendorName(vendor, trainers, venues) : o.payee} onApprove={approveNow} onClose={() => setConfirming(false)} />}
       {o.status === 'paid' && (
         <>
           <ReceiptList receipts={receipts} viewer={viewer} />

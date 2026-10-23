@@ -6,6 +6,7 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { VENDOR_TYPES, Vendor, VendorType, bankCheckFields, bankChecked, bankText, canCheckBank, hasBank, vendorName, vendorProblem, vendorTypeLabel, withBankStamp } from '../lib/vendors';
 import { formatDate } from '../lib/deals';
+import { superConfirm } from '../lib/superManager';
 import { useSearchPrefill } from './GlobalSearch';
 
 // Admin work → Vendors (2026-10-20): who NEXT Academy pays for trainings, with bank details for accounts.
@@ -172,6 +173,8 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
   };
   // A manager who didn't set the bank details confirms them (process audit, 2026-10-22), e.g. after calling the vendor.
   const checkBank = async (v: Vendor) => {
+    if (v.bankSetById === viewer.id && !superConfirm(`confirm bank details you entered yourself (${vendorName(v, trainers, venues)}).`,
+      'nobody else checks the account, so a wrong or changed account goes straight to accounts for payment.')) return;
     if (!window.confirm(`Confirm ${vendorName(v, trainers, venues)}'s bank details?\n\n${bankText(v) || 'No bank details'}\n\nChanged by ${v.bankSetByName}. Check them with the vendor (for example by phone) before confirming.`)) return;
     setError('');
     try { await updateDoc(doc(db, 'vendors', v.id), bankCheckFields(viewer)); } catch (e) { setError(friendlyError(e)); }

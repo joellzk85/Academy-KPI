@@ -63,6 +63,7 @@ import { useMonthLocks } from './lib/useMonthLocks';
 import { canEditMonth, kpiMonthYm, ymLabel as lockYmLabel } from './lib/monthLock';
 import DealChecksPage from './components/DealChecksPage';
 import { linkedOnly, setLinkedTeam } from './lib/linked';
+import { setSuperManager } from './lib/superManager';
 import { SharedKind } from './lib/sharedInbox';
 import GlobalSearch, { SearchHit, setSearchPrefill } from './components/GlobalSearch';
 import Rating360Panel, { useToRateCount } from './components/Rating360';
@@ -204,6 +205,8 @@ export default function App() {
 function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; teamMembers: TeamMember[] }) {
   // Old records not linked to a Team member yet are hidden everywhere (lib/linked.ts).
   setLinkedTeam(teamMembers.map(m => m.id));
+  // Who the Super Manager is (lib/superManager.ts), from the Team list.
+  setSuperManager(teamMembers);
   const isManagement = currentMember.role === 'management';
   const isRep = currentMember.role === 'rep';
   const isStaff = !isRep; // Admin or Management

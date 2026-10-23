@@ -9,6 +9,7 @@ import { doc, getDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
 import { formatDate, formatRM } from './deals';
 import { deletedStamp, undoStamp } from './money';
+import { isSuperManager, superConfirm } from './superManager';
 
 type Viewer = { id: string; name: string; role?: string };
 export type MoneyColl = 'money_in' | 'money_out' | 'claim_backs';
@@ -38,8 +39,12 @@ export function askReason(question: string): string | null {
 /** Delete a money record with a History line: a payment request still waiting for approval (or rejected) is removed;
  *  anything else is marked deleted with the reason. */
 export async function deleteMoney(coll: MoneyColl, rec: { id: string; dealId?: string; status?: string }, viewer: Viewer, what: string, reason: string) {
-  const erase = coll === 'money_out' && (rec.status === 'pending' || rec.status === 'rejected');
-  await withDealHistory(rec.dealId || '', viewer, `Deleted ${what}${reason ? `: ${reason}` : ''}`, batch => {
+  // The Super Manager may delete forever instead (Joel, 2026-10-22), after two confirmations naming the risk.
+  const forever = isSuperManager(viewer) && !(coll === 'money_out' && (rec.status === 'pending' || rec.status === 'rejected'))
+    && window.confirm('Delete it forever instead of keeping it as deleted (restorable)?\n\nOK = delete forever. Cancel = keep it restorable.')
+    && superConfirm(`delete ${what} forever.`, 'it cannot be restored, and the deal\'s P&L and money history lose it for good.');
+  const erase = forever || (coll === 'money_out' && (rec.status === 'pending' || rec.status === 'rejected'));
+  await withDealHistory(rec.dealId || '', viewer, `Deleted ${forever ? 'forever ' : ''}${what}${reason ? `: ${reason}` : ''}`, batch => {
     if (erase) batch.delete(doc(db, coll, rec.id));
     else batch.update(doc(db, coll, rec.id), deletedStamp(viewer, reason));
   });

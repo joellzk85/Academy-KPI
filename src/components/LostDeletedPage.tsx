@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, onSnapshot, query, where, writeBatch } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, where, writeBatch } from 'firebase/firestore';
+import { isSuperManager, superConfirm } from '../lib/superManager';
 import { ChevronDown, Loader2, RotateCcw, Undo2 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import {
@@ -88,6 +89,18 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
       });
       await batch.commit();
       setMsg({ ok: true, text: `${clientName(p)} reopened.` });
+    } catch (e) { setMsg({ ok: false, text: friendlyError(e) }); } finally { setBusyId(''); }
+  };
+
+  // Super Manager only (Joel, 2026-10-22): erase a deleted deal for good, after two confirmations naming the risk.
+  // Its quotations, outlines, money records and files stay in the database, no longer linked to a deal.
+  const eraseDeal = async (p: any) => {
+    if (!window.confirm(`Delete the deal for ${clientName(p)} forever?`)) return;
+    if (!superConfirm(`delete the deal for ${clientName(p)} forever.`, 'it cannot be restored, its History is lost, and its quotations, money records and files are left without a deal.')) return;
+    setBusyId(p.id); setMsg(null);
+    try {
+      await deleteDoc(doc(db, 'pipelines', p.id));
+      setMsg({ ok: true, text: `The deal for ${clientName(p)} was deleted forever.` });
     } catch (e) { setMsg({ ok: false, text: friendlyError(e) }); } finally { setBusyId(''); }
   };
 
@@ -208,10 +221,15 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
                   {open && (
                     <div className="space-y-3 px-5 pb-4 sm:pl-10">
                       <FollowUpList deal={p} />
-                      <button type="button" disabled={busyId === p.id} className={btnSecondary} onClick={() => (tab === 'lost' ? reopen(p) : restore(p))}>
-                        {busyId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
-                        {tab === 'lost' ? 'Reopen deal' : 'Restore deal'}
-                      </button>
+                      <span className="flex flex-wrap gap-2">
+                        <button type="button" disabled={busyId === p.id} className={btnSecondary} onClick={() => (tab === 'lost' ? reopen(p) : restore(p))}>
+                          {busyId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+                          {tab === 'lost' ? 'Reopen deal' : 'Restore deal'}
+                        </button>
+                        {tab === 'deleted' && isSuperManager(viewer) && (
+                          <button type="button" disabled={busyId === p.id} className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={() => eraseDeal(p)}>Delete forever</button>
+                        )}
+                      </span>
                     </div>
                   )}
                 </li>
@@ -258,6 +276,11 @@ function DeletedMoney({ viewer, deals, clientName }: { viewer: Viewer; deals: an
       await batch.commit();
     } catch (e) { setError(friendlyError(e)); } finally { setBusyId(''); }
   };
+  const erase = async (r: any) => {
+    if (!superConfirm(`delete this ${label(r).toLowerCase()} (${formatRM(r.amount)}) forever.`, 'it cannot be restored and the money history loses it for good.')) return;
+    setBusyId(r.id); setError('');
+    try { await deleteDoc(doc(db, r.coll, r.id)); } catch (e) { setError(friendlyError(e)); } finally { setBusyId(''); }
+  };
   return (
     <section className="space-y-2">
       <h3 className="text-lg font-bold">Deleted money records <span className="font-normal text-ink-soft">({all.length})</span></h3>
@@ -274,6 +297,9 @@ function DeletedMoney({ viewer, deals, clientName }: { viewer: Viewer; deals: an
             <button type="button" disabled={busyId === r.id} className={btnSecondary} onClick={() => restore(r)}>
               {busyId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Restore
             </button>
+            {isSuperManager(viewer) && (
+              <button type="button" disabled={busyId === r.id} className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={() => erase(r)}>Delete forever</button>
+            )}
           </li>
         ))}
       </ul>

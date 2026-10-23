@@ -21,6 +21,13 @@ service firebase.storage {
     function isStaff() {
       return isMember() && firestore.get(link()).data.role in ['admin', 'management'];
     }
+    // Super Manager (Joel, 2026-10-22): reads and deletes any file (the CRM confirms twice first).
+    function isSuper() {
+      return isManagement() && firestore.get(link()).data.get('superManager', false) == true;
+    }
+    match /{allFiles=**} {
+      allow read, delete: if isSuper();
+    }
 
     match /proposals/{dealId}/{fileName} {
       allow read: if isMember();

@@ -6,6 +6,8 @@
 // - Payment requests raised from a deal's checklist (money_out) keep vendorId; the payment summary for accounts
 //   reads the bank details live from here, but only once a manager has checked them (process audit, 2026-10-22).
 
+import { isSuperManager } from './superManager';
+
 export type VendorType = 'trainer' | 'venue' | 'transport' | 'facilitator' | 'materials' | 'other';
 
 export const VENDOR_TYPES: [VendorType, string][] = [
@@ -67,9 +69,9 @@ export function withBankStamp(next: Vendor, before: Partial<Vendor> | null | und
 /** The fields Management saves to confirm a vendor's bank details. */
 export const bankCheckFields = (viewer: { id: string; name: string }) => ({ bankCheckedById: viewer.id, bankCheckedByName: viewer.name, bankCheckedAt: new Date().toISOString() });
 
-/** Can this person confirm the bank details? A manager who did not set them. */
+/** Can this person confirm the bank details? A manager who did not set them, or the Super Manager (Joel, 2026-10-22). */
 export const canCheckBank = (v: Partial<Vendor>, viewer: { id: string; role: string }) =>
-  viewer.role === 'management' && !!v.bankSetById && !v.bankCheckedById && v.bankSetById !== viewer.id;
+  viewer.role === 'management' && !!v.bankSetById && !v.bankCheckedById && (v.bankSetById !== viewer.id || isSuperManager(viewer));
 
 // The checklist step's kind → the vendor type listed first in the picker.
 export const STEP_VENDOR_TYPE: Record<string, VendorType> = {

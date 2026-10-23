@@ -7,6 +7,7 @@
 
 import { addDays, formatRM, todayIso, trainingEndDate } from './deals';
 import { daysUntil, Flag } from './checklist';
+import { isSuperManager, superConfirm } from './superManager';
 
 export type InSource = 'hrdc' | 'client';
 export type OutStatus = 'pending' | 'approved' | 'rejected' | 'paid';
@@ -276,9 +277,17 @@ export function dealMoneySums(ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings
   return { invoiced, hrdcFee, costs, received, toComeIn, toPayOut, pendingApproval, shortfall: short };
 }
 
-// Can this person approve or reject this request? Managers only, never their own.
+// Can this person approve or reject this request? Managers only, never their own, except the Super Manager
+// (Joel, 2026-10-22), who is asked to confirm a second time (ownApprovalOk).
 export function canDecide(o: MoneyOut, viewer: { id: string; role: string }): boolean {
-  return o.status === 'pending' && viewer.role === 'management' && o.requestedById !== viewer.id;
+  return o.status === 'pending' && viewer.role === 'management' && (o.requestedById !== viewer.id || isSuperManager(viewer));
+}
+
+/** Approving your own request (Super Manager only): the second confirmation, naming the risk. */
+export function ownApprovalOk(o: Pick<MoneyOut, 'requestedById' | 'payee' | 'amount'>, viewer: { id: string }): boolean {
+  if (o.requestedById !== viewer.id) return true;
+  return superConfirm(`approve your own payment request (${o.payee}, RM ${(Number(o.amount) || 0).toFixed(2)}).`,
+    'nobody else checks this payment before it goes to accounts.');
 }
 
 // Money reminders up to training day, for the admin work queue. From the day after the training, the invoice,

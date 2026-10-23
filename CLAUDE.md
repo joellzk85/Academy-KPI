@@ -56,6 +56,7 @@ Funding types: `hrdc` (HRDC claimable), `direct` (Direct pay), `hrdc_topup` (HRD
 
 - Admin can do everything a rep can, plus operations for every deal.
 - **Payment approval:** payments raised by Admin can be approved by either manager. Payments raised by Manager A can only be approved by Manager B, and vice versa. Nobody can ever approve their own request, and the Approve button must not even show for it. Every approval is logged (who, when).
+- **Super Manager (Joel, 2026-10-22):** one Management person (claimed in Team, `superManager` on team and auth_map, set only by the server) can do anything without anyone's approval: approve their own requests, bypass any check, delete anything forever. Nobody else can change their role, password or access. The CRM confirms twice and names the risk each time (`lib/superManager.ts`); actions still go into the History. Only login records (passwords, Team, auth_map) stay server-only. See `process-audit.md`.
 - Money in: keyed in by Admin, no approval needed. Money out (trainer fee, venue, hotel, bus, facilitator, staff claims): raised by Admin or Management, pending until approved, and only approved items can be marked paid. Approved items feed that deal's P&L.
 
 ### Single source of truth (agreed principle)

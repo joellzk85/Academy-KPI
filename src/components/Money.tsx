@@ -6,7 +6,7 @@ import { pdfErrorText } from '../lib/oldTab';
 import { addDays, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
   COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, OutStatus, TIMING_LABELS,
-  canDecide, dateTimeMY, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
+  canDecide, dateTimeMY, ownApprovalOk, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
 import { projectRow } from '../lib/projectPL';
@@ -20,6 +20,7 @@ import PaymentSummaryPanel from './PaymentSummaryPanel';
 import { BankRequestsBox, TrainerFeeRequests } from './TrainerPortalAdmin';
 import { FixRequest, PLTick, resubmitRequest } from './StepCosts';
 import { askReason, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
+import { superConfirm } from '../lib/superManager';
 import { isTrainerFee } from '../lib/feeChecks';
 import { ApproveFeeDialog } from './FeeChecks';
 import { VendorForm, useVendors } from './VendorsPage';
@@ -177,7 +178,11 @@ function useTypedSst(dealId: string): Record<string, { sstAmount?: number | null
 /** Approve several requests at once (the same check as one by one: a manager, never their own).
  *  Trainer fees are left out: each is approved by itself, after its checks (lib/feeChecks.ts). */
 export async function approveMany(list: MoneyOut[], viewer: Viewer) {
-  const ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
+  let ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
+  // The Super Manager's own requests are in the list only after the second confirmation.
+  const own = ok.filter(o => o.requestedById === viewer.id);
+  if (own.length && !superConfirm(`approve ${own.length} of your own payment request${own.length === 1 ? '' : 's'} with the others.`,
+    'nobody else checks these payments before they go to accounts.')) ok = ok.filter(o => o.requestedById !== viewer.id);
   if (!ok.length) return;
   const at = new Date().toISOString();
   for (let i = 0; i < ok.length; i += 400) {
@@ -410,7 +415,11 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
   const forText = company ? 'Company payment' : docFor || context || 'Training';
   const canFix = o.status === 'rejected' && isMine && !o.trainingCancelled;
 
-  const approveNow = () => updateDoc(doc(db, 'money_out', o.id), { ...clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' }), decidedTs: serverTimestamp() });
+  const approveNow = async () => {
+    if (!ownApprovalOk(o, viewer)) return;
+    await approveWrite();
+  };
+  const approveWrite = () => updateDoc(doc(db, 'money_out', o.id), { ...clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' }), decidedTs: serverTimestamp() });
   // A trainer fee first shows "Are you sure?" with the T3, photos and report checks (lib/feeChecks.ts).
   const approve = () => (isTrainerFee(o) ? setMode('approve') : run(approveNow));
   const reject = () => {
@@ -498,7 +507,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
         </div>
       )}
       {mode === 'fix' && <FixRequest o={o} viewer={viewer} onDone={() => setMode(null)} />}
-      {mode === 'approve' && <ApproveFeeDialog o={o} onApprove={approveNow} onClose={() => setMode(null)} />}
+      {mode === 'approve' && <ApproveFeeDialog o={o} viewer={viewer} onApprove={approveNow} onClose={() => setMode(null)} />}
       {error && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
     </li>
   );

@@ -25,6 +25,12 @@ service cloud.firestore {
     function isStaff() {
       return isMember() && get(myLinkPath()).data.role in ['admin', 'management'];
     }
+    // Super Manager (Joel, 2026-10-22: "can do any changes, no need anyone to approve, can bypass, approve anything,
+    // delete anything forever; nobody supersedes"). Set only by the CRM server (auth_map.superManager). The CRM asks
+    // them to confirm twice and names the risk; these rules let every write through (see the match at the end).
+    function isSuper() {
+      return isManagement() && get(myLinkPath()).data.get('superManager', false) == true;
+    }
     function ownerOf(data) {
       return data.get('ownerId', data.get('creatorId', ''));
     }
@@ -940,6 +946,12 @@ service cloud.firestore {
             && (!('lastActionAt' in resource.data) || request.time > resource.data.lastActionAt + duration.value(10, 's')))
         );
       allow delete: if false;
+    }
+
+    // Super Manager: read and write anything, except the login records the CRM server keeps (passwords, the Team list
+    // and auth_map, which the Team screen changes through the server).
+    match /{coll}/{path=**} {
+      allow read, write: if isSuper() && !(coll in ['secrets', 'server_secrets', 'team', 'auth_map']);
     }
 
     // All other CRM work data: team members only

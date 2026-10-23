@@ -17,6 +17,7 @@ import {
   canDecideChange, canRequestChange, cancelledTraining, changeProblem, changeSummary, changeWhy, movedText, paxOf, pendingChange, todoFor,
   valueChangeProblem,
 } from '../lib/trainingChange';
+import { superConfirm } from '../lib/superManager';
 import TrainingDaysPicker from './TrainingDaysPicker';
 
 type Viewer = { id: string; name: string; role: string };
@@ -190,6 +191,9 @@ function PendingBox({ deal, change: c, viewer, onDone }: { deal: any; change: Tr
   const stopped = (o: MoneyOut) => stop[o.id] !== false;   // ticked to stop by default
 
   const approve = async () => {
+    // Super Manager approving their own request (Joel, 2026-10-22): a second confirmation, naming the risk.
+    if (c.byId === viewer.id && !superConfirm(`approve your own ${c.kind === 'cancel' ? 'cancellation' : c.kind === 'value' ? 'value / pax change' : 'date change'} on this won deal.`,
+      'nobody else checks it, and it changes the deal\'s Closing RM or training date straight away.')) return;
     setBusy(true);
     setError('');
     try {

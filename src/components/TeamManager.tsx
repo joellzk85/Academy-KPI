@@ -174,6 +174,26 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     window.setTimeout(() => setNotice(n => (n?.text === text ? null : n)), 6000);
   };
 
+  // ---- Super Manager (Joel, 2026-10-22) ----
+  const superMember = activeMembers.find(m => m.superManager === true) || null;
+  const claimSuper = async () => {
+    if (!window.confirm('Make yourself Super Manager?\n\nYou will be able to approve your own requests, bypass any check and delete anything forever, and nobody else will be able to change your role, password or access.\n\nRisk: nobody checks what you approve for yourself, and things deleted forever cannot be restored.')) return;
+    setBusyId(currentMember.id);
+    try { await callServer('/api/team/super/claim', {}, true); flash('ok', 'You are now Super Manager.'); }
+    catch (err) { flash('error', friendlyError(err)); } finally { setBusyId(null); }
+  };
+  const handOverSuper = async () => {
+    const others = activeMembers.filter(m => m.role === 'management' && m.id !== currentMember.id);
+    const name = window.prompt(`Hand Super Manager over to whom? Type the name exactly:\n${others.map(m => m.name).join('\n')}`, '');
+    const to = others.find(m => m.name.trim().toLowerCase() === String(name || '').trim().toLowerCase());
+    if (!name) return;
+    if (!to) return flash('error', 'No Management person with that name.');
+    if (!window.confirm(`Hand Super Manager to ${to.name}? You become a normal manager, and only ${to.name} can give it back.`)) return;
+    setBusyId(currentMember.id);
+    try { await callServer('/api/team/super/handover', { memberId: to.id }, true); flash('ok', `${to.name} is now Super Manager.`); }
+    catch (err) { flash('error', friendlyError(err)); } finally { setBusyId(null); }
+  };
+
   const nameTaken = (name: string, exceptId?: string) =>
     activeMembers.some(m => m.id !== exceptId && m.name.trim().toLowerCase() === name.trim().toLowerCase());
 
@@ -329,6 +349,22 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
         </div>
       )}
 
+      {/* Super Manager (Joel, 2026-10-22): one person who can do anything; nobody else can change them. */}
+      {!superMember && currentMember.role === 'management' && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-white px-4 py-3 text-[15px]">
+          <span className="min-w-[16rem] flex-1">Nobody is Super Manager yet. The Super Manager can approve anything (their own requests too), bypass any check and delete anything forever; nobody else can change their role, password or access.</span>
+          <button type="button" className={secondaryBtn} disabled={!!busyId} onClick={claimSuper}>Make me Super Manager</button>
+        </div>
+      )}
+      {superMember && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-accent-soft px-4 py-3 text-[15px] text-accent">
+          <span className="min-w-[16rem] flex-1"><strong>{superMember.name}</strong> is Super Manager: can approve, bypass and delete anything; nobody else can change their role, password or access.</span>
+          {superMember.id === currentMember.id && activeMembers.some(m => m.role === 'management' && m.id !== currentMember.id) && (
+            <button type="button" className={secondaryBtn} disabled={!!busyId} onClick={handOverSuper}>Hand it over</button>
+          )}
+        </div>
+      )}
+
       {activeManagementCount < 2 && (
         <div className="rounded-lg bg-attention-soft px-4 py-3 text-[15px] leading-relaxed text-attention">
           Payment approvals need two Management people who approve each other's requests. Add a second Management person when you're ready.
@@ -343,12 +379,14 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
           </div>
           <ul className="divide-y divide-line">
             {activeMembers.map(m => {
-              const isMe = m.id === currentMember.id;
+              // Nobody but the Super Manager changes the Super Manager (the server refuses it too).
+              const isMe = m.id === currentMember.id || (m.superManager === true && currentMember.id !== superMember?.id);
               return (
                 <li key={m.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold">
-                      {m.name} {isMe && <span className="font-normal text-ink-soft">(you)</span>}
+                      {m.name} {m.id === currentMember.id && <span className="font-normal text-ink-soft">(you)</span>}
+                      {m.superManager && <span className="ml-2 rounded bg-accent-soft px-1.5 py-0.5 text-xs font-semibold text-accent">Super Manager</span>}
                     </p>
                     <p className="mt-0.5 text-sm text-ink-soft">
                       {m.mustChangePassword ? 'Has not set their own password yet' : 'Active'}
