@@ -178,7 +178,7 @@ function useReveal(ref: React.RefObject<HTMLDivElement | null>, on: boolean) {
   });
 }
 
-const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+export const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 
 function Nav({ r, onGo }: { r: ResolvedTb; onGo: (k: string) => void }) {
   const short: Partial<Record<TbSectionKey, string>> = { objectives: 'Objectives', trainers: 'Trainers', agenda: 'Agenda', activities: 'Activities', venues: 'Venues', packages: 'Packages', takeaways: 'Takeaways', terms: 'Terms' };
@@ -283,7 +283,7 @@ function SectionHead({ no, title }: { no: string; title: string }) {
   );
 }
 
-function Rich({ text, className = '' }: { text: string; className?: string }) {
+export function Rich({ text, className = '' }: { text: string; className?: string }) {
   const bl = blocks(text);
   if (!bl.length) return null;
   return (
