@@ -9,7 +9,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { formatDate, todayIso } from '../lib/deals';
-import { HRDC_STATUS_LABELS, HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus } from '../lib/programmes';
+import { HRDC_STATUS_LABELS, HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus, programmesFor, withTbMark } from '../lib/programmes';
 import PanelResizer from './PanelResizer';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -34,10 +34,12 @@ export function StatusChip({ programme }: { programme: any }) {
 }
 
 // ---------- Picker used on the deal form, with quick add ----------
-export function ProgrammePicker({ programmes, value, legacyName, viewer, onChange }: {
+export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, viewer, onChange, kind }: {
   programmes: Programme[]; value: string; legacyName?: string; viewer: Viewer; onChange: (p: Programme) => void;
+  kind?: 'training' | 'teambuilding';   // teambuilding: only "(TB)" programmes, and a quick-added one gets "(TB)"
 }) {
-  const selected = programmes.find(p => p.id === value);
+  const programmes = programmesFor(allProgrammes, kind);
+  const selected = allProgrammes.find(p => p.id === value);
   const [queryText, setQueryText] = useState(selected ? '' : legacyName || '');
   const [open, setOpen] = useState(!selected && !!legacyName);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -52,9 +54,10 @@ export function ProgrammePicker({ programmes, value, legacyName, viewer, onChang
     .slice(0, 8);
 
   const add = async () => {
-    const name = queryText.trim();
-    if (!name) return setErr('Type the programme name first.');
-    const dup = programmes.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
+    const typed = queryText.trim();
+    if (!typed) return setErr('Type the programme name first.');
+    const name = kind === 'teambuilding' ? withTbMark(typed) : typed;
+    const dup = allProgrammes.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
     if (dup) { onChange(dup); setOpen(false); return; }
     setBusy(true);
     setErr('');
@@ -105,7 +108,7 @@ export function ProgrammePicker({ programmes, value, legacyName, viewer, onChang
           ))}
           {matches.length === 0 && <p className="px-3 py-2 text-sm text-ink-soft">No programme matches "{queryText}".</p>}
           <button type="button" disabled={busy} onClick={add} className="flex w-full items-center gap-2 border-t border-line px-3 py-2.5 text-left text-sm font-semibold text-accent hover:bg-accent-soft">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add {queryText.trim() ? `"${queryText.trim()}"` : 'a new programme'}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add {queryText.trim() ? `"${kind === 'teambuilding' ? withTbMark(queryText) : queryText.trim()}"` : 'a new programme'}
           </button>
         </div>
       )}
@@ -123,6 +126,7 @@ const daysText = (d?: number | null) => (d ? (d === 0.5 ? 'Half day' : `${d} day
 export default function ProgrammesManager({ programmes, deals, viewer }: { programmes: Programme[]; deals: any[]; viewer: Viewer }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [category, setCategory] = useState('');   // '' = all, '-' = no category
+  const [kindFilter, setKindFilter] = useState<'' | 'training' | 'teambuilding'>('');   // programmes ending in "(TB)" are teambuilding
   const categories = useMemo(() => [...new Set(programmes.map(p => (p.category || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [programmes]);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<'new' | string | null>(null);
@@ -164,9 +168,10 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
     return programmes
       .filter(p => filter === 'all' || programmeStatus(p) === filter)
       .filter(p => !category || (category === '-' ? !(p.category || '').trim() : (p.category || '').trim() === category))
+      .filter(p => !kindFilter || programmesFor([p], kindFilter).length > 0)
       .filter(p => !q || `${p.name} ${p.hrdcCode || ''} ${p.category || ''}`.toLowerCase().includes(q))
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [programmes, filter, search, category]);
+  }, [programmes, filter, search, category, kindFilter]);
 
   const startNew = () => { setForm(emptyForm()); setError(''); setEditing('new'); };
   const startEdit = (p: Programme) => {
@@ -282,6 +287,11 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, HRDC code or category" className={`${input} pl-9`} aria-label="Search programmes" />
         </div>
+        <select value={kindFilter} onChange={e => setKindFilter(e.target.value as any)} aria-label="Training or teambuilding" className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none sm:w-auto">
+          <option value="">Training and teambuilding</option>
+          <option value="training">Training only</option>
+          <option value="teambuilding">Teambuilding (TB) only</option>
+        </select>
         {categories.length > 0 && (
           <select value={category} onChange={e => setCategory(e.target.value)} aria-label="Category" className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none sm:w-auto">
             <option value="">All categories</option>

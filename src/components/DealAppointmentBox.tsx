@@ -241,7 +241,7 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
         <div className="space-y-3">
           <div>
             <span className={label}>Programme</span>
-            <ProgrammePicker programmes={programmes} value={v.programmeId} legacyName={!v.programmeId ? deal.courseName : ''} viewer={viewer} onChange={pg => set({ programmeId: pg.id })} />
+            <ProgrammePicker programmes={programmes} value={v.programmeId} legacyName={!v.programmeId ? deal.courseName : ''} viewer={viewer} kind={deal.type === 'Teambuilding' ? 'teambuilding' : 'training'} onChange={pg => set({ programmeId: pg.id })} />
           </div>
           <TrainingDaysPicker id="lg-dy" label="How long is the training?" value={v.trainingDays} onChange={d => set({ trainingDays: d })} />
           <div className="grid gap-3 sm:grid-cols-3">
