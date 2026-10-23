@@ -63,7 +63,7 @@ const select = 'rounded-lg border border-line bg-white px-3 py-2 text-sm text-in
 // Contact persons (PICs): a client can have several (Joel, 2026-10-17). The first is the main one.
 const emptyContact = (): Contact => ({ id: newContactId(), name: '', designation: '', phone: '', email: '' });
 const emptyForm = () => ({
-  companyName: '', code: '', employerName: '', industry: '', address: '', hrdcRegistered: true,
+  companyName: '', code: '', employerName: '', employerCode: '', industry: '', address: '', hrdcRegistered: true,
   logoUrl: '',   // optional company logo (2026-10-21), shown on teambuilding proposal covers
   contacts: [emptyContact()] as Contact[],
 });
@@ -229,7 +229,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
   };
   const startEdit = (c: Client) => {
     setForm({
-      companyName: c.companyName || '', code: c.code || '', employerName: c.employerName || '', industry: c.industry || '', address: c.address || '', hrdcRegistered: !!c.hrdcRegistered,
+      companyName: c.companyName || '', code: c.code || '', employerName: c.employerName || '', employerCode: c.employerCode || '', industry: c.industry || '', address: c.address || '', hrdcRegistered: !!c.hrdcRegistered,
       logoUrl: c.logoUrl || '',
       contacts: clientContacts(c).length ? clientContacts(c) : [emptyContact()],
     });
@@ -260,7 +260,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
 
     // Notes have their own box on the client page (with who changed them last), so the form leaves them alone.
     const details = {
-      companyName: name, code, employerName: form.employerName.trim(), industry: form.industry.trim(), address: form.address.trim(), hrdcRegistered: form.hrdcRegistered,
+      companyName: name, code, employerName: form.employerName.trim(), employerCode: form.employerCode.trim(), industry: form.industry.trim(), address: form.address.trim(), hrdcRegistered: form.hrdcRegistered,
       logoUrl: form.logoUrl || '',
       contacts, ...mainContactFields(contacts),
     };
@@ -476,6 +476,11 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
                   <input id="c-employer" value={form.employerName} onChange={e => set({ employerName: e.target.value })} placeholder="e.g. ABC Holdings Sdn Bhd" className={input} />
                   <p className="mt-1 text-sm text-ink-soft">Shown in Project P&amp;L. Each quotation can be addressed to this name instead of the company name.</p>
                 </div>
+                <div>
+                  <label className={label} htmlFor="c-empcode">HRD Corp employer code <span className="font-normal text-ink-soft">(optional)</span></label>
+                  <input id="c-empcode" value={form.employerCode} onChange={e => set({ employerCode: e.target.value })} className={`${input} font-mono sm:max-w-[16rem]`} />
+                  <p className="mt-1 text-sm text-ink-soft">Also typed on a deal's Grant approved step. Used for the HRDC claim and Payment tracking.</p>
+                </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className={label} htmlFor="c-industry">Industry <span className="font-normal text-ink-soft">(optional)</span></label>
@@ -568,6 +573,7 @@ function ClientPanel(props: {
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-lg font-bold"><Building2 className="h-5 w-5 shrink-0 text-accent" /> <span className="truncate">{c.companyName}</span></h3>
           {shown(c.employerName) && <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">Employer name:</span> {c.employerName}</p>}
+          {shown(c.employerCode) && <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">HRD Corp employer code:</span> <span className="font-mono">{c.employerCode}</span></p>}
           <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">Customer code:</span> {clientCode(c) || 'not set yet (Edit to add one)'}</p>
           <p className="mt-0.5 text-[15px] text-ink-soft">{[shown(c.industry), c.hrdcRegistered ? 'HRDC registered' : 'Not HRDC registered'].filter(Boolean).join(' · ')}</p>
         </div>

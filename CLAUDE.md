@@ -38,7 +38,7 @@ Everything hangs off a single deal record that moves through stages. Nothing is 
 | 2 | Appointment | Sales | |
 | 3 | Proposal sent | Sales | deal value entered |
 | 4 | Won / Lost | Sales | Won: client, value, funding type. Lost: reason |
-| 5 | Grant + logistics | Admin | HRDC deals: grant applied, then approved (grant number) before training day |
+| 5 | Grant + logistics | Admin | HRDC deals: grant approved (Employer code and Approval code) before training day |
 | 6 | Training day | Admin | Training delivered: photos and signed attendance uploaded (HRDC claim needs it) |
 | 7 | Post-training | Admin | JD14, T3, training report checked (certificates optional, Joel's choice) |
 | 8 | Invoice + claim | Admin | invoice sent; HRDC claim submitted; payment received; P&L closed |
@@ -159,7 +159,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Process audit fixes (2026-10-22):** money controls, deal and KPI rules, HRDC gates, PDPA (`process-audit.md`); publish **both** rules files straight after it is live (until then approvals and T3 saves fail); go-live checklist item 53.
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
-- **Full deal test fixes (Joel, 2026-10-23):** decisions and the four batches are in `docs/features/full-deal-test.md`; Batch 1 done 2026-10-23. Grant step to collect Employer code and Approval code (Admin / Management, in Admin work).
+- **Full deal test fixes (Joel, 2026-10-23):** decisions and the four batches are in `docs/features/full-deal-test.md`; Batches 1 and 2 done 2026-10-23; HRDC Employer code and Approval code on Grant approved done 2026-10-23 (go-live checklist item 54).
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

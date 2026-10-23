@@ -13,10 +13,12 @@ import { PaymentLine } from './blueprint';
 import { MoneyIn, MoneySettings, isPaid } from './money';
 import { dealAskedFor, dealOwnerId } from './deals';
 import { ProjectRow } from './projectPL';
+import { approvalCodeOf } from './checklist';
 
 export interface TrackLine extends PaymentLine {
   dealId?: string;           // set for lines read from a deal's Money section
   hiddenBy?: string;         // an imported line replaced by a deal's line with the same claim ID
+  employerCode?: string;     // deal lines: the client's HRD Corp employer code (2026-10-23)
 }
 
 export const isIsoDay = (s: any) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -47,7 +49,7 @@ export function dealLines(args: {
     const mine = ins.filter(m => m.dealId === d.id);
     if (!mine.length) return;
     const client = clients.find(c => c.id === d.clientId);
-    const grant = (checklists[d.id]?.tasks || []).find((t: any) => t.kind === 'grant');
+    const approval = approvalCodeOf(checklists[d.id]?.tasks);
     const row = args.rows.find(r => r.deal.id === d.id);
     const date = isIsoDay(String(d.trainingDate || '').slice(0, 10)) ? String(d.trainingDate).slice(0, 10) : '';
     mine.forEach(m => {
@@ -57,8 +59,8 @@ export function dealLines(args: {
         id: `deal_${m.id}`, source: 'manual', dealId: d.id,
         month: monthFrom.slice(0, 7), groupNo: `deal#${d.id}`, date, dateText: '',
         programme: dealAskedFor(d, args.programmeName(d)), salesPerson: args.personName(dealOwnerId(d)),
-        claimId: (m.invoiceNo || '').trim(), grantId: hrdc ? (grant?.grantNumber || '').trim() : '',
-        client: client?.companyName || d.client || '', employer: (client?.employerName || '').trim(), employerAddress: '', venue: '',
+        claimId: (m.invoiceNo || '').trim(), grantId: hrdc ? approval : '',
+        client: client?.companyName || d.client || '', employer: (client?.employerName || '').trim(), employerCode: hrdc ? String(client?.employerCode || '').trim() : '', employerAddress: '', venue: '',
         approved: Number(m.amount) || 0,
         afterDeduct: hrdc ? Math.round((Number(m.amount) || 0) * (1 - settings.hrdcDeductionPct / 100) * 100) / 100 : Number(m.amount) || 0,
         afterTax: null,

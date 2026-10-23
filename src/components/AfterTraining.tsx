@@ -7,7 +7,7 @@ import { DEFAULT_MONEY_SETTINGS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT
 import { INVOICE_WORDS, Receipt, invoicesNeeded, postTraining, receiptsFor } from '../lib/postTraining';
 import { hrdcClaimBlock, progress } from '../lib/checklist';
 import { askReason, withDealHistory } from '../lib/moneyActions';
-import DealChecklist from './DealChecklist';
+import DealChecklist, { HrdcCodes } from './DealChecklist';
 import { InForm, InRow } from './Money';
 import { useReceipts } from './PaymentReceipts';
 import { ClaimBackStep, useClaimBacks } from './ClaimBacks';
@@ -118,6 +118,8 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
             )}
           </div>
         ))}
+        {/* HRDC's codes for the claim, typed on the Grant approved step (2026-10-23) */}
+        <HrdcCodes deal={deal} tasks={checklist?.tasks} editable={false} />
         {staff && claimBlock && st.missingInvoices.includes('hrdc') && !adding && (
           <p className="text-sm font-semibold text-attention">Before the HRDC claim: {claimBlock}</p>
         )}

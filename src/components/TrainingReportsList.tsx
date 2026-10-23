@@ -7,7 +7,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { FileText, Search } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { dealStage, formatDate, isDeletedDeal, todayIso, trainingDateText } from '../lib/deals';
-import { effectiveTrainer, effectiveVenue, leadTrainerTask } from '../lib/checklist';
+import { approvalCodeOf, effectiveTrainer, effectiveVenue, leadTrainerTask } from '../lib/checklist';
 import { STATUS_TEXT, ReportStatus, TrainingReport } from '../lib/trainingReport';
 import { ReportPanel, setReportStep, useTrainingReport, useTrainingReports } from './TrainingReportAdmin';
 import type { ReportHeader } from './TrainingReportDocument';
@@ -55,7 +55,7 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
       const header: ReportHeader = {
         programme: d.courseName || '', client: d.client || '', dates: trainingDateText(d, true),
         venue: effectiveVenue(tasks.find(t => t.kind === 'venue'), dealQuotes, [])?.name || '', trainer: tr?.name || trainerName,
-        grantNumber: tasks.find(t => t.kind === 'grant')?.grantNumber || '',
+        grantNumber: approvalCodeOf(tasks),
       };
       const names = (checklists[d.id]?.t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean);
       return { deal: d, report, status: (report?.status || 'none') as Status, trainerId: report?.trainerId || tr?.id || '', trainerName, header, names };
