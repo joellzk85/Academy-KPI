@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
   AlertTriangle, ArrowLeft, BookmarkPlus, ChevronDown, ChevronRight, Copy, Download, Eye, EyeOff, FilePlus2, Laptop, Library, Link2, Loader2, Lock,
-  MoreHorizontal, Pencil, Plus, RotateCcw, Search, Send, Smartphone, Table2, Trash2, Unlock, X,
+  MoreHorizontal, Pencil, Plus, RectangleHorizontal, RectangleVertical, RotateCcw, Search, Send, Smartphone, Table2, Trash2, Unlock, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { QuoteSendEntry, Representative } from '../types';
@@ -16,6 +16,8 @@ import {
   lockedCopy, newTbId, nextTbRef, PENDING_APPROVAL, resolveTb, sectionsOf, tbSent, tbSummary, venuePhotos,
 } from '../lib/teambuilding';
 import { downloadBlob } from '../lib/quotePdf';
+import type { TbPdfLayout } from '../lib/tbPdf';
+import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { GapsBox } from './DealGates';
 import { Programme } from '../lib/programmes';
 import ShareWithBox, { NewCount } from './ShareWithBox';
@@ -24,7 +26,7 @@ import TeambuildingSite from './TeambuildingSite';
 import PhoneFrame from './PhoneFrame';
 import PhotoPicker from './PhotoPicker';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
-import CustomerCodeBox from './CustomerCodeBox';
+import CustomerCodeBox, { needsCustomerCode, nudgeCustomerCode } from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { AcceptBlock } from './ProposalLinkPage';
@@ -488,6 +490,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   // Sending the proposal: a deal at New moves to "Proposal sent", with the same check as its own button
   // (programme from the list and the deal value). Same rules as course outlines.
   const startSend = () => {
+    if (!locked && needsCustomerCode(r.client, p.refAuto)) return nudgeCustomerCode();
     if (!locked) {
       const mayMove = dealAtNew && canMoveDeal(deal, me);
       const gaps = mayMove ? dealGaps(deal, 'proposal', { clientIds: sources.clients.map(c => c.id), programmeIds: programmes.map(x => x.id) }) : [];
@@ -527,9 +530,9 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
     return persist({ ...p, status: 'draft', sentAt: '', sentById: '', sentByName: '' }, 'Unlocked for revision');
   };
   const makePdf = async () => (await import('../lib/tbPdf')).makeTbPdf(r, pax);
-  const downloadPdf = async () => {
+  const downloadPdf = async (layout: TbPdfLayout) => {
     setPdfBusy(true); setError('');
-    try { const { tbPdfFileName } = await import('../lib/tbPdf'); downloadBlob(await makePdf(), tbPdfFileName(r)); }
+    try { const { makeTbPdf, tbPdfFileName } = await import('../lib/tbPdf'); downloadBlob(await makeTbPdf(r, pax, layout), tbPdfFileName(r, layout)); }
     catch (e: any) { setError(`The PDF couldn't be made (${e?.message || e}).`); }
     finally { setPdfBusy(false); }
   };
@@ -727,7 +730,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
           <span className={`text-sm ${toneClass[status.tone]}`}>{status.text}</span>
           <span className="ml-auto flex flex-wrap gap-2">
             <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
-            <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={downloadPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
+            <PdfButton busy={pdfBusy} onPick={downloadPdf} up />
             <button type="button" className={btnSecondary} disabled={busy || !!gate} onClick={startSend}><Send className="h-4 w-4" /> {sendLabel}</button>
             <button type="button" className={btnPrimary} disabled={busy || !dirty} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
           </span>
@@ -740,9 +743,37 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   );
 }
 
+// ---------- Download PDF: Vertical (A4, the website printed) or Horizontal (16:9 slides, Joel 2026-10-23) ----------
+function PdfButton({ busy, onPick, up }: { busy: boolean; onPick: (layout: TbPdfLayout) => void; up?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useCloseOnOutside(ref, open, useCallback(() => setOpen(false), []));
+  const pick = (layout: TbPdfLayout) => { setOpen(false); onPick(layout); };
+  const item = 'flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-surface';
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" className={btnSecondary} disabled={busy} aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF <ChevronDown className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className={`absolute right-0 z-50 w-72 rounded-xl border border-line bg-white p-1.5 shadow-lg ${up ? 'bottom-full mb-2' : 'top-full mt-2'}`}>
+          <button type="button" className={item} onClick={() => pick('vertical')}>
+            <RectangleVertical className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+            <span><span className="block text-[15px] font-semibold">Vertical (A4)</span><span className="block text-sm text-ink-soft">The proposal website, printed page by page</span></span>
+          </button>
+          <button type="button" className={item} onClick={() => pick('horizontal')}>
+            <RectangleHorizontal className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+            <span><span className="block text-[15px] font-semibold">Horizontal (slides)</span><span className="block text-sm text-ink-soft">One topic per slide, like a PowerPoint deck</span></span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Preview: exactly what the client sees ----------
 function Preview({ r, pax, onPax, onBack, dirty, pdfBusy, onPdf, onSend, sendLabel, busy, error, sendDialog }: {
-  r: ResolvedTb; pax: number; onPax?: (n: number) => void; onBack: () => void; dirty: boolean; pdfBusy: boolean; onPdf: () => void;
+  r: ResolvedTb; pax: number; onPax?: (n: number) => void; onBack: () => void; dirty: boolean; pdfBusy: boolean; onPdf: (layout: TbPdfLayout) => void;
   onSend: () => void; sendLabel: string; busy: boolean; error: string; sendDialog: React.ReactNode;
 }) {
   const [phone, setPhone] = useState(false);
@@ -765,7 +796,7 @@ function Preview({ r, pax, onPax, onBack, dirty, pdfBusy, onPdf, onSend, sendLab
         <span className="hidden text-sm text-ink-soft md:inline">This is what the client will see.</span>
         <span className="ml-auto flex flex-wrap items-center gap-2">
           {dirty && <span className="text-sm text-attention">Draft saves in a moment</span>}
-          <button type="button" className={btnSecondary} disabled={pdfBusy} onClick={onPdf}>{pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download PDF</button>
+          <PdfButton busy={pdfBusy} onPick={onPdf} />
           <button type="button" className={btnPrimary} disabled={busy} onClick={onSend}><Send className="h-4 w-4" /> {sendLabel}</button>
         </span>
         {error && <p role="alert" className="w-full rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}

@@ -12,6 +12,8 @@ import { malaysiaDay } from './src/lib/backup';
 import { readMoneySettings } from './src/lib/money';
 import { projectRows } from './src/lib/projectPL';
 import { dealOwnerId } from './src/lib/deals';
+import { gpAlerts } from './src/lib/gpAlerts';
+import { readKpiLibrary } from './src/lib/kpiLibrary';
 import { itemStars, readRound, RatingRound, ratingOverall, summarise } from './src/lib/rating360';
 
 const MONTH = /^\d{4}-\d{2}$/;
@@ -130,4 +132,29 @@ export function registerKpiRoutes(app: Express) {
     }
     return { gp };
   }));
+
+  // Strange GP or a cost left out of the P&L on my own deals (full deal test, 2026-10-23): the deal owner's My home
+  // alert. Only the GP % and the cost's category and reason go back; reps can't see costs (src/lib/gpAlerts.ts).
+  app.post('/api/kpi/deal-alerts', route(async req => {
+    const caller = await callerFrom(req);
+    const { db } = admin();
+    const list = async (id: string) => (await db.collection(id).get()).docs.map(d => ({ ...(d.data() as any), id: d.id }));
+    const live = (r: any) => r.deleted !== true && r.dealDeleted !== true;
+    const deals = (await list('pipelines')).filter(d => live(d) && dealOwnerId(d) === caller.memberId);
+    if (!deals.length) return { alerts: [] };
+    const [ins, outs, quotes, plSnap, settingsDoc, libDoc] = await Promise.all([
+      list('money_in'), list('money_out'), list('quotations'), db.collection('project_pl').get(),
+      db.collection('config').doc('money_settings').get(), db.collection('config').doc('kpi_library').get(),
+    ]);
+    const today = malaysiaDay(Date.now());
+    const since = new Date(Date.parse(today) - ALERT_DAYS * 864e5).toISOString().slice(0, 10);
+    const plDocs = Object.fromEntries(plSnap.docs.map(d => [d.id, d.data()]));
+    const red = readKpiLibrary(libDoc.data()).gpBands.red;
+    const rows = projectRows(deals, ins.filter(live), outs.filter(live), readMoneySettings(settingsDoc.data()), today, { quotes, plDocs })
+      .filter(r => !r.trainingDate || r.trainingDate >= since);
+    return { alerts: rows.flatMap(r => gpAlerts(r, outs.filter(live), red, true)) };
+  }));
 }
+
+// Alerts look at trainings from this many days ago onwards (older ones are settled).
+const ALERT_DAYS = 90;

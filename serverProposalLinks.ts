@@ -146,6 +146,9 @@ export function registerProposalLinkRoutes(app: Express) {
       tx.update(dRef, {
         ...(moves ? { stage: 'agreed', status: statusForStage('agreed'), agreedDate: plusDaysMY(0, now) } : {}),
         proposalAcceptedAt: now,
+        // The deal owner confirms the amount (Joel, 2026-10-23: clients negotiate, so the accepted package's price
+        // isn't the deal value until the rep says so). Kept until confirmed in the deal panel.
+        acceptedOnline: { packageName: col?.name || '', pax, price: price ?? null, name, position, at: now, confirmed: false },
         history: [...(deal.history || []), historyLine(action, now)],
       });
     });

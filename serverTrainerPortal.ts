@@ -20,7 +20,7 @@ import { effectiveVenue, isCoTrainer, isLeadTrainer } from './src/lib/checklist'
 import { cancelledTraining, lastMove } from './src/lib/trainingChange';
 import { isDeletedRecord, ownedByTeam } from './src/lib/linked';
 import {
-  bankProblem, buildPo, calendarPath, claimFilesText, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeStatusText,
+  bankProblem, buildPo, calendarPath, claimFilesText, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeIsAgreed, feeStatusText,
   icsCalendar, inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -147,7 +147,8 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
     const job: any = (await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data() || {};
     const rep: any = (await db.collection('training_reports').doc(deal.id).get()).data();
     const report = rep && rep.trainerId === trainerId ? { status: rep.status, returnNote: rep.returnNote || '', submittedAt: rep.submittedAt || '' } : null;
-    const lines = (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected');
+    // Only fees a manager has agreed reach the trainer and the PO (2026-10-23).
+    const lines = (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected' && feeIsAgreed(o));
     const files = await poFiles(db, deal.id, task.id);
     const start = String(deal.trainingDate || '').slice(0, 10);
     const client = String(clients.docs.find((d: any) => d.id === deal.clientId)?.data().companyName || deal.client || '');
@@ -500,7 +501,9 @@ export function registerTrainerPortalRoutes(app: Express) {
     const start = String(deal.trainingDate || '').slice(0, 10);
     if (!start || start > todayIso()) throw new UserError(400, 'too-early', 'You can request your fee once the training has started.');
     const folder = claimFolder(trainerId, deal.id);
-    const photos = cleanFiles(req.body?.photos, folder, 40);
+    // Photos are uploaded once (Joel, 2026-10-23): none sent here = the training report's photos.
+    const sentPhotos = cleanFiles(req.body?.photos, folder, 40);
+    const photos = sentPhotos.length ? sentPhotos : await reportPhotos(db, deal.id, trainerId, folder);
     const t3 = cleanFiles(req.body?.t3, folder, 10);
     const problem = claimProblem(photos, t3);
     if (problem) throw new UserError(400, 'invalid', problem);
@@ -516,6 +519,7 @@ export function registerTrainerPortalRoutes(app: Express) {
       claim: { status: 'submitted', photos, t3, submittedAt: at, returnNote: '', history: [...(before?.history || []), { at, byName: by, action: before ? 'Sent again' : 'Fee requested' }].slice(-20) },
     }, { merge: true });
     await addDealHistory(db, deal.id, '', by, `Trainer requested their fee (${claimFilesText(photos, t3)})`);
+    if (photos.length && t3.length) await tickDelivered(db, deal.id, by, `${claimFilesText(photos, t3)} from the trainer portal`);
     return {};
   }));
 
@@ -535,6 +539,12 @@ export function registerTrainerPortalRoutes(app: Express) {
       ? withDates({ ...newReport(deal.id, trainerId, t.name || '', seed), ...mine, ...(mine.trainerDraft || {}) }, seed.dates)
       : newReport(deal.id, trainerId, t.name || '', seed);
     const { participant, showToHr, history, trainerDraft, hrHeader, ...report } = withPax(base, seed.pax) as any;
+    // Photos are uploaded once (Joel, 2026-10-23): a report with no photos yet starts with the fee request's.
+    if (!(report.photos || []).length) {
+      const job: any = (await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data();
+      const claimPhotos = cleanFiles(job?.claim?.photos, claimFolder(trainerId, deal.id), 12);
+      if (claimPhotos.length) report.photos = claimPhotos;
+    }
     return {
       report, names: seed.names, pax: seed.pax, pending: !!mine?.trainerDraft,
       programmes: (await db.collection('programmes').get()).docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name),
@@ -600,9 +610,39 @@ export function registerTrainerPortalRoutes(app: Express) {
       ...part, dealId: deal.id, trainerId, trainerName: t.name || '', status, updatedAt: at, updatedByName: by,
       ...(submit ? { submittedAt: at, submittedByName: by, history: [...(before?.history || []), { at, byName: by, action: 'Sent' }].slice(-30) } : {}),
     }, { merge: true });
-    if (submit) await addDealHistory(db, deal.id, '', by, 'Trainer sent the training report');
+    if (submit) {
+      await addDealHistory(db, deal.id, '', by, 'Trainer sent the training report');
+      // The report's photos plus the T3 sent with the fee request also count as "Training delivered".
+      const t3 = (((await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data() as any)?.claim?.t3 || []) as unknown[];
+      if ((part.photos || []).length && t3.length) await tickDelivered(db, deal.id, by, `${claimFilesText(part.photos, t3)} from the trainer portal`);
+    }
     return { status };
   }));
+}
+
+// The trainer's photos in their training report (sent, or a draft being changed), for a fee request sent without any.
+async function reportPhotos(db: Firestore, dealId: string, trainerId: string, folder: string) {
+  const r: any = (await db.collection('training_reports').doc(dealId).get()).data();
+  if (!r || r.trainerId !== trainerId) return [];
+  return cleanFiles(r.trainerDraft?.photos?.length ? r.trainerDraft.photos : r.photos, folder, 40);
+}
+
+// The trainer sent photos and the signed T3 (Joel, 2026-10-23): tick "Training delivered (photos and signed
+// attendance)" for Admin, so they aren't uploaded a third time. Never unticks; a step already done is left alone.
+async function tickDelivered(db: Firestore, dealId: string, byName: string, what: string) {
+  const ref = db.collection('deal_checklists').doc(dealId);
+  await db.runTransaction(async tx => {
+    const c: any = (await tx.get(ref)).data();
+    const tasks: any[] = c?.tasks || [];
+    const step = tasks.find(x => x.id === 'delivered');
+    if (!step || step.done) return;
+    const at = nowIso();
+    tx.update(ref, {
+      tasks: tasks.map(x => (x.id === 'delivered' ? { ...x, done: true, doneAt: at, doneById: '', doneByName: byName, note: x.note || `${what[0].toUpperCase()}${what.slice(1)}` } : x)),
+      updatedAt: Date.now(),
+      history: [...(c.history || []), { at, byId: '', byName, action: `Training delivered: ticked by itself (${what})` }],
+    });
+  }).catch(e => console.error('[portal] tick delivered', e));
 }
 
 // A checked report changed by the trainer: untick the deal's "Training report" step (as Reopen does in the CRM).

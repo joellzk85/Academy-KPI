@@ -36,6 +36,18 @@ export interface Programme {
   notes?: string;
   category?: string;         // e.g. "Leadership & Professional Development" (from the Blueprint list, 2026-10-20)
   days?: number | null;      // usual length in days (half days allowed)
+  outlineFiles?: ProgrammeFile[];   // course outline files uploaded on the programme (2026-10-23)
+}
+
+// A course outline file kept on a programme, at programme_files/{programmeId}/{id}_{name} in storage.
+export interface ProgrammeFile {
+  id: string;
+  name: string;
+  size: number;
+  path: string;
+  at: string;
+  byId: string;
+  byName: string;
 }
 
 export interface HrdcQuery {
@@ -49,6 +61,17 @@ export interface HrdcQuery {
   handledByName: string;
   answeredDate?: string;
   answer?: string;
+}
+
+// Teambuilding programmes end in "(TB)" (Joel, 2026-10-23): a teambuilding deal picks from those, a training deal
+// from the others. Quick-adding one from a teambuilding deal adds the "(TB)".
+export const isTbProgramme = (name?: string) => /\(TB\)\s*$/i.test(String(name || ''));
+export const withTbMark = (name: string) => (isTbProgramme(name) ? name.trim() : `${name.trim()} (TB)`);
+export const isTbDeal = (deal: any) => String(deal?.type || '') === 'Teambuilding';
+/** The programmes a deal of this type can pick: (TB) ones for teambuilding, the rest for training; all when unknown. */
+export function programmesFor(list: Programme[], kind?: 'training' | 'teambuilding'): Programme[] {
+  if (!kind) return list;
+  return list.filter(p => isTbProgramme(p.name) === (kind === 'teambuilding'));
 }
 
 export function programmeStatus(p: any): HrdcStatus {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { Loader2, Trophy } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
@@ -28,12 +28,12 @@ const history = (p: any, viewer: Viewer, action: string) =>
   [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }];
 
 // The inputs for the missing fields. Values are kept by the parent so they can be saved with the step.
-export type GapValues = { clientId: string; programmeId: string; programmeName: string; value: string; fundingType: FundingType | '' };
-export const emptyGapValues = (): GapValues => ({ clientId: '', programmeId: '', programmeName: '', value: '', fundingType: '' });
+export type GapValues = { clientId: string; programmeId: string; programmeName: string; value: string; fundingType: FundingType | ''; participants: string };
+export const emptyGapValues = (): GapValues => ({ clientId: '', programmeId: '', programmeName: '', value: '', fundingType: '', participants: '' });
 
-function GapInputs({ gaps, values, set, programmes, clients, viewer }: {
+function GapInputs({ gaps, values, set, programmes, clients, viewer, kind }: {
   gaps: DealField[]; values: GapValues; set: (c: Partial<GapValues>) => void;
-  programmes: Programme[]; clients: any[]; viewer: Viewer;
+  programmes: Programme[]; clients: any[]; viewer: Viewer; kind?: 'training' | 'teambuilding';
 }) {
   return (
     <div className="space-y-3">
@@ -49,7 +49,7 @@ function GapInputs({ gaps, values, set, programmes, clients, viewer }: {
       {gaps.includes('programme') && (
         <div>
           <span className={label}>Programme</span>
-          <ProgrammePicker programmes={programmes} value={values.programmeId} viewer={viewer} onChange={pg => set({ programmeId: pg.id, programmeName: pg.name })} />
+          <ProgrammePicker programmes={programmes} value={values.programmeId} viewer={viewer} kind={kind} onChange={pg => set({ programmeId: pg.id, programmeName: pg.name })} />
         </div>
       )}
       {gaps.includes('value') && (
@@ -69,6 +69,12 @@ function GapInputs({ gaps, values, set, programmes, clients, viewer }: {
               </label>
             ))}
           </div>
+        </div>
+      )}
+      {gaps.includes('participants') && (
+        <div>
+          <label htmlFor="gap-pax" className={label}>Number of participants</label>
+          <input id="gap-pax" inputMode="numeric" value={values.participants} onChange={e => set({ participants: e.target.value.replace(/[^0-9]/g, '') })} className={input} placeholder="e.g. 25" />
         </div>
       )}
     </div>
@@ -97,6 +103,11 @@ function gapChanges(gaps: DealField[], v: GapValues, programmes: Programme[], cl
     if (!v.fundingType) return 'Choose how this training will be paid for.';
     out.fundingType = v.fundingType;
   }
+  if (gaps.includes('participants')) {
+    const n = Number(v.participants);
+    if (!Number.isInteger(n) || n <= 0 || n > 10000) return 'Enter the number of participants, for example 25.';
+    out.participants = n;
+  }
   return out;
 }
 
@@ -109,6 +120,15 @@ export function GapsBox({ deal, gaps, step, programmes, clients, viewer, onSaved
   const [v, setV] = useState<GapValues>(emptyGapValues());
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // The box opens after a click on a step, often far down a long editor (full deal test, 2026-10-23):
+  // bring it into view and put the cursor in its first box, so the click never seems to do nothing.
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    box.querySelector<HTMLElement>('input, select, textarea')?.focus({ preventScroll: true });
+  }, []);
   const save = async () => {
     const ch = gapChanges(gaps, v, programmes, clients);
     if (typeof ch === 'string') return setErr(ch);
@@ -125,9 +145,9 @@ export function GapsBox({ deal, gaps, step, programmes, clients, viewer, onSaved
     }
   };
   return (
-    <div className="rounded-xl border border-attention/30 bg-attention-soft p-4">
+    <div ref={boxRef} className="rounded-xl border-2 border-attention bg-attention-soft p-4 shadow-md">
       <p className="mb-3 text-sm font-semibold text-attention">Before "{step}", add {gaps.map(g => GAP_LABELS[g]).join(' and ')}:</p>
-      <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} />
+      <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} kind={deal.type === 'Teambuilding' ? 'teambuilding' : 'training'} />
       {err && <p role="alert" className="mt-3 text-sm text-danger">{err}</p>}
       <div className="mt-3 flex gap-2">
         <button type="button" className={btnSecondary} onClick={onCancel}>Cancel</button>
@@ -202,7 +222,7 @@ export function MarkWonBox({ deal, programmes, clients, viewer, onDone, onCancel
       {gaps.length > 0 && (
         <div className="mt-3">
           <p className="mb-2 text-sm font-semibold text-accent">Also add {gaps.map(g => GAP_LABELS[g]).join(' and ')}:</p>
-          <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} />
+          <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} kind={deal.type === 'Teambuilding' ? 'teambuilding' : 'training'} />
         </div>
       )}
       <p className="mt-2 text-sm text-accent">The sale of {formatRM(Number(v.value) || dealValue(deal))} counts toward KPI in the month signed.</p>

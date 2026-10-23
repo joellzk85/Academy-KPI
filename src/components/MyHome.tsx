@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import {
   AlertTriangle, Briefcase, CalendarDays, ChevronLeft, ChevronRight, ClipboardCheck, GripVertical, LayoutGrid, Loader2, Plus, RotateCcw, ShieldCheck, Users, X,
   BarChart3, TrendingUp, FileText, BookOpen, Building2, GraduationCap, MapPin, ListTodo, ListChecks, Wallet, Layers, ListOrdered, DatabaseBackup, LineChart, PieChart, UserCog, Wrench, PartyPopper,
@@ -7,7 +7,7 @@ import {
 import GridLayout, { WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { db, friendlyError } from '../lib/firebase';
+import { callServer, db, friendlyError } from '../lib/firebase';
 import { CalendarEvent, Representative } from '../types';
 import {
   OPEN_STAGES, STAGE_LABELS, DealStage, journeyStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
@@ -20,7 +20,7 @@ import { useSalesTarget } from '../lib/useSalesTarget';
 import SalesProjection from './SalesProjection';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, isCoTrainer, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, programmeStatus } from '../lib/programmes';
-import { MoneyIn, MoneyOut, canDecide, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags } from '../lib/money';
+import { MoneyIn, MoneyOut, canDecide, dateTimeMY, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags, recentlyApproved } from '../lib/money';
 import { TrainerJob, claimFlag, jobId } from '../lib/trainerPortal';
 import { KIND_TEXT, canDecideChange, changeFlagText, changeSummary, pendingChange } from '../lib/trainingChange';
 import { projectRow } from '../lib/projectPL';
@@ -43,6 +43,13 @@ import { DOC_NOUN, DocLink, openedText } from '../lib/docLinks';
 import ProposalActivity from './ProposalActivity';
 import { useProposalSettings } from '../lib/useProposalSettings';
 import { seesLink } from '../lib/proposalTracking';
+import { acceptToConfirm, canDecideDiscount, discountPct, pendingDiscount } from '../lib/dealOffers';
+import { feeIsAgreed } from '../lib/trainerPortal';
+import { isTrainerFee } from '../lib/feeChecks';
+import { isSuperManager } from '../lib/superManager';
+import { trainingEndDate } from '../lib/deals';
+import { GpAlert, gpAlerts } from '../lib/gpAlerts';
+import { activeKpiLibrary } from '../lib/kpiLibrary';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -131,6 +138,7 @@ export interface MyHomeNav {
   openFile?: (kind: SharedKind, id: string) => void;   // a shared quotation or outline, straight in the editor
   openClient?: (clientId: string) => void;             // a client's page (client touch point follow-ups)
   openTeamFollowUps?: (personId?: string) => void;     // Management → Team follow-ups (one person, or '__quiet')
+  openDeal?: (deal: any) => void;                      // the deal's own panel in its owner's workspace
 }
 
 export default function MyHome({ viewer, people, representatives, workspaces, deals, events, calendar, notices, nav }: {
@@ -161,6 +169,15 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const [quotes, setQuotes] = useState<any[]>([]);
   const [plDocs, setPlDocs] = useState<Record<string, any>>({});
   const [trainerJobs, setTrainerJobs] = useState<TrainerJob[]>([]);
+  const [reportsToCheck, setReportsToCheck] = useState<string[]>([]);   // deal ids whose training report the trainer sent, not checked yet
+  // Strange GP or a cost left out of the P&L on my own deals, from the server (2026-10-23; Management works it out itself).
+  const [ownGpAlerts, setOwnGpAlerts] = useState<GpAlert[]>([]);
+  useEffect(() => {
+    if (viewer.role === 'management') return;
+    let live = true;
+    callServer<{ alerts: GpAlert[] }>('/api/kpi/deal-alerts', {}, true).then(r => live && setOwnGpAlerts(r.alerts || [])).catch(() => {});
+    return () => { live = false; };
+  }, [viewer.id, viewer.role]);
   const touchPoints = useTouchPoints();
   const [savedCards, setSavedCards] = useState<CardId[] | null>(null);
   const [savedShortcuts, setSavedShortcuts] = useState<ShortcutId[] | null>(null);
@@ -242,6 +259,8 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
       subs.push(onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...d.data(), id: d.id })))));
       // Trainer fee requests from the portal, as a notification (2026-10-21).
       subs.push(onSnapshot(query(collection(db, 'trainer_jobs')), s => setTrainerJobs(s.docs.map(d => ({ ...(d.data() as TrainerJob), id: d.id }))), () => setTrainerJobs([])));
+      // Training reports sent by the trainer and waiting to be checked (full deal test, 2026-10-23).
+      subs.push(onSnapshot(query(collection(db, 'training_reports'), where('status', '==', 'submitted')), s => setReportsToCheck(s.docs.map(d => d.id)), () => setReportsToCheck([])));
     }
     // SST typed in Project P&L, for the Money position card's profit (Management only).
     if (viewer.role === 'management') {
@@ -309,10 +328,15 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const nameOf = (id: string) => people.find(p => p.id === id)?.name || 'Former team member';
   const clientName = (p: any) => clients.find(c => c.id === p.clientId)?.companyName || p.client || 'No client';
   // Management can open anyone's workspace; everyone else only their own (Admin goes to the work queue).
+  // Every card opens the deal's own panel, not just the list (full deal test, 2026-10-23: a won deal isn't in
+  // "Open deals", so the list alone looked empty).
   const openDeal = (p: any) => {
     const owner = dealOwnerId(p);
-    if (owner === viewer.id || viewer.role === 'management') return nav.openWorkspace(hasWorkspace(owner) ? owner : viewer.id, 'pipeline');
-    if (viewer.role === 'admin') return nav.openAdminWork('queue');
+    if (owner === viewer.id || viewer.role === 'management') {
+      if (nav.openDeal) return nav.openDeal(p);
+      return nav.openWorkspace(hasWorkspace(owner) ? owner : viewer.id, 'pipeline');
+    }
+    if (viewer.role === 'admin') return nav.openAdminWork('queue', dealStage(p) === 'won' ? p.id : undefined);
   };
 
   const wonDeals = useMemo(() => deals.filter(p => dealStage(p) === 'won'), [deals]);
@@ -349,7 +373,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
-    quotes, plDocs, trainerJobs,
+    quotes, plDocs, trainerJobs, reportsToCheck, ownGpAlerts,
   };
 
   return (
@@ -795,6 +819,8 @@ type CardCtx = {
   openedLinks: DocLink[];   // the links this person may see opens of
   quotes: any[]; plDocs: Record<string, any>;   // for the one P&L (SST from the quotation, or typed in Project P&L)
   trainerJobs: TrainerJob[];
+  reportsToCheck: string[];
+  ownGpAlerts: GpAlert[];
 };
 
 // Trainers who asked for their fee in the portal and aren't approved yet (Admin and Management's notification,
@@ -989,8 +1015,22 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           key: `reopen_${l.token}`, title: p ? c.clientName(p) : l.company || 'Client', onClick: p ? () => c.openDeal(p) : undefined, level: 'danger' as const,
           sub: `${l.reopenRequest!.name} asked to open your ${docNoun(l.kind)} ${l.refNumber || ''} again${l.reopenRequest!.note ? `: "${l.reopenRequest!.note}"` : ''}. Reopen it from the ${docNoun(l.kind)}.`,
         }));
+      // The client accepted online (confirm the amount), and my discount requests once decided (2026-10-23).
+      // Plus strange GP or a cost left out of the P&L on my deals, from the server (no cost amounts).
+      const offers: Item[] = c.deals.filter(p => c.mine(p)).flatMap(p => {
+        const out: Item[] = c.ownGpAlerts.filter(a => a.dealId === p.id).map((a, i) => ({ key: `gp_${p.id}_${i}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: a.level, sub: a.text }));
+        const a = acceptToConfirm(p);
+        if (a) out.push({ key: `acc_${p.id}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: 'attention',
+          sub: `Client accepted online${a.packageName ? ` ("${a.packageName}"${a.price !== null ? `, ${formatRM(a.price || 0)}` : ''})` : ''}: confirm the amount` });
+        const d = p.discountRequest;
+        if (d && d.byId === c.viewer.id && ['approved', 'rejected'].includes(d.status) && d.decidedAt && Date.now() - Date.parse(d.decidedAt) < 14 * 864e5) {
+          out.push({ key: `disc_${p.id}`, title: c.clientName(p), onClick: () => c.openDeal(p), level: d.status === 'rejected' ? 'danger' : undefined,
+            sub: d.status === 'approved' ? `Discount to ${formatRM(d.toValue)} approved by ${d.decidedByName}` : `Discount rejected by ${d.decidedByName}${d.rejectReason ? `: ${d.rejectReason}` : ''}` });
+        }
+        return out;
+      });
       return {
-        items: [...alerts, ...reopen, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
+        items: [...offers, ...alerts, ...reopen, ...opened, ...appts, ...clientItems, ...soon.filter(({ p }) => !alerted.has(p.id)).map(({ p, d }) => ({
           key: p.id, title: c.clientName(p), onClick: () => c.openDeal(p),
           // On hold (2026-10-19): the potential date is the follow-up date.
           sub: activeHold(p) ? (d <= 0 ? 'On hold date reached: resume, hold longer or mark lost' : holdText(p, c.today))
@@ -1078,9 +1118,9 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         const ins = c.moneyIn.filter(m => m.dealId === p.id);
         const outs = c.moneyOut.filter(o => o.dealId === p.id);
         const rc = c.receipts.filter(r => r.dealId === p.id);
-        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.claims, c.today, c.moneySettings);
+        const st = postTraining(p, cl?.tasks, ins, outs, rc, c.claims, c.today, c.moneySettings, c.queries);
         if (!st.ended || st.closed) return;
-        const flags = postTrainingFlags(p, cl?.tasks, ins, outs, rc, c.claims, c.moneySettings, c.today);
+        const flags = postTrainingFlags(p, cl?.tasks, ins, outs, rc, c.claims, c.moneySettings, c.today, c.queries);
         const level = flags.some(f => f.level === 'danger') ? 'danger' as const : 'attention' as const;
         const since = st.daysSince || 0;
         items.push({
@@ -1120,6 +1160,17 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     case 'money_jobs': {
       // Trainers asking for their fee in the portal (2026-10-21): Admin checks T3, photos and report first.
       const items: Item[] = [...feeRequestItems(c, deal)];
+      // Discounts waiting for a manager (2026-10-23): Admin is told too; Management approves them in "Waiting for my approval".
+      if (c.viewer.role === 'admin') c.deals.filter(p => pendingDiscount(p)).forEach(p => {
+        const d = pendingDiscount(p)!;
+        items.push({ key: `${p.id}_disc`, title: `Discount asked · ${deal(p)}`, onClick: () => c.openDeal(p),
+          sub: `${formatRM(d.fromValue)} to ${formatRM(d.toValue)} (${discountPct(d).toFixed(1)}% off) by ${d.byName} · waiting for a manager` });
+      });
+      // Training reports the trainer sent: Admin or Management checks them (this also unlocks the trainer fee).
+      c.wonDeals.filter(p => c.reportsToCheck.includes(p.id)).forEach(p => items.push({
+        key: `${p.id}_report`, title: `Training report to check · ${deal(p)}`, level: 'attention',
+        sub: 'The trainer sent it. Check it, then click "Checked, ready for HR"', onClick: () => c.nav.openAdminWork('queue', p.id),
+      }));
       // Before training only: invoicing a direct-pay client. From the day after the training it's in the After training card.
       c.wonDeals.forEach(p => {
         moneyFlags(p, c.moneyIn.filter(m => m.dealId === p.id), [], c.moneySettings, c.today).forEach((f, i) => items.push({
@@ -1134,13 +1185,19 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       const ready = c.moneyOut.filter(o => o.status === 'approved' && !o.summaryToken && isPayable(o, c.deals.find(d => d.id === o.dealId), c.today));
       if (ready.length) items.push({ key: 'ready_for_summary', title: `${ready.length} approved payment${ready.length === 1 ? '' : 's'} to send to accounts`, sub: `${formatRM(ready.reduce((t, o) => t + (Number(o.amount) || 0), 0))} · make a payment summary in Admin work → Money`, onClick: () => c.nav.openAdminWork('money') });
       c.moneyOut.filter(o => o.status === 'rejected' && !o.trainingCancelled && o.requestedById === c.viewer.id).forEach(o => items.push({ key: o.id, title: `Rejected: ${o.payee} ${formatRM(o.amount)}`, sub: o.rejectReason || 'See the reason and send a new request', level: 'attention', onClick: () => c.nav.openAdminWork('money') }));
+      // The person who raised a request hears back when it's approved, for 3 days (Joel, 2026-10-23).
+      recentlyApproved(c.moneyOut, c.viewer.id).forEach(o => items.push({ key: `${o.id}_ok`, title: `Approved: ${o.payee} ${formatRM(o.amount)}`, sub: `by ${o.decidedByName}, ${dateTimeMY(o.decidedAt)}`, onClick: () => c.nav.openAdminWork('money') }));
       items.sort((a, b) => (a.level === b.level ? 0 : a.level === 'danger' ? -1 : b.level === 'danger' ? 1 : a.level ? -1 : 1));
       return { items, empty: 'No money jobs waiting.' };
     }
     case 'approvals': {
       // Trainers asking for their fee (2026-10-21) replace their fee lines here: approved on the deal, after the checks.
       const fees = feeRequestItems(c, deal);
-      const list = c.moneyOut.filter(o => canDecide(o, c.viewer) && !fees.some(f => f.dealId === o.dealId && f.taskId === o.checklistTaskId));
+      // Trainer fees (2026-10-23): agreed before the PO (here as "Agree trainer fee"), approved for payment only from the
+      // day after the training, so they don't wait here from booking day.
+      const ended = (o: MoneyOut) => { const p = c.deals.find(d => d.id === o.dealId); const end = p ? trainingEndDate(p) : ''; return !!end && end < c.today; };
+      const toAgree = c.moneyOut.filter(o => o.status === 'pending' && !feeIsAgreed(o) && c.viewer.role === 'management' && (o.requestedById !== c.viewer.id || isSuperManager(c.viewer)));
+      const list = c.moneyOut.filter(o => canDecide(o, c.viewer) && feeIsAgreed(o) && !(isTrainerFee(o) && !ended(o)) && !fees.some(f => f.dealId === o.dealId && f.taskId === o.checklistTaskId));
       // Training date changes and cancellations (2026-10-21) come first: nothing moves until they're decided.
       const changes = c.deals.filter(p => canDecideChange(pendingChange(p), c.viewer));
       return {
@@ -1150,9 +1207,20 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
             return { key: `${p.id}_tc`, title: `${KIND_TEXT[tc.kind]} · ${deal(p)}`, level: (tc.kind === 'cancel' ? 'danger' : 'attention') as Item['level'], sub: `${changeSummary(tc)} · asked by ${tc.byName}`, onClick: () => c.openDeal(p) };
           }),
           ...fees,
+          ...toAgree.map(o => {
+            const p = c.deals.find(d => d.id === o.dealId);
+            return { key: `${o.id}_agree`, title: `Agree trainer fee · ${o.payee} · ${formatRM(o.amount)}`, level: 'attention' as Item['level'],
+              sub: `${p ? deal(p) : 'Deal'} · raised by ${o.requestedByName} · the PO goes to the trainer once agreed`, onClick: p ? () => c.nav.openAdminWork('queue', p.id) : undefined };
+          }),
+          // Discounts on quotations (2026-10-23): never your own.
+          ...c.deals.filter(p => canDecideDiscount(pendingDiscount(p), c.viewer)).map(p => {
+            const d = pendingDiscount(p)!;
+            return { key: `${p.id}_disc`, title: `Discount · ${deal(p)}`, level: 'attention' as Item['level'], onClick: () => c.openDeal(p),
+              sub: `${formatRM(d.fromValue)} to ${formatRM(d.toValue)} (${discountPct(d).toFixed(1)}% off)${d.gpTo !== null && d.gpTo !== undefined ? ` · GP ${d.gpTo.toFixed(1)}%` : ''} · asked by ${d.byName}` };
+          }),
           ...list.map(o => {
             const p = c.deals.find(d => d.id === o.dealId);
-            return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · requested by ${o.requestedByName}`, onClick: () => c.nav.openAdminWork('money') };
+            return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · raised by ${o.requestedByName}, ${dateTimeMY(o.resubmittedAt || o.requestedAt)}`, onClick: () => c.nav.openAdminWork('money') };
           }),
         ],
         empty: 'Nothing waiting for your approval.',
@@ -1161,6 +1229,10 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
     case 'money_position': {
       let toComeIn = 0, overdue = 0, toPay = 0, waiting = 0, profitMonth = 0;
       const month = c.today.slice(0, 7);
+      // Strange GP or a cost left out of the P&L on recent trainings (2026-10-23): listed above the tiles.
+      const gpItems: Item[] = [];
+      const since = new Date(Date.parse(c.today) - 90 * 864e5).toISOString().slice(0, 10);
+      const red = activeKpiLibrary().gpBands.red;
       c.wonDeals.forEach(p => {
         const ins = c.moneyIn.filter(m => m.dealId === p.id);
         // The one P&L (projectRow, as in Project P&L and the deal): profit after SST, HRDC's %, commission and costs.
@@ -1168,6 +1240,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         if (!row.estimate) toComeIn += row.toComeIn;   // invoices and claims sent, not yet paid
         toPay += row.toPayOut; waiting += row.pendingApproval;
         if (ymd(p.trainingDate).startsWith(month)) profitMonth += row.profit;
+        if (!ymd(p.trainingDate) || ymd(p.trainingDate) >= since) gpAlerts(row, c.moneyOut, red).forEach((a, i) => gpItems.push({ key: `${p.id}_gp${i}`, title: deal(p), level: a.level, sub: a.text, onClick: () => c.openDeal(p) }));
         ins.filter(m => !isPaid(m) && ymd(m.invoiceDate) && -(daysUntil(ymd(m.invoiceDate), c.today) ?? 0) > c.moneySettings.overdueDays).forEach(() => { overdue++; });
       });
       // Company payments (not tied to a training) still need paying or approving.
@@ -1179,11 +1252,11 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         <div className="rounded-xl bg-surface px-3 py-2.5"><p className="text-xs font-semibold text-ink-soft">{label}</p><p className={`text-lg font-bold tabular-nums ${tone || ''}`}>{value}</p></div>
       );
       return {
-        items: [], empty: '',
+        items: gpItems, empty: '',
         footer: (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              {tile('Still to come in', formatRM(toComeIn))}
+              {tile('Invoiced, not paid yet', formatRM(toComeIn))}
               {tile('Overdue invoices or claims', String(overdue), overdue ? 'text-danger' : '')}
               {tile('Approved, to pay', formatRM(toPay))}
               {tile('Waiting for approval', formatRM(waiting))}

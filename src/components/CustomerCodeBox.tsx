@@ -33,9 +33,9 @@ export default function CustomerCodeBox({ client, clients, refNumber, onSaved }:
 
   const example = refWithCode(refNumber, cleanCode(code) || 'HKL');
   return (
-    <div className="rounded-2xl border border-attention/30 bg-attention-soft p-4">
+    <div id="customer-code-box" className="rounded-2xl border border-attention/30 bg-attention-soft p-4 transition-shadow">
       <p className="text-[15px] font-semibold text-ink">{client.companyName} has no customer code yet</p>
-      <p className="mt-0.5 text-sm text-ink-soft">The code starts the reference number{example !== refNumber ? `, e.g. ${example}` : ''}. It's saved in the client list.</p>
+      <p className="mt-0.5 text-sm text-ink-soft">The code starts the reference number{example !== refNumber ? `, e.g. ${example}` : ''}. It's saved in the client list, and needed before the first send.</p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor="cust-code">Customer code</label>
         <input id="cust-code" value={code} onChange={e => setCode(cleanCode(e.target.value).slice(0, 6))} placeholder="e.g. HKL"
@@ -48,4 +48,17 @@ export default function CustomerCodeBox({ client, clients, refNumber, onSaved }:
       {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
     </div>
   );
+}
+
+// The first send needs the customer code (Joel, 2026-10-23: one reference style from the start).
+export const needsCustomerCode = (client: any, refAuto?: boolean) => !!client && !!refAuto && !clientCode(client);
+
+/** Brings the customer code box into view, highlights it and puts the cursor in it (Send was clicked too early). */
+export function nudgeCustomerCode() {
+  const box = document.getElementById('customer-code-box');
+  if (!box) return;
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  box.classList.add('ring-4', 'ring-attention/60');
+  window.setTimeout(() => box.classList.remove('ring-4', 'ring-attention/60'), 2500);
+  box.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
 }

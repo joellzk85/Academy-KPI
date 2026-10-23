@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
-import { Download, FileText, GraduationCap, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
+import { Download, FileText, GraduationCap, Info, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Trainer } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealStage, formatDate, formatRM, todayIso } from '../lib/deals';
@@ -100,6 +100,20 @@ export async function moveTrainerPrivate(dir: any[], privates: Record<string, an
 const bioText = (rows?: Record<string, string>[]) => (rows || []).filter(rowFilled).map(r => Object.values(r).map(v => String(v || '').trim()).filter(Boolean).join(' · ')).join('\n');
 const ecText = (e?: { name?: string; relationship?: string; phone?: string }) =>
   e ? [e.name, e.relationship ? `(${e.relationship})` : '', e.phone].filter(Boolean).join(' ') : '';
+
+// An (i) circle that explains a button: on hover, or on tap / keyboard focus on phones (Joel, 2026-10-23).
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <button type="button" aria-label={text} className="rounded-full p-0.5 text-ink-soft hover:text-accent focus:text-accent focus:outline-none">
+        <Info className="h-4 w-4" />
+      </button>
+      <span role="tooltip" className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-64 rounded-lg border border-line bg-white p-2.5 text-sm font-normal text-ink shadow-lg group-hover:block group-focus-within:block">
+        {text}
+      </span>
+    </span>
+  );
+}
 
 // Malaysian numbers: 012-345 6789 -> 60123456789 for WhatsApp.
 function whatsappLink(phone: string): string {
@@ -419,10 +433,21 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
           <h2 className="text-xl font-bold">Trainers</h2>
           <p className="text-[15px] text-ink-soft">{trainers.length} trainer{trainers.length === 1 ? '' : 's'}, shared by the whole team</p>
         </div>
-        <span className="flex flex-wrap gap-2">
-          <button type="button" onClick={inviteNew} className={btnSecondary}>Invite a new trainer</button>
-          {isStaff && <button type="button" onClick={() => setPortalInvite('')} className={btnSecondary}>Invite to trainer portal</button>}
-          <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add trainer</button>
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1">
+            <button type="button" onClick={inviteNew} className={btnSecondary}>Invite a new trainer</button>
+            <InfoTip text="For a one-off trainer we may or may not use often. They get a link to fill in their own profile, with no login." />
+          </span>
+          {isStaff && (
+            <span className="inline-flex items-center gap-1">
+              <button type="button" onClick={() => setPortalInvite('')} className={btnSecondary}>Invite to trainer portal</button>
+              <InfoTip text="For trainers we will definitely use often. They get their own login to see their trainings, accept POs, write reports and request their fees." />
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1">
+            <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add trainer</button>
+            <InfoTip text="Type the trainer's details in yourself (manual entry)." />
+          </span>
         </span>
       </div>
 

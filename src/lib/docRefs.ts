@@ -1,5 +1,5 @@
 // Reference numbers and customer codes (Joel, 2026-10-19).
-//   Quotation:               HKL/NA/20260904/01
+//   Quotation:               HKL/NA/Q/20261023/01 (before 2026-10-23: HKL/NA/20260904/01)
 //   Course outline proposal: HKL/NA/PRO/20261019/01
 //   Teambuilding proposal:   HKL/NA/TB/20261019/01
 // HKL = the client's customer code (clients/{id}.code), NA = NEXT Academy, then the date and the number made that day.
@@ -9,9 +9,10 @@
 
 export type RefKind = 'quotation' | 'outline' | 'teambuilding';
 
-const INFIX: Record<RefKind, string> = { quotation: '', outline: 'PRO/', teambuilding: 'TB/' };
+// Quotations gained Q/ on 2026-10-23 (one style for all three, Joel); older quotation numbers keep theirs.
+const INFIX: Record<RefKind, string> = { quotation: 'Q/', outline: 'PRO/', teambuilding: 'TB/' };
 // Numbers from before 2026-10-19 count too, so a day's count carries on from them.
-const OLD_PREFIX: Record<RefKind, RegExp> = { quotation: /^[^/]+\/NA\/(\d{8})\/(\d+)$/, outline: /^CO\/(\d{8})\/(\d+)$/, teambuilding: /^TB\/(\d{8})\/(\d+)$/ };
+const OLD_PREFIX: Record<RefKind, RegExp> = { quotation: /^(?:[A-Z0-9]+\/)?NA\/(\d{8})\/(\d+)$/, outline: /^CO\/(\d{8})\/(\d+)$/, teambuilding: /^TB\/(\d{8})\/(\d+)$/ };
 
 export const CODE_PROBLEM = 'A customer code is 2 to 6 capital letters or numbers, e.g. HKL (NA is kept for NEXT Academy).';
 export const cleanCode = (s?: string) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');

@@ -58,3 +58,12 @@ Joel's input: HRDC can raise **queries** before the training is approved, during
   - A rep's accept leaves a `privateLinkToken` on the trainer, and the next staff visit moves the fields.
 - **Server:** the trainer portal reads and writes them in `trainer_private` (`trainerFrom` merges them in; the profile save and payment address write there).
 - **Known gap:** submissions sent before this change still hold the fields on `trainer_links` until they are accepted or cancelled.
+
+## Programmes linked to course outlines and trainers (2026-10-23)
+
+Joel: "the programme approved is not linked to the course outline." Sometimes the client asks for a programme first and the outline comes later; sometimes an outline's title is the programme itself; sometimes an outline suits a programme with a different name.
+
+- **Admin work → Programmes → a programme:** link course outlines (search by title, ref or company; an outline keeps its own title, so one with a different name can be linked; one linked elsewhere asks before moving), **upload outline files** (PDF, Word or PowerPoint, kept on the programme as `outlineFiles`, storage `programme_files/{programmeId}/...`, Admin and Management upload and remove, everyone opens), and link or unlink trainers (writes the trainer's `programmeIds`). A new programme stays open after saving so these can be linked straight away. Code: `ProgrammeLinks.tsx`.
+- An outline points to one programme (`programmeId`). Linking a draft keeps the title it shows now; it follows the programme's name only if they are the same.
+- **Deal → What they asked for:** clicking the box shows the whole programme list by category; typing narrows it and also finds course outlines. An outline linked to a programme picks that programme; an unlinked one can become the programme (its title becomes the name, and the outline is linked to it when the person may edit that outline). Typing a new name and "Add" still adds a programme. Once picked, the programme's outlines, outline files and trainers show under it.
+- Publish `storage.rules` (programme files) once live. Go-live checklist item 55.

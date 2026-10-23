@@ -149,6 +149,13 @@ export function claimProblem(_photos: PortalFile[], _t3: PortalFile[]): string {
   return '';
 }
 
+// The name to greet a trainer by: their first name, skipping titles (full deal test, 2026-10-23: "Hi Dr").
+const TITLES = new Set(['dr', 'mr', 'mrs', 'ms', 'mdm', 'madam', 'miss', 'puan', 'pn', 'encik', 'en', 'cik', 'tuan', 'dato', "dato'", 'datuk', 'datin', 'tan', 'sri', 'prof', 'ir', 'ts', 'sir', 'haji', 'hj', 'hajah', 'hjh', 'ustaz', 'ustazah']);
+export function greetName(name: unknown): string {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return words.find(w => !TITLES.has(w.toLowerCase().replace(/\.$/, ''))) || words[0] || '';
+}
+
 /** "2 photos, T3" / "no files": what came with a fee request (deal History, the portal). */
 export function claimFilesText(photos: unknown[] = [], t3: unknown[] = []): string {
   const parts = [photos.length ? `${photos.length} photo${photos.length === 1 ? '' : 's'}` : '', t3.length ? 'T3' : ''].filter(Boolean);
@@ -160,8 +167,15 @@ export function claimFilesText(photos: unknown[] = [], t3: unknown[] = []): stri
 export const poNumber = (deal: { id: string; trainingDate?: string }) =>
   `PO-${(/^\d{4}-\d{2}/.test(deal.trainingDate || '') ? deal.trainingDate!.slice(0, 7) : new Date().toISOString().slice(0, 7)).replace('-', '')}-${String(deal.id).slice(-5).toUpperCase()}`;
 // Its lines: the fee lines on the deal's Trainer step (not rejected).
-export const poLines = (outs: { dealId?: string; checklistTaskId?: string; status?: string; description?: string; amount?: number }[], dealId: string, taskId: string) =>
-  outs.filter(o => o.dealId === dealId && o.checklistTaskId === taskId && o.status !== 'rejected')
+// A trainer fee is agreed by a manager before the PO goes out (Joel, 2026-10-23): a line marked feeAgreeNeeded counts
+// only once feeAgreed is there for its current amount. Approved or paid lines, and older lines without the mark, count.
+export function feeIsAgreed(o: { status?: string; amount?: number; feeAgreeNeeded?: boolean; feeAgreed?: { amount?: number } | null }): boolean {
+  if (!o.feeAgreeNeeded || o.status === 'approved' || o.status === 'paid') return true;
+  return !!o.feeAgreed && Math.abs(Number(o.feeAgreed.amount) - Number(o.amount)) < 0.005;
+}
+
+export const poLines = (outs: { dealId?: string; checklistTaskId?: string; status?: string; description?: string; amount?: number; feeAgreeNeeded?: boolean; feeAgreed?: any }[], dealId: string, taskId: string) =>
+  outs.filter(o => o.dealId === dealId && o.checklistTaskId === taskId && o.status !== 'rejected' && feeIsAgreed(o))
     .map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 }));
 
 export interface PoInput {

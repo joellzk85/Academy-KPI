@@ -43,14 +43,16 @@ export function canQuote(p: any): boolean {
 // Details are asked for when they matter, not upfront (Joel, 2026-10-18):
 // a new deal needs only the client, what they asked for (programme or a typed note) and the date asked;
 // "Proposal sent" (and creating the quotation) needs the programme from the list and the deal value;
-// "Won" needs the client, the value and the funding type.
-export type DealField = 'client' | 'programme' | 'value' | 'funding';
+// "Won" needs the client, the value, the funding type and the number of participants (Joel, 2026-10-23: pax lives on
+// the deal and locks once won, so it's asked for before Won).
+export type DealField = 'client' | 'programme' | 'value' | 'funding' | 'participants';
 export type GateStep = 'proposal' | 'quote' | 'won';
 export const GAP_LABELS: Record<DealField, string> = {
   client: 'the client from the client list',
   programme: 'the programme from the programme list',
   value: 'the deal value',
   funding: 'how it will be paid',
+  participants: 'the number of participants',
 };
 export function dealGaps(p: any, step: GateStep, known: { clientIds: string[]; programmeIds: string[] }): DealField[] {
   const out: DealField[] = [];
@@ -58,6 +60,7 @@ export function dealGaps(p: any, step: GateStep, known: { clientIds: string[]; p
   if (step !== 'won' && !(p?.programmeId && known.programmeIds.includes(p.programmeId))) out.push('programme');
   if (dealValue(p) <= 0) out.push('value');
   if (step === 'won' && !p?.fundingType) out.push('funding');
+  if (step === 'won' && !(Number(p?.participants) > 0)) out.push('participants');
   return out;
 }
 

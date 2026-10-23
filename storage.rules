@@ -64,6 +64,18 @@ service firebase.storage {
       allow delete: if isStaff() && (resource.metadata.uploadedBy == request.auth.uid || isManagement());
     }
 
+    // Course outline files on a programme (2026-10-23): programme_files/{programmeId}/{id}_{name}. Admin and
+    // Management upload and remove them (Admin work → Programmes); everyone on the team opens them from a deal.
+    match /programme_files/{programmeId}/{fileName} {
+      allow read: if isMember();
+      allow create: if isStaff()
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType.matches('application/(pdf|msword|vnd[.]ms-powerpoint|vnd[.]openxmlformats-officedocument[.](wordprocessingml[.]document|presentationml[.]presentation))')
+        && request.resource.metadata.uploadedBy == request.auth.uid;
+      allow update: if false;
+      allow delete: if isStaff();
+    }
+
     // Photos for teambuilding proposals, activities, trainers and venues (2026-10-19): photos/{folder}/{id}.jpg.
     // Client logos (2026-10-21): photos/logos/{id}.png (or .jpg), shown on teambuilding proposal covers.
     // Every member uploads (made smaller in the browser first); up to 10 MB; JPG, PNG or WebP.

@@ -38,7 +38,7 @@ Everything hangs off a single deal record that moves through stages. Nothing is 
 | 2 | Appointment | Sales | |
 | 3 | Proposal sent | Sales | deal value entered |
 | 4 | Won / Lost | Sales | Won: client, value, funding type. Lost: reason |
-| 5 | Grant + logistics | Admin | HRDC deals: grant applied, then approved (grant number) before training day |
+| 5 | Grant + logistics | Admin | HRDC deals: grant approved with the Employer code and Approval code (both required) before training day; trainer fee agreed by a manager before the PO |
 | 6 | Training day | Admin | Training delivered: photos and signed attendance uploaded (HRDC claim needs it) |
 | 7 | Post-training | Admin | JD14, T3, training report checked (certificates optional, Joel's choice) |
 | 8 | Invoice + claim | Admin | invoice sent; HRDC claim submitted; payment received; P&L closed |
@@ -130,6 +130,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `clients-directories-calendar.md` | Client history, Clients, Trainers, Venues, To-do, Google Calendar |
 | `backup-and-tidyup.md` | Data backup, tidy-up done and still open |
 | `process-audit.md` | Process audit fixes (2026-10-22): money controls, deal rules, HRDC gates, PDPA |
+| `full-deal-test.md` | Full deal test of 22 Oct 2026: every problem found, Joel's fix / leave decisions, the four fix batches and what is done |
 
 ## 6. Status and Joel's open to-dos
 
@@ -158,6 +159,8 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Process audit fixes (2026-10-22):** money controls, deal and KPI rules, HRDC gates, PDPA (`process-audit.md`); publish **both** rules files straight after it is live (until then approvals and T3 saves fail); go-live checklist item 53.
 - **Go-live tests:** items 6 to 31, 34 and 35 of the go-live checklist (29: pre-training checklist, vendors, payment summary; 30: Include in P&L tick; 31: one P&L; 34: Change date / Cancel training; publish `firestore.rules` for all).
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
+- **Full deal test fixes (Joel, 2026-10-23):** decisions and the four batches are in `docs/features/full-deal-test.md`; all four batches done 2026-10-23. Publish `firestore.rules` (Batch 3 discount requests, Batch 4 Agree fee); add "(TB)" to existing teambuilding programme names. HRDC Employer code and Approval code on Grant approved (go-live checklist item 54), required since Batch 4. (The older rule tests' 3 failures were an out-of-date test, fixed 2026-10-23; rules unchanged.)
+- **Programmes linked to outlines and trainers; venue address (2026-10-23):** publish `storage.rules` (`programme_files`); go-live checklist item 55.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

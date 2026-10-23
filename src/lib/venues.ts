@@ -4,6 +4,8 @@
 import { Venue } from '../types';
 import { dealStage } from './deals';
 import { dealVenue } from './checklist';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from './firebase';
 
 const norm = (s?: string) => (s || '').trim().toLowerCase();
 
@@ -27,4 +29,19 @@ export function venueBookings(v: Venue, deals: any[], checklists: Record<string,
 export function phoneIn(text?: string): string {
   const m = (text || '').match(/\+?\d[\d\s-]{7,}\d/);
   return m ? m[0].trim() : '';
+}
+
+// A venue typed on a quotation or the checklist, saved to the Venues list in one click (full deal test, 2026-10-23:
+// free text is fine, then the CRM offers to keep it). A venue of the same name already in the list is reused.
+export async function saveTypedVenue(name: string, venues: { id: string; name?: string }[], by: { id: string; name: string }): Promise<string> {
+  const clean = name.trim();
+  const same = venues.find(v => norm(v.name) === norm(clean));
+  if (same) return same.id;
+  const id = `venue_${Date.now()}`;
+  await setDoc(doc(db, 'venues_directory', id), {
+    id, name: clean, region: '', distance: '', pictures: '', meetingPackagePrice: '', roomPackagePrice: '', dinnerPackage: '',
+    quotationDate: '', facilities: '', contact: '', remarks: '', status: 'Available', photos: [],
+    createdAt: Date.now(), createdBy: by.id, createdByName: by.name,
+  });
+  return id;
 }

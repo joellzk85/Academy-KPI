@@ -118,6 +118,10 @@ export interface MoneyOut {
   // cost lines start ticked, and leaving one out needs a short reason (notInPLReason).
   inPL?: boolean;
   notInPLReason?: string;
+  // Trainer fee agreed by a manager before the PO (Joel, 2026-10-23): new trainer fee lines have feeAgreeNeeded; the PO and
+  // the trainer portal use a line only once feeAgreed matches its amount (older lines count as agreed). See lib/trainerPortal.ts.
+  feeAgreeNeeded?: boolean;
+  feeAgreed?: { byId: string; byName: string; at: string; amount: number } | null;
   decidedTs?: any;         // the database's own time of the approval or rejection (firestore.rules)
   lastUndo?: UndoStamp;    // Management undid "paid" (process audit, 2026-10-22)
   deleted?: boolean;       // approved or paid requests are marked deleted, never erased (process audit, 2026-10-22)
@@ -180,6 +184,15 @@ export function dateTimeMY(iso?: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
   return d.toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+/** "Payment raised 23 Oct 2026, 2:15 pm · pending boss approval" on a pending request (Joel, 2026-10-23). */
+export const raisedText = (o: Pick<MoneyOut, 'requestedAt' | 'resubmittedAt' | 'requestDate'>) =>
+  `Payment raised ${dateTimeMY(o.resubmittedAt || o.requestedAt) || o.requestDate || ''} · pending boss approval`;
+
+/** The requests this person raised that a manager approved in the last 3 days: their My home notice (2026-10-23). */
+export function recentlyApproved(outs: MoneyOut[], viewerId: string, now = Date.now()): MoneyOut[] {
+  return outs.filter(o => o.status === 'approved' && o.requestedById === viewerId && o.decidedAt && now - Date.parse(o.decidedAt) < 3 * 86400_000);
 }
 
 export interface MoneySettings {

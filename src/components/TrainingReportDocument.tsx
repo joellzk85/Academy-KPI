@@ -9,7 +9,7 @@ import {
   HrKey, INTERNAL_PARTS, REVIEW_PARTS, ReportHeaderData, TIME_LABELS, TrainingReport, absentCount, attendancePct, objectivesAverage, onHrCopy, presentCount,
 } from '../lib/trainingReport';
 
-// Programme, client, dates, venue, trainer, HRDC grant no. (from the deal; saved on the report for HR's link).
+// Programme, client, dates, venue, trainer, HRDC approval code (Grant approved step; saved on the report for HR's link).
 export type ReportHeader = ReportHeaderData;
 
 const stars = (n: number) => (n ? `${'★'.repeat(n)}${'☆'.repeat(5 - n)}` : 'Not rated');
@@ -38,7 +38,7 @@ export default function TrainingReportDocument({ r, h }: { r: TrainingReport; h:
 
       <table className="w-full border-collapse">
         <tbody>
-          {([['Programme', h.programme], ['Client', h.client], ['Date(s)', h.dates], ['Venue', h.venue], ['Trainer', h.trainer], ...(h.grantNumber ? [['HRDC grant no.', h.grantNumber]] : [])] as [string, string][]).map(([k, v]) => (
+          {([['Programme', h.programme], ['Client', h.client], ['Date(s)', h.dates], ['Venue', h.venue], ['Trainer', h.trainer], ...(h.grantNumber ? [['HRDC approval code', h.grantNumber]] : [])] as [string, string][]).map(([k, v]) => (
             <tr key={k}><td className={`${cell} w-[28%] font-semibold`}>{k}</td><td className={cell}>{v || ' '}</td></tr>
           ))}
         </tbody>

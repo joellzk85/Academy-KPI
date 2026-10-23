@@ -42,8 +42,9 @@ export interface ChecklistTask {
   note?: string;
   // Apply grant
   grantAppliedDate?: string;
-  grantNumber?: string;
+  grantNumber?: string;      // older checklists; read through approvalCodeOf
   grantApprovedDate?: string;
+  approvalCode?: string;     // HRDC's approval code (grant ID), typed on Grant approved (2026-10-23). The Employer code lives on the client.
   // Check venue + payment (picked from the venue list, or typed)
   venueId?: string;
   venueName?: string;
@@ -207,6 +208,12 @@ export const isLockedStep = (t: { id?: string }) => LOCKED_STEPS.includes(t.id |
 export function grantApproved(deal: any, tasks: ChecklistTask[] | undefined): boolean {
   if (!isHrdc(deal?.fundingType)) return true;
   return !!(tasks || []).find(t => t.kind === 'grant')?.done;
+}
+
+/** HRDC's approval code for the deal, from the Grant approved step ('' = not typed yet). Older checklists kept it as grantNumber. */
+export function approvalCodeOf(tasks: ChecklistTask[] | undefined): string {
+  const g = (tasks || []).find(t => t.kind === 'grant');
+  return String(g?.approvalCode || g?.grantNumber || '').trim();
 }
 
 /** "Training delivered" ticked (photos or the signed attendance uploaded). A checklist made before the step existed
@@ -395,6 +402,8 @@ export function checklistFlags(deal: any, tasks: ChecklistTask[] | undefined, se
   const co = coTrainerShort(deal, tasks);
   const end = daysUntil(trainingEndDate(deal), today);
   if (co && !(end !== null && end < 0)) rest.push({ level: 'attention', text: `${co.pax} pax, HRDC needs ${co.need} trainers: co-trainer not chosen` });
+  // Grant approved ticked but HRDC's approval code not typed: a reminder, never a block (Joel, 2026-10-23).
+  if (isHrdc(deal?.fundingType) && (tasks || []).find(t => t.kind === 'grant')?.done && !approvalCodeOf(tasks)) rest.push({ level: 'attention', text: 'Grant approved: approval code not filled in' });
   // "Not applied" already says more than "not approved", so only one shows.
   return g ? [g, ...rest.filter(f => !/grant not approved$/.test(f.text))] : rest;
 }

@@ -177,7 +177,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     const mOut = moneyOut.filter(m => m.dealId === p.id);
     const rc = receipts.filter(r => r.dealId === p.id);
     // Up to training day: money reminders; from the day after: one after-training journey (lib/postTraining.ts).
-    flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, claims, moneySettings, today));
+    flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, claims, moneySettings, today, queries));
     flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
     flags.push(...prePaymentFlags(p, mOut, settings.flagDays, today));
     // A trainer asked for their fee in the trainer portal (2026-10-21) and it isn't approved yet.
@@ -196,7 +196,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     // Change date / Cancel training (2026-10-21): a request waiting for Management, or things still to update after a new date.
     const change = changeFlagText(p);
     if (change) flags.unshift({ level: pendingChange(p) ? 'attention' : 'danger', text: change });
-    const post = postTraining(p, cl.tasks, mIn, mOut, rc, claims, today, moneySettings);
+    const post = postTraining(p, cl.tasks, mIn, mOut, rc, claims, today, moneySettings, queries);
     // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).
     const complete = pr.done === pr.total && open.length === 0 && post.closed;
     return { deal: p, pr, overdue: overdue.length > 0, complete, after: post.ended && !complete, post, flags };

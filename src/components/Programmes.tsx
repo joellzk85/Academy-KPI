@@ -9,8 +9,9 @@ import { db, friendlyError } from '../lib/firebase';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { formatDate, todayIso } from '../lib/deals';
-import { HRDC_STATUS_LABELS, HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus } from '../lib/programmes';
+import { HRDC_STATUS_LABELS, HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus, programmesFor, withTbMark } from '../lib/programmes';
 import PanelResizer from './PanelResizer';
+import ProgrammeLinks, { ProgrammeLinkedInfo, linkOutline, outlineTitle } from './ProgrammeLinks';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -34,10 +35,17 @@ export function StatusChip({ programme }: { programme: any }) {
 }
 
 // ---------- Picker used on the deal form, with quick add ----------
-export function ProgrammePicker({ programmes, value, legacyName, viewer, onChange }: {
+// Joel, 2026-10-23: opening it shows the whole list (by category) to choose from; typing narrows it and also finds
+// course outlines. An outline linked to a programme picks that programme; an unlinked one can become the programme
+// (its title is the programme name, and the outline is linked to it). Once picked, what's linked to it shows below.
+export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, viewer, onChange, kind, outlines, showLinks }: {
   programmes: Programme[]; value: string; legacyName?: string; viewer: Viewer; onChange: (p: Programme) => void;
+  kind?: 'training' | 'teambuilding';   // teambuilding: only "(TB)" programmes, and a quick-added one gets "(TB)"
+  outlines?: any[];                     // course outlines to search too
+  showLinks?: boolean;                  // show the picked programme's outlines, files and trainers
 }) {
-  const selected = programmes.find(p => p.id === value);
+  const programmes = programmesFor(allProgrammes, kind);
+  const selected = allProgrammes.find(p => p.id === value);
   const [queryText, setQueryText] = useState(selected ? '' : legacyName || '');
   const [open, setOpen] = useState(!selected && !!legacyName);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -46,23 +54,36 @@ export function ProgrammePicker({ programmes, value, legacyName, viewer, onChang
   const [busy, setBusy] = useState(false);
 
   const q = queryText.trim().toLowerCase();
-  const matches = (q ? programmes.filter(p => `${p.name} ${p.hrdcCode || ''}`.toLowerCase().includes(q)) : programmes)
+  const matches = (q ? programmes.filter(p => `${p.name} ${p.hrdcCode || ''} ${p.category || ''}`.toLowerCase().includes(q)) : programmes)
     .slice()
-    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
-    .slice(0, 8);
+    .sort((a, b) => String(a.category || '~').localeCompare(String(b.category || '~')) || String(a.name).localeCompare(String(b.name)));
+  const outlineMatches = !q || !outlines ? [] : outlines
+    .filter(o => !o.isHidden && !o.dealDeleted && o.id !== 'outline_default')
+    .map(o => ({ o, title: outlineTitle(o, allProgrammes) }))
+    .filter(x => x.title && `${x.title} ${x.o.refNumber || ''}`.toLowerCase().includes(q))
+    // One row per title (the same outline is often reused); a linked one first.
+    .sort((a, b) => Number(!!b.o.programmeId) - Number(!!a.o.programmeId))
+    .filter((x, i, all) => all.findIndex(y => y.title.toLowerCase() === x.title.toLowerCase()) === i)
+    .slice(0, 6);
+
+  const create = async (typed: string): Promise<Programme | null> => {
+    const name = kind === 'teambuilding' ? withTbMark(typed) : typed;
+    const dup = allProgrammes.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
+    if (dup) return dup;
+    const id = `prog_${Date.now()}`;
+    const data = { id, name, hrdcStatus: 'not_registered' as HrdcStatus, hrdcCode: '', submittedDate: '', approvedDate: '', notes: '', createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name };
+    await setDoc(doc(db, 'programmes', id), data);
+    return data;
+  };
 
   const add = async () => {
-    const name = queryText.trim();
-    if (!name) return setErr('Type the programme name first.');
-    const dup = programmes.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
-    if (dup) { onChange(dup); setOpen(false); return; }
+    const typed = queryText.trim();
+    if (!typed) return setErr('Type the programme name first.');
     setBusy(true);
     setErr('');
     try {
-      const id = `prog_${Date.now()}`;
-      const data = { id, name, hrdcStatus: 'not_registered' as HrdcStatus, hrdcCode: '', submittedDate: '', approvedDate: '', notes: '', createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name };
-      await setDoc(doc(db, 'programmes', id), data);
-      onChange(data);
+      const p = await create(typed);
+      if (p) onChange(p);
       setOpen(false);
       setQueryText('');
     } catch (e) {
@@ -72,14 +93,37 @@ export function ProgrammePicker({ programmes, value, legacyName, viewer, onChang
     }
   };
 
+  const pickOutline = async (o: any, title: string) => {
+    const linked = o.programmeId ? allProgrammes.find(p => p.id === o.programmeId) : undefined;
+    if (linked) { onChange(linked); setOpen(false); setQueryText(''); return; }
+    setBusy(true);
+    setErr('');
+    try {
+      const p = await create(title);
+      if (!p) return;
+      onChange(p);
+      setOpen(false);
+      setQueryText('');
+      // Link the outline to it. Someone who can't edit that outline still gets the programme.
+      await linkOutline(o, p.id, [...allProgrammes, p]).catch(() => {});
+    } catch (e) {
+      setErr(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (selected && !open) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-3 py-2">
-        <span className="min-w-0">
-          <span className="block truncate font-semibold">{selected.name}</span>
-          <span className="mt-0.5 flex items-center gap-2 text-sm text-ink-soft"><StatusChip programme={selected} />{selected.hrdcCode && <span>Code {selected.hrdcCode}</span>}</span>
-        </span>
-        <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => { setOpen(true); setQueryText(''); }}>Change</button>
+      <div>
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-3 py-2">
+          <span className="min-w-0">
+            <span className="block truncate font-semibold">{selected.name}</span>
+            <span className="mt-0.5 flex items-center gap-2 text-sm text-ink-soft"><StatusChip programme={selected} />{selected.hrdcCode && <span>Code {selected.hrdcCode}</span>}</span>
+          </span>
+          <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => { setOpen(true); setQueryText(''); }}>Change</button>
+        </div>
+        {showLinks && <ProgrammeLinkedInfo programme={selected} programmes={allProgrammes} />}
       </div>
     );
   }
@@ -92,20 +136,41 @@ export function ProgrammePicker({ programmes, value, legacyName, viewer, onChang
         onChange={e => { setQueryText(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         className={`${input} pl-9`}
-        placeholder="Search the programme list"
+        placeholder={outlines ? 'Choose from the list, or search programmes and course outlines' : 'Choose from the list, or search'}
         aria-label="Search the programme list"
       />
       {open && (
         <div className="mt-1 overflow-hidden rounded-lg border border-line bg-white shadow-lg">
-          {matches.map(p => (
-            <button key={p.id} type="button" onClick={() => { onChange(p); setOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface">
-              <span className="min-w-0 truncate text-sm font-semibold">{p.name}</span>
-              <StatusChip programme={p} />
-            </button>
-          ))}
-          {matches.length === 0 && <p className="px-3 py-2 text-sm text-ink-soft">No programme matches "{queryText}".</p>}
+          <div className="max-h-80 overflow-y-auto">
+            {matches.map((p, i) => (
+              <React.Fragment key={p.id}>
+                {(i === 0 || (matches[i - 1].category || '') !== (p.category || '')) && (
+                  <p className="bg-surface px-3 py-1 text-xs font-semibold text-ink-soft">{p.category || 'No category'}</p>
+                )}
+                <button type="button" onClick={() => { onChange(p); setOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface">
+                  <span className="min-w-0 truncate text-sm font-semibold">{p.name}</span>
+                  <StatusChip programme={p} />
+                </button>
+              </React.Fragment>
+            ))}
+            {matches.length === 0 && <p className="px-3 py-2 text-sm text-ink-soft">No programme matches "{queryText}".</p>}
+            {outlineMatches.length > 0 && (
+              <>
+                <p className="bg-surface px-3 py-1 text-xs font-semibold text-ink-soft">Course outlines</p>
+                {outlineMatches.map(({ o, title }) => {
+                  const linked = o.programmeId ? allProgrammes.find(p => p.id === o.programmeId) : undefined;
+                  return (
+                    <button key={o.id} type="button" disabled={busy} onClick={() => pickOutline(o, title)} className="block w-full px-3 py-2 text-left hover:bg-surface">
+                      <span className="block truncate text-sm font-semibold">{title}</span>
+                      <span className="block truncate text-sm text-ink-soft">{linked ? `Programme: ${linked.name}` : 'Not linked yet: use this title as the programme'}</span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </div>
           <button type="button" disabled={busy} onClick={add} className="flex w-full items-center gap-2 border-t border-line px-3 py-2.5 text-left text-sm font-semibold text-accent hover:bg-accent-soft">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add {queryText.trim() ? `"${queryText.trim()}"` : 'a new programme'}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add {queryText.trim() ? `"${kind === 'teambuilding' ? withTbMark(queryText) : queryText.trim()}"` : 'a new programme'}
           </button>
         </div>
       )}
@@ -123,6 +188,7 @@ const daysText = (d?: number | null) => (d ? (d === 0.5 ? 'Half day' : `${d} day
 export default function ProgrammesManager({ programmes, deals, viewer }: { programmes: Programme[]; deals: any[]; viewer: Viewer }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [category, setCategory] = useState('');   // '' = all, '-' = no category
+  const [kindFilter, setKindFilter] = useState<'' | 'training' | 'teambuilding'>('');   // programmes ending in "(TB)" are teambuilding
   const categories = useMemo(() => [...new Set(programmes.map(p => (p.category || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [programmes]);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<'new' | string | null>(null);
@@ -164,9 +230,10 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
     return programmes
       .filter(p => filter === 'all' || programmeStatus(p) === filter)
       .filter(p => !category || (category === '-' ? !(p.category || '').trim() : (p.category || '').trim() === category))
+      .filter(p => !kindFilter || programmesFor([p], kindFilter).length > 0)
       .filter(p => !q || `${p.name} ${p.hrdcCode || ''} ${p.category || ''}`.toLowerCase().includes(q))
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [programmes, filter, search, category]);
+  }, [programmes, filter, search, category, kindFilter]);
 
   const startNew = () => { setForm(emptyForm()); setError(''); setEditing('new'); };
   const startEdit = (p: Programme) => {
@@ -213,7 +280,8 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
         await batch.commit();
       }
       formDraft.clear();
-      setEditing(null);
+      // A new programme stays open, so its course outlines, file and trainers can be linked straight away.
+      setEditing(editing === 'new' ? id : null);
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -282,6 +350,11 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, HRDC code or category" className={`${input} pl-9`} aria-label="Search programmes" />
         </div>
+        <select value={kindFilter} onChange={e => setKindFilter(e.target.value as any)} aria-label="Training or teambuilding" className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none sm:w-auto">
+          <option value="">Training and teambuilding</option>
+          <option value="training">Training only</option>
+          <option value="teambuilding">Teambuilding (TB) only</option>
+        </select>
         {categories.length > 0 && (
           <select value={category} onChange={e => setCategory(e.target.value)} aria-label="Category" className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none sm:w-auto">
             <option value="">All categories</option>
@@ -379,26 +452,12 @@ export default function ProgrammesManager({ programmes, deals, viewer }: { progr
                 <label htmlFor="pg-code" className={label}>HRDC programme code</label>
                 <input id="pg-code" value={form.hrdcCode} onChange={e => setForm(f => ({ ...f, hrdcCode: e.target.value }))} className={input} placeholder="From the HRDC portal, once given" />
               </div>
-              {editing !== 'new' && (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-xl border border-line p-3">
-                    <p className="text-sm font-semibold text-ink-soft">Course outlines</p>
-                    {outlinesOf(editing).length === 0 ? <p className="mt-1 text-sm text-ink-soft">None yet. Create one in Course outlines and choose this programme.</p> : (
-                      <ul className="mt-1 space-y-1 text-[15px]">
-                        {outlinesOf(editing).map(o => <li key={o.id}>{o.refNumber || 'Outline'} <span className="text-sm text-ink-soft">· {o.status === 'sent' ? 'Sent' : 'Draft'}{o.preparedForCompany ? ` · ${o.preparedForCompany}` : ''}</span></li>)}
-                      </ul>
-                    )}
-                  </div>
-                  <div className="rounded-xl border border-line p-3">
-                    <p className="text-sm font-semibold text-ink-soft">Trainers who teach it</p>
-                    {trainersOf(editing).length === 0 ? <p className="mt-1 text-sm text-ink-soft">None yet. Tick this programme on a trainer in Trainers.</p> : (
-                      <ul className="mt-1 space-y-1 text-[15px]">
-                        {trainersOf(editing).map(t => <li key={t.id}>{t.name}{t.status === 'On Leave' && <span className="text-sm text-attention"> · on leave</span>}</li>)}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              )}
+              {editing === 'new' ? (
+                <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">After you save, you can link course outlines, upload the outline file and link trainers here.</p>
+              ) : (() => {
+                const p = programmes.find(x => x.id === editing);
+                return p ? <ProgrammeLinks programme={p} programmes={programmes} outlines={outlines} deals={deals} trainers={trainers} viewer={viewer} /> : null;
+              })()}
               <div>
                 <label htmlFor="pg-notes" className={label}>Notes</label>
                 <textarea id="pg-notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className={`${input} min-h-[80px]`} />

@@ -6,6 +6,7 @@ import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { STAGE_LABELS, dealOwnerId, dealStage } from '../lib/deals';
 import { vendorName, vendorTypeLabel } from '../lib/vendors';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
+import { approvalCodeOf } from '../lib/checklist';
 
 // Global search (2026-10-21): one box in the top bar (or Ctrl+K / "/") finds clients, deals, quotations,
 // course outlines, teambuilding proposals, trainers, venues and (Admin, Management) vendors.
@@ -74,7 +75,7 @@ export default function GlobalSearch({ viewer, people, deals, quotations, outlin
   const [text, setText] = useState('');
   const [active, setActive] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<{ clients: any[]; tbs: any[]; trainers: any[]; venues: any[]; vendors: any[]; programmes: any[] }>({ clients: [], tbs: [], trainers: [], venues: [], vendors: [], programmes: [] });
+  const [data, setData] = useState<{ clients: any[]; tbs: any[]; trainers: any[]; venues: any[]; vendors: any[]; programmes: any[]; codes: Map<string, string> }>({ clients: [], tbs: [], trainers: [], venues: [], vendors: [], programmes: [], codes: new Map() });
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -104,9 +105,11 @@ export default function GlobalSearch({ viewer, people, deals, quotations, outlin
     Promise.all([
       read('clients'), read('teambuilding_proposals'), read('trainers_directory'), read('venues_directory'),
       staff ? read('vendors') : Promise.resolve([] as any[]), read('programmes'),
-    ]).then(([clients, tbs, trainers, venues, vendors, programmes]) => {
+      staff ? read('deal_checklists') : Promise.resolve([] as any[]),   // HRDC approval codes (Grant approved step)
+    ]).then(([clients, tbs, trainers, venues, vendors, programmes, checklists]) => {
       if (!alive) return;
-      setData({ clients, tbs: linkedOnly<any>(tbs), trainers, venues, vendors, programmes });
+      const codes = new Map<string, string>(checklists.map(c => [c.id, approvalCodeOf(c.tasks)]));
+      setData({ clients, tbs: linkedOnly<any>(tbs), trainers, venues, vendors, programmes, codes });
       setLoading(false);
     });
     return () => { alive = false; };
@@ -119,7 +122,7 @@ export default function GlobalSearch({ viewer, people, deals, quotations, outlin
     const groups: { kind: SearchKind; label: string; hits: SearchHit[]; more: number }[] = [];
     if (!q) return groups;
     const match = matcher(q);
-    const { clients, tbs, trainers, venues, vendors, programmes } = data;
+    const { clients, tbs, trainers, venues, vendors, programmes, codes } = data;
     const clientById = new Map<string, any>(clients.map(c => [c.id, c]));
     const dealById = new Map<string, any>(deals.map(d => [d.id, d]));
     const progName = (id?: string) => (id ? programmes.find(p => p.id === id)?.name || '' : '');
@@ -146,14 +149,14 @@ export default function GlobalSearch({ viewer, people, deals, quotations, outlin
     };
 
     add('client', clients
-      .filter(c => match([c.companyName, c.code, c.employerName, c.contactName, c.phone, c.email, c.industry]))
+      .filter(c => match([c.companyName, c.code, c.employerName, c.employerCode, c.contactName, c.phone, c.email, c.industry]))
       .map(c => ({ kind: 'client', id: c.id, title: c.companyName || 'Unnamed client', sub: join(c.contactName, c.phone, c.email), record: c })));
 
     // Deals: Management and Admin see all; a rep sees their own and deals they are tagged on (like Deals).
     add('deal', withoutDeleted(deals)
       .filter(d => staff || dealOwnerId(d) === viewer.id || (d.taggedRepIds || []).includes(viewer.id))
       .map(d => ({ d, client: clientOfDeal(d), prog: progName(d.programmeId) || d.courseName || '' }))
-      .filter(({ d, client, prog }) => match([client, prog, d.enquiryNote, d.contactPerson, d.contactName, d.grantNumber, clientById.get(d.clientId)?.contactName]))
+      .filter(({ d, client, prog }) => match([client, prog, d.enquiryNote, d.contactPerson, d.contactName, codes.get(d.id), clientById.get(d.clientId)?.employerCode, clientById.get(d.clientId)?.contactName]))
       .map(({ d, client, prog }) => ({
         kind: 'deal', id: d.id, title: client || 'No client',
         sub: join(prog, STAGE_LABELS[dealStage(d)], staff && dealOwnerId(d) !== viewer.id ? personName(dealOwnerId(d)) : ''), record: d,

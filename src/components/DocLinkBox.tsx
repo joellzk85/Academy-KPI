@@ -87,7 +87,7 @@ export default function DocLinkBox({ link, message, compact, viewer }: {
     window.setTimeout(() => setCopied(''), 2000);
   };
   const stop = async () => {
-    if (!window.confirm(tb ? 'Revoke this link? The client will see "no longer active" with your name and the company phone number. Making a new link gives a new address.' : `Stop this link? The client will no longer be able to open it. Sending again makes a new link.`)) return;
+    if (!window.confirm(tb ? 'Stop this link? The client will see "no longer active" with your name and the company phone number. Making a new link gives a new address.' : `Stop this link? The client will no longer be able to open it. Sending again makes a new link.`)) return;
     setBusy(true);
     setError('');
     try { await stopDocLink(link.token); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
@@ -111,7 +111,7 @@ export default function DocLinkBox({ link, message, compact, viewer }: {
         <button type="button" className={blocked || req ? btnPrimary : btnSecondary} disabled={busy} onClick={() => (changing ? setChanging(false) : startChange())}>
           {blocked || req ? <RotateCcw className="h-4 w-4" /> : <CalendarClock className="h-4 w-4" />}{blocked || req ? 'Reopen' : 'Change limits'}
         </button>
-        <button type="button" className="text-sm font-semibold text-ink-soft hover:text-danger" disabled={busy} onClick={stop}>{busy ? 'Working…' : tb ? 'Revoke link' : 'Stop link'}</button>
+        <button type="button" className="text-sm font-semibold text-ink-soft hover:text-danger" disabled={busy} onClick={stop}>{busy ? 'Working…' : 'Stop link'}</button>
       </div>
 
       {/* Limits */}

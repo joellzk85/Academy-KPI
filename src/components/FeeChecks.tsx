@@ -49,7 +49,7 @@ function CheckRow({ c, onMark, onUnmark, busy }: { c: FeeCheck; onMark?: () => v
       {c.ok ? <CheckCircle2 className="h-4 w-4 shrink-0 text-accent" /> : <Circle className="h-4 w-4 shrink-0 text-danger" />}
       <span className="font-semibold">{c.label}</span>
       <span className={`text-sm ${c.ok ? 'text-ink-soft' : 'text-danger'}`}>
-        {c.auto ? `CRM: ${c.auto}` : c.manual ? `checked by ${c.manual.byName} on ${isoDay(c.manual.at)}` : 'not found in the CRM'}
+        {c.auto ? `CRM: ${c.auto}` : c.manual ? `checked by ${c.manual.byName} on ${isoDay(c.manual.at)}` : c.waiting || 'not found in the CRM'}
       </span>
       {!c.auto && !c.manual && onMark && <button type="button" disabled={busy} className={`${btnSecondary} px-2.5 py-1`} onClick={onMark}><Check className="h-3.5 w-3.5" /> Checked by me</button>}
       {!c.auto && c.manual && onUnmark && <button type="button" disabled={busy} className="text-sm font-semibold text-ink-soft hover:text-danger hover:underline" onClick={onUnmark}>Untick</button>}
