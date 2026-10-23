@@ -71,7 +71,8 @@ function profitOf(c: Record<string, number | null>, before?: TrackLine | null): 
 export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenDeal }: Props) {
   const deals = pipelinesSync || [];
   const settings = useMoneySettings();
-  const seesProfit = viewer.role === 'management';
+  // Admin sees costs and profit too (Joel, 2026-10-22).
+  const seesProfit = viewer.role !== 'rep';
   const receipts = useReceipts(true);
   const receiptsOf = (l: TrackLine) => receipts.filter(r => (l.dealId ? r.moneyInId === l.id.slice(5) : r.recordId === l.id));
   const moneyInOf = (l: TrackLine) => (l.dealId ? ins.find(m => m.id === l.id.slice(5)) : undefined);
@@ -374,7 +375,8 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
                   {statusText(open, today)}{isIsoDay(open.paidDate) ? ` on ${formatDate(open.paidDate)}` : ''}{linePaid(open) ? `: ${formatRM(lineNet(open))}` : `, expecting ${formatRM(lineNet(open))}`}
                 </p>
                 {!open.dealId && (linePaid(open) ? (
-                  <button type="button" disabled={busy} onClick={() => markPaid(open, false)} className="mt-1 text-sm font-semibold text-ink-soft hover:underline">Undo paid</button>
+                  // Only Management undoes a payment (process audit, 2026-10-22).
+                  viewer.role === 'management' && <button type="button" disabled={busy} onClick={() => markPaid(open, false)} className="mt-1 text-sm font-semibold text-ink-soft hover:underline">Undo paid</button>
                 ) : (
                   <div className="mt-2 space-y-2">
                     <ReceiptPick file={payFile} onFile={setPayFile} />

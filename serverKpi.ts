@@ -1,4 +1,4 @@
-// Gross profit KPIs (Joel, 2026-10-22). Reps and Admin can't read costs (money_out, project_pl), so the server works
+// Gross profit KPIs (Joel, 2026-10-22). Reps can't read costs (money_out, project_pl), so the server works
 // out the gross profit % with the same P&L as Management → Project P&L (src/lib/projectPL.ts) and returns only
 // percentages:
 // - POST /api/kpi/gp { months: ['YYYY-MM', ...] } → { gp: { [month]: { [memberId | 'company']: { margin, trainings } } } }

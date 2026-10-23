@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Plus } from 'lucide-react';
-import { formatDate, formatRM, trainingEndDate } from '../lib/deals';
-import { InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, TIMING_LABELS, isPaid, isPayable, payableFrom } from '../lib/money';
+import { doc } from 'firebase/firestore';
+import { db, friendlyError } from '../lib/firebase';
+import { formatDate, formatRM, todayIso, trainingEndDate } from '../lib/deals';
+import { DEFAULT_MONEY_SETTINGS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, TIMING_LABELS, isPaid, isPayable, payableFrom, shortfall } from '../lib/money';
 import { INVOICE_WORDS, Receipt, invoicesNeeded, postTraining, receiptsFor } from '../lib/postTraining';
-import { progress } from '../lib/checklist';
+import { hrdcClaimBlock, progress } from '../lib/checklist';
+import { askReason, withDealHistory } from '../lib/moneyActions';
 import DealChecklist from './DealChecklist';
 import { InForm, InRow } from './Money';
 import { useReceipts } from './PaymentReceipts';
@@ -36,8 +39,33 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
   const staff = viewer.role !== 'rep';
   const receipts = useReceipts(staff, deal.id);
   const claims = useClaimBacks(staff, deal.id);
-  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts, claims);
+  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts, claims, todayIso(), settings);
   const [adding, setAdding] = useState<InSource | null>(null);
+  // HRDC claim only once the grant is approved and the training delivered; Management can record it anyway, with a
+  // reason in the History (process audit, 2026-10-22).
+  const claimBlock = hrdcClaimBlock(deal, checklist?.tasks);
+  const [override, setOverride] = useState('');
+  const [topUp, setTopUp] = useState<{ claimId: string; amount: number; claimNo: string } | null>(null);
+  const [error, setError] = useState('');
+  const startAdding = (src: InSource) => {
+    setError('');
+    if (src === 'hrdc' && claimBlock && !override) {
+      if (viewer.role !== 'management') return setError(`${claimBlock} Record the HRDC claim once it is, or ask Management.`);
+      const why = askReason(`${claimBlock}\n\nRecord the HRDC claim anyway? Why?`);
+      if (!why) return;
+      setOverride(why);
+    }
+    setAdding(src);
+  };
+  const writeOff = (m: MoneyIn) => {
+    const gap = shortfall(m, settings);
+    const why = askReason(`Write off the ${formatRM(gap)} HRDC didn't pay on claim ${m.invoiceNo || ''}? No top-up invoice goes to the client.\n\nWhy?`);
+    if (!why) return;
+    setError('');
+    withDealHistory(deal.id, viewer, `HRDC shortfall of ${formatRM(gap)} written off (claim ${m.invoiceNo || ''}): ${why}`,
+      batch => batch.update(doc(db, 'money_in', m.id), { shortfallWriteOff: { byId: viewer.id, byName: viewer.name, at: new Date().toISOString(), reason: why, amount: gap } }))
+      .catch(e => setError(friendlyError(e)));
+  };
   const needed = invoicesNeeded(deal.fundingType);
   const docsPr = progress(checklist?.tasks, deal.fundingType, 'after');
   const end = trainingEndDate(deal);
@@ -76,20 +104,24 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
         )}
         {!sortedIns.length && <p className="text-[15px] text-ink-soft">{staff ? 'Nothing recorded yet.' : 'Not issued yet.'}</p>}
         {staff && (adding ? (
-          <InForm deal={deal} source={adding} viewer={viewer} settings={settings} onDone={() => setAdding(null)} />
+          <InForm deal={deal} source={adding} viewer={viewer} settings={settings} override={adding === 'hrdc' ? override : ''} onDone={() => { setAdding(null); setOverride(''); }} />
         ) : (
           <div className="flex flex-wrap gap-2">
             {st.missingInvoices.map(src => (
-              <button key={src} type="button" className={btnPrimary} onClick={() => setAdding(src)}><Plus className="h-4 w-4" /> Record the {INVOICE_WORDS[src]}</button>
+              <button key={src} type="button" className={btnPrimary} onClick={() => startAdding(src)}><Plus className="h-4 w-4" /> Record the {INVOICE_WORDS[src]}</button>
             ))}
             {(needed.includes('hrdc') || !needed.length) && !st.missingInvoices.includes('hrdc') && (
-              <button type="button" className={btnSecondary} onClick={() => setAdding('hrdc')}><Plus className="h-4 w-4" /> {ins.some(m => m.source === 'hrdc') ? 'Another HRDC claim' : 'Record HRDC claim'}</button>
+              <button type="button" className={btnSecondary} onClick={() => startAdding('hrdc')}><Plus className="h-4 w-4" /> {ins.some(m => m.source === 'hrdc') ? 'Another HRDC claim' : 'Record HRDC claim'}</button>
             )}
             {!st.missingInvoices.includes('client') && (
-              <button type="button" className={btnSecondary} onClick={() => setAdding('client')}><Plus className="h-4 w-4" /> {ins.some(m => m.source === 'client') ? 'Another client invoice' : 'Record client invoice'}</button>
+              <button type="button" className={btnSecondary} onClick={() => startAdding('client')}><Plus className="h-4 w-4" /> {ins.some(m => m.source === 'client') ? 'Another client invoice' : 'Record client invoice'}</button>
             )}
           </div>
         ))}
+        {staff && claimBlock && st.missingInvoices.includes('hrdc') && !adding && (
+          <p className="text-sm font-semibold text-attention">Before the HRDC claim: {claimBlock}</p>
+        )}
+        {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
       </Step>
 
       {/* 2. Documents */}
@@ -115,6 +147,24 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
               ))}
           </ul>
         )}
+        {/* HRDC paid less (process audit, 2026-10-22): a top-up invoice to the client, or Management writes it off. */}
+        {staff && st.shortfallsOpen.map(m => (
+          topUp?.claimId === m.id ? (
+            <InForm key={m.id} deal={deal} source="client" viewer={viewer} settings={settings} topUp={topUp} onDone={() => setTopUp(null)} />
+          ) : (
+            <div key={m.id} className="rounded-lg border border-danger/30 bg-danger-soft/50 px-3 py-2.5">
+              <p className="text-[15px] font-semibold text-danger">HRDC paid {formatRM(shortfall(m, settings))} less than expected on claim {m.invoiceNo || ''}.</p>
+              <p className="text-sm text-ink-soft">Bill the client for the difference on a top-up invoice. The case can't close until it's raised{viewer.role === 'management' ? ' or written off' : ''}.</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className={btnPrimary} onClick={() => setTopUp({ claimId: m.id, amount: shortfall(m, settings), claimNo: m.invoiceNo || '' })}><Plus className="h-4 w-4" /> Raise top-up invoice</button>
+                {viewer.role === 'management' && <button type="button" className={btnSecondary} onClick={() => writeOff(m)}>Write it off</button>}
+              </div>
+            </div>
+          )
+        ))}
+        {staff && ins.filter(m => m.shortfallWriteOff).map(m => (
+          <p key={m.id} className="text-sm text-ink-soft">HRDC shortfall of {formatRM(m.shortfallWriteOff!.amount)} on claim {m.invoiceNo || ''} written off by {m.shortfallWriteOff!.byName}: {m.shortfallWriteOff!.reason}</p>
+        ))}
       </Step>
 
       {/* 4. Payments out (2026-10-21): what we still owe on this training before the case can close */}
@@ -173,8 +223,8 @@ function Step({ n, title, done, sub, children }: { n: number; title: string; don
 }
 
 /** One line for a fold's hint: where the deal's post-training stands. */
-export function afterTrainingHint(deal: any, checklist: any | null, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[], claims: ClaimBack[]): string {
-  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts, claims);
+export function afterTrainingHint(deal: any, checklist: any | null, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[], claims: ClaimBack[], settings: MoneySettings = DEFAULT_MONEY_SETTINGS): string {
+  const st = postTraining(deal, checklist?.tasks, ins, outs, receipts, claims, todayIso(), settings);
   if (st.closed) return 'Case closed';
   if (!st.ended) return 'Starts after the training';
   return `Step ${Math.min(st.step, st.steps)} of ${st.steps}: ${st.next}`;

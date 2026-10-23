@@ -81,7 +81,7 @@ function FixField({ fix, deal, client, refNumber, me, onRelink, onShowProgrammes
               {saveBtn(!date || parseTrainingDays(days) === null, () => run(() => updateDoc(doc(db, 'pipelines', deal.id), {
                 trainingDate: date,
                 trainingDays: parseTrainingDays(days),
-                history: [...(deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Training date set to ${trainingDateText({ trainingDate: date, trainingDays: parseTrainingDays(days) }, true)} from quotation ${refNumber}` }].slice(-40),
+                history: [...(deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Training date set to ${trainingDateText({ trainingDate: date, trainingDays: parseTrainingDays(days) }, true)} from quotation ${refNumber}` }],
               }), 'Training date saved on the deal'))}
               <span className="text-sm text-ink-soft">Saved on the deal.</span>
             </div>

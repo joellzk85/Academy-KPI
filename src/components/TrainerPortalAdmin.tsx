@@ -6,6 +6,7 @@ import { sendPortalPasswordEmail } from '../lib/portalEmail';
 import { dealStage, formatDate, formatDateRange, todayIso, trainingEndDate } from '../lib/deals';
 import { linkedOnly } from '../lib/linked';
 import { MoneyOut } from '../lib/money';
+import { Vendor, withBankStamp } from '../lib/vendors';
 import { newToken, whatsappShare } from '../lib/trainerLinks';
 import { isTrainerFee } from '../lib/feeChecks';
 import { FeeChecksBox } from './FeeChecks';
@@ -291,10 +292,13 @@ export function BankRequestsBox({ viewer, trainers }: { viewer: Viewer; trainers
     const now = new Date().toISOString();
     const found = await getDocs(query(collection(db, 'vendors'), where('trainerId', '==', r.trainerId)));
     const bank = { bankName: r.bankName, accountNo: r.accountNo, accountName: r.accountName, updatedAt: now, updatedByName: viewer.name };
-    if (!found.empty) await updateDoc(found.docs[0].ref, bank);
-    else {
+    // The new bank details wait for a manager's check before accounts see them (process audit, 2026-10-22).
+    if (!found.empty) {
+      const before = { ...(found.docs[0].data() as Vendor), id: found.docs[0].id };
+      await setDoc(found.docs[0].ref, withBankStamp({ ...before, ...bank }, before, viewer));
+    } else {
       const id = `vd_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-      await setDoc(doc(db, 'vendors', id), { id, type: 'trainer', name: nameOf(r), trainerId: r.trainerId, ...bank, createdAt: now, createdById: viewer.id, createdByName: viewer.name });
+      await setDoc(doc(db, 'vendors', id), withBankStamp({ id, type: 'trainer', name: nameOf(r), trainerId: r.trainerId, ...bank, createdAt: now, createdById: viewer.id, createdByName: viewer.name }, null, viewer));
     }
     await updateDoc(doc(db, 'trainer_bank_requests', r.id), { status: 'accepted', decidedByName: viewer.name, decidedAt: now });
   });

@@ -457,7 +457,7 @@ export function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicke
         try {
           await updateDoc(doc(db, 'pipelines', r.deal.id), {
             stage: 'quoted', status: 'Pending', quotationSentDate: todayIso(),
-            history: [...(r.deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Quotation ${q.refNumber} sent` }].slice(-40),
+            history: [...(r.deal.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Quotation ${q.refNumber} sent` }],
           });
         } catch (e) {
           setDealWarn(`The quotation is sent, but the deal couldn't be moved to "Quotation sent" (${friendlyError(e)}). Open the deal and click "Quotation sent another way".`);

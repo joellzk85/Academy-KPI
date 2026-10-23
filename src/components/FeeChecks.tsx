@@ -4,8 +4,9 @@ import { AlertTriangle, Check, CheckCircle2, Circle, Loader2, X } from 'lucide-r
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM } from '../lib/deals';
 import { MoneyOut } from '../lib/money';
-import { FeeCheck, FeeCheckKey, allChecked, feeChecks } from '../lib/feeChecks';
+import { AUTO_ONLY, FeeCheck, FeeCheckKey, allChecked, feeChecks } from '../lib/feeChecks';
 import { TrainerJob, jobId } from '../lib/trainerPortal';
+import { isSuperManager, superConfirm } from '../lib/superManager';
 
 // Trainer fee checks (lib/feeChecks.ts, Joel 2026-10-21): the box on the deal's Trainer step where the CRM ticks
 // T3, training photos and training report by itself and Admin can tick "Checked by me", and the "Are you sure?"
@@ -75,7 +76,7 @@ export function FeeChecksBox({ dealId, taskId, viewer }: { dealId: string; taskI
       <ul className="space-y-1.5">
         {checks.map(c => (
           <CheckRow key={c.key} c={c} busy={busy}
-            onMark={staff && trainerId ? save(c.key, { byId: viewer.id, byName: viewer.name, at: new Date().toISOString() }) : undefined}
+            onMark={staff && trainerId && !AUTO_ONLY.includes(c.key) ? save(c.key, { byId: viewer.id, byName: viewer.name, at: new Date().toISOString() }) : undefined}
             onUnmark={staff && trainerId ? save(c.key, deleteField()) : undefined} />
         ))}
       </ul>
@@ -86,12 +87,16 @@ export function FeeChecksBox({ dealId, taskId, viewer }: { dealId: string; taskI
 }
 
 /** "Are you sure?" before approving a trainer fee: the checks, and Approve only when all are ticked. */
-export function ApproveFeeDialog({ o, payee, onApprove, onClose }: { o: MoneyOut; payee?: string; onApprove: () => Promise<void> | void; onClose: () => void }) {
+export function ApproveFeeDialog({ o, payee, onApprove, onClose, viewer }: { o: MoneyOut; payee?: string; onApprove: () => Promise<void> | void; onClose: () => void; viewer?: { id: string } }) {
   const { loading, checks } = useFeeChecks(o.dealId, o.checklistTaskId || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const done = !loading && allChecked(checks);
+  // The Super Manager can approve with checks missing (Joel, 2026-10-22), after a second confirmation.
+  const bypass = !done && !loading && isSuperManager(viewer);
   const approve = async () => {
+    if (bypass && !superConfirm(`approve this trainer fee with ${checks.filter(c => !c.ok).map(c => c.label).join(', ')} not checked.`,
+      'the trainer is paid before the CRM has proof of the training; HRDC may refuse the claim later.')) return;
     setBusy(true); setError('');
     try { await onApprove(); onClose(); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
@@ -116,7 +121,7 @@ export function ApproveFeeDialog({ o, payee, onApprove, onClose }: { o: MoneyOut
         {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" className={btnSecondary} onClick={onClose}>Cancel</button>
-          <button type="button" disabled={!done || busy} className={btnPrimary} onClick={approve}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Yes, approve</button>
+          <button type="button" disabled={!(done || bypass) || busy} className={btnPrimary} onClick={approve}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {bypass ? 'Approve anyway (Super Manager)' : 'Yes, approve'}</button>
         </div>
       </div>
     </div>

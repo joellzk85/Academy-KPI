@@ -21,7 +21,7 @@ export default function TrainingTimeBox({ deal, quotes, viewer, editable }: {
     try {
       await updateDoc(doc(db, 'pipelines', deal.id), {
         trainingTime,
-        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-40),
+        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }],
       });
       setEditing(false);
     } catch (e) {

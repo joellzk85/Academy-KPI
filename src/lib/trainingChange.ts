@@ -17,6 +17,7 @@
 // Pure logic (no database code), shared with the server (trainer portal).
 import { dealOwnerId, dealStage, dealValue, formatDate, trainingDateText, trainingDays } from './deals';
 import { namedTrainerTasks } from './checklist';
+import { isSuperManager } from './superManager';
 
 export type ChangeKind = 'date' | 'cancel' | 'value';
 export type ChangeStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn';
@@ -80,9 +81,9 @@ export function pendingChange(p: any): TrainingChange | null {
   return c && c.status === 'pending' && dealStage(p) === 'won' && p?.deleted !== true ? (c as TrainingChange) : null;
 }
 
-// Management, never their own request.
+// Management, never their own request, except the Super Manager (Joel, 2026-10-22), who confirms a second time.
 export function canDecideChange(c: TrainingChange | null, viewer: Viewer): boolean {
-  return !!c && c.status === 'pending' && viewer.role === 'management' && c.byId !== viewer.id;
+  return !!c && c.status === 'pending' && viewer.role === 'management' && (c.byId !== viewer.id || isSuperManager(viewer));
 }
 
 export function cancelledTraining(p: any): { at: string; byName: string; reason: string; note: string; wonDate: string; value: number } | null {

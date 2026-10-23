@@ -47,7 +47,7 @@ export function PotentialBox({ deal, editable, viewer }: { deal: any; editable: 
     try {
       await updateDoc(doc(db, 'pipelines', deal.id), {
         ...patch,
-        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: what }].slice(-40),
+        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: what }],
       });
     } catch (e) { setErr(friendlyError(e)); }
     setBusy(false);

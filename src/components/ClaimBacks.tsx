@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, doc, getDoc, onSnapshot, query, updateDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { AlertTriangle, Check, Loader2, Plus, Trash2, Undo2 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { daysUntil } from '../lib/checklist';
@@ -8,6 +8,7 @@ import { MoneyOut, MoneySettings, OUT_STATUS_LABELS } from '../lib/money';
 import { BehalfStatus, ClaimBack, behalfStatus, claimFor, claimPaid, claimReceipts, invoiceable } from '../lib/onBehalf';
 import { Receipt, daysSinceTraining } from '../lib/postTraining';
 import { withoutDeleted } from '../lib/linked';
+import { askReason, deleteMoney, undoPayment, withDealHistory as withHistory } from '../lib/moneyActions';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
@@ -38,17 +39,6 @@ export function useClaimBacks(enabled: boolean, dealId?: string): ClaimBack[] {
     return onSnapshot(q, s => setList(withoutDeleted(s.docs.map(d => ({ ...(d.data() as ClaimBack), id: d.id })))), () => setList([]));
   }, [enabled, dealId]);
   return list;
-}
-
-async function withHistory(dealId: string, viewer: Viewer, action: string, change: (batch: ReturnType<typeof writeBatch>) => void) {
-  const batch = writeBatch(db);
-  change(batch);
-  const d = await getDoc(doc(db, 'pipelines', dealId));
-  if (d.exists()) {
-    const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action };
-    batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
-  }
-  await batch.commit();
 }
 
 /** After training, step 5: what was paid on the client's behalf, the reimbursement invoices and the payments back. */
@@ -184,11 +174,17 @@ export function ClaimRow({ c, viewer, receipts, outs, settings, context }: {
       setPaying(false);
     });
   };
-  const undo = () => run(() => updateDoc(doc(db, 'claim_backs', c.id), { paidDate: '', paidAmount: 0, paidAt: '', updatedAt: Date.now() }));
+  // Only Management undoes a payment; deleted invoices are kept, with a reason (process audit, 2026-10-22).
+  const undo = () => {
+    if (!window.confirm(`Undo the client's payment of ${formatRM(c.paidAmount || 0)}? It is noted in the deal's History.`)) return;
+    return run(() => undoPayment('claim_backs', c, viewer, `reimbursement invoice${c.invoiceNo ? ` ${c.invoiceNo}` : ''}`));
+  };
   const remove = () => {
-    if (!window.confirm(paid ? `Delete this reimbursement invoice? The client already paid it back (${formatRM(c.paidAmount || 0)}). This can't be undone.` : 'Delete this reimbursement invoice? Its costs go back to "not claimed back yet".')) return;
-    return run(() => withHistory(c.dealId, viewer, `Deleted reimbursement invoice${c.invoiceNo ? ` ${c.invoiceNo}` : ''} (${formatRM(c.amount)}${paid ? `, paid back ${formatRM(c.paidAmount || 0)}` : ''})`,
-      batch => batch.delete(doc(db, 'claim_backs', c.id))));
+    const reason = askReason(paid
+      ? `Delete this reimbursement invoice? The client already paid it back (${formatRM(c.paidAmount || 0)}). Management can restore it later.\n\nWhy is it deleted?`
+      : 'Delete this reimbursement invoice? Its costs go back to "not claimed back yet". Management can restore it later.\n\nWhy is it deleted?');
+    if (!reason) return;
+    return run(() => deleteMoney('claim_backs', c, viewer, `reimbursement invoice${c.invoiceNo ? ` ${c.invoiceNo}` : ''} (${formatRM(c.amount)}${paid ? `, paid back ${formatRM(c.paidAmount || 0)}` : ''})`, reason));
   };
 
   return (
@@ -207,7 +203,7 @@ export function ClaimRow({ c, viewer, receipts, outs, settings, context }: {
         </div>
         <span className="flex shrink-0 gap-1">
           {paid
-            ? <button type="button" disabled={busy} className={btnSmall} onClick={undo}><Undo2 className="h-3.5 w-3.5" /> Undo payment</button>
+            ? viewer.role === 'management' && <button type="button" disabled={busy} className={btnSmall} onClick={undo}><Undo2 className="h-3.5 w-3.5" /> Undo payment</button>
             : !paying && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setPaying(true); setError(''); }}><Check className="h-3.5 w-3.5" /> Record payment</button>}
           {(!paid || viewer.role === 'management') && <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={remove} aria-label="Delete"><Trash2 className="h-4 w-4" /></button>}
         </span>

@@ -306,6 +306,8 @@ export default function DealsBoard({
   const formDateLocked = !!editing && editing !== 'new' && dateLocked(deals.find(p => p.id === editing));
   // Won deals (2026-10-22): value, participants, programme and funding type change only through "Change value / pax".
   const formValueLocked = !!editing && editing !== 'new' && valueLocked(deals.find(p => p.id === editing));
+  // A won deal's owner (Closing RM, commission) changes only by Management (process audit, 2026-10-22).
+  const formWon = !!editing && editing !== 'new' && dealStage(deals.find(p => p.id === editing)) === 'won';
 
   const saveForm = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -382,7 +384,7 @@ export default function DealsBoard({
           history: [historyEntry(viewer, 'Deal created')],
         });
       } else {
-        data.history = [...(existing.history || []), historyEntry(viewer, changes.length ? changes.join('. ') : 'Details updated')].slice(-40);
+        data.history = [...(existing.history || []), historyEntry(viewer, changes.length ? changes.join('. ') : 'Details updated')];
       }
       await setDoc(doc(db, 'pipelines', id), data, { merge: true });
       formDraft.clear();
@@ -405,7 +407,7 @@ export default function DealsBoard({
         ...(p.onHold ? { onHold: null } : {}),   // any move ends a hold
         ...changes,
         status: statusForStage(changes.stage),
-        history: [...(p.history || []), historyEntry(viewer, action)].slice(-40),
+        history: [...(p.history || []), historyEntry(viewer, action)],
       });
       setStagePanel(null);
       flash(action);
@@ -564,7 +566,7 @@ export default function DealsBoard({
       tbList.forEach(t => batch.update(doc(db, 'teambuilding_proposals', t.id), { dealDeleted: true }));
       batch.update(doc(db, 'pipelines', p.id), {
         deleted: true, deletedAt: at, deletedById: viewer.id, deletedByName: viewer.name, deletedReason: reason.trim().slice(0, 500),
-        history: [...(p.history || []), historyEntry(viewer, `Deleted${reason.trim() ? `: ${reason.trim().slice(0, 120)}` : ''}`)].slice(-40),
+        history: [...(p.history || []), historyEntry(viewer, `Deleted${reason.trim() ? `: ${reason.trim().slice(0, 120)}` : ''}`)],
       });
       await batch.commit();
       setOpenId(null);
@@ -954,7 +956,7 @@ export default function DealsBoard({
                   value={form.ownerId}
                   onChange={e => setForm(f => ({ ...f, ownerId: e.target.value }))}
                   className={input}
-                  disabled={editing === 'new' && viewer.role === 'rep'}
+                  disabled={(editing === 'new' && viewer.role === 'rep') || (formWon && viewer.role !== 'management')}
                 >
                   {people.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
@@ -1050,7 +1052,8 @@ function DealPanel(props: {
   const journey: DealStage[] = JOURNEY;
   const reached = st === 'lost' ? -1 : journey.indexOf(journeyStage(st));
   const hasQuote = props.quotes.length > 0;
-  const canUndoWin = props.viewer.role !== 'rep';
+  // Only Management undoes a win (process audit, 2026-10-22: firestore.rules checks the same).
+  const canUndoWin = props.viewer.role === 'management';
   const isHrdcDeal = p.fundingType === 'hrdc' || p.fundingType === 'hrdc_topup';
   const grantBlock = grantBlockReason(p, props.programme);
   const coShort = coTrainerShort(p, props.checklist?.tasks);
@@ -1427,7 +1430,7 @@ function DealPanel(props: {
         {/* After training: invoice, post-training documents, payment received → Case closed (2026-10-20).
             Reps see where it stands. */}
         {st === 'won' && (
-          <Fold title="After training" hint={afterTrainingHint(p, props.checklist, props.moneyIn, props.moneyOut, receipts, claims)} defaultOpen={def === 'after'} id={p.id}>
+          <Fold title="After training" hint={afterTrainingHint(p, props.checklist, props.moneyIn, props.moneyOut, receipts, claims, props.moneySettings)} defaultOpen={def === 'after'} id={p.id}>
             <AfterTraining deal={p} checklist={props.checklist} quotes={props.quotes} viewer={props.viewer}
               ins={props.moneyIn} outs={props.moneyOut} settings={props.moneySettings} />
           </Fold>
@@ -1551,7 +1554,7 @@ function QuoteRows({ deal, quotes, viewer, canTick, onOpen, onCreate, onAdd }: {
       await updateDoc(doc(db, 'pipelines', deal.id), {
         valueQuoteIds: keep.map(q => q.id),
         ...(keep.length ? { proposalValue: sum } : {}),
-        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-40),
+        history: [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }],
       });
     } catch (e) {
       setErr(`Couldn't change the deal total: ${friendlyError(e)}`);

@@ -19,7 +19,7 @@ export function summaryProblem(o: MoneyOut, deal: any, today = todayIso()): stri
   if (from && from > today) return `Post-training: payable from ${formatDate(from)}`;
   return '';
 }
-import { Vendor } from './vendors';
+import { Vendor, bankChecked } from './vendors';
 
 export interface SummaryLine {
   id: string;
@@ -43,6 +43,9 @@ export interface SummaryGroup {
   accountNo: string;
   accountName: string;
   paymentDetails: string;   // typed on a company payment ("Payment details")
+  // The vendor's new or changed bank details wait for a manager's check (process audit, 2026-10-22): no bank details
+  // are shown and accounts can't mark it paid until then.
+  bankUnchecked: boolean;
   lines: SummaryLine[];
   total: number;
 }
@@ -59,7 +62,8 @@ export function buildSummary(outs: MoneyOut[], vendors: Vendor[], forTextOf: (o:
     const key = v ? `v:${v.id}` : `p:${String(o.payee || '').trim().toLowerCase()}`;
     const g = map.get(key) || {
       key, payee: String(o.payee || v?.name || 'Not named').trim(),
-      bankName: v?.bankName || '', accountNo: v?.accountNo || '', accountName: v?.accountName || '',
+      bankName: v && bankChecked(v) ? v.bankName || '' : '', accountNo: v && bankChecked(v) ? v.accountNo || '' : '', accountName: v && bankChecked(v) ? v.accountName || '' : '',
+      bankUnchecked: !!v && !bankChecked(v),
       paymentDetails: '', lines: [], total: 0,
     };
     if (!v && o.paymentDetails && !g.paymentDetails) g.paymentDetails = o.paymentDetails;

@@ -187,14 +187,16 @@ function BatchView({ token, data, onData }: { token: string; data: BatchData; on
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-semibold">{g.payee}</p>
-                      <p className="text-sm">{[g.bankName, g.accountNo, g.accountName].filter(Boolean).join(' · ') || g.paymentDetails || <span className="font-semibold text-attention">Bank details not recorded: ask NEXT Academy</span>}</p>
+                      <p className="text-sm">{g.bankUnchecked
+                        ? <span className="font-semibold text-danger">Bank details are being checked by NEXT Academy: please don't pay yet.</span>
+                        : [g.bankName, g.accountNo, g.accountName].filter(Boolean).join(' · ') || g.paymentDetails || <span className="font-semibold text-attention">Bank details not recorded: ask NEXT Academy</span>}</p>
                       <p className="text-sm text-ink-soft">{g.lines.length} payment{g.lines.length === 1 ? '' : 's'}: {g.lines.map(l => `${l.category}${l.description ? ` (${l.description})` : ''}`).join(', ')}</p>
                     </div>
                     <p className="text-right font-bold tabular-nums">{sen(g.total)}</p>
                   </div>
                   {paid ? (
                     <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-accent"><CheckCircle2 className="h-4 w-4" /> Payment made{last ? ` ${dateTimeMY(last.paidAt)}` : ''}{last?.paidRef ? ` · ref ${last.paidRef}` : ''}</p>
-                  ) : payable.length ? (
+                  ) : g.bankUnchecked ? null : payable.length ? (
                     <div className="mt-3 flex flex-wrap items-end gap-2">
                       <div className="min-w-[12rem] flex-1">
                         <label htmlFor={`ref-${g.key}`} className="mb-1 block text-sm font-medium text-ink-soft">Bank reference (optional)</label>

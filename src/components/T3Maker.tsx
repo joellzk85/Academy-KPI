@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { deleteField, doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { ChevronDown, ChevronUp, Download, FileUp, Loader2, Plus, Trash2 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { addDays, trainingDays } from '../lib/deals';
@@ -34,9 +34,30 @@ export function dealDates(deal: any): string[] {
 
 const NOT_ON_FORM = /[^\u0000-ÿ–—‘’“”]/;
 
+// The T3 name list holds participants' IC numbers, so it lives in deal_t3/{dealId}, which only Admin and Management
+// can read (process audit, 2026-10-22: PDPA). Lists saved before sit on deal_checklists/{dealId}.t3 (legacy) until they
+// are moved (moveT3Lists, or the next save here).
+export function useT3(dealId: string, enabled: boolean, legacy?: T3Data): T3Data | undefined {
+  const [data, setData] = useState<T3Data | null | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled || !dealId) { setData(undefined); return; }
+    return onSnapshot(doc(db, 'deal_t3', dealId), d => setData(d.exists() ? (d.data().t3 as T3Data) : null), () => setData(null));
+  }, [dealId, enabled]);
+  return data || legacy;
+}
+
+/** Move legacy T3 lists off the checklists everyone can read (run by Admin or Management). */
+export async function moveT3Lists(checklists: { id: string; t3?: T3Data }[]) {
+  for (const c of checklists.filter(x => x.t3)) {
+    const priv = await getDoc(doc(db, 'deal_t3', c.id));
+    if (!priv.exists()) await setDoc(doc(db, 'deal_t3', c.id), { t3: c.t3 });
+    await updateDoc(doc(db, 'deal_checklists', c.id), { t3: deleteField() });
+  }
+}
+
 export default function T3Maker({ deal, saved, viewer, incoming }: {
   deal: any;
-  saved?: T3Data;                                         // deal_checklists/{dealId}.t3
+  saved?: T3Data;                                         // deal_t3/{dealId}.t3 (useT3)
   viewer: Viewer;
   incoming?: { files: File[]; at: number } | null;      // files just dropped in the Attendance list box
 }) {
@@ -75,9 +96,11 @@ export default function T3Maker({ deal, saved, viewer, incoming }: {
   const auto = useAutoSave({
     value: data, dirty, enabled: true,
     write: async v => {
-      await updateDoc(doc(db, 'deal_checklists', deal.id), {
+      await setDoc(doc(db, 'deal_t3', deal.id), {
         t3: JSON.parse(JSON.stringify({ ...v, updatedAt: new Date().toISOString(), byName: viewer.name })),
       });
+      // An older list on the checklist itself is removed once it's saved here (PDPA).
+      await updateDoc(doc(db, 'deal_checklists', deal.id), { t3: deleteField() }).catch(() => {});
     },
     onSaved: setSavedJson,
   });

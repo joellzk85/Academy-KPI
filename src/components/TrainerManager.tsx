@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import { Download, FileText, GraduationCap, Info, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Trainer } from '../types';
 import { db, friendlyError } from '../lib/firebase';
@@ -19,7 +19,8 @@ import TrainingReportsList from './TrainingReportsList';
 import { BankRequestsBox, PortalAccessBox, PortalInviteDialog, TrainerRatings, useTrainerAccounts } from './TrainerPortalAdmin';
 import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
-import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel } from '../lib/trainerProfile';
+import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel,
+  legacyPrivateKeys, privateOf, splitTrainerPrivate, withPrivate } from '../lib/trainerProfile';
 import PanelResizer from './PanelResizer';
 import { useSearchPrefill } from './GlobalSearch';
 
@@ -54,7 +55,8 @@ const norm = (s?: string) => (s || '').trim().toLowerCase();
 // typed on a profile link that a rep accepted stays in trainer_link_private/{token} until Admin or Management save it.
 async function readIc(t: { id: string; icLinkToken?: string }): Promise<string> {
   const own = await getDoc(doc(db, 'trainer_private', t.id));
-  if (own.exists()) return String(own.data().icNumber || '');
+  // The private record may hold only the personal details (2026-10-22), not an IC number yet.
+  if (own.exists() && own.data().icNumber !== undefined) return String(own.data().icNumber || '');
   if (t.icLinkToken) {
     const fromLink = await getDoc(doc(db, 'trainer_link_private', t.icLinkToken));
     if (fromLink.exists()) return String(fromLink.data().icNumber || '');
@@ -71,6 +73,29 @@ function useIc(t: { id: string; icLinkToken?: string } | null, allowed: boolean)
   }, [t?.id, t?.icLinkToken, allowed]);
   return ic && t && ic.id === t.id ? ic.value : null;
 }
+// Personal details (gender, address, emergency contact, race, nationality, rate) live in trainer_private/{id}, which only
+// Admin and Management can read (process audit, 2026-10-22: PDPA). Records saved before still hold them on
+// trainers_directory, and a profile a rep accepted leaves them in trainer_link_private/{token} (privateLinkToken).
+/** Move them into trainer_private and off the shared record (run by Admin or Management). */
+export async function moveTrainerPrivate(dir: any[], privates: Record<string, any>) {
+  for (const t of dir) {
+    const keys = legacyPrivateKeys(t);
+    if (!keys.length && !t.privateLinkToken) continue;
+    const mine = privates[t.id] || {};
+    // From the shared record: only what the private record doesn't have yet.
+    const patch: Record<string, any> = Object.fromEntries(keys.filter(k => mine[k] === undefined).map(k => [k, t[k]]));
+    // From an accepted profile link: when newer than the private record.
+    if (t.privateLinkToken) {
+      const l = (await getDoc(doc(db, 'trainer_link_private', t.privateLinkToken))).data();
+      if (l && (l.detailsAt || 0) > (mine.detailsAt || 0)) Object.assign(patch, privateOf(l), { detailsAt: l.detailsAt });
+    }
+    if (Object.keys(patch).length) await setDoc(doc(db, 'trainer_private', t.id), patch, { merge: true });
+    await updateDoc(doc(db, 'trainers_directory', t.id), {
+      ...Object.fromEntries(keys.map(k => [k, deleteField()])), ...(t.privateLinkToken ? { privateLinkToken: deleteField() } : {}),
+    });
+  }
+}
+
 // One biodata list as lines of text, e.g. "Bachelor of Business · Universiti Malaya · 2010".
 const bioText = (rows?: Record<string, string>[]) => (rows || []).filter(rowFilled).map(r => Object.values(r).map(v => String(v || '').trim()).filter(Boolean).join(' · ')).join('\n');
 const ecText = (e?: { name?: string; relationship?: string; phone?: string }) =>
@@ -98,7 +123,11 @@ function whatsappLink(phone: string): string {
 }
 
 export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProps) {
-  const [trainers, setTrainers] = useState<Trainer[]>([]);
+  const isStaff = viewer.role === 'admin' || viewer.role === 'management';
+  const [dirTrainers, setDirTrainers] = useState<Trainer[]>([]);
+  // trainer_private, Admin and Management only (2026-10-22): their personal details are merged into each trainer.
+  const [privates, setPrivates] = useState<Record<string, any> | null>(null);
+  const trainers = useMemo(() => (isStaff && privates ? dirTrainers.map(t => withPrivate(t, privates[t.id])) : dirTrainers), [dirTrainers, privates, isStaff]);
   const [deals, setDeals] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
   // Every record, including old ones not linked yet (hidden on screen), so nothing they use can be deleted.
@@ -113,6 +142,15 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const links = useTrainerLinks();
   const [shareLink, setShareLink] = useState<TrainerLink | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
+  // The personal details a trainer sent on the link being reviewed (trainer_link_private; Admin and Management only).
+  const [reviewPriv, setReviewPriv] = useState<Record<string, any>>({});
+  useEffect(() => {
+    setReviewPriv({});
+    if (!reviewId || !(viewer.role === 'admin' || viewer.role === 'management')) return;
+    let live = true;
+    getDoc(doc(db, 'trainer_link_private', reviewId)).then(d => live && setReviewPriv(privateOf(d.data()))).catch(() => {});
+    return () => { live = false; };
+  }, [reviewId]);
   const waiting = links.filter(l => l.kind === 'profile' && l.status === 'submitted' && isLive(l)).sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
 
   const [search, setSearch] = useState('');
@@ -131,7 +169,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
 
   useEffect(() => {
     const subs = [
-      onSnapshot(query(collection(db, 'trainers_directory')), s => { setTrainers(s.docs.map(d => ({ ...(d.data() as Trainer), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
+      onSnapshot(query(collection(db, 'trainers_directory')), s => { setDirTrainers(s.docs.map(d => ({ ...(d.data() as Trainer), id: d.id }))); setLoaded(true); }, () => setLoaded(true)),
       onSnapshot(query(collection(db, 'pipelines')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllDeals(all); setDeals(linkedOnly(all)); }),
       onSnapshot(query(collection(db, 'quotations')), s => { const all = s.docs.map(d => ({ ...d.data(), id: d.id })); setAllQuotes(all); setQuotes(linkedOnly(all)); }),
       onSnapshot(query(collection(db, 'deal_checklists')), s => setChecklists(Object.fromEntries(s.docs.map(d => [d.id, d.data()])))),
@@ -140,6 +178,21 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     ];
     return () => subs.forEach(u => u());
   }, []);
+  useEffect(() => {
+    if (!isStaff) return;
+    return onSnapshot(query(collection(db, 'trainer_private')), s => setPrivates(Object.fromEntries(s.docs.map(d => [d.id, d.data()]))), () => setPrivates({}));
+  }, [isStaff]);
+
+  // Personal details still on the shared trainer records are moved to trainer_private (process audit, 2026-10-22: PDPA).
+  // Runs once per page load, when Admin or Management opens Trainers.
+  const movedPrivate = useRef(false);
+  useEffect(() => {
+    if (movedPrivate.current || !isStaff || !loaded || !privates) return;
+    const legacy = dirTrainers.filter(t => legacyPrivateKeys(t).length || (t as any).privateLinkToken);
+    if (!legacy.length) return;
+    movedPrivate.current = true;
+    moveTrainerPrivate(legacy, privates).catch(e => console.error('Moving trainer personal details:', e));
+  }, [dirTrainers, privates, loaded]);
 
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
   const today = todayIso();
@@ -176,17 +229,32 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     };
     delete (details as any).icNumber;
     delete (details as any).icSent;
+    delete (details as any).privateSent;
+    // Personal details (process audit, 2026-10-22: PDPA): the server keeps them in trainer_link_private/{token}
+    // (older submissions still hold them on the link). Admin and Management save them to trainer_private; when a rep
+    // accepts, they wait there (privateLinkToken) until Admin or Management next open Trainers (moveTrainerPrivate).
+    const sentPrivate = !!(s as any).privateSent || legacyPrivateKeys(s).length > 0;
+    const { publicPart, privatePart } = splitTrainerPrivate(details);
     setBusy(true);
     try {
-      if (targetId) await setDoc(doc(db, 'trainers_directory', targetId), details, { merge: true });
+      const linkPriv = isStaff && (s as any).privateSent ? (await getDoc(doc(db, 'trainer_link_private', l.id))).data() : undefined;
+      const toSave = {
+        ...publicPart,
+        ...(!isStaff && (s as any).privateSent ? { privateLinkToken: l.id } : {}),
+        ...(isStaff && targetId ? Object.fromEntries(legacyPrivateKeys(dirTrainers.find(t => t.id === targetId)).map(k => [k, deleteField()])) : {}),
+      };
+      if (targetId) await setDoc(doc(db, 'trainers_directory', targetId), toSave, { merge: true });
       else {
         targetId = `trainer_${Date.now()}`;
-        await setDoc(doc(db, 'trainers_directory', targetId), { id: targetId, ...details, photoUrl: s.photoUrl || '', specialization: '', status: 'Available', notes: '', createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+        await setDoc(doc(db, 'trainers_directory', targetId), { id: targetId, ...toSave, photoUrl: s.photoUrl || '', specialization: '', status: 'Available', notes: '', createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+      }
+      if (isStaff && sentPrivate) {
+        await setDoc(doc(db, 'trainer_private', targetId), { ...privateOf(privatePart), ...privateOf(linkPriv), detailsAt: Date.now(), detailsByName: viewer.name }, { merge: true });
       }
       // Admin and Management copy the IC number into the trainer's own private record straight away.
       if (s.icSent && isStaff) {
         const fromLink = await getDoc(doc(db, 'trainer_link_private', l.id));
-        if (fromLink.exists()) await setDoc(doc(db, 'trainer_private', targetId), { icNumber: fromLink.data().icNumber || '', at: Date.now(), byName: viewer.name });
+        if (fromLink.exists()) await setDoc(doc(db, 'trainer_private', targetId), { icNumber: fromLink.data().icNumber || '', at: Date.now(), byName: viewer.name }, { merge: true });
       }
       await closeTrainerLink(l, 'accepted', viewer);
       setReviewId(null);
@@ -248,7 +316,6 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     setFormError(''); setDupId(null); setEditing(t.id);
   };
   const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
-  const isStaff = viewer.role === 'admin' || viewer.role === 'management';
   const editingTrainer = editing && editing !== 'new' ? trainers.find(t => t.id === editing) || null : null;
   const savedIc = useIc(editingTrainer, isStaff);
   const [icInput, setIcInput] = useState<string | null>(null);   // null = not changed on the form
@@ -275,22 +342,29 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       photoUrl: form.photoUrl,
       ...extrasToSave(form),
     };
+    // Personal details go to trainer_private (process audit, 2026-10-22: PDPA); a rep doesn't see or send them.
+    const { publicPart, privatePart } = splitTrainerPrivate(details);
     setBusy(true);
     try {
+      const id = editing === 'new' ? (newId || `trainer_${Date.now()}`) : editing!;
       if (editing === 'new') {
-        const id = newId || `trainer_${Date.now()}`;
-        await setDoc(doc(db, 'trainers_directory', id), { id, ...details, createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+        await setDoc(doc(db, 'trainers_directory', id), { id, ...publicPart, createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
         setOpenId(id);
-        flash('Trainer added');
-      } else if (editing) {
-        // Each field is replaced as a whole, so a file removed on the form comes off the record.
-        await setDoc(doc(db, 'trainers_directory', editing), details, { mergeFields: Object.keys(details) });
-        flash('Trainer saved');
+      } else {
+        // Each field is replaced as a whole, so a file removed on the form comes off the record. Admin and Management
+        // also take any old copy of the personal details off it.
+        const old = isStaff ? legacyPrivateKeys(dirTrainers.find(t => t.id === id)) : [];
+        const patch = { ...publicPart, ...Object.fromEntries(old.map(k => [k, deleteField()])) };
+        await setDoc(doc(db, 'trainers_directory', id), patch, { mergeFields: Object.keys(patch) });
       }
+      if (isStaff) {
+        const priv = { ...privatePart, detailsAt: Date.now(), detailsByName: viewer.name };
+        await setDoc(doc(db, 'trainer_private', id), priv, { mergeFields: Object.keys(priv) });
+      }
+      flash(editing === 'new' ? 'Trainer added' : 'Trainer saved');
       if (isStaff && icInput !== null && cleanIc(icInput) !== (savedIc || '')) {
-        const id = editing === 'new' ? newId : editing!;
         const ic = cleanIc(icInput);
-        await setDoc(doc(db, 'trainer_private', id), { icNumber: ic, at: Date.now(), byName: viewer.name });
+        await setDoc(doc(db, 'trainer_private', id), { icNumber: ic, at: Date.now(), byName: viewer.name }, { merge: true });
         await setDoc(doc(db, 'trainers_directory', id), { icOnFile: !!ic }, { merge: true });
       }
       formDraft.clear();
@@ -333,6 +407,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
     onChange: (p: any) => setForm(f => ({ ...f, ...(typeof p === 'function' ? p(f) : p) })),
     uploader: { prefix: `trainer_files/${editing === 'new' ? newId : editing}/`, byName: viewer.name, uploadedBy: viewer.id },
     idPrefix: 't',
+    hidePrivate: !isStaff,
     ic: isStaff ? {
       value: icValue,
       onChange: (v: string) => setIcInput(v),
@@ -453,7 +528,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                       </span>
                       <span className="block truncate text-sm text-ink-soft">{sub || 'No programmes or phone yet'}</span>
                     </span>
-                    <span className="hidden w-28 shrink-0 text-right text-sm font-semibold tabular-nums sm:block">{t.rate ? `${formatRM(t.rate)}/day` : ''}</span>
+                    <span className="hidden w-28 shrink-0 text-right text-sm font-semibold tabular-nums sm:block">{isStaff && t.rate ? `${formatRM(t.rate)}/day` : ''}</span>
                     <span className="w-32 shrink-0 text-right text-sm text-ink-soft">{next ? `Next ${formatDate(next)}` : 'No training booked'}</span>
                   </button>
                 </li>
@@ -530,8 +605,9 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       {reviewId && (() => {
         const l = links.find(x => x.id === reviewId);
         if (!l || !l.submission) return null;
-        const s = l.submission as ProfileSubmission;
+        const s = { ...(l.submission as ProfileSubmission), ...reviewPriv } as ProfileSubmission;
         const cur = l.trainerId ? trainers.find(t => t.id === l.trainerId) : null;
+        const privSent = !!(l.submission as any).privateSent || legacyPrivateKeys(l.submission).length > 0;
         const row = (label_: string, now: string, before?: string) => (
           <div className="grid gap-1 border-b border-line py-2 sm:grid-cols-[10rem_minmax(0,1fr)]">
             <dt className="text-sm text-ink-soft">{label_}</dt>
@@ -554,18 +630,22 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                 {row('Programmes', s.programmeIds.map(progName).filter(Boolean).join(', '), (cur?.programmeIds || []).map(progName).filter(Boolean).join(', '))}
                 {row('Other topics', s.suggestedTopics, cur?.suggestedTopics)}
                 {row('Years of experience', s.experienceYears ? String(s.experienceYears) : '', cur?.experienceYears ? String(cur.experienceYears) : '')}
-                {row('Daily rate', s.rate ? formatRM(s.rate) : '', cur?.rate ? formatRM(cur.rate) : '')}
+                {isStaff && row('Daily rate', s.rate ? formatRM(s.rate) : '', cur?.rate ? formatRM(cur.rate) : '')}
                 {row('Bio', s.bio, cur?.bio)}
                 {row('IC / Passport No.', s.icSent ? 'Sent (only Admin and Management can see it)' : '', cur?.icOnFile ? 'On file' : '')}
-                {row('Nationality', s.nationality || '', cur?.nationality)}
-                {row('Race', s.race || '', cur?.race)}
+                {isStaff ? <>
+                  {row('Nationality', s.nationality || '', cur?.nationality)}
+                  {row('Race', s.race || '', cur?.race)}
+                </> : row('Personal details', privSent ? 'Sent (only Admin and Management can see them)' : '')}
                 {row('TTT number', s.tttNumber || '', cur?.tttNumber)}
                 {BIO_LISTS.map(b => <React.Fragment key={b.key}>{row(b.title, bioText(s[b.key]), bioText(cur?.[b.key]))}</React.Fragment>)}
                 {s.qualifications && s.qualifications !== (cur?.qualifications || '') && row('Qualifications (typed before)', s.qualifications, cur?.qualifications)}
                 {row('Past clients', s.pastClients, cur?.pastClients)}
-                {row('Gender', s.gender || '', cur?.gender)}
-                {row('Address', s.address || '', cur?.address)}
-                {row('Emergency contact', ecText(s.emergencyContact), ecText(cur?.emergencyContact))}
+                {isStaff && <>
+                  {row('Gender', s.gender || '', cur?.gender)}
+                  {row('Address', s.address || '', cur?.address)}
+                  {row('Emergency contact', ecText(s.emergencyContact), ecText(cur?.emergencyContact))}
+                </>}
                 {row('Languages', languagesText(s), cur ? languagesText(cur) : '')}
                 {row('Type of training', (s.trainingTypes || []).map(trainingTypeLabel).join(', '), (cur?.trainingTypes || []).map(trainingTypeLabel).join(', '))}
                 {row('LinkedIn', s.linkedin || '', cur?.linkedin)}
@@ -657,10 +737,12 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                   <label className={label} htmlFor="t-email">Email</label>
                   <input id="t-email" type="email" value={form.email} onChange={e => set({ email: e.target.value })} className={input} />
                 </div>
-                <div>
-                  <label className={label} htmlFor="t-rate">Daily rate (RM)</label>
-                  <input id="t-rate" inputMode="decimal" value={form.rate} onChange={e => set({ rate: e.target.value })} placeholder="e.g. 2000" className={input} />
-                </div>
+                {isStaff && (
+                  <div>
+                    <label className={label} htmlFor="t-rate">Daily rate (RM)</label>
+                    <input id="t-rate" inputMode="decimal" value={form.rate} onChange={e => set({ rate: e.target.value })} placeholder="e.g. 2000" className={input} />
+                  </div>
+                )}
                 <label className="flex cursor-pointer items-center gap-2.5 self-end pb-2 text-[15px]">
                   <input type="checkbox" checked={form.onLeave} onChange={e => set({ onLeave: e.target.checked })} className="h-4 w-4 accent-[#0E6E62]" />
                   On leave (not taking trainings for now)
@@ -732,7 +814,9 @@ function TrainerPanel(props: {
     catch (e: any) { setPdfError(pdfErrorText(e)); }
     finally { setPdfBusy(false); }
   };
-  const hasBio = !!(t.nationality || t.race || t.tttNumber || t.icOnFile || BIO_LISTS.some(b => (t[b.key] || []).some(rowFilled)));
+  // Personal details show to Admin and Management only (2026-10-22), even from an old record not moved yet.
+  const staffOnly = props.isStaff;
+  const hasBio = !!((staffOnly && (t.nationality || t.race)) || t.tttNumber || t.icOnFile || BIO_LISTS.some(b => (t[b.key] || []).some(rowFilled)));
   const phone = (t.contact || '').trim();
   const wa = phone ? whatsappLink(phone) : '';
   const clientName = (d: any) => props.clients.find(c => c.id === d.clientId)?.companyName || d.client || 'No client';
@@ -787,8 +871,8 @@ function TrainerPanel(props: {
           <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-[15px]">
             <div><dt className="text-sm text-ink-soft">IC / Passport No.</dt><dd className="font-semibold">{props.isStaff ? (ic === null ? '…' : ic || 'Not given') : t.icOnFile ? 'On file (Admin and Management can see it)' : 'Not given'}</dd></div>
             {t.tttNumber && <div><dt className="text-sm text-ink-soft">TTT number</dt><dd className="font-semibold">{t.tttNumber}</dd></div>}
-            {t.nationality && <div><dt className="text-sm text-ink-soft">Nationality</dt><dd className="font-semibold">{t.nationality}</dd></div>}
-            {t.race && <div><dt className="text-sm text-ink-soft">Race</dt><dd className="font-semibold">{t.race}</dd></div>}
+            {staffOnly && t.nationality && <div><dt className="text-sm text-ink-soft">Nationality</dt><dd className="font-semibold">{t.nationality}</dd></div>}
+            {staffOnly && t.race && <div><dt className="text-sm text-ink-soft">Race</dt><dd className="font-semibold">{t.race}</dd></div>}
             {BIO_LISTS.map(b => {
               const rows = (t[b.key] || []).filter(rowFilled);
               return rows.length ? (
@@ -814,18 +898,18 @@ function TrainerPanel(props: {
       </section>
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
-        <div><dt className="text-sm text-ink-soft">Daily rate</dt><dd className="font-semibold">{t.rate ? formatRM(t.rate) : 'Not set'}</dd></div>
+        {props.isStaff && <div><dt className="text-sm text-ink-soft">Daily rate</dt><dd className="font-semibold">{t.rate ? formatRM(t.rate) : 'Not set'}</dd></div>}
         <div><dt className="text-sm text-ink-soft">Status</dt><dd className="font-semibold">{t.status === 'On Leave' ? 'On leave' : 'Available'}</dd></div>
         {!!t.experienceYears && <div><dt className="text-sm text-ink-soft">Experience</dt><dd className="font-semibold">{t.experienceYears} year{t.experienceYears === 1 ? '' : 's'}</dd></div>}
         {!!(t.trainingTypes || []).length && <div><dt className="text-sm text-ink-soft">Type of training</dt><dd className="font-semibold">{(t.trainingTypes || []).map(trainingTypeLabel).join(', ')}</dd></div>}
         {languagesText(t) && <div><dt className="text-sm text-ink-soft">Languages</dt><dd className="font-semibold">{languagesText(t)}</dd></div>}
-        {t.gender && <div><dt className="text-sm text-ink-soft">Gender</dt><dd className="font-semibold">{t.gender}</dd></div>}
+        {staffOnly && t.gender && <div><dt className="text-sm text-ink-soft">Gender</dt><dd className="font-semibold">{t.gender}</dd></div>}
         {topicList(t.suggestedTopics).length > 0 && (
           <div className="col-span-2"><dt className="text-sm text-ink-soft">Other topics (not in the Programme list yet)</dt>
             <dd className="mt-1 flex flex-wrap gap-1.5">{topicList(t.suggestedTopics).map(x => <span key={x} className="rounded-full bg-surface px-2.5 py-1 text-sm">{x}</span>)}</dd></div>
         )}
-        {t.address && <div className="col-span-2"><dt className="text-sm text-ink-soft">Address</dt><dd className="whitespace-pre-line">{t.address}</dd></div>}
-        {(t.emergencyContact?.name || t.emergencyContact?.phone) && (
+        {staffOnly && t.address && <div className="col-span-2"><dt className="text-sm text-ink-soft">Address</dt><dd className="whitespace-pre-line">{t.address}</dd></div>}
+        {staffOnly && (t.emergencyContact?.name || t.emergencyContact?.phone) && (
           <div className="col-span-2"><dt className="text-sm text-ink-soft">Emergency contact</dt>
             <dd>{ecText(t.emergencyContact)}{t.emergencyContact?.phone && <a href={`tel:${t.emergencyContact.phone.replace(/\s/g, '')}`} className="ml-2 text-sm font-semibold text-accent hover:underline">Call</a>}</dd></div>
         )}

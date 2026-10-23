@@ -124,6 +124,29 @@ export const extrasToSave = (x: TrainerExtras) => ({
   docs: x.docs,
 });
 
+// ---------- Personal details kept apart (process audit, 2026-10-22: PDPA) ----------
+// These six live in trainer_private/{trainerId} (Admin and Management only), next to the IC number, never on
+// trainers_directory (which every team member reads). Same field names, so the data keeps its shape.
+// A profile link's copy waits in trainer_link_private/{token} until the submission is accepted.
+export const PRIVATE_TRAINER_FIELDS = ['gender', 'address', 'emergencyContact', 'race', 'nationality', 'rate'] as const;
+export type PrivateTrainerField = typeof PRIVATE_TRAINER_FIELDS[number];
+const isPrivateKey = (k: string) => (PRIVATE_TRAINER_FIELDS as readonly string[]).includes(k);
+
+// A record split in two: what goes on trainers_directory, and the six personal fields (only those present).
+export function splitTrainerPrivate<T extends Record<string, any>>(record: T): { publicPart: Omit<T, PrivateTrainerField>; privatePart: Partial<Pick<T, Extract<keyof T, PrivateTrainerField>>> } {
+  const publicPart: any = {};
+  const privatePart: any = {};
+  for (const [k, v] of Object.entries(record || {})) (isPrivateKey(k) ? privatePart : publicPart)[k] = v;
+  return { publicPart, privatePart };
+}
+// Just the six personal fields of a record (missing ones left out).
+export const privateOf = (r: any): Record<string, any> =>
+  Object.fromEntries(PRIVATE_TRAINER_FIELDS.filter(k => r?.[k] !== undefined).map(k => [k, r[k]]));
+// The personal fields still sitting on a trainers_directory record (saved before 2026-10-22).
+export const legacyPrivateKeys = (r: any): PrivateTrainerField[] => PRIVATE_TRAINER_FIELDS.filter(k => r?.[k] !== undefined);
+// A trainer with their private record merged in, for Admin and Management (the private copy wins).
+export const withPrivate = <T,>(t: T, priv?: any): T => (priv ? { ...t, ...privateOf(priv) } : t);
+
 // "Topics you teach": one per line in suggestedTopics (kept as text so older records read the same).
 export const topicList = (s?: string) => String(s || '').split('\n').map(x => x.trim()).filter(Boolean);
 export const topicText = (list: string[]) => list.map(x => x.trim()).filter(Boolean).join('\n');

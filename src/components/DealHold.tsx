@@ -50,7 +50,7 @@ export function HoldBox({ deal, viewer, ownerName, onDone, onCancel }: {
         followUpDate: until,
         followUpById: deal.followUpById || dealOwnerId(deal),
         followUpByName: deal.followUpByName || ownerName,
-        history: [...(deal.history || []), historyEntry(viewer, action)].slice(-40),
+        history: [...(deal.history || []), historyEntry(viewer, action)],
       });
       onDone(current ? 'Hold extended' : 'Deal put on hold');
     } catch (err) {
@@ -105,7 +105,7 @@ export function ResumeBox({ deal, viewer, onDone, onCancel }: {
         onHold: null,
         holdResumedDate: today,   // the follow-up rule clock starts again from today
         followUpDate: next,
-        history: [...(deal.history || []), historyEntry(viewer, `Taken off hold. Next follow-up ${formatDate(next)}`)].slice(-40),
+        history: [...(deal.history || []), historyEntry(viewer, `Taken off hold. Next follow-up ${formatDate(next)}`)],
       });
       onDone('Deal taken off hold');
     } catch (err) {

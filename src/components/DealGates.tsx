@@ -25,7 +25,7 @@ const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
 const history = (p: any, viewer: Viewer, action: string) =>
-  [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-40);
+  [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }];
 
 // The inputs for the missing fields. Values are kept by the parent so they can be saved with the step.
 export type GapValues = { clientId: string; programmeId: string; programmeName: string; value: string; fundingType: FundingType | '' };
@@ -154,7 +154,8 @@ export async function markDealWon(deal: any, wonDate: string, extra: Record<stri
   const participants = paxOf({ participants: extra.participants ?? deal.participants });
   await updateDoc(doc(db, 'pipelines', deal.id), {
     ...extra, stage: 'won', status: statusForStage('won'), wonDate, lostReason: '', lostNote: '',
-    wonOriginal: { value, participants, date: wonDate, at: new Date().toISOString(), byId: viewer.id, byName: viewer.name },
+    // The first win's snapshot stays when a deal is won again (process audit, 2026-10-22).
+    ...(deal.wonOriginal ? {} : { wonOriginal: { value, participants, date: wonDate, at: new Date().toISOString(), byId: viewer.id, byName: viewer.name } }),
     winCount: (Number(deal.winCount) || 0) + 1,
     history: history(deal, viewer, `Won (${formatRM(value)})`),
   });

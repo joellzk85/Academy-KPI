@@ -146,7 +146,7 @@ export function registerProposalLinkRoutes(app: Express) {
       tx.update(dRef, {
         ...(moves ? { stage: 'agreed', status: statusForStage('agreed'), agreedDate: plusDaysMY(0, now) } : {}),
         proposalAcceptedAt: now,
-        history: [...(deal.history || []), historyLine(action, now)].slice(-40),
+        history: [...(deal.history || []), historyLine(action, now)],
       });
     });
     return { accepted };

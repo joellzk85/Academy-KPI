@@ -44,3 +44,17 @@ Joel's input: HRDC can raise **queries** before the training is approved, during
     - Tested with a script (8 checks: rows cleaned, 30-row limit, IC cleaned, gaps, IC never saved on the trainer record) and a temporary local page of the trainer's form (IC, nationality, lists with Add another, Preview content and no download, Submit anyway payload, old text kept, phone width). The server's IC handling, the team form and the PDF need the live site.
 
 
+
+## Trainers' personal details are private (process audit, 2026-10-22)
+
+- Gender, address, emergency contact, race, nationality and rate live in `trainer_private/{trainerId}` (Admin and Management only), with the same field names; `PRIVATE_TRAINER_FIELDS` and helpers in `lib/trainerProfile.ts`.
+- **Staff:**
+  - Trainers merges them into each trainer, and saves split them.
+  - `moveTrainerPrivate` moves older records once per page load and removes the fields from `trainers_directory`.
+- **Reps:** they don't see these fields (hidden in the list, panel, form and review). The rules refuse a rep write that touches them.
+- **Profile-link submissions:**
+  - The six fields go to `trainer_link_private/{token}`; the link only says `privateSent`.
+  - A staff accept copies them to `trainer_private`.
+  - A rep's accept leaves a `privateLinkToken` on the trainer, and the next staff visit moves the fields.
+- **Server:** the trainer portal reads and writes them in `trainer_private` (`trainerFrom` merges them in; the profile save and payment address write there).
+- **Known gap:** submissions sent before this change still hold the fields on `trainer_links` until they are accepted or cancelled.

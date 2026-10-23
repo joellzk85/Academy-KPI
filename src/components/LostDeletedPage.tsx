@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, onSnapshot, query, where, writeBatch } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, where, writeBatch } from 'firebase/firestore';
+import { isSuperManager, superConfirm } from '../lib/superManager';
 import { ChevronDown, Loader2, RotateCcw, Undo2 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import {
@@ -74,7 +75,7 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
   const owners = [...new Set(list.map(dealOwnerId))].map(id => ({ id, name: nameOf(id) })).sort((a, b) => a.name.localeCompare(b.name));
   const totalValue = filtered.reduce((t, p) => t + dealValue(p), 0);
 
-  const history = (p: any, action: string) => [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-40);
+  const history = (p: any, action: string) => [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }];
 
   const reopen = async (p: any) => {
     if (!window.confirm(`Reopen the deal for ${clientName(p)}? It goes back to ${STAGE_LABELS[reachedStage(p)]} in ${nameOf(dealOwnerId(p))}'s Deals.`)) return;
@@ -88,6 +89,18 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
       });
       await batch.commit();
       setMsg({ ok: true, text: `${clientName(p)} reopened.` });
+    } catch (e) { setMsg({ ok: false, text: friendlyError(e) }); } finally { setBusyId(''); }
+  };
+
+  // Super Manager only (Joel, 2026-10-22): erase a deleted deal for good, after two confirmations naming the risk.
+  // Its quotations, outlines, money records and files stay in the database, no longer linked to a deal.
+  const eraseDeal = async (p: any) => {
+    if (!window.confirm(`Delete the deal for ${clientName(p)} forever?`)) return;
+    if (!superConfirm(`delete the deal for ${clientName(p)} forever.`, 'it cannot be restored, its History is lost, and its quotations, money records and files are left without a deal.')) return;
+    setBusyId(p.id); setMsg(null);
+    try {
+      await deleteDoc(doc(db, 'pipelines', p.id));
+      setMsg({ ok: true, text: `The deal for ${clientName(p)} was deleted forever.` });
     } catch (e) { setMsg({ ok: false, text: friendlyError(e) }); } finally { setBusyId(''); }
   };
 
@@ -208,10 +221,15 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
                   {open && (
                     <div className="space-y-3 px-5 pb-4 sm:pl-10">
                       <FollowUpList deal={p} />
-                      <button type="button" disabled={busyId === p.id} className={btnSecondary} onClick={() => (tab === 'lost' ? reopen(p) : restore(p))}>
-                        {busyId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
-                        {tab === 'lost' ? 'Reopen deal' : 'Restore deal'}
-                      </button>
+                      <span className="flex flex-wrap gap-2">
+                        <button type="button" disabled={busyId === p.id} className={btnSecondary} onClick={() => (tab === 'lost' ? reopen(p) : restore(p))}>
+                          {busyId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+                          {tab === 'lost' ? 'Reopen deal' : 'Restore deal'}
+                        </button>
+                        {tab === 'deleted' && isSuperManager(viewer) && (
+                          <button type="button" disabled={busyId === p.id} className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={() => eraseDeal(p)}>Delete forever</button>
+                        )}
+                      </span>
                     </div>
                   )}
                 </li>
@@ -221,6 +239,70 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
         )}
       </div>
       <p className="text-sm text-ink-soft">Old deals not yet linked to a Team member (Data tools) aren't listed.</p>
+
+      <DeletedMoney viewer={viewer} deals={deals} clientName={clientName} />
     </div>
+  );
+}
+
+// Deleted money records (process audit, 2026-10-22): invoices, HRDC claims, reimbursement invoices and approved or
+// paid payment requests are never erased, only marked deleted with a reason. Management sees them here and can
+// restore them (firestore.rules: restoreOk).
+const MONEY_KINDS = [['money_in', 'Invoice or HRDC claim'], ['money_out', 'Payment request'], ['claim_backs', 'Reimbursement invoice']] as const;
+
+function DeletedMoney({ viewer, deals, clientName }: { viewer: Viewer; deals: any[]; clientName: (p: any) => string }) {
+  const [recs, setRecs] = useState<Record<string, any[]>>({});
+  const [busyId, setBusyId] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const subs = MONEY_KINDS.map(([coll]) => onSnapshot(query(collection(db, coll), where('deleted', '==', true)),
+      s => setRecs(r => ({ ...r, [coll]: s.docs.map(d => ({ ...d.data(), id: d.id, coll })) })), () => setRecs(r => ({ ...r, [coll]: [] }))));
+    return () => subs.forEach(u => u());
+  }, []);
+  const all = MONEY_KINDS.flatMap(([coll]) => recs[coll] || []).sort((a, b) => String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
+  if (!all.length) return null;
+  const label = (r: any) => MONEY_KINDS.find(([c]) => c === r.coll)?.[1] || 'Money record';
+  const forText = (r: any) => {
+    if (!r.dealId) return 'Company payment';
+    const d = deals.find(x => x.id === r.dealId);
+    return d ? `${clientName(d)} · ${d.courseName || 'Training'}` : 'Deal not found';
+  };
+  const restore = async (r: any) => {
+    if (!window.confirm(`Restore this ${label(r).toLowerCase()} (${formatRM(r.amount)})? It counts again in the deal's money and P&L.`)) return;
+    setBusyId(r.id); setError('');
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, r.coll, r.id), { deleted: false, restoredById: viewer.id, restoredByName: viewer.name, restoredAt: new Date().toISOString() });
+      await batch.commit();
+    } catch (e) { setError(friendlyError(e)); } finally { setBusyId(''); }
+  };
+  const erase = async (r: any) => {
+    if (!superConfirm(`delete this ${label(r).toLowerCase()} (${formatRM(r.amount)}) forever.`, 'it cannot be restored and the money history loses it for good.')) return;
+    setBusyId(r.id); setError('');
+    try { await deleteDoc(doc(db, r.coll, r.id)); } catch (e) { setError(friendlyError(e)); } finally { setBusyId(''); }
+  };
+  return (
+    <section className="space-y-2">
+      <h3 className="text-lg font-bold">Deleted money records <span className="font-normal text-ink-soft">({all.length})</span></h3>
+      <p className="text-[15px] text-ink-soft">Invoices, HRDC claims, reimbursement invoices and approved or paid payment requests are kept when deleted. Restore one to count it again.</p>
+      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
+      <ul className={`${card} divide-y divide-line`}>
+        {all.map(r => (
+          <li key={`${r.coll}:${r.id}`} className="flex flex-wrap items-start gap-3 px-5 py-3">
+            <div className="min-w-[14rem] flex-1">
+              <p className="font-semibold">{label(r)}{r.invoiceNo ? ` ${r.invoiceNo}` : ''}{r.payee ? ` · ${r.payee}` : ''} · {formatRM(r.amount)}{r.status ? ` (${r.status})` : ''}</p>
+              <p className="text-sm text-ink-soft">{forText(r)}</p>
+              <p className="text-sm"><strong className="text-danger">{r.deletedReason || 'No reason given'}</strong> <span className="text-ink-soft">· deleted {formatDate(ymd(r.deletedAt))} by {r.deletedByName || 'someone'}</span></p>
+            </div>
+            <button type="button" disabled={busyId === r.id} className={btnSecondary} onClick={() => restore(r)}>
+              {busyId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Restore
+            </button>
+            {isSuperManager(viewer) && (
+              <button type="button" disabled={busyId === r.id} className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={() => erase(r)}>Delete forever</button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

@@ -516,7 +516,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
       const sent = /^\d{4}-\d{2}-\d{2}/.test(d.proposalSentDate || '') ? d.proposalSentDate : todayIso();
       await updateDoc(doc(db, 'pipelines', d.id), {
         stage: 'proposal', status: statusForStage('proposal'), proposalSentDate: sent,
-        history: [...(d.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Proposal sent: teambuilding proposal ${p.refNumber || ''}`.trim() }].slice(-40),
+        history: [...(d.history || []), { at: new Date().toISOString(), byId: me.id, byName: me.name, action: `Proposal sent: teambuilding proposal ${p.refNumber || ''}`.trim() }],
       });
     } catch (e) {
       setDealWarn(`The proposal is sent, but the deal couldn't be moved to "Proposal sent" (${friendlyError(e)}). Open the deal and click "Proposal sent".`);

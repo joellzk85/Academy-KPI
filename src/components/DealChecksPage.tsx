@@ -27,7 +27,7 @@ const btnSecondary =
 
 const pctText = (r: number) => `${Math.round(r * 100)}%`;
 const historyLine = (deal: any, viewer: Viewer, action: string) =>
-  [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-40);
+  [...(deal.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }];
 
 export default function DealChecksPage({ deals, people, viewer, onOpenDeal }: {
   deals: any[]; people: { id: string; name: string }[]; viewer: Viewer; onOpenDeal?: (deal: any) => void;

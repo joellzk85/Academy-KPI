@@ -70,7 +70,7 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
         followUps: [...(Array.isArray(deal.followUps) ? deal.followUps : []), note].slice(-200),
         followUpDate: nextDate,
         followUpById: byId, followUpByName: byName,
-        history: [...(deal.history || []), { at: note.at, byId: viewer.id, byName: viewer.name, action }].slice(-40),
+        history: [...(deal.history || []), { at: note.at, byId: viewer.id, byName: viewer.name, action }],
       });
       draft.clear();
       onDone(decision ? 'Kept open' : 'Follow-up logged');

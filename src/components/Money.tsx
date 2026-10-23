@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, onSnapshot, query, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { AlertTriangle, Check, Download, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
-import { dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
+import { addDays, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
   COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, OutStatus, TIMING_LABELS,
-  canDecide, dateTimeMY, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
+  canDecide, dateTimeMY, ownApprovalOk, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
 import { projectRow } from '../lib/projectPL';
@@ -19,6 +19,8 @@ import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } fr
 import PaymentSummaryPanel from './PaymentSummaryPanel';
 import { BankRequestsBox, TrainerFeeRequests } from './TrainerPortalAdmin';
 import { FixRequest, PLTick, resubmitRequest } from './StepCosts';
+import { askReason, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
+import { superConfirm } from '../lib/superManager';
 import { isTrainerFee } from '../lib/feeChecks';
 import { ApproveFeeDialog } from './FeeChecks';
 import { VendorForm, useVendors } from './VendorsPage';
@@ -67,21 +69,6 @@ function useRun() {
     try { await fn(); } catch (err) { setError(friendlyError(err)); } finally { setBusy(false); }
   };
   return { busy, error, setError, run };
-}
-
-// Delete a money record and say so in its deal's History (Joel, 2026-10-20: Management can delete any money
-// record, paid ones included, so the deal keeps a trail of what was deleted, by whom and when).
-async function deleteMoney(coll: 'money_in' | 'money_out', id: string, dealId: string, viewer: Viewer, what: string) {
-  const batch = writeBatch(db);
-  batch.delete(doc(db, coll, id));
-  if (dealId) {
-    const d = await getDoc(doc(db, 'pipelines', dealId));
-    if (d.exists()) {
-      const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Deleted ${what}` };
-      batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
-    }
-  }
-  await batch.commit();
 }
 
 // ---------- Rep view: status only ----------
@@ -191,12 +178,16 @@ function useTypedSst(dealId: string): Record<string, { sstAmount?: number | null
 /** Approve several requests at once (the same check as one by one: a manager, never their own).
  *  Trainer fees are left out: each is approved by itself, after its checks (lib/feeChecks.ts). */
 export async function approveMany(list: MoneyOut[], viewer: Viewer) {
-  const ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
+  let ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
+  // The Super Manager's own requests are in the list only after the second confirmation.
+  const own = ok.filter(o => o.requestedById === viewer.id);
+  if (own.length && !superConfirm(`approve ${own.length} of your own payment request${own.length === 1 ? '' : 's'} with the others.`,
+    'nobody else checks these payments before they go to accounts.')) ok = ok.filter(o => o.requestedById !== viewer.id);
   if (!ok.length) return;
   const at = new Date().toISOString();
   for (let i = 0; i < ok.length; i += 400) {
     const batch = writeBatch(db);
-    ok.slice(i, i + 400).forEach(o => batch.update(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: at, rejectReason: '' }));
+    ok.slice(i, i + 400).forEach(o => batch.update(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: at, decidedTs: serverTimestamp(), rejectReason: '' }));
     await batch.commit();
   }
 }
@@ -211,10 +202,19 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'da
 }
 
 // ---------- Money in ----------
-export function InForm({ deal, source, viewer, settings, onDone }: { deal: any; source: InSource; viewer: Viewer; settings: MoneySettings; onDone: () => void }) {
-  const [f, setF] = useState({ invoiceNo: '', invoiceDate: todayIso(), amount: dealValue(deal) ? String(dealValue(deal)) : '', note: '' });
+// topUp (process audit, 2026-10-22): a top-up invoice to the client for what HRDC didn't pay on a claim. override: why
+// Management records an HRDC claim before the grant is approved or the training delivered (kept in the deal's History).
+export function InForm({ deal, source, viewer, settings, onDone, topUp, override }: {
+  deal: any; source: InSource; viewer: Viewer; settings: MoneySettings; onDone: () => void;
+  topUp?: { claimId: string; amount: number; claimNo: string }; override?: string;
+}) {
+  const [f, setF] = useState({
+    invoiceNo: '', invoiceDate: todayIso(),
+    amount: topUp ? String(Math.round(topUp.amount * 100) / 100) : dealValue(deal) ? String(dealValue(deal)) : '',
+    note: topUp ? `Top-up: HRDC paid less on claim${topUp.claimNo ? ` ${topUp.claimNo}` : ''}` : '',
+  });
   // Kept in this browser until it's saved (lib/useFormDraft.ts).
-  const draft = useFormDraft(viewer.id, `money-in:${source}:${deal.id}`, f, setF);
+  const draft = useFormDraft(viewer.id, `money-in:${source}:${deal.id}${topUp ? `:topup:${topUp.claimId}` : ''}`, f, setF);
   const { busy, error, setError, run } = useRun();
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -223,10 +223,12 @@ export function InForm({ deal, source, viewer, settings, onDone }: { deal: any; 
     if (!(amount > 0)) return setError('Enter the amount, for example 15000.');
     const id = `in_${Date.now()}`;
     return run(async () => {
-      await setDoc(doc(db, 'money_in', id), {
+      const what = `${topUp ? 'Top-up invoice' : IN_SOURCE_LABELS[source]}${f.invoiceNo.trim() ? ` ${f.invoiceNo.trim()}` : ''} recorded (${formatRM(amount)})${override ? `, before the grant or delivery was ticked: ${override}` : ''}`;
+      await withDealHistory(deal.id, viewer, what, batch => batch.set(doc(db, 'money_in', id), {
         id, dealId: deal.id, source, invoiceNo: f.invoiceNo.trim(), invoiceDate: f.invoiceDate, amount, paidDate: '', paidAmount: 0, note: f.note.trim(),
+        ...(topUp ? { topUpFor: topUp.claimId } : {}),
         createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
-      });
+      }));
       draft.clear();
       onDone();
     });
@@ -284,14 +286,19 @@ export function InRow({ m, viewer, settings, context, receipts = [], readOnly }:
       setPaying(false);
     });
   };
-  const undo = () => run(() => updateDoc(doc(db, 'money_in', m.id), { paidDate: '', paidAmount: 0, paidAt: '', updatedAt: Date.now() }));
+  const label = IN_SOURCE_LABELS[m.source].toLowerCase();
+  // Only Management undoes a payment (process audit, 2026-10-22).
+  const undo = () => {
+    if (!window.confirm(`Undo the payment of ${formatRM(m.paidAmount || 0)} on this ${label}? It is noted in the deal's History.`)) return;
+    return run(() => undoPayment('money_in', m, viewer, `${label}${m.invoiceNo ? ` ${m.invoiceNo}` : ''}`));
+  };
   const remove = () => {
-    const label = IN_SOURCE_LABELS[m.source].toLowerCase();
-    if (!window.confirm(paid
-      ? `Delete this ${label}? It has been paid (${formatRM(m.paidAmount || 0)}), so the deal's P&L and Project P&L change. This can't be undone.`
-      : `Delete this ${label}?`)) return;
+    const reason = askReason(paid
+      ? `Delete this ${label}? It has been paid (${formatRM(m.paidAmount || 0)}), so the deal's P&L and Project P&L change. Management can restore it later.\n\nWhy is it deleted?`
+      : `Delete this ${label}? Management can restore it later.\n\nWhy is it deleted?`);
+    if (!reason) return;
     const what = `${label}${m.invoiceNo ? ` ${m.invoiceNo}` : ''} (${formatRM(m.amount)}${paid ? `, paid ${formatRM(m.paidAmount || 0)}` : ''})`;
-    return run(() => deleteMoney('money_in', m.id, m.dealId, viewer, what));
+    return run(() => deleteMoney('money_in', m, viewer, what, reason));
   };
 
   return (
@@ -316,7 +323,7 @@ export function InRow({ m, viewer, settings, context, receipts = [], readOnly }:
         </div>
         {!readOnly && <span className="flex shrink-0 gap-1">
           {paid
-            ? <button type="button" disabled={busy} className={btnSmall} onClick={undo}><Undo2 className="h-3.5 w-3.5" /> Undo payment</button>
+            ? viewer.role === 'management' && <button type="button" disabled={busy} className={btnSmall} onClick={undo}><Undo2 className="h-3.5 w-3.5" /> Undo payment</button>
             : !paying && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setPaying(true); setError(''); }}><Check className="h-3.5 w-3.5" /> Record payment</button>}
           {(!paid || viewer.role === 'management') && <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={remove} aria-label="Delete"><Trash2 className="h-4 w-4" /></button>}
         </span>}
@@ -408,25 +415,36 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
   const forText = company ? 'Company payment' : docFor || context || 'Training';
   const canFix = o.status === 'rejected' && isMine && !o.trainingCancelled;
 
-  const approveNow = () => updateDoc(doc(db, 'money_out', o.id), clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' }));
+  const approveNow = async () => {
+    if (!ownApprovalOk(o, viewer)) return;
+    await approveWrite();
+  };
+  const approveWrite = () => updateDoc(doc(db, 'money_out', o.id), { ...clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' }), decidedTs: serverTimestamp() });
   // A trainer fee first shows "Are you sure?" with the T3, photos and report checks (lib/feeChecks.ts).
   const approve = () => (isTrainerFee(o) ? setMode('approve') : run(approveNow));
   const reject = () => {
     if (!reason.trim()) return setError('Say briefly why it is rejected.');
     return run(async () => {
-      await updateDoc(doc(db, 'money_out', o.id), { status: 'rejected', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: reason.trim() });
+      await updateDoc(doc(db, 'money_out', o.id), { status: 'rejected', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), decidedTs: serverTimestamp(), rejectReason: reason.trim() });
       setMode(null);
     });
   };
   // Marked paid in Admin work → Money → Payment summary (2026-10-21), or by accounts on the summary's link.
-  const undoPaid = () => run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', paidDate: '', paidRef: '', paidById: '', paidByName: '' }));
+  // Undo paid: Management only (process audit, 2026-10-22).
+  const undoPaid = () => {
+    if (!window.confirm('Undo "paid" on this payment request? It is noted with your name.')) return;
+    return run(() => undoPayment('money_out', o, viewer, `${o.category} · ${o.payee}`));
+  };
   const cancel = () => {
     const settled = o.status === 'approved' || o.status === 'paid';
-    if (!window.confirm(settled
-      ? `Delete this ${o.status} payment request? ${o.status === 'paid' ? 'It has been paid, so the' : 'The'} P&L changes. This can't be undone.`
-      : 'Cancel this payment request?')) return;
     const what = `payment request: ${o.category} · ${o.payee} (${company ? formatSen(o.amount) : formatRM(o.amount)}, ${OUT_STATUS_LABELS[o.status].toLowerCase()})`;
-    return run(() => deleteMoney('money_out', o.id, o.dealId || '', viewer, what));
+    if (!settled) {
+      if (!window.confirm('Cancel this payment request?')) return;
+      return run(() => deleteMoney('money_out', o, viewer, what, ''));
+    }
+    const reason = askReason(`Delete this ${o.status} payment request? ${o.status === 'paid' ? 'It has been paid, so the' : 'The'} P&L changes. It is kept, and Management can restore it.\n\nWhy is it deleted?`);
+    if (!reason) return;
+    return run(() => deleteMoney('money_out', o, viewer, what, reason));
   };
 
   if (mode === 'fix' && company) return <li><CompanyForm viewer={viewer} editing={o} onDone={() => setMode(null)} /></li>;
@@ -464,6 +482,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
           )}
           {o.status === 'approved' && o.summaryToken && <p className="text-sm text-accent">On a payment summary sent to accounts</p>}
           {o.status === 'pending' && isMine && <p className="text-sm text-attention">{viewer.role === 'management' ? 'Waiting for the other manager to approve.' : 'Waiting for a manager to approve.'}</p>}
+          {o.lastUndo && <p className="text-sm text-ink-soft">"Paid" undone by {o.lastUndo.byName} on {formatDate(o.lastUndo.at)} (was paid {formatDate(o.lastUndo.paidDate)})</p>}
         </div>
         {viewer.role !== 'rep' && !mode && (
           <span className="flex max-w-full shrink-0 flex-wrap justify-end gap-1 sm:max-w-[22rem]">
@@ -472,7 +491,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
             {decide && <button type="button" disabled={busy} className={`${btnPrimary} py-1.5`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
             {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={() => { setMode('reject'); setError(''); }}><X className="h-3.5 w-3.5" /> Reject</button>}
             {canFix && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setMode('fix'); setError(''); }}><Pencil className="h-3.5 w-3.5" /> Fix and send again</button>}
-            {o.status === 'paid' && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
+            {o.status === 'paid' && viewer.role === 'management' && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
             {(viewer.role === 'management' || ((o.status === 'pending' || o.status === 'rejected') && isMine)) && (
               <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={cancel} aria-label="Cancel request"><Trash2 className="h-4 w-4" /></button>
             )}
@@ -488,7 +507,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
         </div>
       )}
       {mode === 'fix' && <FixRequest o={o} viewer={viewer} onDone={() => setMode(null)} />}
-      {mode === 'approve' && <ApproveFeeDialog o={o} onApprove={approveNow} onClose={() => setMode(null)} />}
+      {mode === 'approve' && <ApproveFeeDialog o={o} viewer={viewer} onApprove={approveNow} onClose={() => setMode(null)} />}
       {error && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
     </li>
   );
@@ -770,9 +789,15 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
     if (!(commission >= 0 && commission < 100)) return setError('The commission must be a percentage, for example 3.');
     const behalf = Number(v.behalf);
     if (!(behalf >= 1)) return setError('The claim-back reminder must be at least 1 day.');
+    // A changed HRDC % or commission % applies from today: the old rates are kept up to yesterday, so past P&Ls,
+    // commissions and HRDC amounts don't change (process audit, 2026-10-22).
+    const rateChanged = pct !== settings.hrdcDeductionPct || commission !== settings.commissionPct;
+    const rates = (settings.rates || []).filter(r => r.until < addDays(todayIso(), -1));
+    if (rateChanged) rates.push({ until: addDays(todayIso(), -1), hrdcDeductionPct: settings.hrdcDeductionPct, commissionPct: settings.commissionPct });
     return run(async () => {
       await setDoc(doc(db, 'config', 'money_settings'), {
         hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder, commissionPct: commission, behalfReminderDays: behalf,
+        rates: rateChanged ? rates : settings.rates || [],
         updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name,
       });
       setF(null);
@@ -791,9 +816,15 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
         <div><label className={small} htmlFor="ms-bh">Paid on behalf of client, not claimed back: red after (days after training)</label><input id="ms-bh" inputMode="numeric" value={v.behalf} onChange={e => set('behalf', e.target.value)} className={input} /></div>
       </div>
       <p className="text-sm text-ink-soft">HRD Corp allows 6 months (180 days) after training to submit a claim. The work queue shows an amber reminder straight after training and turns it red after the reminder days, well before the deadline.</p>
+      <p className="text-sm text-ink-soft">A new HRDC % or commission % applies to trainings from today; earlier trainings keep the rate of their time.</p>
+      {(settings.rates || []).length > 0 && (
+        <p className="text-sm text-ink-soft">Earlier rates: {(settings.rates || []).map(r => `up to ${formatDate(r.until)}: HRDC ${r.hrdcDeductionPct}%, commission ${r.commissionPct}%`).join(' · ')}</p>
+      )}
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       {saved && <p role="status" className="text-sm text-accent">Saved.</p>}
-      <button type="button" disabled={busy || !f} onClick={save} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save settings</button>
+      {viewer.role === 'management'
+        ? <button type="button" disabled={busy || !f} onClick={save} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save settings</button>
+        : <p className="text-sm font-semibold text-ink-soft">Only Management changes these settings.</p>}
     </section>
   );
 }

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { doc, setDoc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
+import { doc, serverTimestamp, setDoc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
-import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, paidViaLink } from '../lib/money';
+import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, ownApprovalOk, paidViaLink } from '../lib/money';
 import { ChecklistTask, costCategory, isCoTrainer, materialItems } from '../lib/checklist';
 import { STEP_VENDOR_TYPE, Vendor, bankText, hasBank, vendorName } from '../lib/vendors';
 import { Receipt } from '../lib/postTraining';
@@ -14,6 +14,7 @@ import { VendorForm } from './VendorsPage';
 import { ReceiptDrop, ReceiptList } from './PaymentReceipts';
 import { isTrainerFee } from '../lib/feeChecks';
 import { ApproveFeeDialog } from './FeeChecks';
+import { askReason, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
 
 // Costs on a before-training checklist step (Joel, 2026-10-20: "able to key in amount, e.g. bus RM 5,000 + upload
 // document; all these amounts automated into the training P&L and into payment requests, payable to different
@@ -105,30 +106,32 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
   };
   const decide = canDecide(o, viewer);
   const mine = o.requestedById === viewer.id;
-  const approveNow = () => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' });
+  const approveNow = async () => { if (ownApprovalOk(o, viewer)) await approveWrite(); };
+  const approveWrite = () => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), decidedTs: serverTimestamp(), rejectReason: '' });
   // A trainer fee first shows "Are you sure?" with the T3, photos and report checks (lib/feeChecks.ts).
   const approve = () => (isTrainerFee(o) ? setConfirming(true) : run(approveNow));
   const reject = () => {
     const reason = window.prompt('Why is it rejected?');
     if (!reason?.trim()) return;
-    return run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'rejected', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: reason.trim() }));
+    return run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'rejected', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), decidedTs: serverTimestamp(), rejectReason: reason.trim() }));
   };
+  // Approved or paid costs are kept, marked deleted with a reason (process audit, 2026-10-22).
   const remove = () => {
     const settled = o.status === 'approved' || o.status === 'paid';
-    if (!window.confirm(settled ? `Delete this ${OUT_STATUS_LABELS[o.status].toLowerCase()} cost? The P&L changes. This can't be undone.` : 'Delete this cost?')) return;
-    return run(async () => {
-      const batch = writeBatch(db);
-      batch.delete(doc(db, 'money_out', o.id));
-      const d = await getDoc(doc(db, 'pipelines', o.dealId));
-      if (d.exists()) {
-        const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Deleted cost: ${o.category} · ${o.payee} · ${o.description || ''} (${sen(o.amount)}, ${OUT_STATUS_LABELS[o.status].toLowerCase()})` };
-        batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
-      }
-      await batch.commit();
-    });
+    const what = `cost: ${o.category} · ${o.payee} · ${o.description || ''} (${sen(o.amount)}, ${OUT_STATUS_LABELS[o.status].toLowerCase()})`;
+    if (!settled) {
+      if (!window.confirm('Delete this cost?')) return;
+      return run(() => deleteMoney('money_out', o, viewer, what, ''));
+    }
+    const reason = askReason(`Delete this ${OUT_STATUS_LABELS[o.status].toLowerCase()} cost? The P&L changes. It is kept, and Management can restore it.\n\nWhy is it deleted?`);
+    if (!reason) return;
+    return run(() => deleteMoney('money_out', o, viewer, what, reason));
   };
-  // Paid from the payment summary (Admin work → Money); a mistaken Mark paid can be undone here.
-  const undoPaid = () => run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', paidDate: '', paidRef: '', paidById: '', paidByName: '' }));
+  // Paid from the payment summary (Admin work → Money); Management can undo a mistaken Mark paid here.
+  const undoPaid = () => {
+    if (!window.confirm('Undo "paid" on this cost? It is noted with your name.')) return;
+    return run(() => undoPayment('money_out', o, viewer, `${o.category} · ${o.payee}`));
+  };
   const canDelete = viewer.role === 'management' || (mine && (o.status === 'pending' || o.status === 'rejected'));
 
   return (
@@ -148,6 +151,8 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
             {o.status === 'approved' && o.summaryToken && <span className="text-accent">on a payment summary sent to accounts</span>}
             {o.onBehalf && o.status !== 'rejected' && <span className="rounded bg-attention-soft px-1.5 py-0.5 font-semibold text-attention">On behalf of client: claim back after training</span>}
             {o.status === 'pending' && mine && <span className="text-attention">{viewer.role === 'management' ? 'the other manager approves' : 'a manager approves'}</span>}
+            {!inPL(o) && !o.onBehalf && o.notInPLReason && <span className="text-ink-soft">not in the P&L: {o.notInPLReason}</span>}
+            {o.lastUndo && <span className="text-ink-soft">"paid" undone by {o.lastUndo.byName} {formatDate(o.lastUndo.at)}</span>}
           </p>
           {o.status !== 'rejected' && o.status !== 'paid' && (!vendor || !hasBank(vendor)) && (
             <p className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-attention"><AlertTriangle className="h-3.5 w-3.5" /> No bank details for this vendor yet (Admin work → Vendors)</p>
@@ -160,12 +165,12 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
           {decide && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
           {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={reject}><X className="h-3.5 w-3.5" /> Reject</button>}
           {o.status === 'rejected' && mine && !o.trainingCancelled && !fixing && <button type="button" disabled={busy} className={btnSmall} onClick={() => setFixing(true)}><Pencil className="h-3.5 w-3.5" /> Fix and send again</button>}
-          {o.status === 'paid' && !paidViaLink(o) && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
+          {o.status === 'paid' && viewer.role === 'management' && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
           {canDelete && <button type="button" disabled={busy} onClick={remove} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label="Delete this cost">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button>}
         </span>
       </div>
       {fixing && <FixRequest o={o} viewer={viewer} onDone={() => setFixing(false)} />}
-      {confirming && <ApproveFeeDialog o={o} payee={vendor ? vendorName(vendor, trainers, venues) : o.payee} onApprove={approveNow} onClose={() => setConfirming(false)} />}
+      {confirming && <ApproveFeeDialog o={o} viewer={viewer} payee={vendor ? vendorName(vendor, trainers, venues) : o.payee} onApprove={approveNow} onClose={() => setConfirming(false)} />}
       {o.status === 'paid' && (
         <>
           <ReceiptList receipts={receipts} viewer={viewer} />
@@ -183,8 +188,8 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
 }) {
   const vType = STEP_VENDOR_TYPE[task.kind] || 'other';
   const hinted = hint && vendors.find(v => (hint.trainerId && v.trainerId === hint.trainerId) || (hint.venueId && v.venueId === hint.venueId));
-  // "Include in P&L" starts unticked (Joel, 2026-10-21).
-  const [f, setF] = useState({ description: '', amount: '', timing: defaultTiming(task), vendorId: hinted?.id || '', inPL: false, onBehalf: false });
+  // "Include in P&L" starts ticked; leaving a cost out needs a short reason (Joel, process audit 2026-10-22).
+  const [f, setF] = useState({ description: '', amount: '', timing: defaultTiming(task), vendorId: hinted?.id || '', inPL: true, notInPLReason: '', onBehalf: false });
   const draft = useFormDraft(viewer.id, `cost:${deal.id}:${task.id}`, f, setF);
   const [newVendor, setNewVendor] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -203,6 +208,7 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
     if (!f.description.trim()) return setError('Say what it is for, e.g. Booking.');
     if (!(amount > 0)) return setError('Enter the amount, for example 5000.');
     if (!vendor) return setError('Pick who is paid, or add a new vendor.');
+    if (!f.onBehalf && !f.inPL && f.notInPLReason.trim().length < 3) return setError('Say briefly why this cost is not in the P&L.');
     // No double payment by mistake (2026-10-21): this vendor already has a cost on this step?
     const same = lines.filter(o => o.vendorId === vendor.id && o.status !== 'rejected');
     if (same.length && !window.confirm(`${vendorName(vendor, trainers, venues)} already has ${same.length} cost line${same.length === 1 ? '' : 's'} on this step (${same.map(o => `${o.description || o.category} RM ${Number(o.amount).toFixed(2)}`).join(', ')}).\n\nAdd another one anyway (e.g. a balance payment)?`)) return;
@@ -212,6 +218,7 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
       await setDoc(doc(db, 'money_out', id), {
         id, dealId: deal.id, kind: 'deal', category: costCategory(task), payee: vendorName(vendor, trainers, venues), vendorId: vendor.id,
         description: f.description.trim(), amount: Math.round(amount * 100) / 100, timing: f.timing, inPL: !f.onBehalf && !!f.inPL, onBehalf: !!f.onBehalf, checklistTaskId: task.id, requestDate: todayIso(),
+        notInPLReason: !f.onBehalf && !f.inPL ? f.notInPLReason.trim() : '',
         status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
         decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
       });
@@ -282,8 +289,12 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
       {!f.onBehalf && (
         <label className="flex items-center gap-2 text-[15px]">
           <input type="checkbox" checked={!!f.inPL} onChange={e => setF(x => ({ ...x, inPL: e.target.checked }))} className="h-4 w-4 accent-[#0E6E62]" />
-          Include in P&L <span className="text-sm text-ink-soft">(count it as a cost of this training; can be changed later)</span>
+          Include in P&L <span className="text-sm text-ink-soft">(count it as a cost of this training)</span>
         </label>
+      )}
+      {!f.onBehalf && !f.inPL && (
+        <input value={f.notInPLReason} onChange={e => setF(x => ({ ...x, notInPLReason: e.target.value }))} className={input}
+          placeholder="Why is it not a cost of this training?" aria-label="Why it is not in the P&L" />
       )}
       <p className="text-sm text-ink-soft">It waits for {viewer.role === 'management' ? 'the other manager' : 'a manager'} to approve it, then goes on the payment summary for accounts.</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
@@ -303,7 +314,7 @@ export async function resubmitRequest(o: MoneyOut, patch: Partial<MoneyOut>, vie
   const d = o.dealId ? await getDoc(doc(db, 'pipelines', o.dealId)) : null;
   if (d?.exists()) {
     const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `Fixed and sent again for approval: ${o.category} · ${o.payee} (${sen(Number(patch.amount ?? o.amount))}, rejected: ${o.rejectReason || 'no reason'})` };
-    batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
+    batch.update(d.ref, { history: [...((d.data() as any).history || []), entry] });
   }
   await batch.commit();
 }
@@ -337,31 +348,33 @@ export function FixRequest({ o, viewer, onDone }: { o: MoneyOut; viewer: Viewer;
   );
 }
 
+/** Can this person change a cost's P&L ticks? Admin and Management while it waits for approval; once approved or paid,
+ *  Management only (process audit, 2026-10-22: the profit can't be changed after approval without a manager). */
+const canTick = (o: MoneyOut, viewer: Viewer) => viewer.role === 'management' || (viewer.role === 'admin' && (o.status === 'pending' || o.status === 'rejected'));
+const tickLocked = 'Approved: only Management can change this now.';
+
 /** "Pay on behalf of client" tick beside a cost (Joel, 2026-10-22): the client pays it back on a reimbursement invoice
- *  after training (lib/onBehalf.ts); never in the P&L. Admin and Management change it at any status, with a History line. */
+ *  after training (lib/onBehalf.ts); never in the P&L. Each change goes into the deal's History. Unticked, the cost
+ *  counts in the P&L again. */
 export function BehalfTick({ o, viewer }: { o: MoneyOut; viewer: Viewer }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const on = !!o.onBehalf;
   const change = async (next: boolean) => {
-    if (!next && !window.confirm('Untick "Pay on behalf of client"? It will no longer be claimed back from the client. If it is already on a reimbursement invoice, fix that invoice in After training too.')) return;
+    if (!next && !window.confirm('Untick "Pay on behalf of client"? It will no longer be claimed back from the client, and it counts in the P&L. If it is already on a reimbursement invoice, fix that invoice in After training too.')) return;
     setBusy(true); setError('');
     try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, 'money_out', o.id), { onBehalf: next });
-      const d = o.dealId ? await getDoc(doc(db, 'pipelines', o.dealId)) : null;
-      if (d?.exists()) {
-        const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `${next ? 'Marked as paid on behalf of client (to claim back)' : 'No longer paid on behalf of client'}: ${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${sen(o.amount)})` };
-        batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
-      }
-      await batch.commit();
+      const what = `${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${sen(o.amount)})`;
+      await withDealHistory(o.dealId || '', viewer, `${next ? 'Marked as paid on behalf of client (to claim back)' : 'No longer paid on behalf of client'}: ${what}`,
+        batch => batch.update(doc(db, 'money_out', o.id), next ? { onBehalf: true } : { onBehalf: false, inPL: true, notInPLReason: '' }));
     } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
   if (viewer.role === 'rep') return null;
+  const locked = !canTick(o, viewer);
   return (
-    <label className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${on ? 'border-attention/40 bg-attention-soft text-attention' : 'border-line bg-white text-ink-soft'}`}
-      title="Ticked: we pay it for the client and claim it back after training. Not in the P&L.">
-      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <input type="checkbox" checked={on} disabled={busy} onChange={e => change(e.target.checked)} className="h-3.5 w-3.5 accent-[#0E6E62]" />}
+    <label className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${locked ? '' : 'cursor-pointer'} ${on ? 'border-attention/40 bg-attention-soft text-attention' : 'border-line bg-white text-ink-soft'}`}
+      title={locked ? tickLocked : 'Ticked: we pay it for the client and claim it back after training. Not in the P&L.'}>
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <input type="checkbox" checked={on} disabled={busy || locked} onChange={e => change(e.target.checked)} className="h-3.5 w-3.5 accent-[#0E6E62]" />}
       {ON_BEHALF_LABEL}
       {error && <span role="alert" className="ml-1 font-normal text-danger">{error}</span>}
     </label>
@@ -369,29 +382,28 @@ export function BehalfTick({ o, viewer }: { o: MoneyOut; viewer: Viewer }) {
 }
 
 /** "Include in P&L" tick beside a cost (Joel, 2026-10-21). Unticked = still a payment to approve and pay, but not a
- *  cost in the training's P&L. Admin and Management change it at any status; each change goes into the deal's History. */
+ *  cost in the training's P&L; unticking needs a short reason (process audit, 2026-10-22). Each change goes into the
+ *  deal's History. */
 export function PLTick({ o, viewer }: { o: MoneyOut; viewer: Viewer }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const on = inPL(o);
   const change = async (next: boolean) => {
+    const reason = next ? '' : askReason('Leave this cost out of the P&L? Why is it not a cost of this training?');
+    if (!next && !reason) return;
     setBusy(true); setError('');
     try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, 'money_out', o.id), { inPL: next });
-      const d = o.dealId ? await getDoc(doc(db, 'pipelines', o.dealId)) : null;
-      if (d?.exists()) {
-        const entry = { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `${next ? 'Included in' : 'Left out of'} the P&L: ${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${sen(o.amount)})` };
-        batch.update(d.ref, { history: [...((d.data() as any).history || []), entry].slice(-40) });
-      }
-      await batch.commit();
+      const what = `${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${sen(o.amount)})`;
+      await withDealHistory(o.dealId || '', viewer, `${next ? 'Included in the P&L' : `Left out of the P&L (${reason})`}: ${what}`,
+        batch => batch.update(doc(db, 'money_out', o.id), { inPL: next, notInPLReason: reason || '' }));
     } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
   if (viewer.role === 'rep') return null;
+  const locked = !canTick(o, viewer);
   return (
-    <label className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${on ? 'border-accent/40 bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft'}`}
-      title="Ticked: counted as a cost in this training's P&L. Unticked: still paid, but not in the P&L.">
-      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <input type="checkbox" checked={on} disabled={busy} onChange={e => change(e.target.checked)} className="h-3.5 w-3.5 accent-[#0E6E62]" />}
+    <label className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${locked ? '' : 'cursor-pointer'} ${on ? 'border-accent/40 bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft'}`}
+      title={locked ? tickLocked : 'Ticked: counted as a cost in this training\'s P&L. Unticked: still paid, but not in the P&L.'}>
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <input type="checkbox" checked={on} disabled={busy || locked} onChange={e => change(e.target.checked)} className="h-3.5 w-3.5 accent-[#0E6E62]" />}
       Include in P&L
       {error && <span role="alert" className="ml-1 font-normal text-danger">{error}</span>}
     </label>
