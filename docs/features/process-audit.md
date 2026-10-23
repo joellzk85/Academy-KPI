@@ -91,4 +91,5 @@ Joel: "Joel is Super Manager and can do any changes, no need anyone to approve; 
 
 - Publish **`firestore.rules`** and **`storage.rules`** after the build is live. Until then: T3 lists can't be saved, the T3 lists and the trainers' personal details don't move, and the new approvals carry a field the old rules refuse (`decidedTs`), so approving fails.
 - Tested with Firebase's own test database (a temporary Java in the scratch folder): 116 rule checks covering every item above, the Super Manager, and the existing approvals (Fix and send again, cross-approval).
+- 2026-10-23: three Super Manager checks failed because the test still marked the Super Manager the old draft way (an `owner_access` record). The rules are right: the Super Manager is marked by `superManager: true` on their `auth_map` record, set only by the server. Test updated (also checks a manager cannot make themselves Super Manager); 119 + 18 + 15 checks pass, `firestore.rules` unchanged.
 - Not tested in the browser.
