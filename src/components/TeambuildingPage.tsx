@@ -26,7 +26,7 @@ import TeambuildingSite from './TeambuildingSite';
 import PhoneFrame from './PhoneFrame';
 import PhotoPicker from './PhotoPicker';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
-import CustomerCodeBox from './CustomerCodeBox';
+import CustomerCodeBox, { needsCustomerCode, nudgeCustomerCode } from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { AcceptBlock } from './ProposalLinkPage';
@@ -490,6 +490,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   // Sending the proposal: a deal at New moves to "Proposal sent", with the same check as its own button
   // (programme from the list and the deal value). Same rules as course outlines.
   const startSend = () => {
+    if (!locked && needsCustomerCode(r.client, p.refAuto)) return nudgeCustomerCode();
     if (!locked) {
       const mayMove = dealAtNew && canMoveDeal(deal, me);
       const gaps = mayMove ? dealGaps(deal, 'proposal', { clientIds: sources.clients.map(c => c.id), programmeIds: programmes.map(x => x.id) }) : [];

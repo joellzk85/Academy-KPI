@@ -1,19 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { AlertTriangle, Check, Download, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
-import { pdfErrorText } from '../lib/oldTab';
 import { addDays, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
   COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, OutStatus, TIMING_LABELS,
-  canDecide, dateTimeMY, ownApprovalOk, paidViaLink, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
+  canDecide, dateTimeMY, ownApprovalOk, paidViaLink, raisedText, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
 import { projectRow } from '../lib/projectPL';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
-import PaymentRequestDocument, { paymentRef } from './PaymentRequestDocument';
 import { Receipt, needsReceipt } from '../lib/postTraining';
 import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
 import PaymentSummaryPanel from './PaymentSummaryPanel';
@@ -350,40 +348,8 @@ export function InRow({ m, viewer, settings, context, receipts = [], readOnly }:
   );
 }
 
-// ---------- Payment request PDF: download, or share to WhatsApp (Joel, 2026-10-18) ----------
-// The PDF tools load only when someone makes one, like quotations.
-async function paymentPdf(o: MoneyOut, forText: string): Promise<{ blob: Blob; name: string }> {
-  const { makeDocumentPdf } = await import('../lib/quotePdf');
-  const blob = await makeDocumentPdf(React.createElement(PaymentRequestDocument, { o, forText }), `Payment request ${paymentRef(o)}`);
-  const name = `Payment request ${paymentRef(o)} - ${String(o.payee || '').replace(/[\\/:*?"<>|]+/g, '').slice(0, 60)}.pdf`;
-  return { blob, name };
-}
-
-async function saveBlob(blob: Blob, name: string) {
-  const { downloadBlob } = await import('../lib/quotePdf');
-  downloadBlob(blob, name);
-}
-
-// The request's own PDF, for printing or filing. Accounts are sent payment summaries only (2026-10-21), so there is
-// no WhatsApp or per-request link any more.
-function PaymentPdf({ o, forText }: { o: MoneyOut; forText: string }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const download = async () => {
-    setBusy(true); setError('');
-    try { const { blob, name } = await paymentPdf(o, forText); await saveBlob(blob, name); }
-    catch (e) { setError(pdfErrorText(e)); }
-    finally { setBusy(false); }
-  };
-  return (
-    <>
-      <button type="button" disabled={busy} className={btnSmall} onClick={download} title="Download as PDF (for printing or filing)">
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF
-      </button>
-      {error && <span role="alert" className="basis-full rounded-lg bg-danger-soft px-2.5 py-1.5 text-sm text-danger">{error}</span>}
-    </>
-  );
-}
+// Payment requests have no PDF or link of their own (2026-10-23): accounts get them only on a payment summary
+// (Admin work → Money), which shows where to pay.
 
 // A link made for one request before 2026-10-21 still works until it's stopped (serverPaymentLinks.ts). The request
 // can't go on a payment summary while it's open, so it can be stopped here.
@@ -412,7 +378,6 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
   const decide = canDecide(o, viewer);
   const isMine = o.requestedById === viewer.id;
   const company = isCompanyPayment(o);
-  const forText = company ? 'Company payment' : docFor || context || 'Training';
   const canFix = o.status === 'rejected' && isMine && !o.trainingCancelled;
 
   const approveNow = async () => {
@@ -481,13 +446,12 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
             </p>
           )}
           {o.status === 'approved' && o.summaryToken && <p className="text-sm text-accent">On a payment summary sent to accounts</p>}
-          {o.status === 'pending' && isMine && <p className="text-sm text-attention">{viewer.role === 'management' ? 'Waiting for the other manager to approve.' : 'Waiting for a manager to approve.'}</p>}
+          {o.status === 'pending' && <p className="text-sm font-semibold text-attention">{raisedText(o)}</p>}
           {o.lastUndo && <p className="text-sm text-ink-soft">"Paid" undone by {o.lastUndo.byName} on {formatDate(o.lastUndo.at)} (was paid {formatDate(o.lastUndo.paidDate)})</p>}
         </div>
         {viewer.role !== 'rep' && !mode && (
           <span className="flex max-w-full shrink-0 flex-wrap justify-end gap-1 sm:max-w-[22rem]">
             {!company && o.status !== 'rejected' && <PLTick o={o} viewer={viewer} />}
-            <PaymentPdf o={o} forText={forText} />
             {decide && <button type="button" disabled={busy} className={`${btnPrimary} py-1.5`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
             {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={() => { setMode('reject'); setError(''); }}><X className="h-3.5 w-3.5" /> Reject</button>}
             {canFix && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setMode('fix'); setError(''); }}><Pencil className="h-3.5 w-3.5" /> Fix and send again</button>}

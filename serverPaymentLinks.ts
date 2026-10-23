@@ -217,12 +217,15 @@ function registerBatchRoutes(app: Express) {
     const docs = await Promise.all(ids.map(id => db.collection('money_out').doc(id).get()));
     const bad = docs.find(d => !d.exists || (d.data() as any).dealDeleted || (d.data() as any).deleted || (d.data() as any).status !== 'approved');
     if (bad) throw new UserError(409, 'not-approved', 'Only approved payments that are not paid yet can go on a summary. Reload and try again.');
-    // One summary per payment, and post-training payments only after the training (2026-10-21; summaryProblem).
+    // One summary per payment, post-training payments only after the training (2026-10-21), and only with bank
+    // details accounts can use (2026-10-23; summaryProblem).
     const dealIds = [...new Set(docs.map(d => (d.data() as any).dealId).filter(Boolean))] as string[];
     const deals = new Map((await Promise.all(dealIds.map(id => db.collection('pipelines').doc(id).get()))).map(d => [d.id, d.data()]));
+    const vendorIds = [...new Set(docs.map(d => (d.data() as any).vendorId).filter(Boolean))] as string[];
+    const vendors = new Map((await Promise.all(vendorIds.map(id => db.collection('vendors').doc(id).get()))).filter(d => d.exists).map(d => [d.id, { ...(d.data() as any), id: d.id }]));
     for (const d of docs) {
       const o: any = { ...d.data(), id: d.id };
-      const problem = summaryProblem(o, deals.get(o.dealId), todayMY());
+      const problem = summaryProblem(o, deals.get(o.dealId), vendors.get(o.vendorId), todayMY());
       if (problem) throw new UserError(409, 'cannot-add', `${o.payee || 'A payment'}: ${problem}. Reload and try again.`);
     }
     const byName = String((await db.collection('team').doc(caller.memberId).get()).data()?.name || '');

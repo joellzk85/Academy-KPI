@@ -31,9 +31,9 @@ const history = (p: any, viewer: Viewer, action: string) =>
 export type GapValues = { clientId: string; programmeId: string; programmeName: string; value: string; fundingType: FundingType | ''; participants: string };
 export const emptyGapValues = (): GapValues => ({ clientId: '', programmeId: '', programmeName: '', value: '', fundingType: '', participants: '' });
 
-function GapInputs({ gaps, values, set, programmes, clients, viewer }: {
+function GapInputs({ gaps, values, set, programmes, clients, viewer, kind }: {
   gaps: DealField[]; values: GapValues; set: (c: Partial<GapValues>) => void;
-  programmes: Programme[]; clients: any[]; viewer: Viewer;
+  programmes: Programme[]; clients: any[]; viewer: Viewer; kind?: 'training' | 'teambuilding';
 }) {
   return (
     <div className="space-y-3">
@@ -49,7 +49,7 @@ function GapInputs({ gaps, values, set, programmes, clients, viewer }: {
       {gaps.includes('programme') && (
         <div>
           <span className={label}>Programme</span>
-          <ProgrammePicker programmes={programmes} value={values.programmeId} viewer={viewer} onChange={pg => set({ programmeId: pg.id, programmeName: pg.name })} />
+          <ProgrammePicker programmes={programmes} value={values.programmeId} viewer={viewer} kind={kind} onChange={pg => set({ programmeId: pg.id, programmeName: pg.name })} />
         </div>
       )}
       {gaps.includes('value') && (
@@ -147,7 +147,7 @@ export function GapsBox({ deal, gaps, step, programmes, clients, viewer, onSaved
   return (
     <div ref={boxRef} className="rounded-xl border-2 border-attention bg-attention-soft p-4 shadow-md">
       <p className="mb-3 text-sm font-semibold text-attention">Before "{step}", add {gaps.map(g => GAP_LABELS[g]).join(' and ')}:</p>
-      <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} />
+      <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} kind={deal.type === 'Teambuilding' ? 'teambuilding' : 'training'} />
       {err && <p role="alert" className="mt-3 text-sm text-danger">{err}</p>}
       <div className="mt-3 flex gap-2">
         <button type="button" className={btnSecondary} onClick={onCancel}>Cancel</button>
@@ -222,7 +222,7 @@ export function MarkWonBox({ deal, programmes, clients, viewer, onDone, onCancel
       {gaps.length > 0 && (
         <div className="mt-3">
           <p className="mb-2 text-sm font-semibold text-accent">Also add {gaps.map(g => GAP_LABELS[g]).join(' and ')}:</p>
-          <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} />
+          <GapInputs gaps={gaps} values={v} set={c => setV(x => ({ ...x, ...c }))} programmes={programmes} clients={clients} viewer={viewer} kind={deal.type === 'Teambuilding' ? 'teambuilding' : 'training'} />
         </div>
       )}
       <p className="mt-2 text-sm text-accent">The sale of {formatRM(Number(v.value) || dealValue(deal))} counts toward KPI in the month signed.</p>

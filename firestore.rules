@@ -183,6 +183,24 @@ service cloud.firestore {
         return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['trainingChange'])
           || tc == null || tc.get('status', '') != 'pending' || tc.get('byId', '') == request.auth.uid;
       }
+      // Discount requests (full deal test, 2026-10-23): asked in your own name; approved or rejected only by a manager
+      // who didn't ask (the Super Manager may), signed with their id; withdrawn only by the person who asked.
+      // Approving is the only way the discount's lower value is written with it.
+      function discountOk() {
+        let before = resource.data.get('discountRequest', null);
+        let after = request.resource.data.get('discountRequest', null);
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['discountRequest'])
+          || (after != null && after.get('status', '') == 'pending' && after.get('byId', '') == request.auth.uid
+              && (before == null || before.get('status', '') != 'pending'))
+          || (after != null && before != null && before.get('status', '') == 'pending'
+              && after.get('status', '') in ['approved', 'rejected'] && after.get('byId', '') == before.get('byId', '')
+              && after.get('toValue', 0) == before.get('toValue', 0)
+              && isManagement() && after.get('decidedById', '') == request.auth.uid
+              && (before.get('byId', '') != request.auth.uid || isSuper()))
+          || (after != null && before != null && before.get('status', '') == 'pending'
+              && after.get('status', '') == 'withdrawn' && before.get('byId', '') == request.auth.uid)
+          || isSuper();
+      }
       function becomesWon() {
         return request.resource.data.get('stage', '') == 'won' && resource.data.get('stage', '') != 'won';
       }
@@ -217,7 +235,7 @@ service cloud.firestore {
               || isManagement() || (request.resource.data.get('stage', '') == 'lost' && changeApproved('cancel')))
           && (!changed.hasAny(['stage', 'status']) || stageOk(request.resource.data))
           && (!(becomesWon() || changed.hasAny(['clientId', 'proposalValue', 'fundingType'])) || wonGateOk(request.resource.data))
-          && historyOk() && changeRequestOk();
+          && historyOk() && changeRequestOk() && discountOk();
       }
       // Month lock: a changed meeting date or proposal date (old and new) and a newly added follow-up note must be in
       // open months.

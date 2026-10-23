@@ -3,7 +3,7 @@ import { Check, CheckCircle2, Clock, Loader2, XCircle } from 'lucide-react';
 import { MoneyOut, dateTimeMY, paidViaLink } from '../lib/money';
 import { formatDate } from '../lib/deals';
 import PaymentRequestDocument from './PaymentRequestDocument';
-import PaymentSummaryDocument from './PaymentSummaryDocument';
+import PaymentSummaryDocument, { PayTo } from './PaymentSummaryDocument';
 import { PaymentSummary, groupPaid, groupPayable } from '../lib/paymentSummary';
 import logoUrl from '../assets/outline/next-logo.png';
 
@@ -162,17 +162,10 @@ function BatchView({ token, data, onData }: { token: string; data: BatchData; on
 
   return (
     <div className="min-h-screen bg-[#f3f5f4] font-sans text-ink">
-      <header className="sticky top-0 z-10 border-b border-line bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
-          <img src={logoUrl} alt="NEXT Academy" className="h-8 w-auto" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-semibold">Payment summary {data.ref}</p>
-            <p className="truncate text-sm text-ink-soft">{s.groups.length} vendor{s.groups.length === 1 ? '' : 's'} · {sen(s.total)}</p>
-          </div>
-        </div>
-      </header>
+      {/* No header bar (Joel, 2026-10-23): the reference and total sit on the first line. */}
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-5">
         <section className="rounded-2xl border border-line bg-white p-4 sm:p-5">
+          <p className="text-sm text-ink-soft">NEXT Academy · Payment summary {data.ref} · {sen(s.total)}</p>
           <h1 className="text-lg font-semibold">{open.length ? `${open.length} vendor${open.length === 1 ? '' : 's'} to pay` : 'Everything on this summary is paid'}</h1>
           <p className="text-sm text-ink-soft">Prepared by {data.byName} on {formatDate(data.createdAt)}. Every payment here was approved by Management. Pay each vendor, then click Payment made on its block.</p>
           {error && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
@@ -187,9 +180,7 @@ function BatchView({ token, data, onData }: { token: string; data: BatchData; on
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-semibold">{g.payee}</p>
-                      <p className="text-sm">{g.bankUnchecked
-                        ? <span className="font-semibold text-danger">Bank details are being checked by NEXT Academy: please don't pay yet.</span>
-                        : [g.bankName, g.accountNo, g.accountName].filter(Boolean).join(' · ') || g.paymentDetails || <span className="font-semibold text-attention">Bank details not recorded: ask NEXT Academy</span>}</p>
+                      <div className="text-sm"><PayTo g={g} /></div>
                       <p className="text-sm text-ink-soft">{g.lines.length} payment{g.lines.length === 1 ? '' : 's'}: {g.lines.map(l => `${l.category}${l.description ? ` (${l.description})` : ''}`).join(', ')}</p>
                     </div>
                     <p className="text-right font-bold tabular-nums">{sen(g.total)}</p>
