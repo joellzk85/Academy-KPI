@@ -436,8 +436,19 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.requestedById == request.auth.uid
         && request.resource.data.get('deleted', false) == false
+        && request.resource.data.get('feeAgreed', null) == null
         && plTickOk(request.resource.data);
       allow update: if isStaff() && (
+        // Agree a trainer fee before the PO goes out (full deal test, 2026-10-23): a manager who didn't raise it
+        // (the Super Manager may), for the amount as it is, signed with their id; nothing else changes.
+        (isManagement()
+          && resource.data.status == 'pending'
+          && resource.data.get('feeAgreed', null) == null
+          && (resource.data.requestedById != request.auth.uid || isSuper())
+          && request.resource.data.get('feeAgreed', {}).get('byId', '') == request.auth.uid
+          && request.resource.data.get('feeAgreed', {}).get('amount', -1) == resource.data.amount
+          && changedOnly(['feeAgreed']))
+        ||
         // approve or reject (decidedTs: the database's own time of the decision)
         (isManagement()
           && resource.data.status == 'pending'
@@ -479,8 +490,12 @@ service cloud.firestore {
           && request.resource.data.status == 'pending'
           && request.resource.data.requestedById == request.auth.uid
           && request.resource.data.decidedById == ''
+          // an agreed trainer fee stays agreed only for the same amount (2026-10-23)
+          && (request.resource.data.get('feeAgreed', null) == null
+              || (request.resource.data.get('feeAgreed', null) == resource.data.get('feeAgreed', null)
+                  && request.resource.data.amount == resource.data.amount))
           && changedOnly(['status', 'amount', 'description', 'decidedById', 'decidedByName', 'decidedAt', 'rejectReason', 'resubmittedAt',
-                          'category', 'payee', 'vendorId', 'requestDate', 'items', 'neededBy', 'paymentDetails']))
+                          'category', 'payee', 'vendorId', 'requestDate', 'items', 'neededBy', 'paymentDetails', 'feeAgreed']))
       );
       // Delete: only while waiting for approval or rejected, by the requester or Management (approved and paid ones
       // are marked deleted instead, above).

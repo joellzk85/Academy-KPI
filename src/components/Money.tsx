@@ -20,6 +20,7 @@ import { FixRequest, PLTick, resubmitRequest } from './StepCosts';
 import { askReason, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
 import { superConfirm } from '../lib/superManager';
 import { isTrainerFee } from '../lib/feeChecks';
+import { feeIsAgreed } from '../lib/trainerPortal';
 import { ApproveFeeDialog } from './FeeChecks';
 import { VendorForm, useVendors } from './VendorsPage';
 import { bankText, hasBank, vendorName } from '../lib/vendors';
@@ -98,7 +99,7 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
 }) {
   const plDocs = useTypedSst(deal.id);
   const row = projectRow(deal, ins, outs, settings, todayIso(), { quotes, plDocs });
-  const approvable = outs.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
+  const approvable = outs.filter(o => canDecide(o, viewer) && !isTrainerFee(o) && feeIsAgreed(o));
   const behalfTotal = behalfOuts(outs).reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const { busy, error, run } = useRun();
   const stepTotals = Object.values(outs.filter(o => o.checklistTaskId && o.status !== 'rejected').reduce((m, o) => {
@@ -176,7 +177,7 @@ function useTypedSst(dealId: string): Record<string, { sstAmount?: number | null
 /** Approve several requests at once (the same check as one by one: a manager, never their own).
  *  Trainer fees are left out: each is approved by itself, after its checks (lib/feeChecks.ts). */
 export async function approveMany(list: MoneyOut[], viewer: Viewer) {
-  let ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
+  let ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o) && feeIsAgreed(o));
   // The Super Manager's own requests are in the list only after the second confirmation.
   const own = ok.filter(o => o.requestedById === viewer.id);
   if (own.length && !superConfirm(`approve ${own.length} of your own payment request${own.length === 1 ? '' : 's'} with the others.`,
@@ -375,7 +376,9 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
   const [mode, setMode] = useState<null | 'reject' | 'fix' | 'approve'>(null);
   const [reason, setReason] = useState('');
   const { busy, error, setError, run } = useRun();
-  const decide = canDecide(o, viewer);
+  // A trainer fee not agreed yet is agreed on the deal's Trainer step first; paying it is approved after the training (2026-10-23).
+  const toAgree = o.status === 'pending' && !feeIsAgreed(o);
+  const decide = canDecide(o, viewer) && !toAgree;
   const isMine = o.requestedById === viewer.id;
   const company = isCompanyPayment(o);
   const canFix = o.status === 'rejected' && isMine && !o.trainingCancelled;
@@ -452,6 +455,7 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
         {viewer.role !== 'rep' && !mode && (
           <span className="flex max-w-full shrink-0 flex-wrap justify-end gap-1 sm:max-w-[22rem]">
             {!company && o.status !== 'rejected' && <PLTick o={o} viewer={viewer} />}
+            {toAgree && <span className="text-sm font-semibold text-attention">Fee to agree on the deal's Trainer step (then the PO goes out)</span>}
             {decide && <button type="button" disabled={busy} className={`${btnPrimary} py-1.5`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
             {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={() => { setMode('reject'); setError(''); }}><X className="h-3.5 w-3.5" /> Reject</button>}
             {canFix && <button type="button" disabled={busy} className={btnSmall} onClick={() => { setMode('fix'); setError(''); }}><Pencil className="h-3.5 w-3.5" /> Fix and send again</button>}

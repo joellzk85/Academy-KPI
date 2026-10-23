@@ -20,6 +20,18 @@ import { ChecklistTask, Flag, applicableTasks, daysUntil, isOptional } from './c
 import { formatDate, formatRM, todayIso, trainingEndDate } from './deals';
 import { DEFAULT_MONEY_SETTINGS, InSource, MoneyIn, MoneyOut, MoneySettings, isPaid, openShortfalls, shortfall } from './money';
 import { BehalfStatus, ClaimBack, behalfFlags, behalfNext, behalfStatus } from './onBehalf';
+import { isHrdc } from './checklist';
+import { openTodos } from './trainingChange';
+import { pendingDiscount } from './dealOffers';
+
+// HRDC order (Joel, 2026-10-23): on HRDC deals the post-training documents (Training delivered, JD14, verified T3,
+// report) come before the HRDC claim, because HRDC needs them for the claim. Direct-pay deals keep the invoice first
+// (often issued before the training). Only the order shown changes; any step can still be done at any time.
+export const docsFirst = (deal: any) => isHrdc(deal?.fundingType);
+
+// Every loop closed before Case closed (Joel, 2026-10-23): the before-training steps, the to-dos after an approved date
+// change, open HRDC queries and a discount waiting for a manager count too, and are listed by name.
+export interface OpenLoop { what: string; text: string }
 
 export interface Receipt {
   id: string;
@@ -72,6 +84,8 @@ export interface PostStatus {
   outsOpen: MoneyOut[];             // payment requests waiting for approval or to be paid
   shortfallsOpen: MoneyIn[];        // HRDC paid less, no top-up invoice raised and not written off (process audit, 2026-10-22)
   beforeOpen: ChecklistTask[];      // before-training steps still open (the case can't close with them open)
+  loopsOpen: OpenLoop[];            // everything else still open that stops "Case closed" (before-training steps included)
+  invoiceStep: number;              // where the invoice / HRDC claim step sits: 1, or 2 on HRDC deals (documents first)
   paymentInDone: boolean;           // step 3: every invoice and claim received with its receipt
   outsDone: boolean;                // step 4: no payment request waiting for approval or to be paid
   paymentDone: boolean;             // both
@@ -84,7 +98,7 @@ export interface PostStatus {
 }
 
 export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[],
-  claims: ClaimBack[] = [], today = todayIso(), s: MoneySettings = DEFAULT_MONEY_SETTINGS): PostStatus {
+  claims: ClaimBack[] = [], today = todayIso(), s: MoneySettings = DEFAULT_MONEY_SETTINGS, queries: { dealId?: string; answeredDate?: string; question?: string }[] = []): PostStatus {
   const daysSince = daysSinceTraining(deal, today);
   const ended = daysSince !== null;
   const needed = invoicesNeeded(deal?.fundingType);
@@ -106,17 +120,30 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   const paymentDone = paymentInDone && outsDone;
   const behalf = behalfStatus(deal?.id, outs, claims, receipts);
   const steps = behalf.has ? 5 : 4;
-  const closed = ended && paymentDone && behalf.done && docsOpen.length === 0 && beforeOpen.length === 0;
+  const loopsOpen: OpenLoop[] = [
+    ...beforeOpen.map(t => ({ what: 'Before training', text: t.label })),
+    ...openTodos(deal).map(t => ({ what: 'After the date change', text: t.label })),
+    ...queries.filter(q => q.dealId === deal?.id && !q.answeredDate).map(q => ({ what: 'HRDC query', text: String(q.question || 'Not answered yet').slice(0, 80) })),
+    ...(pendingDiscount(deal) ? [{ what: 'Discount', text: 'Waiting for a manager' }] : []),
+  ];
+  const closed = ended && paymentDone && behalf.done && docsOpen.length === 0 && loopsOpen.length === 0;
   const started = ins.length > 0 || after.some(t => t.done);
+  const hrdcOrder = docsFirst(deal);
+  const invoiceStep = hrdcOrder ? 2 : 1;
+  const docsNext = () => `${docsOpen[0].label}${docsOpen.length > 1 ? ` (then ${docsOpen.slice(1).map(t => t.label).join(', ')})` : ''}`;
+  const invoiceNext = () => (missingInvoices.length ? `Record the ${missingInvoices.map(s => INVOICE_WORDS[s]).join(' and the ')}` : 'Record the invoice or HRDC claim');
 
   let next = '';
   let step = steps + 1;
-  if (!invoiceDone) {
+  if (hrdcOrder && docsOpen.length) {
     step = 1;
-    next = missingInvoices.length ? `Record the ${missingInvoices.map(s => INVOICE_WORDS[s]).join(' and the ')}` : 'Record the invoice or HRDC claim';
+    next = docsNext();
+  } else if (!invoiceDone) {
+    step = invoiceStep;
+    next = invoiceNext();
   } else if (docsOpen.length) {
     step = 2;
-    next = `${docsOpen[0].label}${docsOpen.length > 1 ? ` (then ${docsOpen.slice(1).map(t => t.label).join(', ')})` : ''}`;
+    next = docsNext();
   } else if (!paymentInDone) {
     step = 3;
     next = unpaid.length ? `Waiting for payment: ${plural(unpaid.length, 'invoice or claim')}`
@@ -129,9 +156,9 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   } else if (!behalf.done) {
     step = 5;
     next = behalfNext(behalf);
-  } else if (ended && beforeOpen.length) {
-    step = 2;
-    next = `Before-training step still open: ${beforeOpen.map(t => t.label).join(', ')}`;
+  } else if (ended && loopsOpen.length) {
+    step = steps;
+    next = `Still open: ${loopsOpen.map(l => `${l.text} (${l.what.toLowerCase()})`).join(', ')}`;
   } else if (!ended) {
     step = 2;
     next = 'Starts after the training';
@@ -143,13 +170,13 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
     ? [...ins.map(m => m.paidDate || ''), ...docs.map(t => t.doneAt || ''), ...receipts.filter(r => ins.some(m => m.id === r.moneyInId)).map(r => r.at.slice(0, 10)),
       ...outs.map(o => o.paidDate || ''), ...behalf.claims.map(c => c.paidDate || '')].filter(isDay).map(d => d.slice(0, 10)).sort().pop() || ''
     : '';
-  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, shortfallsOpen, beforeOpen, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
+  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, shortfallsOpen, beforeOpen, loopsOpen, invoiceStep, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
 }
 
 /** Reminders from the day after the training until the case is closed (the work queue, My home's After training card). */
 export function postTrainingFlags(deal: any, tasks: ChecklistTask[] | undefined, ins: MoneyIn[], outs: MoneyOut[], receipts: Receipt[],
-  claims: ClaimBack[], s: MoneySettings, today = todayIso()): Flag[] {
-  const st = postTraining(deal, tasks, ins, outs, receipts, claims, today, s);
+  claims: ClaimBack[], s: MoneySettings, today = todayIso(), queries: { dealId?: string; answeredDate?: string; question?: string }[] = []): Flag[] {
+  const st = postTraining(deal, tasks, ins, outs, receipts, claims, today, s, queries);
   if (!st.ended || st.closed) return [];
   const since = st.daysSince!;
   const flags: Flag[] = [];
@@ -180,5 +207,6 @@ export function postTrainingFlags(deal: any, tasks: ChecklistTask[] | undefined,
   st.shortfallsOpen.forEach(m => flags.push({ level: 'danger', text: `HRDC paid ${formatRM(shortfall(m, s))} less than expected: raise a top-up invoice to the client` }));
   st.noReceipt.forEach(m => flags.push({ level: 'attention', text: `Payment received ${formatDate(m.paidDate || '')}, receipt not uploaded yet` }));
   flags.push(...behalfFlags(st.behalf, since, s, today));
+  if (st.paymentDone && !st.docsOpen.length && st.loopsOpen.length) flags.push({ level: 'attention', text: `Case can't close yet, still open: ${st.loopsOpen.map(l => l.text).join(', ')}` });
   return flags;
 }
