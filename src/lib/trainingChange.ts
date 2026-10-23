@@ -81,7 +81,7 @@ export function pendingChange(p: any): TrainingChange | null {
   return c && c.status === 'pending' && dealStage(p) === 'won' && p?.deleted !== true ? (c as TrainingChange) : null;
 }
 
-// Management, never their own request, except the Super Manager (Joel, 2026-10-22), who confirms a second time.
+// Management, never their own request, except with the owner override (lib/superManager.ts), which asks twice.
 export function canDecideChange(c: TrainingChange | null, viewer: Viewer): boolean {
   return !!c && c.status === 'pending' && viewer.role === 'management' && (c.byId !== viewer.id || isSuperManager(viewer));
 }

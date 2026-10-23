@@ -92,7 +92,7 @@ export function ApproveFeeDialog({ o, payee, onApprove, onClose, viewer }: { o: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const done = !loading && allChecked(checks);
-  // The Super Manager can approve with checks missing (Joel, 2026-10-22), after a second confirmation.
+  // Owner override (lib/superManager.ts): approve with checks missing, after a second confirmation.
   const bypass = !done && !loading && isSuperManager(viewer);
   const approve = async () => {
     if (bypass && !superConfirm(`approve this trainer fee with ${checks.filter(c => !c.ok).map(c => c.label).join(', ')} not checked.`,
@@ -121,7 +121,7 @@ export function ApproveFeeDialog({ o, payee, onApprove, onClose, viewer }: { o: 
         {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" className={btnSecondary} onClick={onClose}>Cancel</button>
-          <button type="button" disabled={!(done || bypass) || busy} className={btnPrimary} onClick={approve}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {bypass ? 'Approve anyway (Super Manager)' : 'Yes, approve'}</button>
+          <button type="button" disabled={!(done || bypass) || busy} className={btnPrimary} onClick={approve}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {bypass ? 'Approve anyway' : 'Yes, approve'}</button>
         </div>
       </div>
     </div>

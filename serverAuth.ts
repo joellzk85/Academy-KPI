@@ -136,7 +136,7 @@ export async function callerFrom(req: Request) {
   const link = await db.collection('auth_map').doc(uid).get();
   const data = link.data();
   if (!link.exists || !data?.active) throw new UserError(403, 'no-access', 'This login no longer has access.');
-  return { memberId: uid, role: data.role as Role, superManager: data.superManager === true };
+  return { memberId: uid, role: data.role as Role, superManager: (await db.collection('owner_access').doc(uid).get()).exists };
 }
 
 export async function managementFrom(req: Request) {
@@ -159,11 +159,11 @@ async function activeManagementCount(db: Firestore): Promise<number> {
   return snap.size;
 }
 
-// Super Manager (Joel, 2026-10-22: "Joel is Super Manager and can do any changes, nobody supersedes"). One person,
-// marked superManager on team and auth_map. Only they change, reset or remove themselves; nobody else can.
-function guardSuper(member: any, caller: { memberId: string; superManager?: boolean }) {
-  if (member.superManager === true && !caller.superManager) {
-    throw new UserError(403, 'super-manager', 'Only the Super Manager can change the Super Manager.');
+// Owner override (2026-10-22): a person with an owner_access record (made only in the Firebase console) can't be
+// changed, reset or removed by anyone else.
+async function guardSuper(db: Firestore, member: any, caller: { memberId: string; superManager?: boolean }) {
+  if (!caller.superManager && (await db.collection('owner_access').doc(member.id).get()).exists) {
+    throw new UserError(403, 'not-allowed', 'This change is not allowed.');
   }
 }
 
@@ -291,7 +291,7 @@ export function registerAuthRoutes(app: Express) {
     const { db } = admin();
     const member = await getMember(db, req.body?.memberId);
     if (member.id === caller.memberId) throw new UserError(400, 'self-role', 'You cannot change your own role.');
-    guardSuper(member, caller);
+    await guardSuper(db, member, caller);
     if (!member.active) throw new UserError(400, 'inactive', 'Give this person access again before changing their role.');
     if (member.role === 'management' && role !== 'management' && (await activeManagementCount(db)) <= 1) {
       throw new UserError(400, 'last-management', 'The CRM needs at least one Management person.');
@@ -312,7 +312,7 @@ export function registerAuthRoutes(app: Express) {
     if (member.id === caller.memberId) {
       throw new UserError(400, 'self-password', 'Use "Change my password" in the top-right menu to change your own password.');
     }
-    guardSuper(member, caller);
+    await guardSuper(db, member, caller);
     const { hash, salt } = await hashPassword(password);
     const batch = db.batch();
     batch.set(db.collection('secrets').doc(member.id), { hash, salt, updatedAt: Date.now() });
@@ -329,7 +329,7 @@ export function registerAuthRoutes(app: Express) {
     const { auth, db } = admin();
     const member = await getMember(db, req.body?.memberId);
     if (member.id === caller.memberId) throw new UserError(400, 'self-remove', 'You cannot remove yourself. Ask the other Management person to do it.');
-    guardSuper(member, caller);
+    await guardSuper(db, member, caller);
     if (member.role === 'management' && (await activeManagementCount(db)) <= 1) {
       throw new UserError(400, 'last-management', 'The CRM needs at least one Management person.');
     }
@@ -358,41 +358,13 @@ export function registerAuthRoutes(app: Express) {
     const mustChange = req.body?.mustChangePassword !== false;
     const { db } = admin();
     const member = await getMember(db, req.body?.memberId);
-    guardSuper(member, caller);
+    await guardSuper(db, member, caller);
     await assertNameFree(db, String(member.name || ''), member.id);
     const { hash, salt } = await hashPassword(password);
     const batch = db.batch();
     batch.update(db.collection('team').doc(member.id), { active: true, mustChangePassword: mustChange, removedAt: null });
-    batch.set(db.collection('auth_map').doc(member.id), { memberId: member.id, role: member.role, active: true, superManager: member.superManager === true });
+    batch.set(db.collection('auth_map').doc(member.id), { memberId: member.id, role: member.role, active: true });
     batch.set(db.collection('secrets').doc(member.id), { hash, salt, updatedAt: Date.now() });
-    await batch.commit();
-  }));
-
-  // Super Manager (Joel, 2026-10-22). Claim: a manager takes it while nobody holds it. Hand over: the Super Manager
-  // passes it to another active manager (and is a normal manager after). Saved on team and auth_map (the rules read it).
-  app.post('/api/team/super/claim', route(async req => {
-    const caller = await managementFrom(req);
-    const { db } = admin();
-    const held = await db.collection('team').where('superManager', '==', true).where('active', '==', true).limit(1).get();
-    if (!held.empty) throw new UserError(409, 'super-taken', 'There is already a Super Manager.');
-    const batch = db.batch();
-    batch.update(db.collection('team').doc(caller.memberId), { superManager: true, superSince: Date.now() });
-    batch.set(db.collection('auth_map').doc(caller.memberId), { superManager: true }, { merge: true });
-    await batch.commit();
-  }));
-
-  app.post('/api/team/super/handover', route(async req => {
-    const caller = await managementFrom(req);
-    if (!caller.superManager) throw new UserError(403, 'not-super', 'Only the Super Manager can hand it over.');
-    const { db } = admin();
-    const member = await getMember(db, req.body?.memberId);
-    if (member.id === caller.memberId) throw new UserError(400, 'self', 'Choose someone else.');
-    if (!member.active || member.role !== 'management') throw new UserError(400, 'not-management', 'Hand it to an active Management person.');
-    const batch = db.batch();
-    batch.update(db.collection('team').doc(member.id), { superManager: true, superSince: Date.now() });
-    batch.set(db.collection('auth_map').doc(member.id), { superManager: true }, { merge: true });
-    batch.update(db.collection('team').doc(caller.memberId), { superManager: false });
-    batch.set(db.collection('auth_map').doc(caller.memberId), { superManager: false }, { merge: true });
     await batch.commit();
   }));
 }

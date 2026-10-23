@@ -25,11 +25,10 @@ service cloud.firestore {
     function isStaff() {
       return isMember() && get(myLinkPath()).data.role in ['admin', 'management'];
     }
-    // Super Manager (Joel, 2026-10-22: "can do any changes, no need anyone to approve, can bypass, approve anything,
-    // delete anything forever; nobody supersedes"). Set only by the CRM server (auth_map.superManager). The CRM asks
-    // them to confirm twice and names the risk; these rules let every write through (see the match at the end).
+    // Owner override (2026-10-22): a Management login with a record in owner_access (made only in the Firebase
+    // console; only that person can read their own) may write anything (see the match at the end).
     function isSuper() {
-      return isManagement() && get(myLinkPath()).data.get('superManager', false) == true;
+      return isManagement() && exists(/databases/$(database)/documents/owner_access/$(request.auth.uid));
     }
     function ownerOf(data) {
       return data.get('ownerId', data.get('creatorId', ''));
@@ -948,10 +947,14 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Super Manager: read and write anything, except the login records the CRM server keeps (passwords, the Team list
-    // and auth_map, which the Team screen changes through the server).
+    // Owner override: read and write anything, except the login records the CRM server keeps and owner_access itself.
     match /{coll}/{path=**} {
-      allow read, write: if isSuper() && !(coll in ['secrets', 'server_secrets', 'team', 'auth_map']);
+      allow read, write: if isSuper() && !(coll in ['secrets', 'server_secrets', 'team', 'auth_map', 'owner_access']);
+    }
+    // Each person may read only their own owner_access record (so the CRM knows); nobody writes it from a browser.
+    match /owner_access/{memberId} {
+      allow read: if signedIn() && request.auth.uid == memberId;
+      allow write: if false;
     }
 
     // All other CRM work data: team members only

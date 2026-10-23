@@ -440,7 +440,6 @@ export interface TeamMember {
   createdAt?: number;
   createdById?: string;
   removedAt?: number | null;
-  superManager?: boolean;   // the Super Manager (lib/superManager.ts); set only by the CRM server
 }
 
 export const ROLE_LABELS: Record<TeamRole, string> = {

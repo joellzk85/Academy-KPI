@@ -179,7 +179,7 @@ function useTypedSst(dealId: string): Record<string, { sstAmount?: number | null
  *  Trainer fees are left out: each is approved by itself, after its checks (lib/feeChecks.ts). */
 export async function approveMany(list: MoneyOut[], viewer: Viewer) {
   let ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o));
-  // The Super Manager's own requests are in the list only after the second confirmation.
+  // Own requests (owner override) stay in the list only after the second confirmation.
   const own = ok.filter(o => o.requestedById === viewer.id);
   if (own.length && !superConfirm(`approve ${own.length} of your own payment request${own.length === 1 ? '' : 's'} with the others.`,
     'nobody else checks these payments before they go to accounts.')) ok = ok.filter(o => o.requestedById !== viewer.id);

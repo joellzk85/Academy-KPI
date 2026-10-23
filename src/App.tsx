@@ -205,9 +205,15 @@ export default function App() {
 function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; teamMembers: TeamMember[] }) {
   // Old records not linked to a Team member yet are hidden everywhere (lib/linked.ts).
   setLinkedTeam(teamMembers.map(m => m.id));
-  // Who the Super Manager is (lib/superManager.ts), from the Team list.
-  setSuperManager(teamMembers);
   const isManagement = currentMember.role === 'management';
+  // Owner override (lib/superManager.ts): only the person's own record, which only they can read.
+  const [, setOwnerOverride] = useState(false);
+  useEffect(() => {
+    if (!isManagement) { setSuperManager(''); setOwnerOverride(false); return; }
+    return onSnapshot(doc(db, 'owner_access', currentMember.id),
+      s => { setSuperManager(s.exists() ? currentMember.id : ''); setOwnerOverride(s.exists()); },
+      () => { setSuperManager(''); setOwnerOverride(false); });
+  }, [currentMember.id, isManagement]);
   const isRep = currentMember.role === 'rep';
   const isStaff = !isRep; // Admin or Management
 

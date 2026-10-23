@@ -71,24 +71,8 @@ The audit checked the agreed rules in CLAUDE.md against the code and `firestore.
 - **Checklist files** (attendance, T3, JD14): only Admin and Management can read the records and the files. Reps see each step's progress only.
 - **Trainers:** gender, address, emergency contact, race, nationality and rate move to `trainer_private` (Admin and Management). The rules refuse a rep write that touches them. See `hrdc-programmes-trainers.md`.
 
-## Super Manager (Joel, 2026-10-22)
-
-Joel: "Joel is Super Manager and can do any changes, no need anyone to approve; can bypass, approve anything, delete anything forever. Nobody supersedes. Only the system double confirms the decision and mentions the potential risk."
-
-- **Who:** one person, `superManager: true` on `team` and `auth_map`, set only by the server:
-  - Team → **Make me Super Manager**, offered while nobody holds it (`/api/team/super/claim`).
-  - **Hand it over** to another manager (`/api/team/super/handover`).
-  - No names in code: `lib/superManager.ts` reads who it is from the Team list.
-- **Nobody supersedes:** the server refuses anyone else changing the Super Manager's role or password, removing them, or reactivating them (`guardSuper` in `serverAuth.ts`). The Team screen greys those buttons.
-- **Rules:** `isSuper()` (Management plus `auth_map.superManager`) may read and write anything, except `secrets`, `server_secrets`, `team` and `auth_map` (login records stay server-only). In `storage.rules` they may read and delete any file. An Admin with the flag gets nothing extra.
-- **On screen, always with a second confirmation that names the risk (`superConfirm`):**
-  - approve their own payment request (also in Approve all), training change or bank details;
-  - approve a trainer fee with checks missing (**Approve anyway**);
-  - **Delete forever** when deleting money, and on Lost and deleted for deleted deals and deleted money records.
-- History lines are still written ("Deleted forever …").
-
 ## Rules and tests
 
 - Publish **`firestore.rules`** and **`storage.rules`** after the build is live. Until then: T3 lists can't be saved, the T3 lists and the trainers' personal details don't move, and the new approvals carry a field the old rules refuse (`decidedTs`), so approving fails.
-- Tested with Firebase's own test database (a temporary Java in the scratch folder): 116 rule checks covering every item above, the Super Manager, and the existing approvals (Fix and send again, cross-approval).
+- Tested with Firebase's own test database (a temporary Java in the scratch folder): rule checks covering every item above and the existing approvals (Fix and send again, cross-approval).
 - Not tested in the browser.

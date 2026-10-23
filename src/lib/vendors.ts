@@ -69,7 +69,7 @@ export function withBankStamp(next: Vendor, before: Partial<Vendor> | null | und
 /** The fields Management saves to confirm a vendor's bank details. */
 export const bankCheckFields = (viewer: { id: string; name: string }) => ({ bankCheckedById: viewer.id, bankCheckedByName: viewer.name, bankCheckedAt: new Date().toISOString() });
 
-/** Can this person confirm the bank details? A manager who did not set them, or the Super Manager (Joel, 2026-10-22). */
+/** Can this person confirm the bank details? A manager who did not set them, or the owner override. */
 export const canCheckBank = (v: Partial<Vendor>, viewer: { id: string; role: string }) =>
   viewer.role === 'management' && !!v.bankSetById && !v.bankCheckedById && (v.bankSetById !== viewer.id || isSuperManager(viewer));
 

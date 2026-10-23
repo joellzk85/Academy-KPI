@@ -1,22 +1,19 @@
-// Super Manager (Joel, 2026-10-22: "Joel is Super Manager and can do any changes, no need anyone to approve; can
-// bypass, approve anything, delete anything forever. Nobody supersedes. Only the system double confirms the decision
-// and mentions the potential risk.")
-// - One person, marked superManager on their Team record (set only by the CRM server: Team → Super Manager).
-// - The database rules let them do anything (firestore.rules isSuper); the screens show the extra buttons and ask a
-//   second time, naming the risk (superConfirm). What they do is still written in the deal's History.
-// No names or IDs here: who it is comes from the Team list (App.tsx calls setSuperManager).
+// Owner override (2026-10-22). A Management login with a record in owner_access/{memberId} (made only in the Firebase
+// console) can approve their own requests, bypass checks and delete forever. Only that person can read their own
+// record, and nothing on screen tells anyone else it exists. The screens ask a second time, naming the risk
+// (superConfirm). No names or IDs here: App.tsx reads the logged-in person's own record (setSuperManager).
 
 let superId = '';
 
-/** Called by the app once the Team list is loaded. */
-export function setSuperManager(members: { id: string; superManager?: boolean; active?: boolean }[]) {
-  superId = members.find(m => m.superManager === true && m.active !== false)?.id || '';
+/** Called by the app with the logged-in person's id when their owner_access record exists ('' when it doesn't). */
+export function setSuperManager(id: string) {
+  superId = id;
 }
 
-/** Is this person the Super Manager? */
+/** Does this person have the owner override? */
 export const isSuperManager = (viewer?: { id?: string } | null) => !!viewer?.id && !!superId && viewer.id === superId;
 
 /** The second confirmation, naming the risk. True = go ahead. */
 export function superConfirm(action: string, risk: string): boolean {
-  return window.confirm(`Super Manager: ${action}\n\nRisk: ${risk}\n\nGo ahead anyway?`);
+  return window.confirm(`Please confirm: ${action}\n\nRisk: ${risk}\n\nGo ahead anyway?`);
 }

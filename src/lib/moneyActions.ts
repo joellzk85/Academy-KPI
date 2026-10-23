@@ -39,7 +39,7 @@ export function askReason(question: string): string | null {
 /** Delete a money record with a History line: a payment request still waiting for approval (or rejected) is removed;
  *  anything else is marked deleted with the reason. */
 export async function deleteMoney(coll: MoneyColl, rec: { id: string; dealId?: string; status?: string }, viewer: Viewer, what: string, reason: string) {
-  // The Super Manager may delete forever instead (Joel, 2026-10-22), after two confirmations naming the risk.
+  // Owner override (lib/superManager.ts): may delete forever instead, after two confirmations naming the risk.
   const forever = isSuperManager(viewer) && !(coll === 'money_out' && (rec.status === 'pending' || rec.status === 'rejected'))
     && window.confirm('Delete it forever instead of keeping it as deleted (restorable)?\n\nOK = delete forever. Cancel = keep it restorable.')
     && superConfirm(`delete ${what} forever.`, 'it cannot be restored, and the deal\'s P&L and money history lose it for good.');

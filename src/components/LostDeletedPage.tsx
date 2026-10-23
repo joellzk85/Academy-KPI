@@ -92,7 +92,7 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
     } catch (e) { setMsg({ ok: false, text: friendlyError(e) }); } finally { setBusyId(''); }
   };
 
-  // Super Manager only (Joel, 2026-10-22): erase a deleted deal for good, after two confirmations naming the risk.
+  // Owner override only (lib/superManager.ts): erase a deleted deal for good, after two confirmations naming the risk.
   // Its quotations, outlines, money records and files stay in the database, no longer linked to a deal.
   const eraseDeal = async (p: any) => {
     if (!window.confirm(`Delete the deal for ${clientName(p)} forever?`)) return;

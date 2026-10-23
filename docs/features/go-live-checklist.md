@@ -103,4 +103,3 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
     - **Shortfall:** record the HRDC payment RM 100 less than expected. Step 3 shows **Raise top-up invoice** (and Write it off for Management); the case closes only after one of them.
     - **Training report step:** no Done button; it ticks when the report is checked.
     - **Privacy, as a rep:** a won deal's checklist shows the steps but no files and no T3 list; Trainers shows no address, emergency contact, race, nationality or rate. As Admin all are there.
-    - **Super Manager:** as Joel, Team → **Make me Super Manager** (do this first, straight after the rules are published). As the other manager: Joel's role, Set password and Remove are greyed. As Joel: raise a cost and approve it yourself (a second box names the risk); on Lost and deleted, **Delete forever** a test deal.
