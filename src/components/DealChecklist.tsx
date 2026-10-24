@@ -16,7 +16,8 @@ import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import StepFiles from './ChecklistFiles';
 import SaveVenueButton from './SaveVenueButton';
 import T3Maker, { useT3 } from './T3Maker';
-import StepCosts, { VendorHint } from './StepCosts';
+import StepCosts, { CostPrefill, VendorHint } from './StepCosts';
+import { AddDealTask, DealTaskList, prefillFrom, useDealTasks } from './DealTasks';
 import { useVendors } from './VendorsPage';
 import { useReceipts } from './PaymentReceipts';
 import { TrainerClash, TrainerJobBox } from './TrainerPortalAdmin';
@@ -123,6 +124,9 @@ export default function DealChecklist({
   }, [deal.id, money]);
   const receipts = useReceipts(money, deal.id);
   const vendors = useVendors(money);
+  // Tasks raised from a step (2026-10-24, DealTasks.tsx); "Raise payment now" opens that step's cost form filled in.
+  const dealTasks = useDealTasks(deal.id);
+  const [raise, setRaise] = useState<{ stepId: string; prefill: CostPrefill } | null>(null);
 
   const allTasks: ChecklistTask[] = upgradeTasks(checklist?.tasks);
   const inPart = (t: { after?: boolean }) => !part || (part === 'after') === !!t.after;
@@ -288,6 +292,7 @@ export default function DealChecklist({
     );
   }
 
+  const costsShown = (t: ChecklistTask) => hasCosts(t) && !notNeeded(t) && (t.needed === true || !asksNeeded(t));
   const hintFor = (t: ChecklistTask): VendorHint | undefined => {
     if (t.kind === 'trainer') { const p = effectiveTrainer(t, quotes, trainers); return { type: 'trainer', trainerId: p?.id || undefined, name: p?.name }; }
     if (t.kind === 'venue') { const p = effectiveVenue(t, quotes, venues); return { type: 'venue', venueId: p?.id || undefined, name: p?.name }; }
@@ -322,6 +327,9 @@ export default function DealChecklist({
                     onEmployerSaved={code => save(allTasks, `${t.label}: employer code ${code ? `set to ${code}` : 'cleared'} (saved on the client)`)} />
                 )}
               </div>
+              {!arranging && (
+                <AddDealTask deal={deal} viewer={viewer} step={t} hint={hintFor(t)} vendors={vendors} trainers={trainers} venues={venues} canPay={hasCosts(t)} compact />
+              )}
               {editable && arranging ? (
                 <span className="flex shrink-0 items-center">
                   <button type="button" className={iconBtn} disabled={busy || i === 0} onClick={() => move(t, -1)} aria-label={`Move ${t.label} up`}><ArrowUp className="h-4 w-4" /></button>
@@ -385,8 +393,17 @@ export default function DealChecklist({
                     onPatch={(c, a) => patch(t.id, c, a)} />
                 )}
 
-                {money && hasCosts(t) && !notNeeded(t) && (t.needed === true || !asksNeeded(t)) && (
-                  <StepCosts deal={deal} task={t} viewer={viewer} outs={outs} receipts={receipts} vendors={vendors} trainers={trainers} venues={venues} hint={hintFor(t)} />
+                {dealTasks.some(x => x.stepId === t.id) && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-sm font-semibold">Tasks</p>
+                    <DealTaskList tasks={dealTasks.filter(x => x.stepId === t.id)} viewer={viewer}
+                      onRaise={money && costsShown(t) ? x => setRaise({ stepId: t.id, prefill: prefillFrom(x) }) : undefined} />
+                  </div>
+                )}
+
+                {money && costsShown(t) && (
+                  <StepCosts deal={deal} task={t} viewer={viewer} outs={outs} receipts={receipts} vendors={vendors} trainers={trainers} venues={venues} hint={hintFor(t)}
+                    prefill={raise?.stepId === t.id ? raise.prefill : null} />
                 )}
                 {/* Blocked dates (2026-10-21): warn when the trainer is already booked on these dates */}
                 {t.kind === 'trainer' && editable && (() => {

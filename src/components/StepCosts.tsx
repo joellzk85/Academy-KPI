@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { doc, serverTimestamp, setDoc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
@@ -48,7 +48,7 @@ export const sen = (n: number) => 'RM ' + (Number(n) || 0).toLocaleString('en-MY
 const num = (s: string) => Number(String(s).replace(/[^0-9.]/g, ''));
 
 // Quick descriptions per step (Joel: "Booking and final payment").
-function quickWords(t: ChecklistTask): string[] {
+export function quickWords(t: ChecklistTask): string[] {
   if (t.kind === 'venue' || t.kind === 'bus') return ['Booking', 'Final payment'];
   if (t.kind === 'trainer') return [isCoTrainer(t) ? 'Co-trainer fee' : 'Trainer fee'];
   if (t.kind === 'facilitator') return ['Facilitator fee'];
@@ -56,17 +56,21 @@ function quickWords(t: ChecklistTask): string[] {
   return [];
 }
 // The trainer is paid after training (Joel's example); everything else defaults to before.
-const defaultTiming = (t: ChecklistTask): OutTiming => (t.kind === 'trainer' ? 'after' : 'before');
+export const defaultTiming = (t: ChecklistTask): OutTiming => (t.kind === 'trainer' ? 'after' : 'before');
 
 /** Who the vendor is for this step's trainer or venue (picked on the checklist), to suggest or create. */
 export type VendorHint = { type: Vendor['type']; trainerId?: string; venueId?: string; name?: string };
 
-export default function StepCosts({ deal, task, viewer, outs, receipts, vendors, trainers, venues, hint }: {
+/** A cost form opened from a "Raise payment" task (2026-10-24, DealTasks.tsx), filled in with what the task knows. */
+export type CostPrefill = { key: number; description: string; amount: number; vendorId: string; timing: OutTiming };
+
+export default function StepCosts({ deal, task, viewer, outs, receipts, vendors, trainers, venues, hint, prefill }: {
   deal: any; task: ChecklistTask; viewer: Viewer; outs: MoneyOut[]; receipts: Receipt[];
-  vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint;
+  vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint; prefill?: CostPrefill | null;
 }) {
   const lines = outs.filter(o => o.checklistTaskId === task.id).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
   const [adding, setAdding] = useState(false);
+  useEffect(() => { if (prefill) setAdding(true); }, [prefill?.key]);
   const counted = lines.filter(o => (o.status === 'approved' || o.status === 'paid') && inPL(o)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const waiting = lines.filter(o => o.status === 'pending' && inPL(o)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const leftOut = lines.filter(o => !inPL(o) && !o.onBehalf && o.status !== 'rejected').reduce((t, o) => t + (Number(o.amount) || 0), 0);
@@ -86,7 +90,7 @@ export default function StepCosts({ deal, task, viewer, outs, receipts, vendors,
         </ul>
       )}
       {adding ? (
-        <CostForm deal={deal} task={task} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} hint={hint} lines={lines} onDone={() => setAdding(false)} />
+        <CostForm key={prefill?.key || 0} deal={deal} task={task} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} hint={hint} lines={lines} prefill={prefill} onDone={() => setAdding(false)} />
       ) : (
         <button type="button" className={btnSmall} onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> Add a cost</button>
       )}
@@ -197,13 +201,16 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
   );
 }
 
-function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines = [], onDone }: {
-  deal: any; task: ChecklistTask; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint; lines?: MoneyOut[]; onDone: () => void;
+function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines = [], prefill, onDone }: {
+  deal: any; task: ChecklistTask; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint; lines?: MoneyOut[]; prefill?: CostPrefill | null; onDone: () => void; key?: number;
 }) {
   const vType = STEP_VENDOR_TYPE[task.kind] || 'other';
   const hinted = hint && vendors.find(v => (hint.trainerId && v.trainerId === hint.trainerId) || (hint.venueId && v.venueId === hint.venueId));
   // "Include in P&L" starts ticked; leaving a cost out needs a short reason (Joel, process audit 2026-10-22).
-  const [f, setF] = useState({ description: '', amount: '', timing: defaultTiming(task), vendorId: hinted?.id || '', inPL: true, notInPLReason: '', onBehalf: false });
+  const [f, setF] = useState({
+    description: prefill?.description || '', amount: prefill?.amount ? String(prefill.amount) : '', timing: prefill?.timing || defaultTiming(task),
+    vendorId: (prefill?.vendorId && vendors.some(v => v.id === prefill.vendorId) ? prefill.vendorId : '') || hinted?.id || '', inPL: true, notInPLReason: '', onBehalf: false,
+  });
   const draft = useFormDraft(viewer.id, `cost:${deal.id}:${task.id}`, f, setF);
   const [newVendor, setNewVendor] = useState(false);
   const [busy, setBusy] = useState(false);

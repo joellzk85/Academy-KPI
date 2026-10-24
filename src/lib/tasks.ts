@@ -32,6 +32,20 @@ export interface Task {
   source?: 'meeting';
   meetingDate?: string;
   meetingSlide?: string;      // the slide on screen when it was raised
+  // Shortcut from inside a deal (2026-10-24, components/DealTasks.tsx): the checklist step it's about, and for
+  // "Raise payment" the details known when it was asked (blank = to be filled in by the person tagged).
+  stepId?: string;
+  stepLabel?: string;
+  ask?: 'payment';
+  payment?: TaskPayment;
+}
+
+export interface TaskPayment { what: string; amount: number; payee: string; vendorId: string; timing: 'before' | 'after' }
+
+// What a "Raise payment" task still needs, in plain words.
+export function paymentMissing(p?: TaskPayment): string[] {
+  if (!p) return [];
+  return [!p.what && 'what it is for', !(p.amount > 0) && 'the amount', !p.payee && !p.vendorId && 'who is paid'].filter(Boolean) as string[];
 }
 
 export type TaskGroup = 'overdue' | 'today' | 'week' | 'later' | 'nodate' | 'done';

@@ -22,6 +22,8 @@ import { AlertLine, FollowUpForm, FollowUpList, followUpCountText } from './Foll
 import { GapsBox, MarkWonBox } from './DealGates';
 import { Picked, coTrainerShort, coTrainerText, dealVenue, progress } from '../lib/checklist';
 import DealChecklist from './DealChecklist';
+import { AddDealTask, DealTaskList, useDealTasks } from './DealTasks';
+import { isDone } from '../lib/tasks';
 import HrdcQueries from './HrdcQueries';
 import DealAppointmentBox from './DealAppointmentBox';
 import TrainingTimeBox from './TrainingTimeBox';
@@ -1120,6 +1122,7 @@ function DealPanel(props: {
   const smallLink = 'inline-flex items-center gap-1 text-sm font-semibold hover:underline';
   const nHist = (p.history || []).length;
   const openQueries = props.queries.filter(q => !q.answeredDate).length;
+  const dealTasks = useDealTasks(p.id);
 
   // The single main step for the stage
   const next: { title: string; hint?: string; button?: React.ReactNode } = (() => {
@@ -1443,6 +1446,18 @@ function DealPanel(props: {
             <ProposalTracking dealId={p.id} links={props.dealLinks} viewer={props.viewer} />
           </Fold>
         )}
+
+        {/* Tasks on this deal (2026-10-24): anyone makes one and tags anyone; step tasks also show on their step */}
+        <Fold title="Tasks" hint={(() => { const n = dealTasks.filter(t => !isDone(t)).length; return n ? `${n} open` : 'None open'; })()}
+          defaultOpen={dealTasks.some(t => !isDone(t))} id={p.id}>
+          <div className="space-y-2">
+            <DealTaskList tasks={dealTasks} viewer={props.viewer} showStep empty="No tasks yet. Make one and tag who should do it; it lands in their To-do." />
+            <AddDealTask deal={{ ...p, client: props.clientName, courseName: props.courseName }} viewer={props.viewer} />
+            {dealTasks.some(t => t.ask === 'payment' && !isDone(t)) && props.viewer.role !== 'rep' && (
+              <p className="text-sm text-ink-soft">Payment tasks are raised from their step in the checklist ("Raise payment now").</p>
+            )}
+          </div>
+        </Fold>
 
         {/* Admin checklist, up to training day (after the deal is won) */}
         {st === 'won' && (

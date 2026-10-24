@@ -42,9 +42,10 @@ function keptClients(text: string, tags: ClientRef[]): ClientRef[] {
 }
 const tagsOf = (t: Task): ClientRef[] => (t.clientIds || []).map((id, i) => ({ id, companyName: (t.clientNames || [])[i] || '' })).filter(c => c.companyName);
 
-export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenClient, openTaskId, onOpenTaskHandled }: {
+export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenDeal, onOpenClient, openTaskId, onOpenTaskHandled }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
   onOpenDeals?: () => void;          // jump to the Deals tab
+  onOpenDeal?: (dealId: string) => void;   // open the deal's panel (tasks made inside a deal, 2026-10-24)
   onOpenClient?: (clientId: string) => void;   // a client tag
   openTaskId?: string | null;        // open this task's panel (from a client page)
   onOpenTaskHandled?: () => void;
@@ -278,7 +279,7 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenClient
           <PanelResizer />
           <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <TaskPanel key={openTask.id} t={openTask} team={team} clients={clientRefs} nameOf={nameOf} dealChoices={dealChoices} deals={deals} dealLabel={dealLabel}
-              canChange={canChange(openTask)} canDelete={canDelete(openTask)} me={me} onOpenDeals={onOpenDeals} onOpenClient={onOpenClient}
+              canChange={canChange(openTask)} canDelete={canDelete(openTask)} me={me} onOpenDeals={onOpenDeals} onOpenDeal={onOpenDeal} onOpenClient={onOpenClient}
               onClose={() => setOpenId(null)} onToggle={() => toggleDone(openTask)} onSaved={() => flash('Task saved')} onDeleted={() => { setOpenId(null); flash('Task deleted'); }} />
           </div>
         </div>
@@ -334,7 +335,7 @@ function TaskRow({ t, g, scope, rep, canTick, nameOf, deal, dealLabel, onOpenCli
         <DetailText t={t} onOpenClient={onOpenClient} className={`block whitespace-pre-line text-[15px] ${done ? 'text-ink-soft line-through' : ''}`} />
         <span className="mt-0.5 block text-sm text-ink-soft">
           {t.source === 'meeting' && <span className="mr-1.5 rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent">Action point{t.meetingDate ? `, meeting ${formatDate(t.meetingDate)}` : ''}</span>}
-          {[who, deal ? dealLabel(deal) : ''].filter(Boolean).join(' · ')}
+          {[who, deal ? dealLabel(deal) : '', deal && t.stepLabel ? t.stepLabel : ''].filter(Boolean).join(' · ')}
         </span>
       </div>
       <span className={`shrink-0 text-right text-sm ${g === 'overdue' ? 'font-semibold text-danger' : 'text-ink-soft'}`}>{when}</span>
@@ -406,7 +407,7 @@ function MentionInput({ value, onChange, clients, people, onPickClient, onPickPe
 }
 
 // ---------- Who it's for: one or more teammates ----------
-function PeoplePicker({ ids, team, meId, nameOf, onChange, disabled }: {
+export function PeoplePicker({ ids, team, meId, nameOf, onChange, disabled }: {
   ids: string[]; team: Person[]; meId: string; nameOf: (id: string) => string; onChange: (ids: string[]) => void; disabled?: boolean;
 }) {
   const rest = team.filter(p => !ids.includes(p.id));
@@ -460,9 +461,9 @@ function DoneDialog({ t, onCancel, onDone }: { t: Task; onCancel: () => void; on
   );
 }
 
-function TaskPanel({ t, team, clients, nameOf, dealChoices, deals, dealLabel, canChange, canDelete, me, onOpenDeals, onOpenClient, onClose, onToggle, onSaved, onDeleted }: {
+function TaskPanel({ t, team, clients, nameOf, dealChoices, deals, dealLabel, canChange, canDelete, me, onOpenDeals, onOpenDeal, onOpenClient, onClose, onToggle, onSaved, onDeleted }: {
   t: Task; team: Person[]; clients: ClientRef[]; nameOf: (id: string, f?: string) => string; dealChoices: any[]; deals: any[]; dealLabel: (d: any) => string;
-  canChange: boolean; canDelete: boolean; me: Viewer; onOpenDeals?: () => void; onOpenClient?: (id: string) => void;
+  canChange: boolean; canDelete: boolean; me: Viewer; onOpenDeals?: () => void; onOpenDeal?: (dealId: string) => void; onOpenClient?: (id: string) => void;
   onClose: () => void; onToggle: () => void; onSaved: () => void; onDeleted: () => void; key?: string;
 }) {
   const [detail, setDetail] = useState(t.detail || '');
@@ -567,7 +568,12 @@ function TaskPanel({ t, team, clients, nameOf, dealChoices, deals, dealLabel, ca
             <option value="">No deal</option>
             {choices.map(d => <option key={d.id} value={d.id}>{dealLabel(d)}</option>)}
           </select>
-          {deal && onOpenDeals && <button type="button" className="mt-1 text-sm font-semibold text-accent hover:underline" onClick={onOpenDeals}>Go to Deals</button>}
+          {deal && t.stepLabel && dealId === t.pipelineId && <span className="mt-1 block text-sm text-ink-soft">Step: {t.stepLabel}</span>}
+          {deal && (onOpenDeal || onOpenDeals) && (
+            <button type="button" className="mt-1 text-sm font-semibold text-accent hover:underline" onClick={() => (onOpenDeal ? onOpenDeal(deal.id) : onOpenDeals!())}>
+              {onOpenDeal ? (t.ask === 'payment' ? 'Open the deal to raise the payment' : 'Open the deal') : 'Go to Deals'}
+            </button>
+          )}
         </div>
       </fieldset>
       {!canChange && <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">Only the people it's for, the person who assigned it, or Management can change this task.</p>}

@@ -1402,6 +1402,7 @@ export default function RepDetailDashboard({
             />
           ) : activeSubTab === 'tasks' ? (
             <TasksPage key={rep.id} rep={rep} reps={reps} viewer={viewer} onOpenDeals={() => handleSubTabChange('pipeline')}
+              onOpenDeal={(id) => { setDealToOpen(id); setActiveSubTab('pipeline'); }}
               openTaskId={taskToOpen} onOpenTaskHandled={() => setTaskToOpen(null)}
               onOpenClient={(id) => { setClientToOpen(id); setActiveSubTab('client'); }} />
           ) : (
