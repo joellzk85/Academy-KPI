@@ -37,7 +37,38 @@ export interface Programme {
   category?: string;         // e.g. "Leadership & Professional Development" (from the Blueprint list, 2026-10-20)
   days?: number | null;      // usual length in days (half days allowed)
   outlineFiles?: ProgrammeFile[];   // course outline files uploaded on the programme (2026-10-23)
+  tags?: string[];           // #tags for finding it later, stored without the "#" (2026-10-24)
 }
+
+// Titles are the programmes (Joel, 2026-10-24): a course outline's or teambuilding proposal's title IS the programme,
+// so there's no separate Programmes tab. Each title has one category and any number of #tags.
+export const STANDARD_CATEGORIES = ['Sales', 'HR', 'Communication', 'Customer service'];
+
+/** The categories to pick from: the standard ones first, then every other one already used (Blueprint ones included). */
+export function categoryList(programmes: { category?: string }[]): string[] {
+  const isStd = (c: string) => STANDARD_CATEGORIES.some(s => s.toLowerCase() === c.toLowerCase());
+  const used = [...new Set(programmes.map(p => String(p.category || '').trim()).filter(Boolean))];
+  return [...STANDARD_CATEGORIES, ...used.filter(u => !isStd(u)).sort((a, b) => a.localeCompare(b))];
+}
+
+/** "#Customer Service" → "customer-service". */
+export function normTag(s: string): string {
+  return String(s || '').trim().replace(/^#+/, '').toLowerCase().replace(/&/g, ' ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+
+/** Tags made from an older category, e.g. "Leadership & Professional Development" → leadership, professional-development. */
+export function tagsFromCategory(category?: string): string[] {
+  return [...new Set(String(category || '').split(/&|,|\/|\band\b/i).map(normTag).filter(Boolean))];
+}
+
+/** A title's #tags: its own once set, else the ones its category gives. */
+export function programmeTags(p: { tags?: string[]; category?: string } | undefined): string[] {
+  if (!p) return [];
+  return Array.isArray(p.tags) ? p.tags : tagsFromCategory(p.category);
+}
+
+/** Two titles are the same when they match ignoring case and spaces (and "(TB)" for teambuilding). */
+export const titleKey = (name?: string) => String(name || '').replace(/\(TB\)\s*$/i, '').trim().replace(/\s+/g, ' ').toLowerCase();
 
 // A course outline file kept on a programme, at programme_files/{programmeId}/{id}_{name} in storage.
 export interface ProgrammeFile {
@@ -91,6 +122,6 @@ export function grantBlockReason(deal: any, programme: Programme | undefined): s
   if (deal?.fundingType !== 'hrdc' && deal?.fundingType !== 'hrdc_topup') return '';
   if (!deal?.programmeId) return 'Pick the programme from the programme list on the deal first (Edit details).';
   if (!programme) return 'This deal\'s programme is no longer in the programme list. Pick it again (Edit details).';
-  if (programmeStatus(programme) !== 'approved') return `"${programme.name}" isn't approved by HRDC yet. Update it in Admin work → Programmes once it is.`;
+  if (programmeStatus(programme) !== 'approved') return `"${programme.name}" isn't approved by HRDC yet. Update it on its title (Course outlines or Teambuilding proposal → By title) once it is.`;
   return '';
 }

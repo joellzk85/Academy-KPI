@@ -124,7 +124,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `quotations-outlines.md` | Quotations, sending (PDF, email, WhatsApp, client links, link limits), proposal files, Fill in, Shared with me, course outlines, several quotations per deal, customer codes, drafts |
 | `teambuilding-client-links.md` | Teambuilding proposals (A1), proposal links (B), client link tracking and protection |
 | `admin-checklist.md` | Phase 2B checklist, flags, checklist files, pre-training flow with costs, vendors and the payment summary (2026-10-21), co-trainer and facilitator days (2026-10-22) |
-| `hrdc-programmes-trainers.md` | Phase 2C programmes, HRDC queries, trainer links, trainer profile and HRDC biodata |
+| `hrdc-programmes-trainers.md` | Phase 2C programmes (titles are the programmes, categories, #tags), HRDC queries, trainer links, trainer profile and HRDC biodata |
 | `trainer-portal.md` | Trainer portal (/trainer): email login for trainers given access, profile, bank, TIN, trainings, PO, fee request, rating |
 | `training-report.md` | Training report: trainer writes it in the portal (or Admin on the deal), can change it after sending (change list), pax from the deal, checked, Management picks HR's sections, PDF or link for HR |
 | `money.md` | Phase 3 money, company payments, Link for accounts, Project P&L, manager deletes, Blueprint import, Payment tracking, After training to Case closed, paid on behalf of client |
@@ -168,6 +168,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Task shortcut inside a deal (2026-10-24):** "+ Task" on every deal and checklist step, tag anyone; Raise payment fills in from the step; nothing to publish; go-live checklist item 58.
 - **Co-closed deals, client Found by, Referred by and referral fees (2026-10-24):** commission only is shared (KPIs stay with the owner); referral fee request raised when won; publish `firestore.rules`; go-live checklist item 59.
 - **Sales contributor ring (2026-10-24):** Team → KPIs tick gives Admin / Management who sell a sales ring without a sales KPI; nothing to publish. See `home-kpi-dashboards.md`.
+- **Titles are the programmes (2026-10-24):** no Programmes tab; Course outlines and Teambuilding proposal → By title holds HRDC status, category (standard list + new) and #tags; anyone sets category and tags, only Admin / Management rename or change HRDC; publish `firestore.rules`; go-live checklist item 60. See `hrdc-programmes-trainers.md`.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

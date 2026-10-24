@@ -83,9 +83,10 @@ function AddSearch<T>({ placeholder, items, text, sub, onPick }: {
   );
 }
 
-// ---------- On the programme (Admin work → Programmes) ----------
-export default function ProgrammeLinks({ programme, programmes, outlines, deals, trainers, viewer }: {
+// ---------- On the title's details (Course outlines / Teambuilding proposal → By title) ----------
+export default function ProgrammeLinks({ programme, programmes, outlines, deals, trainers, viewer, hideOutlines }: {
   programme: Programme; programmes: Programme[]; outlines: any[]; deals: any[]; trainers: any[]; viewer: Viewer;
+  hideOutlines?: boolean;   // a teambuilding title: no course outlines to link
 }) {
   const [error, setError] = useState('');
   const [progress, setProgress] = useState<number | null>(null);
@@ -162,7 +163,7 @@ export default function ProgrammeLinks({ programme, programmes, outlines, deals,
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-line p-3">
+      {!hideOutlines && <div className="rounded-xl border border-line p-3">
         <p className="text-sm font-semibold text-ink-soft">Course outlines</p>
         {own.length + viaDeal.length === 0 ? <p className="mt-1 text-sm text-ink-soft">None linked yet.</p> : (
           <ul className="mt-2 space-y-2">
@@ -175,7 +176,7 @@ export default function ProgrammeLinks({ programme, programmes, outlines, deals,
           sub={o => [o.refNumber, o.preparedForCompany, o.programmeId ? `now linked to ${progName(o.programmeId)}` : ''].filter(Boolean).join(' · ')}
           onPick={link} />
         <p className="mt-1.5 text-sm text-ink-soft">An outline keeps its own title, so one with a different name can still be linked here.</p>
-      </div>
+      </div>}
 
       <div className="rounded-xl border border-line p-3">
         <div className="flex items-center justify-between gap-2">
@@ -239,7 +240,7 @@ export function ProgrammeLinkedInfo({ programme, programmes }: { programme: Prog
   // One line per outline title: the same outline is often reused for many clients.
   const titles = [...new Set(outlines.map(o => outlineTitle(o, programmes)).filter(Boolean))];
   if (!titles.length && !files.length && !trainers.length) {
-    return <p className="mt-1.5 text-sm text-ink-soft">No course outline or trainer linked to this programme yet (Admin work → Programmes).</p>;
+    return <p className="mt-1.5 text-sm text-ink-soft">No course outline or trainer linked to this programme yet (Course outlines → By title).</p>;
   }
   return (
     <div className="mt-2 space-y-1 rounded-lg bg-surface px-3 py-2 text-sm">

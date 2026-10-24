@@ -25,7 +25,7 @@ import { useTrainerJobs } from './TrainerPortalAdmin';
 import { useTrainingReports } from './TrainingReportAdmin';
 import { reportFlag } from '../lib/trainingReport';
 const PaymentTracking = React.lazy(() => import('./PaymentTracking'));
-import ProgrammesManager, { StatusChip } from './Programmes';
+import { StatusChip } from './Programmes';
 import { Flag } from '../lib/checklist';
 import { HrdcQuery, Programme, grantBlockReason, isQueryOpen, isQueryOverdue } from '../lib/programmes';
 import { ClientLastTouch } from './ClientContactDot';
@@ -60,12 +60,13 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
   onOpenManagementPayments?: () => void;       // Management's Payment tracking (Management → Payment tracking)
 }) {
   // Backup is Management only (Joel, 2026-10-24): Admin never gets the tab, even when asked to open it.
-  // Backup moved to the private room (2026-10-24); an old link to it opens the Work queue.
-  const [view, setView] = useState<AdminView>(initialView === 'backup' ? 'queue' : initialView);
+  // Backup moved to the private room (2026-10-24); an old link to it opens the Work queue. So does Programmes: titles
+  // live on Course outlines and Teambuilding proposal now (2026-10-24).
+  const [view, setView] = useState<AdminView>(initialView === 'backup' || initialView === 'programmes' ? 'queue' : initialView);
   usePlace(`admin_${view}`, 2);
   const [focusDeal, setFocusDeal] = useState(initialDealId);
   // Payment tracking is in Admin work for Admin; Management has it under Management (with profit), so it isn't repeated.
-  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['vendors', 'Vendors'], ['referrers', 'Referrers'], ['days_out', 'Days out'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks']];
+  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['vendors', 'Vendors'], ['referrers', 'Referrers'], ['days_out', 'Days out'], ['tasks', 'Checklist tasks']];
   const openPayments = viewer.role === 'admin' ? () => setView('payments') : onOpenManagementPayments;
   return (
     <div className="space-y-5 font-sans text-ink">
@@ -93,7 +94,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
         : view === 'vendors' ? <VendorsPage viewer={viewer} />
         : view === 'referrers' ? <ReferrersPage viewer={viewer} />
         : view === 'days_out' ? <DaysOut viewer={viewer} people={people} />
-        : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : view === 'tasks' ? <TaskSettings viewer={viewer} /> : null}
+        : view === 'tasks' ? <TaskSettings viewer={viewer} /> : null}
     </div>
   );
 }
@@ -594,19 +595,6 @@ function TaskSettings({ viewer }: { viewer: Viewer }) {
 }
 
 // ---------- Programmes (HRDC registration) ----------
-function ProgrammesView({ viewer }: { viewer: Viewer }) {
-  const [programmes, setProgrammes] = useState<Programme[]>([]);
-  const [deals, setDeals] = useState<any[]>([]);
-  useEffect(() => {
-    const subs = [
-      onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(s.docs.map(d => ({ ...(d.data() as Programme), id: d.id })))),
-      onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
-    ];
-    return () => subs.forEach(u => u());
-  }, []);
-  return <ProgrammesManager programmes={programmes} deals={deals} viewer={viewer} />;
-}
-
 // Admin and Management can set a won deal's training date here, without opening the rep's workspace.
 function TrainingDate({ deal, viewer, label }: { deal: any; viewer: Viewer; label: string; key?: string }) {
   const iso = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : '');

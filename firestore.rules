@@ -345,7 +345,12 @@ service cloud.firestore {
       allow read: if isMember();
       allow create: if isStaff()
         || (isMember() && request.resource.data.hrdcStatus == 'not_registered');
-      allow update, delete: if isStaff();
+      // Titles are the programmes (2026-10-24): anyone sets a title's category and #tags; only Admin and
+      // Management rename it, change its HRDC details, files or anything else.
+      allow update: if isStaff()
+        || (isMember() && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['category', 'tags', 'updatedAt', 'updatedById', 'updatedByName']));
+      allow delete: if isStaff();
     }
 
     // HRDC queries on a deal (Phase 2C): everyone sees them; Admin and Management handle them.

@@ -704,7 +704,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                   </div>
                 )}
                 {progOptions.length === 0 ? (
-                  <p className="text-sm text-ink-soft">The Programme list is empty. Programmes are added in Admin work → Programmes, or on a deal.</p>
+                  <p className="text-sm text-ink-soft">No titles yet. A title is added when a course outline or teambuilding proposal is written, or when it's typed on a deal.</p>
                 ) : (
                   <div className="rounded-lg border border-line">
                     <input value={progSearch} onChange={e => setProgSearch(e.target.value)} placeholder="Search programmes" aria-label="Search programmes" className="w-full rounded-t-lg border-b border-line px-3 py-2 text-[15px] focus:outline-none" />

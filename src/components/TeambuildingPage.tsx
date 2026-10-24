@@ -20,6 +20,8 @@ import type { TbPdfLayout } from '../lib/tbPdf';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { GapsBox } from './DealGates';
 import { Programme } from '../lib/programmes';
+import TitlesView, { TitleDoc, TitleGroup } from './TitleList';
+import TitleTagsBox from './TitleTagsBox';
 import ShareWithBox, { NewCount } from './ShareWithBox';
 import { TeambuildingSendDialog } from './QuoteSendDialog';
 import TeambuildingSite from './TeambuildingSite';
@@ -72,7 +74,7 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
   const [loaded, setLoaded] = useState(false);
   const template = usePackageTemplate();
   const [draft, setDraft] = useState<{ p: TbProposal; isNew: boolean } | null>(null);
-  const [choosing, setChoosing] = useState<null | { step: 'deal'; fromDoc?: TrainerDoc } | { step: 'start'; deal: any | null }>(null);
+  const [choosing, setChoosing] = useState<null | { step: 'deal'; fromDoc?: TrainerDoc; forTitle?: ForTitle } | { step: 'start'; deal: any | null; forTitle?: ForTitle }>(null);
   const [backDeal, setBackDeal] = useState<string | null>(null);
   const trainerDocs = useTrainerDocs('teambuilding');
   const [peekDoc, setPeekDoc] = useState<TrainerDoc | null>(null);
@@ -119,7 +121,8 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
     if (d && onBackToDeal) onBackToDeal(d);
   };
 
-  const createFrom = (deal: any | null, base: TbProposal | null) => {
+  // forTitle: "Write proposal" on a title (By title view) makes it for that title.
+  const createFrom = (deal: any | null, base: TbProposal | null, forTitle?: ForTitle) => {
     const date = todayIso();
     const ownerId = (deal && dealOwnerId(deal)) || rep.id;
     const content = base ? { ...blankProposalContent(template.pk), ...copyContent(base) } : blankProposalContent(template.pk);
@@ -128,7 +131,8 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
       id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date, clientCode(clients.find(c => c.id === deal?.clientId))), refAuto: true, date,
       preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
       clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
-      title: content.title || (deal ? dealProgrammeName(deal, programmes) : ''),
+      title: forTitle?.name || content.title || (deal ? dealProgrammeName(deal, programmes) : ''),
+      programmeId: forTitle?.programmeId || deal?.programmeId || '',
       status: 'draft', sharedWithIds: [], isHidden: false,
     } as TbProposal;
     setChoosing(null);
@@ -197,7 +201,8 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
             onUse={d => setChoosing({ step: 'deal', fromDoc: d })} onPreview={setPeekDoc} />
           {docError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{docError}</p>}
           <ProposalList rep={rep} me={me} staff={staff} list={list} loaded={loaded} sources={sources} personName={personName} startOnShared={startOnShared}
-            onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} />
+            onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} programmes={programmes}
+            onWriteTitle={g => setChoosing({ step: 'deal', forTitle: { programmeId: g.programme?.id, name: g.name } })} />
           </>
         )}
       {peekDoc && (
@@ -207,11 +212,11 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
       {choosing?.step === 'deal' && (
         <DealChooser deals={dealsForPicker} clients={clients} programmes={programmes} personName={personName}
           title={choosing.fromDoc ? "Which deal is this trainer's proposal for?" : undefined}
-          onPick={deal => { const d = choosing.fromDoc; if (d) copyTrainerDoc(deal, d); else setChoosing({ step: 'start', deal }); }} onCancel={() => setChoosing(null)} allowGeneral />
+          onPick={deal => { const d = choosing.fromDoc; if (d) copyTrainerDoc(deal, d); else setChoosing({ step: 'start', deal, forTitle: choosing.forTitle }); }} onCancel={() => setChoosing(null)} allowGeneral />
       )}
       {choosing?.step === 'start' && (
         <StartChooser deal={choosing.deal} list={list} sources={sources} clients={clients}
-          onPick={base => createFrom(choosing.deal, base)} onBack={() => setChoosing({ step: 'deal' })} onCancel={() => (backDeal ? leave() : setChoosing(null))} />
+          onPick={base => createFrom(choosing.deal, base, choosing.forTitle)} onBack={() => setChoosing({ step: 'deal', forTitle: choosing.forTitle })} onCancel={() => (backDeal ? leave() : setChoosing(null))} />
       )}
     </div>
   );
@@ -314,10 +319,18 @@ function StartChooser({ deal, list, sources, clients, onPick, onBack, onCancel }
 // ---------- List ----------
 type Scope = 'mine' | 'shared' | 'everyone';
 
-function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew, onOpen, onDuplicate, startOnShared }: {
+type ForTitle = { programmeId?: string; name: string };
+// By title (2026-10-24): one row per title with every client's proposal under it; All proposals is the list as before.
+type ListView = 'titles' | 'all';
+const VIEW_KEY = 'tb_view';
+
+function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew, onOpen, onDuplicate, startOnShared, programmes, onWriteTitle }: {
   rep: Representative; me: Viewer; staff: boolean; list: TbProposal[]; loaded: boolean; sources: TbSources; personName: (id?: string) => string;
   startOnShared?: boolean; onNew: () => void; onOpen: (p: TbProposal) => void; onDuplicate: (p: TbProposal) => Promise<void>;
+  programmes: Programme[]; onWriteTitle: (g: TitleGroup) => void;
 }) {
+  const [view, setViewState] = useState<ListView>(() => { try { return startOnShared ? 'all' : (localStorage.getItem(VIEW_KEY) as ListView) || 'titles'; } catch { return 'titles'; } });
+  const setView = (v: ListView) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window */ } };
   const canSeeEveryone = staff && me.id === rep.id;
   const [scope, setScope] = useState<Scope>(startOnShared ? 'shared' : canSeeEveryone ? 'everyone' : 'mine');
   const seen = useSharedSeen(me.id === rep.id ? me.id : undefined);
@@ -327,6 +340,13 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
   const [menu, setMenu] = useState<string | null>(null);
   const [error, setError] = useState('');
   const resolved = useMemo(() => list.map(p => ({ raw: p, r: resolveTb(p, sources) })), [list, sources]);
+  const titleDocs: TitleDoc[] = useMemo(() => resolved
+    .filter(x => !x.raw.isHidden && !(x.raw as any).dealDeleted)
+    .map(({ raw, r }) => ({
+      id: raw.id, title: String(r.p.title || '').trim(),
+      programmeId: (raw as any).programmeId || sources.deals.find(d => d.id === raw.pipelineId)?.programmeId || '',
+      company: r.company || '', ref: raw.refNumber || '', date: raw.date || '', sent: tbSent(raw), raw,
+    })), [resolved, sources.deals]);
   const isMine = (x: { raw: TbProposal; r: ResolvedTb }) => x.r.ownerId === rep.id || x.raw.creatorId === rep.id;
   const isShared = (p: TbProposal) => (p.sharedWithIds || []).includes(rep.id);
   const counts = { mine: resolved.filter(isMine).length, shared: resolved.filter(x => !isMine(x) && isShared(x.raw)).length, unseen: list.filter(unseen).length };
@@ -343,6 +363,19 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-lg border border-line bg-white p-0.5" role="tablist" aria-label="Show">
+          {([['titles', 'By title'], ['all', 'All proposals']] as [ListView, string][]).map(([k, t]) => (
+            <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
+              className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === k ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'}`}>{t}</button>
+          ))}
+        </div>
+        {view === 'titles' && <button type="button" className={`${btnPrimary} ml-auto`} onClick={onNew}><Plus className="h-4 w-4" /> New proposal</button>}
+      </div>
+      {view === 'titles' ? (
+        <TitlesView kind="teambuilding" programmes={programmes} docs={titleDocs} deals={sources.deals} trainers={sources.trainers} outlines={[]}
+          viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle} />
+      ) : <>
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
           {([...(canSeeEveryone ? [['everyone', "Everyone's"]] : []), ['mine', `Mine (${counts.mine})`], ['shared', `Shared with me (${counts.shared})`]] as [Scope, string][]).map(([k, t]) => (
@@ -411,6 +444,7 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
           </ul>
         )}
       </div>
+      </>}
     </div>
   );
 }
@@ -667,6 +701,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
           <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
             <div className="space-y-3">
               <div><label className={label} htmlFor="tb-title">Title</label><input id="tb-title" value={p.title} onChange={e => set({ title: e.target.value })} className={input} placeholder="e.g. Leading Beyond Expectations: Restaurant Manager Summit" /></div>
+              <TitleTagsBox kind="teambuilding" programmeId={(p as any).programmeId || r.deal?.programmeId} title={p.title || ''} programmes={programmes} viewer={me} />
               <div><label className={label} htmlFor="tb-sub">Line under the title</label><textarea id="tb-sub" value={p.subtitle} onChange={e => set({ subtitle: e.target.value })} rows={2} className={`${input} resize-y`} /></div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div><label className={label} htmlFor="tb-stay">Length</label><input id="tb-stay" value={p.stay || ''} onChange={e => set({ stay: e.target.value })} className={input} placeholder="2 Days 1 Night" /></div>
