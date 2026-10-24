@@ -1,7 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db, friendlyError } from '../lib/firebase';
-import { Programme, categoryList, programmeTags, programmesFor, titleKey } from '../lib/programmes';
+import { Programme, categoryList, programmeTags, titleKey } from '../lib/programmes';
+import { programmesFor } from '../lib/outlineTb';
 import { CategoryPicker, TagInput, TitleKind, allTagsOf, createTitle } from './TitleList';
 
 // The title's category and #tags, inside the outline (or proposal) editor (Joel, 2026-10-24: "a #tag tab in course
@@ -18,7 +19,8 @@ export default function TitleTagsBox({ kind, programmeId, title, programmes, vie
   const [newCat, setNewCat] = useState('');   // a new category being typed, saved on leaving the box
   const made = useRef<string>('');            // the record just made here, before the list shows it (no doubles)
   const list = programmesFor(programmes, kind);
-  const p = (programmeId && programmes.find(x => x.id === programmeId)) || list.find(x => titleKey(x.name) === titleKey(title));
+  // The same title of this kind first, else the same title of any type (titles no longer differ by a "(TB)").
+  const p = (programmeId && programmes.find(x => x.id === programmeId)) || list.find(x => titleKey(x.name) === titleKey(title)) || programmes.find(x => titleKey(x.name) === titleKey(title));
   const pid = p?.id || made.current;
   if (!p && !title.trim()) return null;
 

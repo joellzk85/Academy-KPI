@@ -19,7 +19,7 @@ import { periodFor } from '../lib/salesTarget';
 import { useSalesTarget } from '../lib/useSalesTarget';
 import SalesProjection from './SalesProjection';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, isCoTrainer, progress, Flag } from '../lib/checklist';
-import { HrdcQuery, isQueryOpen, isQueryOverdue, isTbProgramme, programmeStatus } from '../lib/programmes';
+import { HrdcQuery, isQueryOpen, isQueryOverdue, isTbTitle, programmeStatus } from '../lib/programmes';
 import { MoneyIn, MoneyOut, canDecide, dateTimeMY, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags, recentlyApproved } from '../lib/money';
 import { TrainerJob, claimFlag, jobId } from '../lib/trainerPortal';
 import { KIND_TEXT, canDecideChange, changeFlagText, changeSummary, pendingChange } from '../lib/trainingChange';
@@ -1339,7 +1339,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       return {
         items: list.map(p => {
           const waited = ymd(p.submittedDate) ? -(daysUntil(ymd(p.submittedDate), c.today) ?? 0) : null;
-          return { key: p.id, title: p.name, onClick: () => c.nav.openWorkspace(c.viewer.id, isTbProgramme(p.name) ? 'teambuilding' : 'course_outline'), sub: waited === null ? 'Submitted to HRDC' : `Waiting ${waited} day${waited === 1 ? '' : 's'} (since ${formatDate(ymd(p.submittedDate))})`, level: waited !== null && waited > 30 ? 'attention' as const : undefined };
+          return { key: p.id, title: p.name, onClick: () => c.nav.openWorkspace(c.viewer.id, isTbTitle(p) ? 'teambuilding' : 'course_outline'), sub: waited === null ? 'Submitted to HRDC' : `Waiting ${waited} day${waited === 1 ? '' : 's'} (since ${formatDate(ymd(p.submittedDate))})`, level: waited !== null && waited > 30 ? 'attention' as const : undefined };
         }),
         empty: 'No programmes waiting on HRDC.',
       };

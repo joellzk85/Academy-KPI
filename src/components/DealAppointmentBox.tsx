@@ -82,7 +82,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
         appointmentDate: v.date, appointmentTicked: true,
         stage, status: statusForStage(stage as any),
         followUpDate: v.followUpDate,
-        ...(prog ? { programmeId: prog.id, courseName: prog.name } : {}),
+        ...(prog ? { programmeId: prog.id, courseName: prog.name, ...(v.dealType ? { type: v.dealType } : {}) } : {}),
         ...(v.trainingDate && !locked ? { trainingDate: v.trainingDate } : {}),
         ...(v.trainingDays.trim() && parseTrainingDays(v.trainingDays) && !locked ? { trainingDays: parseTrainingDays(v.trainingDays) } : {}),
         ...(v.participants && !locked ? { participants: v.participants } : {}),
@@ -195,6 +195,7 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
     mode: (a?.mode || 'face') as ApptMode,
     metWith: held?.metWith || dealContact(deal, client)?.name || '',
     programmeId: deal.programmeId || '',
+    dealType: '',   // set by the picked programme's type
     trainingDate: /^\d{4}-\d{2}-\d{2}/.test(deal.trainingDate || '') ? deal.trainingDate.slice(0, 10) : '',
     trainingDays: trainingDays(deal) !== 1 ? String(trainingDays(deal)) : '',
     participants: deal.participants ? String(deal.participants) : '',
@@ -241,7 +242,8 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
         <div className="space-y-3">
           <div>
             <span className={label}>Programme</span>
-            <ProgrammePicker programmes={programmes} value={v.programmeId} legacyName={!v.programmeId ? deal.courseName : ''} viewer={viewer} kind={deal.type === 'Teambuilding' ? 'teambuilding' : 'training'} onChange={pg => set({ programmeId: pg.id })} />
+            <ProgrammePicker programmes={programmes} value={v.programmeId} legacyName={!v.programmeId ? deal.courseName : ''} viewer={viewer} startType={deal.type === 'Teambuilding' ? 'teambuilding' : undefined}
+              onChange={(pg, t) => set({ programmeId: pg.id, dealType: t === 'teambuilding' ? 'Teambuilding' : 'Training' })} />
           </div>
           <TrainingDaysPicker id="lg-dy" label="How long is the training?" value={v.trainingDays} onChange={d => set({ trainingDays: d })} />
           <div className="grid gap-3 sm:grid-cols-3">

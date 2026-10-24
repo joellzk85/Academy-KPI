@@ -3,9 +3,9 @@ import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { Loader2, Plus, Search } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus, programmeTags, programmesFor, withTbMark } from '../lib/programmes';
+import { HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus, programmeTags, titleCaps, titleKey, typingCaps } from '../lib/programmes';
 import { ProgrammeLinkedInfo, linkOutline, outlineTitle } from './ProgrammeLinks';
-import { OUTLINE_TYPES, OutlineType, outlineTypeOf, programmeTypeOf } from '../lib/outlineTb';
+import { OUTLINE_TYPES, OutlineType, outlineTypeOf, programmeTypeOf, programmesFor } from '../lib/outlineTb';
 
 // ---------- Soft skill · Team building · Technical skill (Joel, 2026-10-24) ----------
 // Every list of titles or outlines sorts into these three: click one and only that list shows.
@@ -63,21 +63,23 @@ export function StatusChip({ programme }: { programme: any }) {
 // Joel, 2026-10-23: opening it shows the whole list (by category) to choose from; typing narrows it and also finds
 // course outlines. An outline linked to a programme picks that programme; an unlinked one can become the programme
 // (its title is the programme name, and the outline is linked to it). Once picked, what's linked to it shows below.
-export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, viewer, onChange, kind, outlines, showLinks }: {
-  programmes: Programme[]; value: string; legacyName?: string; viewer: Viewer; onChange: (p: Programme) => void;
-  kind?: 'training' | 'teambuilding';   // teambuilding: only "(TB)" programmes, and a quick-added one gets "(TB)"
+export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, viewer, onChange, kind, startType, outlines, showLinks }: {
+  programmes: Programme[]; value: string; legacyName?: string; viewer: Viewer;
+  onChange: (p: Programme, type: OutlineType) => void;   // type: the picked title's Soft skill / Team building / Technical skill
+  kind?: 'training' | 'teambuilding';   // teambuilding: only Team building titles; training: Soft and Technical skill ones; none: all three
+  startType?: OutlineType;              // the tab to open on when nothing is picked yet
   outlines?: any[];                     // course outlines to search too
   showLinks?: boolean;                  // show the picked programme's outlines, files and trainers
 }) {
   const selected = allProgrammes.find(p => p.id === value);
   const typeOutlines = useOutlinesForTypes(outlines);
-  // A teambuilding deal picks Team building titles; a training deal Soft or Technical skill ones.
+  // A teambuilding deal picks Team building titles; a training deal Soft or Technical skill ones; the new-deal form all three.
   const tabs: OutlineType[] = kind === 'teambuilding' ? ['teambuilding'] : kind === 'training' ? ['soft', 'technical'] : TAB_ORDER;
   const [tab, setTab] = useState<OutlineType>(() => {
-    const t = selected ? programmeTypeOf(selected, typeOutlines) : tabs[0];
+    const t = selected ? programmeTypeOf(selected, typeOutlines) : startType || tabs[0];
     return tabs.includes(t) ? t : tabs[0];
   });
-  const programmes = programmesFor(allProgrammes, kind).filter(p => programmeTypeOf(p, typeOutlines) === tab);
+  const programmes = programmesFor(allProgrammes, kind, typeOutlines).filter(p => programmeTypeOf(p, typeOutlines) === tab);
   const [queryText, setQueryText] = useState(selected ? '' : legacyName || '');
   const [open, setOpen] = useState(!selected && !!legacyName);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -99,11 +101,12 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
     .slice(0, 6);
 
   const create = async (typed: string): Promise<Programme | null> => {
-    const name = kind === 'teambuilding' ? withTbMark(typed) : typed;
-    const dup = allProgrammes.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
+    const name = titleCaps(typed);
+    const dup = allProgrammes.find(p => titleKey(p.name) === titleKey(name));
     if (dup) return dup;
     const id = `prog_${Date.now()}`;
-    const data = { id, name, ...(tab === 'technical' ? { skillType: 'technical' as const } : {}), hrdcStatus: 'not_registered' as HrdcStatus, hrdcCode: '', submittedDate: '', approvedDate: '', notes: '', createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name };
+    // The type comes from the tab it was added under (no "(TB)" in the name any more).
+    const data = { id, name, skillType: tab, hrdcStatus: 'not_registered' as HrdcStatus, hrdcCode: '', submittedDate: '', approvedDate: '', notes: '', createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name };
     await setDoc(doc(db, 'programmes', id), data);
     return data;
   };
@@ -115,7 +118,7 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
     setErr('');
     try {
       const p = await create(typed);
-      if (p) onChange(p);
+      if (p) onChange(p, programmeTypeOf(p, typeOutlines));
       setOpen(false);
       setQueryText('');
     } catch (e) {
@@ -127,13 +130,13 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
 
   const pickOutline = async (o: any, title: string) => {
     const linked = o.programmeId ? allProgrammes.find(p => p.id === o.programmeId) : undefined;
-    if (linked) { onChange(linked); setOpen(false); setQueryText(''); return; }
+    if (linked) { onChange(linked, programmeTypeOf(linked, typeOutlines)); setOpen(false); setQueryText(''); return; }
     setBusy(true);
     setErr('');
     try {
       const p = await create(title);
       if (!p) return;
-      onChange(p);
+      onChange(p, programmeTypeOf(p, typeOutlines));
       setOpen(false);
       setQueryText('');
       // Link the outline to it. Someone who can't edit that outline still gets the programme.
@@ -165,7 +168,7 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
       <Search className="pointer-events-none absolute left-3 top-[19px] h-4 w-4 -translate-y-1/2 text-ink-soft" />
       <input
         value={queryText}
-        onChange={e => { setQueryText(e.target.value); setOpen(true); }}
+        onChange={e => { setQueryText(typingCaps(e.target.value)); setOpen(true); }}
         onFocus={() => setOpen(true)}
         className={`${input} pl-9`}
         placeholder={outlines ? 'Choose from the list, or search programmes and course outlines' : 'Choose from the list, or search'}
@@ -180,7 +183,7 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
                 {(i === 0 || (matches[i - 1].category || '') !== (p.category || '')) && (
                   <p className="bg-surface px-3 py-1 text-xs font-semibold text-ink-soft">{p.category || 'No category'}</p>
                 )}
-                <button type="button" onClick={() => { onChange(p); setOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface">
+                <button type="button" onClick={() => { onChange(p, tab); setOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface">
                   <span className="min-w-0 truncate text-sm font-semibold">{p.name}</span>
                   <StatusChip programme={p} />
                 </button>
@@ -203,7 +206,7 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
             )}
           </div>
           <button type="button" disabled={busy} onClick={add} className="flex w-full items-center gap-2 border-t border-line px-3 py-2.5 text-left text-sm font-semibold text-accent hover:bg-accent-soft">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add {queryText.trim() ? `"${kind === 'teambuilding' ? withTbMark(queryText) : queryText.trim()}"` : 'a new programme'}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add {queryText.trim() ? `"${titleCaps(queryText)}" as ${TYPE_TAB_LABELS[tab].toLowerCase()}` : 'a new programme'}
           </button>
         </div>
       )}

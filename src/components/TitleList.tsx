@@ -7,13 +7,13 @@ import { useFormDraft } from '../lib/useFormDraft';
 import { deleteProgrammeEverywhere } from '../lib/detach';
 import { formatDate, todayIso } from '../lib/deals';
 import {
-  HRDC_STATUS_LABELS, HrdcStatus, Programme, categoryList, normTag, programmeStatus, programmeTags, programmesFor, titleKey, withTbMark,
+  HRDC_STATUS_LABELS, HrdcStatus, Programme, categoryList, isTbProgramme, normTag, programmeStatus, programmeTags, titleCaps, titleKey, typingCaps,
 } from '../lib/programmes';
 import DraftBar from './DraftBar';
 import PanelResizer from './PanelResizer';
 import ProgrammeLinks, { ProgrammeLinkedInfo, linkOutline } from './ProgrammeLinks';
 import { StatusChip, TYPE_TAB_LABELS } from './Programmes';
-import { OutlineType, outlineTypeOf, programmeTypeOf } from '../lib/outlineTb';
+import { OutlineType, outlineTypeOf, programmeTypeOf, programmesFor } from '../lib/outlineTb';
 import ListPager from './ListPager';
 import { LIST_SORT_LABELS, sortList, usePaged, type ListSort } from '../lib/listPaging';
 
@@ -58,8 +58,8 @@ const daysText = (d?: number | null) => (d ? (d === 0.5 ? 'Half day' : `${d} day
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 /** Groups documents under their titles. Every title in the list shows, with or without documents. */
-export function groupByTitle(kind: TitleKind, programmes: Programme[], docs: TitleDoc[]): TitleGroup[] {
-  const list = programmesFor(programmes, kind);
+export function groupByTitle(kind: TitleKind, programmes: Programme[], docs: TitleDoc[], outlines: any[] = []): TitleGroup[] {
+  const list = programmesFor(programmes, kind, outlines);
   const groups = new Map<string, TitleGroup>();
   list.forEach(p => groups.set(p.id, { key: p.id, name: p.name, programme: p, docs: [] }));
   const byName = new Map(list.map(p => [titleKey(p.name), p.id] as [string, string]));
@@ -96,14 +96,14 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
   const [open, setOpen] = useState<string | null>(null);
   const [panel, setPanel] = useState<TitleGroup | null>(null);
 
-  const groups = useMemo(() => groupByTitle(kind, programmes, docs), [kind, programmes, docs]);
+  const groups = useMemo(() => groupByTitle(kind, programmes, docs, outlines), [kind, programmes, docs, outlines]);
   const usage = useMemo(() => {
     const m: Record<string, number> = {};
     deals.forEach(d => { if (d.programmeId) m[d.programmeId] = (m[d.programmeId] || 0) + 1; });
     return m;
   }, [deals]);
   const teachers = (id?: string) => (id ? trainers.filter(t => (t.programmeIds || []).includes(id)).length : 0);
-  const categories = useMemo(() => categoryList(programmesFor(programmes, kind)), [programmes, kind]);
+  const categories = useMemo(() => categoryList(programmesFor(programmes, kind, outlines)), [programmes, kind, outlines]);
   // "customer service" typed before shows under the standard "Customer service".
   const catOf = (g: TitleGroup) => { const c = String(g.programme?.category || '').trim(); return categories.find(x => x.toLowerCase() === c.toLowerCase()) || c; };
 
@@ -127,6 +127,30 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
   const paged = usePaged(visible, [search, category, hrdc, sortBy, onlyType]);
 
   // The panel follows live changes (a new record, a rename) while it's open.
+  // Titles are in capital letters only (Joel, 2026-10-24): Admin and Management change the older ones in one click.
+  const notCaps = useMemo(() => (staff ? groups.map(g => g.programme).filter((p): p is Programme => !!p && p.name !== titleCaps(p.name)) : []), [staff, groups]);
+  const [capsBusy, setCapsBusy] = useState(false);
+  const [capsError, setCapsError] = useState('');
+  const capsAll = async () => {
+    if (!window.confirm(`Change ${plural(notCaps.length, 'title')} to capital letters? Draft ${docWord}s and open deals follow; sent ones keep what was sent.`)) return;
+    setCapsBusy(true);
+    setCapsError('');
+    try {
+      for (const p of notCaps) {
+        const name = titleCaps(p.name);
+        await setDoc(doc(db, 'programmes', p.id), {
+          name, ...(!p.skillType && isTbProgramme(p.name) ? { skillType: 'teambuilding' } : {}),
+          updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name,
+        }, { merge: true });
+        await afterRename(docWord, p, name, programmes, deals, docs).catch(() => {});
+      }
+    } catch (e) {
+      setCapsError(friendlyError(e));
+    } finally {
+      setCapsBusy(false);
+    }
+  };
+
   const livePanel = panel && (panel.programme ? groups.find(g => g.programme?.id === panel.programme!.id) : groups.find(g => g.key === panel.key)) || panel;
 
   return (
@@ -152,6 +176,13 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
           {(Object.keys(LIST_SORT_LABELS) as ListSort[]).map(k => <option key={k} value={k}>{k === 'az' ? 'Title A to Z' : k === 'za' ? 'Title Z to A' : LIST_SORT_LABELS[k]}</option>)}
         </select>
       </div>
+
+      {loaded && notCaps.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-attention-soft px-4 py-2.5 text-sm">
+          <span>{plural(notCaps.length, 'title')} {notCaps.length === 1 ? 'is' : 'are'} not in capital letters yet{capsError ? <span className="text-danger"> · {capsError}</span> : null}</span>
+          <button type="button" className={btnSecondary} disabled={capsBusy} onClick={capsAll}>{capsBusy && <Loader2 className="h-4 w-4 animate-spin" />} Change to capitals</button>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-line bg-white">
         {!loaded ? (
@@ -320,7 +351,8 @@ export function allTagsOf(programmes: Programme[]): string[] {
 export async function createTitle(kind: TitleKind, name: string, viewer: Viewer, extra: Partial<Programme> = {}): Promise<Programme> {
   const id = `prog_${Date.now()}`;
   const data: any = {
-    id, name: kind === 'teambuilding' ? withTbMark(name) : name.trim(), hrdcStatus: 'not_registered', hrdcCode: '', submittedDate: '', approvedDate: '', notes: '',
+    // Capital letters only, and the type is set on the title (no "(TB)" in the name) (Joel, 2026-10-24).
+    id, name: titleCaps(name), ...(kind === 'teambuilding' ? { skillType: 'teambuilding' } : {}), hrdcStatus: 'not_registered', hrdcCode: '', submittedDate: '', approvedDate: '', notes: '',
     ...extra, createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
   };
   await setDoc(doc(db, 'programmes', id), data);
@@ -331,7 +363,7 @@ export async function createTitle(kind: TitleKind, name: string, viewer: Viewer,
 // Everyone sets the category and #tags. Only Admin and Management rename a title (it changes on every deal), set its
 // HRDC registration, link outlines, files and trainers, or delete it.
 const formOf = (p?: Programme, name = '', type: OutlineType = 'soft') => ({
-  name: p?.name || name, skillType: (type === 'technical' ? 'technical' : 'soft') as 'soft' | 'technical', category: p?.category || '', tags: programmeTags(p), days: p?.days ? String(p.days) : '',
+  name: p?.name || name, skillType: type, category: p?.category || '', tags: programmeTags(p), days: p?.days ? String(p.days) : '',
   hrdcStatus: programmeStatus(p) as HrdcStatus, hrdcCode: p?.hrdcCode || '', submittedDate: p?.submittedDate || '', approvedDate: p?.approvedDate || '', notes: p?.notes || '',
 });
 
@@ -345,7 +377,7 @@ function TitlePanel({ kind, docWord, group, programmes, deals, trainers, outline
   const formDraft = useFormDraft(viewer.id, `title:${p?.id || group.key}`, form, setForm);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const categories = categoryList(programmesFor(programmes, kind));
+  const categories = categoryList(programmesFor(programmes, kind, outlines));
   const tagList = allTagsOf(programmes);
   const usedOn = p ? deals.filter(d => d.programmeId === p.id).length : 0;
 
@@ -357,17 +389,18 @@ function TitlePanel({ kind, docWord, group, programmes, deals, trainers, outline
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    const name = (kind === 'teambuilding' ? withTbMark(form.name) : form.name.trim());
-    if (!form.name.trim()) return setError('Enter the title.');
-    if (programmes.some(x => x.id !== p?.id && titleKey(x.name) === titleKey(name) && programmesFor([x], kind).length)) return setError('This title is already in the list.');
+    const name = titleCaps(form.name);
+    if (!name) return setError('Enter the title.');
+    if (programmes.some(x => x.id !== p?.id && titleKey(x.name) === titleKey(name))) return setError('This title is already in the list.');
     const wasApproved = programmeStatus(p) === 'approved';
     if (staff && form.hrdcStatus === 'approved' && !form.approvedDate && !wasApproved) return setError('Enter the date HRDC approved it.');
     const days = String(form.days || '').trim() ? Number(form.days) : 0;
     if (staff && String(form.days || '').trim() && !(days > 0 && days <= 60 && Number.isInteger(days * 2))) return setError('Number of days: a whole or half number, e.g. 1, 2 or 0.5.');
     const mine = { category: form.category.trim(), tags: [...new Set(form.tags.map(normTag).filter(Boolean))], updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name };
     const theirs = staff ? {
-      // Kept only once chosen here; until then the title follows its outlines' type.
-      ...(kind === 'training' && (p?.skillType || form.skillType !== startType) ? { skillType: form.skillType } : {}),
+      // Kept only once chosen here; until then the title follows its outlines' type. An older "(TB)" title keeps
+      // Team building as its setting, since saving drops the "(TB)" from its name.
+      ...(p?.skillType || form.skillType !== startType || isTbProgramme(p?.name) ? { skillType: form.skillType } : {}),
       days: days || null, hrdcStatus: form.hrdcStatus, hrdcCode: form.hrdcCode.trim(),
       submittedDate: form.hrdcStatus === 'not_registered' ? '' : form.submittedDate,
       approvedDate: form.hrdcStatus === 'approved' ? form.approvedDate : '', notes: form.notes.trim(),
@@ -435,8 +468,8 @@ function TitlePanel({ kind, docWord, group, programmes, deals, trainers, outline
           {staff && (
             <div>
               <label htmlFor="tt-name" className={label}>Title</label>
-              <input id="tt-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className={input} />
-              {p && form.name.trim() !== p.name && <p className="mt-1 text-sm text-attention">Renaming changes it on every deal and on draft {docWord}s with this title. Sent ones keep what was sent.</p>}
+              <input id="tt-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: typingCaps(e.target.value) }))} className={input} />
+              {p && titleCaps(form.name) !== p.name && <p className="mt-1 text-sm text-attention">Renaming changes it on every deal and on draft {docWord}s with this title. Sent ones keep what was sent.</p>}
             </div>
           )}
           <div>
@@ -448,21 +481,19 @@ function TitlePanel({ kind, docWord, group, programmes, deals, trainers, outline
             <TagInput id="tt-tags" tags={form.tags} allTags={tagList} onChange={t => setForm(f => ({ ...f, tags: t }))} />
           </div>
 
-          {kind === 'training' && (
-            <div>
-              <span className={label}>Type</span>
-              {staff ? (
-                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Type">
-                  {(['soft', 'technical'] as const).map(t => (
-                    <button key={t} type="button" role="radio" aria-checked={form.skillType === t} onClick={() => setForm(f => ({ ...f, skillType: t }))}
-                      className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${form.skillType === t ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>
-                      {TYPE_TAB_LABELS[t]}
-                    </button>
-                  ))}
-                </div>
-              ) : <p className="text-[15px]">{TYPE_TAB_LABELS[form.skillType]} <span className="text-sm text-ink-soft">(set by Admin, or by the type of its course outlines)</span></p>}
-            </div>
-          )}
+          <div>
+            <span className={label}>Type</span>
+            {staff ? (
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Type">
+                {(['soft', 'teambuilding', 'technical'] as const).map(t => (
+                  <button key={t} type="button" role="radio" aria-checked={form.skillType === t} onClick={() => setForm(f => ({ ...f, skillType: t }))}
+                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${form.skillType === t ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>
+                    {TYPE_TAB_LABELS[t]}
+                  </button>
+                ))}
+              </div>
+            ) : <p className="text-[15px]">{TYPE_TAB_LABELS[form.skillType]} <span className="text-sm text-ink-soft">(set by Admin, or by the type of its course outlines)</span></p>}
+          </div>
 
           {staff ? (
             <>
@@ -530,7 +561,8 @@ function TitlePanel({ kind, docWord, group, programmes, deals, trainers, outline
 // After a rename: deals keep a copy of the name for older screens; draft documents that carried the old title as
 // typed text are linked (outlines) or retitled (proposals), so they stay under it.
 async function afterRename(docWord: 'outline' | 'proposal', p: Programme, name: string, programmes: Programme[], deals: any[], docs: TitleDoc[]) {
-  const linked = deals.filter(d => d.programmeId === p.id);
+  // A won deal keeps the name it was won with (the database locks it); screens show the title's current name.
+  const linked = deals.filter(d => d.programmeId === p.id && d.stage !== 'won');
   for (let i = 0; i < linked.length; i += 400) {
     const batch = writeBatch(db);
     linked.slice(i, i + 400).forEach(d => batch.update(doc(db, 'pipelines', d.id), { courseName: name }));

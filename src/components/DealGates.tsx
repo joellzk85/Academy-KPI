@@ -29,7 +29,8 @@ const history = (p: any, viewer: Viewer, action: string) =>
   [...(p.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }];
 
 // The inputs for the missing fields. Values are kept by the parent so they can be saved with the step.
-export type GapValues = { clientId: string; programmeId: string; programmeName: string; value: string; fundingType: FundingType | ''; participants: string };
+// dealType: set by the picked programme's type (Team building: "Teambuilding", else "Training").
+export type GapValues = { clientId: string; programmeId: string; programmeName: string; dealType?: string; value: string; fundingType: FundingType | ''; participants: string };
 export const emptyGapValues = (): GapValues => ({ clientId: '', programmeId: '', programmeName: '', value: '', fundingType: '', participants: '' });
 
 function GapInputs({ gaps, values, set, programmes, clients, viewer, kind }: {
@@ -50,7 +51,8 @@ function GapInputs({ gaps, values, set, programmes, clients, viewer, kind }: {
       {gaps.includes('programme') && (
         <div>
           <span className={label}>Programme</span>
-          <ProgrammePicker programmes={programmes} value={values.programmeId} viewer={viewer} kind={kind} onChange={pg => set({ programmeId: pg.id, programmeName: pg.name })} />
+          <ProgrammePicker programmes={programmes} value={values.programmeId} viewer={viewer} startType={kind === 'teambuilding' ? 'teambuilding' : undefined}
+            onChange={(pg, t) => set({ programmeId: pg.id, programmeName: pg.name, dealType: t === 'teambuilding' ? 'Teambuilding' : 'Training' })} />
         </div>
       )}
       {gaps.includes('value') && (
@@ -93,7 +95,7 @@ function gapChanges(gaps: DealField[], v: GapValues, programmes: Programme[], cl
   if (gaps.includes('programme')) {
     const pg = programmes.find(x => x.id === v.programmeId);
     if (!v.programmeId) return 'Choose the programme from the programme list, or add it as a new programme.';
-    Object.assign(out, { programmeId: v.programmeId, courseName: pg?.name || v.programmeName });
+    Object.assign(out, { programmeId: v.programmeId, courseName: pg?.name || v.programmeName, ...(v.dealType ? { type: v.dealType } : {}) });
   }
   if (gaps.includes('value')) {
     const n = Number(v.value);

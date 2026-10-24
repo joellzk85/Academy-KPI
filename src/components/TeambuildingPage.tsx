@@ -20,7 +20,7 @@ import { downloadBlob } from '../lib/quotePdf';
 import type { TbPdfLayout } from '../lib/tbPdf';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { GapsBox } from './DealGates';
-import { Programme } from '../lib/programmes';
+import { Programme, typingCaps } from '../lib/programmes';
 import TitlesView, { TitleDoc, TitleGroup } from './TitleList';
 import TitleTagsBox from './TitleTagsBox';
 import ShareWithBox, { NewCount } from './ShareWithBox';
@@ -762,7 +762,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
         <Card title="Cover" hint="The first thing the client sees: a big photo with the title over it.">
           <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
             <div className="space-y-3">
-              <div><label className={label} htmlFor="tb-title">Title</label><input id="tb-title" value={p.title} onChange={e => set({ title: e.target.value })} className={input} placeholder="e.g. Leading Beyond Expectations: Restaurant Manager Summit" /></div>
+              <div><label className={label} htmlFor="tb-title">Title</label><input id="tb-title" value={p.title} onChange={e => set({ title: typingCaps(e.target.value) })} className={input} placeholder="e.g. LEADING BEYOND EXPECTATIONS: RESTAURANT MANAGER SUMMIT" /></div>
               <TitleTagsBox kind="teambuilding" programmeId={(p as any).programmeId || r.deal?.programmeId} title={p.title || ''} programmes={programmes} viewer={me} />
               <div><label className={label} htmlFor="tb-sub">Line under the title</label><textarea id="tb-sub" value={p.subtitle} onChange={e => set({ subtitle: e.target.value })} rows={2} className={`${input} resize-y`} /></div>
               <div className="grid gap-3 sm:grid-cols-3">

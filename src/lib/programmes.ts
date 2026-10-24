@@ -38,7 +38,7 @@ export interface Programme {
   days?: number | null;      // usual length in days (half days allowed)
   outlineFiles?: ProgrammeFile[];   // course outline files uploaded on the programme (2026-10-23)
   tags?: string[];           // #tags for finding it later, stored without the "#" (2026-10-24)
-  skillType?: 'soft' | 'technical';   // set by Admin / Management on the title, or when added from a type tab (2026-10-24); see programmeTypeOf
+  skillType?: 'soft' | 'technical' | 'teambuilding';   // set by Admin / Management on the title, or when added from a type tab (2026-10-24); see programmeTypeOf
 }
 
 // Titles are the programmes (Joel, 2026-10-24): a course outline's or teambuilding proposal's title IS the programme,
@@ -95,18 +95,21 @@ export interface HrdcQuery {
   answer?: string;
 }
 
-// Teambuilding programmes end in "(TB)" (Joel, 2026-10-23): a teambuilding deal picks from those, a training deal
-// from the others. Quick-adding one from a teambuilding deal adds the "(TB)".
+// A title's type is picked (Soft skill / Team building / Technical skill), not typed into its name (Joel, 2026-10-24).
+// Older teambuilding titles end in "(TB)" and still count as Team building; the CRM no longer adds it.
 export const isTbProgramme = (name?: string) => /\(TB\)\s*$/i.test(String(name || ''));
-export const withTbMark = (name: string) => (isTbProgramme(name) ? name.trim() : `${name.trim()} (TB)`);
+/** Team building by its own setting (or an older "(TB)" name); see programmeTypeOf for a title that follows its outlines. */
+export const isTbTitle = (p?: { name?: string; skillType?: string }) => p?.skillType === 'teambuilding' || (!p?.skillType && isTbProgramme(p?.name));
 export const isTbDeal = (deal: any) => String(deal?.type || '') === 'Teambuilding';
+/** A deal's type as shown (Joel, 2026-10-24): the stored values stay "Training" and "Teambuilding". */
+export const DEAL_TYPE_LABELS: Record<string, string> = { Training: 'Classroom training', Teambuilding: 'Team building' };
+export const dealTypeLabel = (type?: string) => DEAL_TYPE_LABELS[String(type || '')] || String(type || '');
 /** "(TB)" is for the team only (Joel, 2026-10-24): PDFs, client links, quotations and emails print the title without it. */
 export const clientTitle = (name?: string) => String(name || '').replace(/\s*\(TB\)\s*$/i, '');
-/** The programmes a deal of this type can pick: (TB) ones for teambuilding, the rest for training; all when unknown. */
-export function programmesFor(list: Programme[], kind?: 'training' | 'teambuilding'): Programme[] {
-  if (!kind) return list;
-  return list.filter(p => isTbProgramme(p.name) === (kind === 'teambuilding'));
-}
+/** Titles are in capital letters only (Joel, 2026-10-24); an older "(TB)" mark is dropped (the type says it now). */
+export const titleCaps = (name?: string) => clientTitle(String(name || '').replace(/\s+/g, ' ').trim()).toUpperCase();
+/** The same while typing: spaces are kept so the next word can be typed. */
+export const typingCaps = (name: string) => name.toUpperCase();
 
 export function programmeStatus(p: any): HrdcStatus {
   return p?.hrdcStatus === 'submitted' || p?.hrdcStatus === 'approved' ? p.hrdcStatus : 'not_registered';

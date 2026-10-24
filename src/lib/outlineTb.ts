@@ -23,18 +23,24 @@ export const outlineTypeFields = (t: OutlineType): Pick<CourseOutline, 'kind' | 
 export const outlineTypeLabel = (o: Pick<CourseOutline, 'kind' | 'skillType'>) => OUTLINE_TYPES.find(x => x.key === outlineTypeOf(o))!.label;
 
 // ---------- A title's type (Joel, 2026-10-24): every list of titles or outlines sorts into these three ----------
-/** "(TB)" titles are Teambuilding. Otherwise what Admin set on the title, else its newest outline's type (the
- *  outline creator's choice), else Soft skill. */
+/** What Admin set on the title (or the type it was added under), else an older "(TB)" name (Teambuilding), else its
+ *  newest outline's type (the outline writer's choice), else Soft skill. */
 export function programmeTypeOf(p: Pick<Programme, 'id' | 'name' | 'skillType'> | undefined, outlines: any[] = []): OutlineType {
   if (!p) return 'soft';
+  if (p.skillType === 'technical' || p.skillType === 'soft' || p.skillType === 'teambuilding') return p.skillType;
   if (isTbProgramme(p.name)) return 'teambuilding';
-  if (p.skillType === 'technical' || p.skillType === 'soft') return p.skillType;
   const key = titleKey(p.name);
   const mine = outlines
-    .filter(o => o && o.id !== 'outline_default' && !o.isHidden && !o.dealDeleted && outlineTypeOf(o) !== 'teambuilding'
+    .filter(o => o && o.id !== 'outline_default' && !o.isHidden && !o.dealDeleted
       && (o.programmeId ? o.programmeId === p.id : titleKey(o.courseTitle) === key))
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || Number(b.createdAt || 0) - Number(a.createdAt || 0));
   return mine.length ? outlineTypeOf(mine[0]) : 'soft';
+}
+
+/** The titles a deal or list of this kind can pick: Team building ones for teambuilding, the rest for training; all when unknown. */
+export function programmesFor<P extends Pick<Programme, 'id' | 'name' | 'skillType'>>(list: P[], kind?: 'training' | 'teambuilding', outlines: any[] = []): P[] {
+  if (!kind) return list;
+  return list.filter(p => (programmeTypeOf(p, outlines) === 'teambuilding') === (kind === 'teambuilding'));
 }
 
 // ---------- Agenda: the outline keeps one list (day headings + time slots); the builder works in days ----------

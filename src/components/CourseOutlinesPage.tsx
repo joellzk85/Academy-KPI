@@ -8,9 +8,9 @@ import { CourseOutline, CourseOutlineItem, OutlineAgendaRow, QuoteSendEntry, Rep
 import { BLOOM_LEVELS, DEFAULT_OUTLINE_TERMS, DIFFICULTIES, durationText } from '../lib/outlineContent';
 import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso, trainingDays } from '../lib/deals';
 import { GapsBox } from './DealGates';
-import { Programme, isTbDeal, isTbProgramme, titleKey } from '../lib/programmes';
+import { Programme, isTbDeal, titleKey, typingCaps } from '../lib/programmes';
 import { TYPE_TAB_LABELS, TypeTabs, useOutlinesForTypes } from './Programmes';
-import { OUTLINE_TYPES, OutlineType, agendaToDays, daysToAgenda, outlineFromProposal, outlineTypeFields, outlineTypeLabel, outlineTypeOf, programmeTypeOf } from '../lib/outlineTb';
+import { OUTLINE_TYPES, OutlineType, agendaToDays, daysToAgenda, outlineFromProposal, outlineTypeFields, outlineTypeLabel, outlineTypeOf, programmeTypeOf, programmesFor } from '../lib/outlineTb';
 import { Agenda as DayAgenda } from './TeambuildingParts';
 import { TbProposal, blankProposalContent } from '../lib/teambuilding';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
@@ -156,7 +156,8 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       outcomes: [], items: [newModule()], methods: [], agenda: [],
     };
     // The type picked in "Start from" (Teambuilding, Soft skill or Technical skill); a title of the other kind isn't kept.
-    const keepProg = (id?: string) => (id && isTbProgramme(programmes.find(p => p.id === id)?.name) === (type === 'teambuilding') ? id : '');
+    const isTbProg = (id: string) => programmeTypeOf(programmes.find(p => p.id === id), outlines) === 'teambuilding';
+    const keepProg = (id?: string) => (id && isTbProg(id) === (type === 'teambuilding') ? id : '');
     const progId = keepProg(deal?.programmeId) || keepProg(base?.programmeId);
     const o: CourseOutline = {
       ...content, ...outlineTypeFields(type),
@@ -360,10 +361,10 @@ function StartChooser({ deal, outlines, sources, onPick, onBack, onCancel, title
   onPick: (base: CourseOutline | null, type: OutlineType) => void; onBack: () => void; onCancel: () => void;
 }) {
   const [search, setSearch] = useState('');
-  // Teambuilding for a teambuilding deal or a "(TB)" title, else Soft skill; the creator can change it.
-  // A Soft or Technical title starts on its own type (2026-10-24).
+  // The title's own type (Soft skill, Team building or Technical skill); else Teambuilding for a teambuilding deal,
+  // else Soft skill. The writer can change it (2026-10-24).
   const [type, setType] = useState<OutlineType>(() => {
-    if (titleName ? isTbProgramme(titleName) : isTbDeal(deal)) return 'teambuilding';
+    if (!titleName && isTbDeal(deal) && !deal?.programmeId) return 'teambuilding';
     const prog = titleName ? sources.programmes.find(p => titleKey(p.name) === titleKey(titleName)) : sources.programmes.find(p => p.id === deal?.programmeId);
     return prog ? programmeTypeOf(prog, outlines) : 'soft';
   });
@@ -821,10 +822,11 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const type = outlineTypeOf(o);
   const isTb = type === 'teambuilding';
   const typeOutlines = useOutlinesForTypes();
-  // A different type keeps the title only when it's of the same kind ("(TB)" titles are for teambuilding outlines).
+  // A different type keeps the title only when it's of the same kind (a title set as Team building is for teambuilding
+  // outlines); a title that just follows its outlines follows this one.
   const setType = (t: OutlineType) => {
     const prog = o.programmeId ? sources.programmes.find(p => p.id === o.programmeId) : null;
-    const keep = !prog || isTbProgramme(prog.name) === (t === 'teambuilding');
+    const keep = !prog || !prog.skillType || (prog.skillType === 'teambuilding') === (t === 'teambuilding');
     set({ ...outlineTypeFields(t), ...(keep ? {} : { programmeId: '', useProgrammeName: false, courseTitle: o.courseTitle || '' }) });
   };
   // "Speed build proposal": saved first, then the proposal made from it (or the one already made) opens.
@@ -1162,7 +1164,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
               <label className={label} htmlFor="o-prog">Title from the list <span className="font-normal text-ink-soft">(optional; outlines with the same title are one programme)</span></label>
               <select id="o-prog" value={r.programmeId} onChange={e => set({ programmeId: e.target.value, useProgrammeName: !!e.target.value })} className={input}>
                 <option value="">{r.deal?.programmeId ? 'Use the deal\'s title' : 'None: type the title below'}</option>
-                <ProgrammeOptions programmes={sources.programmes.filter(p => isTbProgramme(p.name) === isTb)} outlines={typeOutlines} first={type} />
+                <ProgrammeOptions programmes={programmesFor(sources.programmes, isTb ? 'teambuilding' : 'training', typeOutlines)} outlines={typeOutlines} first={type} />
               </select>
               {!o.programmeId && r.deal?.programmeId && <p className="mt-0.5 text-xs text-ink-soft">From the deal.</p>}
             </div>
@@ -1175,7 +1177,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
                 </div>
               ) : (
                 <>
-                  <input id="o-title" value={o.courseTitle || ''} onChange={e => set({ courseTitle: e.target.value })} className={input} placeholder="e.g. Leadership Essentials for New Managers" />
+                  <input id="o-title" value={o.courseTitle || ''} onChange={e => set({ courseTitle: typingCaps(e.target.value) })} className={input} placeholder="e.g. LEADERSHIP ESSENTIALS FOR NEW MANAGERS" />
                   {r.programmeName && !locked && <button type="button" className={`${linkBtn} mt-1`} onClick={() => set({ useProgrammeName: true })}>Use the title from the list ({r.programmeName})</button>}
                 </>
               )}

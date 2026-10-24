@@ -35,7 +35,7 @@ import { useClaimBacks } from './ClaimBacks';
 import { daysSinceTraining } from '../lib/postTraining';
 import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
-import { HrdcQuery, Programme, grantBlockReason, isTbDeal } from '../lib/programmes';
+import { DEAL_TYPE_LABELS, HrdcQuery, Programme, dealTypeLabel, grantBlockReason, isTbDeal } from '../lib/programmes';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { clientContacts, dealContact, mainContactFields, newContactId } from '../lib/contacts';
 import PickOrType from './PickOrType';
@@ -771,7 +771,7 @@ export default function DealsBoard({
                   <button type="button" onClick={() => { setOpenId(p.id); setStagePanel(null); setGate(null); setStageError(''); }} className="flex w-full flex-col gap-1.5 px-5 py-3.5 text-left sm:flex-row sm:items-center sm:gap-4">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{clientName(p)}</span>
-                      <span className="block truncate text-sm text-ink-soft">{askedFor(p) || 'No programme yet'}{p.type ? `, ${p.type}` : ''}</span>
+                      <span className="block truncate text-sm text-ink-soft">{askedFor(p) || 'No programme yet'}{p.type ? `, ${dealTypeLabel(p.type).toLowerCase()}` : ''}</span>
                       {showOwner && <span className="block truncate text-sm font-medium text-accent">{personName(dealOwnerId(p))}</span>}
                     </span>
                     <span className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -946,11 +946,12 @@ export default function DealsBoard({
                   programmes={programmes}
                   value={form.programmeId}
                   legacyName={editing !== 'new' ? form.courseName : ''}
-                  kind={form.type === 'Teambuilding' ? 'teambuilding' : 'training'}
+                  startType={form.type === 'Teambuilding' ? 'teambuilding' : undefined}
                   viewer={viewer}
                   outlines={outlines}
                   showLinks
-                  onChange={pg => setForm(f => ({ ...f, programmeId: pg.id, courseName: pg.name }))}
+                  // Picking a Team building title makes the deal Team building; Soft or Technical skill makes it Classroom training.
+                  onChange={(pg, t) => setForm(f => ({ ...f, programmeId: pg.id, courseName: pg.name, type: t === 'teambuilding' ? 'Teambuilding' : 'Training' }))}
                 />
                 {!form.programmeId && (
                   <input value={form.enquiryNote} onChange={e => setForm(f => ({ ...f, enquiryNote: e.target.value }))} className={`${input} mt-2`}
@@ -964,10 +965,12 @@ export default function DealsBoard({
               <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <label htmlFor="d-type" className={label}>Type</label>
-                  <select id="d-type" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={input}>
-                    <option value="Training">Training</option>
-                    <option value="Teambuilding">Teambuilding</option>
+                  {/* Once a programme is picked, its type sets this (Soft or Technical skill: Classroom training). */}
+                  <select id="d-type" value={form.type} disabled={!!form.programmeId} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`}>
+                    <option value="Training">{DEAL_TYPE_LABELS.Training}</option>
+                    <option value="Teambuilding">{DEAL_TYPE_LABELS.Teambuilding}</option>
                   </select>
+                  {!!form.programmeId && <p className="mt-1 text-xs text-ink-soft">Set by the programme picked.</p>}
                 </div>
                 <div>
                   <label htmlFor="d-value" className={label}>Deal value (RM) <span className="font-normal text-ink-soft">(optional for now)</span></label>
