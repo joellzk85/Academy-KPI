@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CheckCircle2, Copy, Download, ExternalLink, FileArchive, Loader2, RefreshCw, Settings2, XCircle } from 'lucide-react';
 import { BackupStatus, backupStatus, downloadBackup, downloadProposals, runBackup, saveBackupSheet } from '../lib/backupApi';
 import { friendlyError } from '../lib/firebase';
-import { malaysiaTime } from '../lib/backup';
+import { ZIP_GROUPS, ZipGroup, malaysiaTime } from '../lib/backup';
 
 // Admin work → Backup (2026-10-17): the daily Google Sheet copy, "Back up now" and the Excel download.
 // Admin and Management only. The server does the work (serverBackup.ts).
@@ -22,6 +22,8 @@ export default function BackupPanel() {
   const [setupOpen, setSetupOpen] = useState(false);
   const [sheet, setSheet] = useState('');
   const [copied, setCopied] = useState(false);
+  const [zipGroups, setZipGroups] = useState<ZipGroup[]>(() => ZIP_GROUPS.map(g => g.id));
+  const toggleGroup = (id: ZipGroup) => setZipGroups(gs => (gs.includes(id) ? gs.filter(g => g !== id) : [...gs, id]));
 
   const load = async () => {
     try {
@@ -53,7 +55,10 @@ export default function BackupPanel() {
     return r.skipped === 'running' ? 'A backup is already running. Check again in a minute.' : `Backed up: ${r.summary}.`;
   });
   const download = () => act('download', async () => { await downloadBackup(); return 'The Excel file is downloading. Keep it somewhere safe, it holds all client and money details.'; });
-  const downloadZip = () => act('zip', async () => { await downloadProposals(); return 'The ZIP of all proposal and checklist files (JD14, T3 and others) is downloading, one folder per deal. Keep it somewhere safe.'; });
+  const downloadZip = () => act('zip', async () => {
+    await downloadProposals(zipGroups);
+    return 'The ZIP of the uploaded files is downloading ("List of files.txt" inside lists them all). Keep it somewhere safe.';
+  });
   const save = () => act('save', async () => {
     const r = await saveBackupSheet(sheet.trim());
     if (!r.configured) return 'Google Sheet disconnected. The daily backup is off.';
@@ -113,11 +118,28 @@ export default function BackupPanel() {
           <button type="button" className={btnSecondary} disabled={!!busy} onClick={download}>
             {busy === 'download' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download Excel file
           </button>
-          <button type="button" className={btnSecondary} disabled={!!busy} onClick={downloadZip}>
-            {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all proposals, checklist files and receipts (ZIP)
-          </button>
           <button type="button" className={btnSecondary} onClick={() => setSetupOpen(v => !v)}>
             <Settings2 className="h-4 w-4" /> {setupOpen ? 'Close setup' : connected ? 'Change Google Sheet' : 'Set up'}
+          </button>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-line p-4">
+          <p className="font-semibold">Uploaded files</p>
+          <p className="mt-0.5 text-sm text-ink-soft">
+            Files aren't in the Google Sheet or Excel copy. Download them here as one ZIP, sorted into folders.
+            With everything ticked it can be large; untick Photos if it's slow.
+          </p>
+          <div className="mt-3 space-y-2">
+            {ZIP_GROUPS.map(g => (
+              <label key={g.id} className="flex cursor-pointer items-start gap-2 text-[15px]">
+                <input type="checkbox" checked={zipGroups.includes(g.id)} onChange={() => toggleGroup(g.id)} disabled={!!busy}
+                  className="mt-1 h-4 w-4 shrink-0 accent-[#0E6E62]" />
+                <span>{g.label}</span>
+              </label>
+            ))}
+          </div>
+          <button type="button" className={`${btnSecondary} mt-3`} disabled={!!busy || !zipGroups.length} onClick={downloadZip}>
+            {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all files (ZIP)
           </button>
         </div>
 

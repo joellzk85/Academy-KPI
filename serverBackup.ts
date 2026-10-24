@@ -3,7 +3,7 @@
 // How it works, in plain terms:
 // - The server reads every list in the database (never passwords or login data) and turns each into a table
 //   (src/lib/backup.ts).
-// - Google Sheet copy: Admin or Management makes one blank Google Sheet and shares it (Editor) with the CRM
+// - Google Sheet copy: Management makes one blank Google Sheet and shares it (Editor) with the CRM
 //   server's own Google address (the App Hosting service account, the same one the calendar uses). Each run
 //   replaces the sheet's tabs with fresh data; Google Sheets' own version history keeps the earlier days.
 //   It runs once a Malaysian day, the first time Admin or Management opens the CRM, or any time with "Back up now".
@@ -11,7 +11,8 @@
 // - Settings and the last result are in config/backup_settings, which only the server writes.
 // - Proposal files (2026-10-18): the file records are a normal list ("Proposal files" tab); the files themselves
 //   download as one ZIP (/api/backup/proposals), one folder per deal. Since 2026-10-19 the ZIP also has the checklist
-//   step files (checklist_files: JD14, T3, ...), in a sub-folder per step.
+//   step files (checklist_files: JD14, T3, ...), in a sub-folder per step. Since 2026-10-24 it also has programme files,
+//   trainer files and photos, and the Backup tab's tick boxes pick which kinds to include.
 
 import type { Express, Request, Response as ExpressResponse } from 'express';
 import ExcelJS from 'exceljs';
@@ -22,7 +23,8 @@ import firebaseConfig from './firebase-applet-config.json';
 import { safeFileName } from './src/lib/proposals';
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import {
-  INFO_TAB, SKIP_CONFIG_DOCS, Table, infoTable, malaysiaDay, orderCollections, sheetIdFrom, toTable, uniqueTabs,
+  INFO_TAB, SKIP_CONFIG_DOCS, Table, ZIP_GROUPS, ZipGroup, ZipLookups, infoTable, malaysiaDay, orderCollections, sheetIdFrom,
+  toTable, uniqueTabs, zipGroupsFrom, zipPlace,
 } from './src/lib/backup';
 import { readMoneySettings } from './src/lib/money';
 import { projectPLBackupRows, projectRows } from './src/lib/projectPL';
@@ -33,10 +35,18 @@ const SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 const CHUNK_ROWS = 2000;
 const CHUNK_BYTES = 4_000_000;
 
-// ---------- Who may use it: Admin and Management ----------
+// ---------- Who may use it: Management (Joel, 2026-10-24) ----------
+// Only Management sees, downloads or sets up the backup. Admin opening the CRM still starts the daily automatic
+// Google Sheet copy (staffFrom, /api/backup/run without force), but gets nothing back from it.
 async function staffFrom(req: Request) {
   const caller = await callerFrom(req);
-  if (caller.role !== 'admin' && caller.role !== 'management') throw new UserError(403, 'staff-only', 'Only Admin and Management can use the backup.');
+  if (caller.role !== 'admin' && caller.role !== 'management') throw new UserError(403, 'staff-only', 'Only Management can use the backup.');
+  return caller;
+}
+
+async function managementFrom(req: Request) {
+  const caller = await callerFrom(req);
+  if (caller.role !== 'management') throw new UserError(403, 'management-only', 'Only Management can use the backup.');
   return caller;
 }
 
@@ -230,7 +240,7 @@ async function runBackup(memberId: string, reason: string) {
 export function registerBackupRoutes(app: Express) {
   // Is the backup set up, and how did the last one go? Includes the address to share the sheet with.
   app.post('/api/backup/status', route(async req => {
-    await staffFrom(req);
+    await managementFrom(req);
     const s = await readSettings();
     return {
       configured: !!s.sheetId, sheetId: s.sheetId || '', sheetName: s.sheetName || '',
@@ -242,7 +252,7 @@ export function registerBackupRoutes(app: Express) {
 
   // Save the Google Sheet (a link or its ID); it's tested before it's saved. Blank = disconnect.
   app.post('/api/backup/settings', route(async req => {
-    await staffFrom(req);
+    await managementFrom(req);
     const raw = String(req.body?.sheet || '').trim();
     if (!raw) {
       await saveSettings({ sheetId: '', sheetName: '', tabs: [], lastError: '' });
@@ -257,9 +267,19 @@ export function registerBackupRoutes(app: Express) {
   }));
 
   // Back up to the Google Sheet. Without "force" it runs only once a Malaysian day (the app asks on opening).
+  // Admin may start only that automatic run, and gets nothing back from it.
   app.post('/api/backup/run', route(async req => {
     const caller = await staffFrom(req);
     const force = !!req.body?.force;
+    if (caller.role !== 'management') {
+      if (force) throw new UserError(403, 'management-only', 'Only Management can use the backup.');
+      await backUpToSheet(caller, false).catch(() => {});   // errors are saved in the settings for Management to see
+      return {};
+    }
+    return backUpToSheet(caller, force);
+  }));
+
+  async function backUpToSheet(caller: { memberId: string }, force: boolean) {
     const s = await readSettings();
     if (!s.sheetId) {
       if (!force) return { skipped: 'not-configured' };
@@ -278,35 +298,36 @@ export function registerBackupRoutes(app: Express) {
     } finally {
       running = null;
     }
-  }));
+  }
 
-  // Every proposal file and checklist step file (JD14, T3, ...) as one ZIP, one folder per deal ("Client - Programme").
-  // Proposals sit in the deal's folder; checklist files in a sub-folder named after the step.
+  // The uploaded files as one ZIP. Proposals and checklist step files (JD14, T3, ...) go in one folder per deal
+  // ("Client - Programme"), checklist files in a sub-folder named after the step, receipts in "Payment receipts".
+  // Since 2026-10-24 also programme files, trainer files (team, profile link, portal) and photos, read straight from
+  // their storage folders (zipPlace in src/lib/backup.ts). The body's `groups` picks which (none sent = all).
   app.post('/api/backup/proposals', async (req: Request, res: ExpressResponse) => {
     try {
-      await staffFrom(req);
+      await managementFrom(req);
+      const groups = zipGroupsFrom(req.body?.groups);
+      if (!groups.length) throw new UserError(400, 'nothing-picked', 'Tick at least one kind of file to download.');
+      const want = (g: ZipGroup) => groups.includes(g);
       const { db } = admin();
-      const all = async (name: string) => (await db.collection(name).get()).docs.map(d => ({ ...d.data(), id: d.id }) as any);
-      const [proposals, stepFiles, receipts, deals, clients, programmes] = await Promise.all([all('proposal_files'), all('checklist_files'), all('payment_receipts'), all('pipelines'), all('clients'), all('programmes')]);
-      const files = [
-        ...proposals.map((f: any) => ({ ...f, what: 'Proposal', sub: '' })),
-        ...stepFiles.map((f: any) => ({ ...f, what: f.taskLabel || 'Checklist', sub: `${safeFileName(f.taskLabel || 'Checklist', 60)}/` })),
-        // Payment receipts (2026-10-20) in a "Payment receipts" sub-folder; receipts on imported Payment tracking lines have no deal.
-        ...receipts.map((f: any) => ({ ...f, what: 'Payment receipt', sub: 'Payment receipts/' })),
-      ];
-      if (!files.length) throw new UserError(404, 'no-proposals', 'There are no proposal or checklist files yet.');
+      const all = async (name: string, needed = true) => (needed ? (await db.collection(name).get()).docs.map(d => ({ ...d.data(), id: d.id }) as any) : []);
+      const fromStorage = want('programmes') || want('trainers') || want('photos');
+      const [proposals, stepFiles, receipts, deals, clients, programmes, trainers, links, team] = await Promise.all([
+        all('proposal_files', want('deals')), all('checklist_files', want('deals')), all('payment_receipts', want('receipts')),
+        all('pipelines'), all('clients'), all('programmes'), all('trainers_directory', want('trainers')),
+        all('trainer_links', want('trainers')), all('team', fromStorage),
+      ]);
       const bucket = getStorage(getApps()[0]).bucket((firebaseConfig as any).storageBucket);
-      try {
-        await bucket.file(files[0].path).getMetadata();
-      } catch (e: any) {
+      const storageProblem = (e: any) => {
         const code = Number(e?.code);
         console.error('[backup] storage check failed:', e?.message || e);
         if (code === 403 || /permission|forbidden/i.test(String(e?.message))) {
-          throw new UserError(503, 'storage-no-access',
+          return new UserError(503, 'storage-no-access',
             "The CRM server isn't allowed to read the stored files yet. In Google Cloud → IAM, give firebase-app-hosting-compute@gen-lang-client-0779528352.iam.gserviceaccount.com the role \"Storage Object Viewer\", then try again.");
         }
-        if (code !== 404) throw new UserError(503, 'storage-error', "The stored files couldn't be read. Try again in a minute.");
-      }
+        return code === 404 ? null : new UserError(503, 'storage-error', "The stored files couldn't be read. Try again in a minute.");
+      };
       const folderOf = new Map<string, string>();
       const usedFolders = new Set<string>();
       const folder = (dealId: string) => {
@@ -321,6 +342,58 @@ export function registerBackupRoutes(app: Express) {
         folderOf.set(dealId, name);
         return name;
       };
+      type ZipFile = { path: string; zipPath: string; at: string; what: string; byName: string; checkExists: boolean };
+      const files: ZipFile[] = [
+        ...proposals.map((f: any) => ({ ...f, what: 'Proposal', sub: '' })),
+        ...stepFiles.map((f: any) => ({ ...f, what: f.taskLabel || 'Checklist', sub: `${safeFileName(f.taskLabel || 'Checklist', 60)}/` })),
+        // Payment receipts (2026-10-20) in a "Payment receipts" sub-folder; receipts on imported Payment tracking lines have no deal.
+        ...receipts.map((f: any) => ({ ...f, what: 'Payment receipt', sub: 'Payment receipts/' })),
+      ].map((f: any) => ({
+        path: String(f.path || ''), zipPath: `${folder(f.dealId)}/${f.sub}${String(f.at || '').slice(0, 10)} ${safeFileName(f.name)}`,
+        at: String(f.at || ''), what: f.what, byName: f.byName || '', checkExists: true,
+      }));
+      if (fromStorage) {
+        const look: ZipLookups = {
+          programmeName: id => programmes.find((x: any) => x.id === id)?.name || '',
+          trainerName: id => trainers.find((x: any) => x.id === id)?.name || '',
+          linkTrainer: token => {
+            const l = links.find((x: any) => x.id === token);
+            return l ? { trainerId: l.trainerId, name: l.submission?.name || l.trainerName } : null;
+          },
+          dealFolder: folder,
+          clean: safeFileName,
+        };
+        const memberName = (id: string) => team.find((m: any) => m.id === id)?.name || '';
+        const prefixes = ZIP_GROUPS.filter(g => want(g.id)).flatMap(g => g.prefixes);
+        for (const prefix of prefixes) {
+          let listed: any[];
+          try {
+            [listed] = await bucket.getFiles({ prefix });
+          } catch (e: any) {
+            const problem = storageProblem(e);
+            if (problem) throw problem;
+            listed = [];
+          }
+          for (const f of listed) {
+            const place = zipPlace(f.name, look);
+            if (!place) continue;
+            const by = String(f.metadata?.metadata?.uploadedBy || '');
+            files.push({
+              path: f.name, zipPath: place.zipPath, at: String(f.metadata?.timeCreated || ''), what: place.what,
+              byName: memberName(by) || (!by || by.startsWith('tr_') ? 'Trainer' : ''), checkExists: false,
+            });
+          }
+        }
+      } else if (files.length) {
+        // Only record-based files: check once that the server may read storage, for a clear message.
+        try {
+          await bucket.file(files[0].path).getMetadata();
+        } catch (e: any) {
+          const problem = storageProblem(e);
+          if (problem) throw problem;
+        }
+      }
+      if (!files.length) throw new UserError(404, 'no-proposals', 'There are no files of the ticked kinds yet.');
       const stamp = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 16).replace('T', '_').replace(':', '');
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="NEXT-Academy-files-${stamp}.zip"`);
@@ -330,19 +403,26 @@ export function registerBackupRoutes(app: Express) {
       zip.pipe(res);
       const missing: string[] = [];
       const usedNames = new Set<string>();
-      for (const f of files.sort((a: any, b: any) => String(a.at).localeCompare(String(b.at)))) {
-        const file = bucket.file(String(f.path || ''));
-        const [exists] = await file.exists().catch(() => [false]);
-        if (!exists) { missing.push(`${folder(f.dealId)}/${f.sub}${f.name}`); continue; }
-        let name = `${folder(f.dealId)}/${f.sub}${String(f.at || '').slice(0, 10)} ${safeFileName(f.name)}`;
-        if (usedNames.has(name.toLowerCase())) name = name.replace(/(\.[^.\/]+)?$/, ` (${f.id.slice(-4)})$1`);
+      files.sort((a, b) => a.at.localeCompare(b.at));
+      for (const f of files) {
+        const file = bucket.file(f.path);
+        if (f.checkExists) {
+          const [exists] = await file.exists().catch(() => [false]);
+          if (!exists) { missing.push(f.zipPath); continue; }
+        }
+        let name = f.zipPath;
+        for (let i = 2; usedNames.has(name.toLowerCase()); i++) name = f.zipPath.replace(/(\.[^.\/]+)?$/, ` (${i})$1`);
         usedNames.add(name.toLowerCase());
         zip.append(file.createReadStream(), { name, date: f.at ? new Date(f.at) : new Date() });
       }
-      const rows = files.map((f: any) => [String(f.at || '').slice(0, 10), folder(f.dealId), f.what, f.name, f.byName || ''].join('\t'));
+      const rows = files.map(f => {
+        const cut = f.zipPath.lastIndexOf('/');
+        return [f.at.slice(0, 10), f.zipPath.slice(0, cut), f.what, f.zipPath.slice(cut + 1), f.byName].join('\t');
+      });
       const list = [
-        `NEXT Academy CRM: proposal and checklist files, downloaded ${new Date().toISOString()}`, '',
-        ['Date', 'Deal', 'What', 'File', 'Uploaded by'].join('\t'), ...rows,
+        `NEXT Academy CRM: uploaded files, downloaded ${new Date().toISOString()}`,
+        `Included: ${ZIP_GROUPS.filter(g => want(g.id)).map(g => g.label).join('; ')}`, '',
+        ['Date', 'Folder', 'What', 'File', 'Uploaded by'].join('\t'), ...rows,
         ...(missing.length ? ['', 'Missing from storage:', ...missing] : []),
       ].join('\r\n');
       zip.append(list, { name: 'List of files.txt' });
@@ -358,10 +438,8 @@ export function registerBackupRoutes(app: Express) {
   // Download everything as an Excel file.
   app.post('/api/backup/download', async (req: Request, res: ExpressResponse) => {
     try {
-      const caller = await staffFrom(req);
-      // Payment tracking is for Management only (Joel, 2026-10-20), so Admin's download leaves it out.
-      // Payment records and client link tracking (2026-10-20: "only management can see tracking") are Management only.
-      const tables = (await readAllTables()).filter(t => caller.role === 'management' || !['payment_records', 'proposal_views'].includes(t.collectionId));
+      const caller = await managementFrom(req);
+      const tables = await readAllTables();
       const now = new Date();
       const wb = new ExcelJS.Workbook();
       wb.creator = 'NEXT Academy CRM';

@@ -280,7 +280,9 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   // Shortcuts: only the ones this person's role allows, whatever was saved.
   const mayUse = (need: Need) => need === 'all' || (need === 'workspace' ? hasWorkspace(viewer.id) : need === 'staff' ? staff : viewer.role === 'management');
   // My KPI only for people with KPIs (Management without a KPI set has a workspace but no KPI page).
-  const allowedShortcuts = SHORTCUTS.filter(s => mayUse(s.need) && (s.id !== 'ws_kpi' || hasKpis(viewer.id)));
+  // Backup is Management only (Joel, 2026-10-24), although it sits in Admin work.
+  const allowedShortcuts = SHORTCUTS.filter(s => mayUse(s.need) && (s.id !== 'ws_kpi' || hasKpis(viewer.id))
+    && (s.id !== 'aw_backup' || viewer.role === 'management'));
   const shortcuts: ShortcutId[] = (savedShortcuts || DEFAULT_SHORTCUTS).filter(id => allowedShortcuts.some(s => s.id === id));
   const saveShortcuts = async (next: ShortcutId[]) => {
     setSavedShortcuts(next);
@@ -299,7 +301,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     saveShortcuts(next);
   };
   const goShortcut = (s: typeof SHORTCUTS[number]) => {
-    if (!mayUse(s.need)) return;
+    if (!allowedShortcuts.some(a => a.id === s.id)) return;
     if (s.need === 'workspace') return nav.openWorkspace(viewer.id, s.tab);
     if (s.need === 'staff') return nav.openAdminWork(s.view as any);
     if (s.need === 'management') return nav.openManagement(s.view as any);

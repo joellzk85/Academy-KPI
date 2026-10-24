@@ -1,6 +1,7 @@
 // The data backup, from the browser (2026-10-17). The CRM server does the work (serverBackup.ts).
 
 import { ServerError, auth, callServer } from './firebase';
+import type { ZipGroup } from './backup';
 
 export interface BackupStatus {
   configured: boolean;
@@ -25,10 +26,11 @@ export const runBackup = (force = false) =>
 // Downloads the Excel backup file to this computer.
 export const downloadBackup = () => downloadFrom('/api/backup/download', 'NEXT-Academy-CRM-backup.xlsx', 'The backup file could not be made. Try again in a minute.');
 
-// Downloads every proposal file as one ZIP (2026-10-18).
-export const downloadProposals = () => downloadFrom('/api/backup/proposals', 'NEXT-Academy-files.zip', "The ZIP file couldn't be made. Try again in a minute.");
+// Downloads the uploaded files as one ZIP (2026-10-18); `groups` = the kinds ticked on the Backup tab (2026-10-24).
+export const downloadProposals = (groups: ZipGroup[]) =>
+  downloadFrom('/api/backup/proposals', 'NEXT-Academy-files.zip', "The ZIP file couldn't be made. Try again in a minute.", { groups });
 
-async function downloadFrom(path: string, fallbackName: string, failMessage: string): Promise<void> {
+async function downloadFrom(path: string, fallbackName: string, failMessage: string, body: any = {}): Promise<void> {
   const user = auth.currentUser;
   if (!user) throw new ServerError('not-logged-in', 'You are logged out. Log in again.');
   let res: Response;
@@ -36,7 +38,7 @@ async function downloadFrom(path: string, fallbackName: string, failMessage: str
     res = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
-      body: '{}',
+      body: JSON.stringify(body),
     });
   } catch {
     throw new ServerError('network', 'No connection to the CRM server. Check your internet and try again.');
