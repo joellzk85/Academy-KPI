@@ -11,8 +11,11 @@
 // The green / amber / red rules live in config/login_rules, editable by Management only.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, doc, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { db, friendlyError } from './firebase';
-import { setWriteListener } from './firestoreTracked';
+import { callServer, db, friendlyError } from './firebase';
+import { setDeleteListener, setWriteListener } from './firestoreTracked';
+import { deviceId } from './linkTracker';
+import { deviceOf } from './proposalTracking';
+import { DEFAULT_WORK_END, DEFAULT_WORK_START } from './loginSessions';
 import type { KpiLight } from './kpi';
 
 
@@ -36,11 +39,13 @@ export interface LoginRules {
   idleMinutes: number;    // the clock stops after this many minutes with no click, typing or scrolling
   noWorkMinutes: number;  // "Online, no work": a day with at least this many minutes…
   noWorkActions: number;  // …and fewer than this many actions; such a day doesn't count towards the light
+  workStart: number;      // working hours, minutes after midnight (Malaysia time): a login outside them, or on a day
+  workEnd: number;        // that isn't a working day, is flagged "After hours" (2026-10-24, serverActivity.ts)
 }
 
 export const DEFAULT_LOGIN_RULES: LoginRules = {
   workDays: [1, 2, 3, 4, 5], greenDays: 5, greenMinutes: 60, amberDays: 3, amberMinutes: 30,
-  idleMinutes: 5, noWorkMinutes: 120, noWorkActions: 3,
+  idleMinutes: 5, noWorkMinutes: 120, noWorkActions: 3, workStart: DEFAULT_WORK_START, workEnd: DEFAULT_WORK_END,
 };
 
 export function readLoginRules(d: any): LoginRules {
@@ -55,6 +60,8 @@ export function readLoginRules(d: any): LoginRules {
     idleMinutes: Math.max(1, num(d?.idleMinutes, DEFAULT_LOGIN_RULES.idleMinutes)),
     noWorkMinutes: num(d?.noWorkMinutes, DEFAULT_LOGIN_RULES.noWorkMinutes),
     noWorkActions: num(d?.noWorkActions, DEFAULT_LOGIN_RULES.noWorkActions),
+    workStart: Math.min(1440, num(d?.workStart, DEFAULT_LOGIN_RULES.workStart)),
+    workEnd: Math.min(1440, num(d?.workEnd, DEFAULT_LOGIN_RULES.workEnd)),
   };
 }
 
@@ -257,6 +264,31 @@ const MAX_ACTIONS_PER_SAVE = 20;   // matches firestore.rules
 const bumpActions = (memberId: string, n: number) =>
   writeToday(memberId, { actions: increment(n), lastActionAt: serverTimestamp() }, { actions: n, lastActionAt: serverTimestamp() });
 
+// ---------- Logins and sensitive actions (2026-10-24, serverActivity.ts) ----------
+const SESSION_KEY = 'next_login_session';
+const newSessionId = () => Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => (b % 36).toString(36)).join('');
+
+/** What the login screen sends with a password login, so the server records the device and carries the session on. */
+export function loginDeviceInfo() {
+  const sessionId = newSessionId();
+  try { sessionStorage.setItem(SESSION_KEY, sessionId); } catch { /* the CRM opening starts its own record */ }
+  return { sessionId, deviceId: deviceId(), device: deviceOf(navigator.userAgent, navigator.maxTouchPoints || 0, window.innerWidth) };
+}
+
+function takeSessionId(): string {
+  try {
+    const id = sessionStorage.getItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
+    if (id && /^[a-z0-9]{10,40}$/.test(id)) return id;
+  } catch { /* new one below */ }
+  return newSessionId();
+}
+
+/** A download worth knowing about (exports of client or personal data). Never stops the download. */
+export function reportDownload(what: string) {
+  callServer('/api/activity/action', { items: [{ kind: 'download', what }] }, true).catch(() => {});
+}
+
 export function useActivityTracker(memberId: string) {
   const idleMinutes = useRef(DEFAULT_LOGIN_RULES.idleMinutes);
   useEffect(() => onSnapshot(doc(db, 'config', 'login_rules'), d => { idleMinutes.current = readLoginRules(d.data()).idleMinutes; }, () => {}), []);
@@ -294,16 +326,37 @@ export function useActivityTracker(memberId: string) {
     };
     const actionTimer = window.setInterval(flush, 15_000);
 
+    // Deletes, sent to the server's Actions log every few seconds.
+    let deletes: { kind: string; path: string }[] = [];
+    setDeleteListener((path, kind) => { if (deletes.length < 60) deletes.push({ kind, path }); });
+    const sendDeletes = () => {
+      if (!deletes.length) return;
+      const items = deletes.splice(0, 30);
+      callServer('/api/activity/action', { items }, true).catch(() => {});
+    };
+    const deleteTimer = window.setInterval(sendDeletes, 5_000);
+
+    // This session (IP, place, device: the server works them out). Right after a password login it carries on
+    // the login's own record.
+    const sessionId = takeSessionId();
+    callServer('/api/activity/open', { sessionId, deviceId: deviceId(), device: deviceOf(navigator.userAgent, navigator.maxTouchPoints || 0, window.innerWidth) }, true).catch(() => {});
+
     bumpLogin(memberId);
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && Date.now() - lastActive < idleMinutes.current * 60_000) bumpMinute(memberId);
+      if (document.visibilityState === 'visible' && Date.now() - lastActive < idleMinutes.current * 60_000) {
+        bumpMinute(memberId);
+        callServer('/api/activity/beat', { sessionId }, true).catch(() => {});
+      }
     }, 60_000);
 
     return () => {
       window.clearInterval(timer);
       window.clearInterval(actionTimer);
+      window.clearInterval(deleteTimer);
       flush();
+      sendDeletes();
       setWriteListener(null);
+      setDeleteListener(null);
       activityEvents.forEach(ev => window.removeEventListener(ev, onActivity, { capture: true } as any));
       inputEvents.forEach(ev => window.removeEventListener(ev, onInput, { capture: true } as any));
       document.removeEventListener('visibilitychange', onVisible);

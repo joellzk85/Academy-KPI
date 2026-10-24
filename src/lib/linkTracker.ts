@@ -16,7 +16,8 @@ const IDLE_MS = 30_000;
 const randomId = (n = 20) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b => (b % 36).toString(36)).join('');
 
 // A random id kept in this browser, so the CRM can tell "opened on 3 different devices" (possibly forwarded).
-function deviceId(): string {
+// Also used by the Login log's "New device" (lib/loginActivity.ts).
+export function deviceId(): string {
   try {
     const old = localStorage.getItem('next_dev');
     if (old && /^[a-z0-9]{10,40}$/.test(old)) return old;

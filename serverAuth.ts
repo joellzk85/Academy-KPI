@@ -14,9 +14,11 @@ import { initializeApp, getApps, App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import firebaseConfig from './firebase-applet-config.json';
+import { logActivity, recordFailedLogin, recordLogin } from './serverActivity';
 
 type Role = 'rep' | 'admin' | 'management';
 const ROLES: Role[] = ['rep', 'admin', 'management'];
+const ROLE_NAMES: Record<Role, string> = { rep: 'Rep', admin: 'Admin', management: 'Management' };
 const MIN_PASSWORD = 6;
 const DEFAULT_TARGETS = { salesFigure: 30000, proposals: 2, preview: 1 };
 const EMPTY_KPI = { salesFigure: [0, 0, 0, 0, 0], proposals: [0, 0, 0, 0, 0], preview: [0, 0, 0, 0, 0] };
@@ -115,10 +117,10 @@ function assertNotLockedOut(memberId: string) {
     throw new UserError(429, 'too-many-attempts', 'Too many wrong passwords. Wait 10 minutes, then try again.');
   }
 }
-function recordFail(memberId: string) {
+function recordFail(memberId: string): number {
   const entry = failedAttempts.get(memberId);
-  if (!entry || Date.now() - entry.since > WINDOW_MS) failedAttempts.set(memberId, { count: 1, since: Date.now() });
-  else entry.count += 1;
+  if (!entry || Date.now() - entry.since > WINDOW_MS) { failedAttempts.set(memberId, { count: 1, since: Date.now() }); return 1; }
+  return ++entry.count;
 }
 
 // ---------- Who is calling? ----------
@@ -231,11 +233,13 @@ export function registerAuthRoutes(app: Express) {
     const secret = secretSnap.data();
     const valid = !!(member?.active && secret && (await checkPassword(password, secret.salt, secret.hash)));
     if (!valid) {
-      recordFail(memberId);
+      await recordFailedLogin(memberId, req, recordFail(memberId));
       throw new UserError(401, 'wrong-password', 'That password is not correct. Check it and try again.');
     }
     failedAttempts.delete(memberId);
-    return { token: await auth.createCustomToken(memberId) };
+    const token = await auth.createCustomToken(memberId);
+    await recordLogin(memberId, req);
+    return { token };
   }));
 
   // Anyone: change my own password.
@@ -258,6 +262,7 @@ export function registerAuthRoutes(app: Express) {
     batch.set(db.collection('secrets').doc(caller.memberId), { hash, salt, updatedAt: Date.now() });
     batch.update(db.collection('team').doc(caller.memberId), { mustChangePassword: false });
     await batch.commit();
+    await logActivity(caller.memberId, req, 'password', 'Changed own password');
   }));
 
   // Management: add a person.
@@ -281,6 +286,7 @@ export function registerAuthRoutes(app: Express) {
     batch.set(db.collection('secrets').doc(memberId), { hash, salt, updatedAt: now });
     batch.set(db.collection('reps').doc(memberId), { kpi: EMPTY_KPI, targets: DEFAULT_TARGETS }, { merge: true });
     await batch.commit();
+    await logActivity(caller.memberId, req, 'team', `Added ${name} (${ROLE_NAMES[role]})`);
     return { memberId };
   }));
 
@@ -300,6 +306,7 @@ export function registerAuthRoutes(app: Express) {
     batch.update(db.collection('team').doc(member.id), { role });
     batch.set(db.collection('auth_map').doc(member.id), { memberId: member.id, role, active: true }, { merge: true });
     await batch.commit();
+    await logActivity(caller.memberId, req, 'team', `Changed ${member.name}'s role to ${ROLE_NAMES[role]}`);
   }));
 
   // Management: set a new password for someone.
@@ -321,6 +328,7 @@ export function registerAuthRoutes(app: Express) {
     failedAttempts.delete(member.id);
     // Log them out everywhere so the old password can't keep a session alive.
     try { await auth.revokeRefreshTokens(member.id); } catch { /* never logged in yet */ }
+    await logActivity(caller.memberId, req, 'password', `Set a new password for ${member.name}`);
   }));
 
   // Management: remove someone (and hand over their open deals).
@@ -348,6 +356,7 @@ export function registerAuthRoutes(app: Express) {
     openDeals.forEach(d => batch.update(d.ref, { ownerId: receiver.id, ownerName: receiver.name }));
     await batch.commit();
     try { await auth.revokeRefreshTokens(member.id); } catch { /* never logged in yet */ }
+    await logActivity(caller.memberId, req, 'team', `Removed ${member.name}`);
     return { movedDeals: openDeals.length, receiverName: receiver?.name || null };
   }));
 
@@ -366,5 +375,6 @@ export function registerAuthRoutes(app: Express) {
     batch.set(db.collection('auth_map').doc(member.id), { memberId: member.id, role: member.role, active: true });
     batch.set(db.collection('secrets').doc(member.id), { hash, salt, updatedAt: Date.now() });
     await batch.commit();
+    await logActivity(caller.memberId, req, 'team', `Gave ${member.name} access again`);
   }));
 }

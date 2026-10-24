@@ -83,4 +83,5 @@ export async function downloadBiodataPdf(t: BiodataInput) {
   a.click();
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  import('../lib/loginActivity').then(m => m.reportDownload(`Trainer biodata PDF (${t.name || 'trainer'})`)).catch(() => {});
 }

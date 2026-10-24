@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BarChart3, ChevronDown, ChevronRight, Clock, Grid3x3, List, Loader2, Settings2, X } from 'lucide-react';
+import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, Clock, Grid3x3, List, Loader2, LogIn, Settings2, ShieldAlert, X } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
 import { db, friendlyError } from '../lib/firebase';
 import { KPI_LIGHT_BADGE, KPI_LIGHT_BG, KpiLight } from '../lib/kpi';
@@ -8,11 +8,13 @@ import {
   lastWorkDays, loginLight, parseDay, placeTotals, useLoginData, weekStart, workDaysOfWeek,
 } from '../lib/loginActivity';
 import { LoginGraph, LoginHeatmap } from './LoginCharts';
+import { ActionsView, FlagChip, LoginsView, useLoginSessions, useOnlineNow } from './LoginSessions';
+import { SessionFlag, clockOf } from '../lib/loginSessions';
 import { TeamMember, ROLE_LABELS } from '../types';
 
 // Team → Login log (Management only): each person's daily time in the CRM and a green / amber / red light.
 const HISTORY_WEEKS = [4, 8, 12, 26];
-type View = 'table' | 'heatmap' | 'graph';
+type View = 'table' | 'heatmap' | 'graph' | 'logins' | 'actions';
 const PREF_KEY = 'next_login_log_view';
 const readPref = (): { view?: View; weeks?: number; who?: string; by?: 'day' | 'week' } => {
   try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); } catch { return {}; }
@@ -58,6 +60,11 @@ function RulesDialog({ rules, viewer, onClose }: { rules: LoginRules; viewer: Te
   const [error, setError] = useState('');
   const setNum = (key: keyof LoginRules) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setR(prev => ({ ...prev, [key]: Math.max(0, Math.round(Number(e.target.value) || 0)) }));
+  const timeValue = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const setTime = (key: 'workStart' | 'workEnd') => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const [h, m] = e.target.value.split(':').map(Number);
+    if (Number.isFinite(h) && Number.isFinite(m)) setR(prev => ({ ...prev, [key]: h * 60 + m }));
+  };
   const toggleDay = (d: number) =>
     setR(prev => ({ ...prev, workDays: prev.workDays.includes(d) ? prev.workDays.filter(x => x !== d) : [...prev.workDays, d].sort() }));
 
@@ -67,6 +74,7 @@ function RulesDialog({ rules, viewer, onClose }: { rules: LoginRules; viewer: Te
     if (r.greenDays < 1 || r.greenDays > n || r.amberDays < 1 || r.amberDays > n) return setError(`Days must be between 1 and ${n} (the number of working days).`);
     if (r.amberDays > r.greenDays || r.amberMinutes > r.greenMinutes) return setError('Amber should ask for less than green.');
     if (r.idleMinutes < 1) return setError('The clock needs at least 1 minute before it stops.');
+    if (r.workStart >= r.workEnd) return setError('Working hours must end after they start.');
     setBusy(true);
     try {
       await setDoc(doc(db, 'config', 'login_rules'), { ...r, updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name });
@@ -131,6 +139,16 @@ function RulesDialog({ rules, viewer, onClose }: { rules: LoginRules; viewer: Te
           </div>
           <p className="mt-2 text-sm text-ink-soft">An action is anything saved: a deal added or moved, an appointment, a follow-up, a quotation, a checklist tick, a payment… Saving the same thing again within 5 minutes counts once.</p>
         </div>
+        <div className="mt-3 rounded-lg border border-line p-3.5">
+          <p className="text-sm font-semibold text-ink">Working hours</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[15px] text-ink">
+            From
+            <input type="time" value={timeValue(r.workStart)} onChange={setTime('workStart')} className={`${inputClass} w-32`} aria-label="Working hours start" />
+            to
+            <input type="time" value={timeValue(r.workEnd)} onChange={setTime('workEnd')} className={`${inputClass} w-32`} aria-label="Working hours end" />
+          </div>
+          <p className="mt-2 text-sm text-ink-soft">A login outside these hours, or on a day that isn't a working day, is marked "After hours" (Malaysia time).</p>
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[15px] text-ink">
           The clock stops after
           <input type="number" min={1} value={r.idleMinutes} onChange={setNum('idleMinutes')} className={inputClass} aria-label="Idle minutes" />
@@ -169,6 +187,15 @@ export default function LoginLog({ currentMember, members }: { currentMember: Te
   const fromKey = dayKey(addDays(weekStart(today), -7 * (weeksShown - 1)));
   const { rules, days, error, byKey, minutesOf: minutesAt, countedOf } = useLoginData(fromKey);
   const minutesOf = (memberId: string) => (day: string) => minutesAt(memberId, day);
+  const fromMs = parseDay(fromKey).getTime();
+  const weekAgoMs = useMemo(() => addDays(today, -7).getTime(), [today]);
+  const { rows: recentSessions } = useLoginSessions(weekAgoMs);
+  const online = useOnlineNow();
+  const warningsOf = (memberId: string) => {
+    const c = new Map<SessionFlag, number>();
+    (recentSessions || []).forEach(s => { if (s.memberId === memberId) (s.flags || []).forEach(f => c.set(f, (c.get(f) || 0) + 1)); });
+    return [...c.entries()];
+  };
 
   const recentDays = lastWorkDays(today, rules, rules.workDays.length);
   const weeks = Array.from({ length: weeksShown }, (_, i) => addDays(weekStart(today), -7 * i));
@@ -201,12 +228,12 @@ export default function LoginLog({ currentMember, members }: { currentMember: Te
         <span className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${KPI_LIGHT_BG.amber}`} /> {summary.amber}</span>
         <span className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${KPI_LIGHT_BG.red}`} /> {summary.red}</span>
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-danger" /> {summary.noWork}</span>
-        <span>Working days: {summary.days}</span>
+        <span>Working days: {summary.days}, {clockOf(rules.workStart)} to {clockOf(rules.workEnd)}</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3">
         <div className="inline-flex overflow-hidden rounded-lg border border-line" role="tablist" aria-label="View">
-          {([['table', 'Table', List], ['heatmap', 'Heatmap', Grid3x3], ['graph', 'Graph', BarChart3]] as const).map(([k, label, Icon]) => (
+          {([['table', 'Table', List], ['heatmap', 'Heatmap', Grid3x3], ['graph', 'Graph', BarChart3], ['logins', 'Logins', LogIn], ['actions', 'Actions', ShieldAlert]] as const).map(([k, label, Icon]) => (
             <button key={k} type="button" role="tab" aria-selected={view === k} className={segBtn(view === k)} onClick={() => { setView(k); remember({ view: k }); }}>
               <Icon className="h-4 w-4" /> {label}
             </button>
@@ -238,6 +265,10 @@ export default function LoginLog({ currentMember, members }: { currentMember: Te
       {error && <p role="alert" className="m-5 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       {days === null ? (
         <p className="flex items-center gap-2 px-5 py-4 text-sm text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
+      ) : view === 'logins' ? (
+        <LoginsView members={members} fromMs={fromMs} />
+      ) : view === 'actions' ? (
+        <ActionsView members={members} fromMs={fromMs} />
       ) : view === 'heatmap' ? (
         <div className="px-5 py-4">
           <p className="mb-3 text-sm text-ink-soft">
@@ -284,6 +315,12 @@ export default function LoginLog({ currentMember, members }: { currentMember: Te
                           {m.name}
                         </span>
                         <span className="ml-5.5 text-sm text-ink-soft">{ROLE_LABELS[m.role]}</span>
+                        {warningsOf(m.id).length > 0 && (
+                          <span className="ml-5.5 mt-1 flex flex-wrap items-center gap-1" title="Warnings in the last 7 days (Logins view)">
+                            <AlertTriangle className="h-3.5 w-3.5 text-attention" />
+                            {warningsOf(m.id).map(([f, n]) => <span key={f} className="inline-flex items-center gap-0.5"><FlagChip flag={f} />{n > 1 && <span className="text-xs text-ink-soft">×{n}</span>}</span>)}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-3">
                         <LightBadge light={light} />
@@ -293,7 +330,7 @@ export default function LoginLog({ currentMember, members }: { currentMember: Te
                       <DayCell day={dayOf(todayKey)} rules={rules} today />
                       <td className="px-3 py-3 text-sm text-ink">{top ? <>{top.label}<span className="block text-ink-soft">{formatMinutes(top.minutes)}</span></> : <span className="text-ink-soft">–</span>}</td>
                       <td className="px-5 py-3 text-sm text-ink-soft">
-                        {seen ? new Date(seen).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : `Not in the last ${weeksShown} weeks`}
+                        {online.has(m.id) ? <span className="inline-flex items-center gap-1.5 font-semibold text-[#15803D]"><span className="h-2 w-2 rounded-full bg-[#15803D]" /> Online now</span> : seen ? new Date(seen).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : `Not in the last ${weeksShown} weeks`}
                       </td>
                     </tr>
                     {isOpen && (

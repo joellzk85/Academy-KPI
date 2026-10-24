@@ -16,6 +16,7 @@ import { registerLinkVisitRoutes } from "./serverLinkVisits";
 import { registerPaymentLinkRoutes } from "./serverPaymentLinks";
 import { registerBlueprintRoutes } from "./serverBlueprint";
 import { registerKpiRoutes } from "./serverKpi";
+import { registerActivityRoutes } from "./serverActivity";
 
 // Load environment variables
 dotenv.config();
@@ -71,6 +72,9 @@ async function startServer() {
 
   // Gross profit KPIs: the GP % only, worked out from the P&L (reps and Admin can't read costs)
   registerKpiRoutes(app);
+
+  // Logins and sensitive actions for Team → Login log (Management only; IP, place, device, warning flags)
+  registerActivityRoutes(app);
 
   // API Routes
   app.get("/api/health", (req, res) => {

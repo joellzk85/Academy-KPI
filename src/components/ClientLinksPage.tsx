@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { ChevronDown, ChevronRight, Download, ExternalLink, Loader2, Search } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
+import { reportDownload } from '../lib/loginActivity';
 import { DocKind, DocLink } from '../lib/docLinks';
 import { LINK_STATE_LABEL, LinkState, MAX_OPENS, linkState, readLinkSettings } from '../lib/linkLimits';
 import { ProposalView, durationText, expiryDateMY, summarise } from '../lib/proposalTracking';
@@ -113,6 +114,7 @@ export default function ClientLinksPage({ people, viewer }: { people: Person[]; 
     a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     a.download = `NEXT-Academy-client-links-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
+    reportDownload(`Client links list (CSV, ${rows.length} link${rows.length === 1 ? '' : 's'})`);
   };
 
   return (

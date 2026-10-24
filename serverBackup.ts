@@ -22,6 +22,7 @@ import { getStorage } from 'firebase-admin/storage';
 import firebaseConfig from './firebase-applet-config.json';
 import { safeFileName } from './src/lib/proposals';
 import { admin, UserError, callerFrom, route } from './serverAuth';
+import { logActivity } from './serverActivity';
 import {
   INFO_TAB, SKIP_CONFIG_DOCS, Table, ZIP_GROUPS, ZipGroup, ZipLookups, infoTable, malaysiaDay, orderCollections, sheetIdFrom,
   toTable, uniqueTabs, zipGroupsFrom, zipPlace,
@@ -276,6 +277,7 @@ export function registerBackupRoutes(app: Express) {
       await backUpToSheet(caller, false).catch(() => {});   // errors are saved in the settings for Management to see
       return {};
     }
+    if (force) await logActivity(caller.memberId, req, 'download', 'Back up now (whole CRM to the Google Sheet)');
     return backUpToSheet(caller, force);
   }));
 
@@ -306,9 +308,10 @@ export function registerBackupRoutes(app: Express) {
   // their storage folders (zipPlace in src/lib/backup.ts). The body's `groups` picks which (none sent = all).
   app.post('/api/backup/proposals', async (req: Request, res: ExpressResponse) => {
     try {
-      await managementFrom(req);
+      const caller = await managementFrom(req);
       const groups = zipGroupsFrom(req.body?.groups);
       if (!groups.length) throw new UserError(400, 'nothing-picked', 'Tick at least one kind of file to download.');
+      await logActivity(caller.memberId, req, 'download', `Files ZIP (${groups.join(', ')})`);
       const want = (g: ZipGroup) => groups.includes(g);
       const { db } = admin();
       const all = async (name: string, needed = true) => (needed ? (await db.collection(name).get()).docs.map(d => ({ ...d.data(), id: d.id }) as any) : []);
@@ -439,6 +442,7 @@ export function registerBackupRoutes(app: Express) {
   app.post('/api/backup/download', async (req: Request, res: ExpressResponse) => {
     try {
       const caller = await managementFrom(req);
+      await logActivity(caller.memberId, req, 'download', 'Excel backup (whole CRM)');
       const tables = await readAllTables();
       const now = new Date();
       const wb = new ExcelJS.Workbook();

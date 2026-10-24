@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ChevronDown, Eye, EyeOff, Loader2, LogOut, ShieldCheck } from 'lucide-react';
 import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { auth, callServer, friendlyError } from '../lib/firebase';
+import { loginDeviceInfo } from '../lib/loginActivity';
 import { TeamMember, ROLE_LABELS } from '../types';
 import Logo from './Logo';
 
@@ -169,7 +170,7 @@ export function LoginForm({ members }: { members: TeamMember[] }) {
     if (!password) return setError('Enter your password.');
     setBusy(true);
     try {
-      const { token } = await callServer<{ token: string }>('/api/auth/login', { memberId: member.id, password });
+      const { token } = await callServer<{ token: string }>('/api/auth/login', { memberId: member.id, password, ...loginDeviceInfo() });
       await signInWithCustomToken(auth, token);
       passwordTypedAtLogin = password;
       localStorage.setItem(LAST_NAME_KEY, member.id);

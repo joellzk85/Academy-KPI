@@ -161,6 +161,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Tidy-up:** delete unreachable old code in `RepDetailDashboard.tsx` (tasks, `handleCellChange`; old P&L done 2026-10-21); redesign remaining old screens in the new style.
 - **Full deal test fixes (Joel, 2026-10-23):** decisions and the four batches are in `docs/features/full-deal-test.md`; all four batches done 2026-10-23. Publish `firestore.rules` (Batch 3 discount requests, Batch 4 Agree fee); add "(TB)" to existing teambuilding programme names. HRDC Employer code and Approval code on Grant approved (go-live checklist item 54), required since Batch 4. (The older rule tests' 3 failures were an out-of-date test, fixed 2026-10-23; rules unchanged.)
 - **Programmes linked to outlines and trainers; venue address (2026-10-23):** publish `storage.rules` (`programme_files`); go-live checklist item 55.
+- **Logins, places, devices, sensitive actions (2026-10-24):** in Login log, never mentioned to staff (Joel); publish `firestore.rules`; go-live checklist item 56.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

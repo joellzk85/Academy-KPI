@@ -981,6 +981,21 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Logins and sensitive actions (2026-10-24, serverActivity.ts): written only by the CRM server, read only by
+    // Management (Team → Login log). login_devices (devices and places seen before) has no rule: server only.
+    match /login_sessions/{sessionId} {
+      allow read: if isManagement();
+      allow write: if false;
+    }
+    match /activity_log/{entryId} {
+      allow read: if isManagement();
+      allow write: if false;
+    }
+    match /login_live/{memberId} {
+      allow read: if isManagement();
+      allow write: if false;
+    }
+
     // Owner override: read and write anything, except the login records the CRM server keeps and owner_access itself.
     match /{coll}/{path=**} {
       allow read, write: if isSuper() && !(coll in ['secrets', 'server_secrets', 'team', 'auth_map', 'owner_access']);
