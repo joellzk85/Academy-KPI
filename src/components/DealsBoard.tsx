@@ -56,7 +56,7 @@ import { valueDropBlocked } from '../lib/dealOffers';
 import PanelResizer from './PanelResizer';
 import { PotentialBox, PotentialButtons, PotentialChip, monthOptions } from './DealPotential';
 import { POTENTIAL_LABELS, Potential, forecastMonthLabel, potentialOf } from '../lib/forecast';
-import { coCloseProblem, coCloser } from '../lib/coClose';
+import { CoCloseMode, coCloseProblem, coCloseText, coCloser } from '../lib/coClose';
 import { ReferralFeeType, Referrer, referralProblem } from '../lib/referrers';
 import { ReferralFields, ReferralLine, raiseReferralFee, useReferrers } from './Referrers';
 
@@ -124,7 +124,8 @@ const emptyForm = () => ({
   ownerId: '',
   taggedRepIds: [] as string[],
   tagNote: '',
-  coCloserId: '',        // closed together (2026-10-24, lib/coClose.ts): the co-closer gets coClosePct % of the commission
+  coCloserId: '',        // closed together (2026-10-24, lib/coClose.ts): the co-closer shares the commission or has their own %
+  coCloseMode: 'share' as CoCloseMode,
   coClosePct: '',
   referrerId: '',        // referred by (2026-10-24, lib/referrers.ts)
   referralFeeType: 'pct' as ReferralFeeType,
@@ -319,6 +320,7 @@ export default function DealsBoard({
       taggedRepIds: p.taggedRepIds || [],
       tagNote: p.tagNote || '',
       coCloserId: coCloser(p)?.id || '',
+      coCloseMode: coCloser(p)?.mode || 'share',
       coClosePct: coCloser(p) ? String(coCloser(p)!.pct) : '',
       referrerId: p.referrerId || '',
       referralFeeType: p.referralFeeType === 'rm' ? 'rm' : 'pct',
@@ -363,7 +365,8 @@ export default function DealsBoard({
       return setFormError('You can only create deals for yourself.');
     }
     const coId = form.coCloserId || '';   // older saved drafts have no co-closer or referrer
-    const coProblem = coCloseProblem(newOwner.id, coId, form.coClosePct || '');
+    const coMode: CoCloseMode = form.coCloseMode === 'own' ? 'own' : 'share';
+    const coProblem = coCloseProblem(newOwner.id, coId, form.coClosePct || '', coMode);
     if (coProblem) return setFormError(coProblem);
     const refId = form.referrerId && referrers.some(r => r.id === form.referrerId) ? form.referrerId : '';
     const refProblem = referralProblem(refId, form.referralFeeType || 'pct', form.referralFeeValue || '');
@@ -415,6 +418,7 @@ export default function DealsBoard({
         tagNote: form.tagNote.trim(),
         coCloserId: coId,
         coCloserName: coId ? people.find(r => r.id === coId)?.name || '' : '',
+        coCloseMode: coId ? coMode : '',
         coClosePct: coId ? Number(form.coClosePct) : 0,
         referrerId: refId,
         referrerName: refId ? referrers.find(r => r.id === refId)?.name || '' : '',
@@ -424,7 +428,7 @@ export default function DealsBoard({
       };
       // A won deal's co-closer and referral fee change only by Management (firestore.rules), like its owner.
       if (existing && dealStage(existing) === 'won' && viewer.role !== 'management') {
-        ['coCloserId', 'coCloserName', 'coClosePct', 'referrerId', 'referrerName', 'referralFeeType', 'referralFeeValue'].forEach(k => delete data[k]);
+        ['coCloserId', 'coCloserName', 'coCloseMode', 'coClosePct', 'referrerId', 'referrerName', 'referralFeeType', 'referralFeeValue'].forEach(k => delete data[k]);
       }
       if (existing && dateLocked(existing)) { delete data.trainingDate; delete data.trainingDays; }
       if (existing && valueLocked(existing)) { ['programmeId', 'courseName', 'enquiryNote', 'fundingType', 'proposalValue', 'participants'].forEach(k => delete data[k]); }
@@ -1037,18 +1041,34 @@ export default function DealsBoard({
                 <label htmlFor="d-coclose" className={label}>Co-closed with <span className="font-normal text-ink-soft">(optional)</span></label>
                 <div className="flex flex-wrap items-center gap-2">
                   <select id="d-coclose" value={form.coCloserId || ''} className={`${input} sm:max-w-[16rem]`} disabled={formWon && viewer.role !== 'management'}
-                    onChange={e => setForm(f => ({ ...f, coCloserId: e.target.value, coClosePct: e.target.value ? f.coClosePct || '50' : '' }))}>
+                    onChange={e => setForm(f => ({ ...f, coCloserId: e.target.value, coClosePct: e.target.value ? f.coClosePct || (f.coCloseMode === 'own' ? '1' : '50') : '' }))}>
                     <option value="">Nobody (owner only)</option>
                     {people.filter(r => r.id !== form.ownerId).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </select>
-                  {form.coCloserId && (
-                    <>
-                      <input value={form.coClosePct} onChange={e => setForm(f => ({ ...f, coClosePct: e.target.value }))} inputMode="decimal" className={`${input} w-24`}
-                        aria-label="Co-closer's share of the commission (%)" disabled={formWon && viewer.role !== 'management'} />
-                      <span className="text-sm text-ink-soft">% of the commission (owner keeps {Number(form.coClosePct) > 0 && Number(form.coClosePct) < 100 ? 100 - Number(form.coClosePct) : '…'}%)</span>
-                    </>
-                  )}
                 </div>
+                {form.coCloserId && (
+                  <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface p-3">
+                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="How the co-closer is paid">
+                      {([['share', "Share the owner's commission"], ['own', 'Own commission %']] as [CoCloseMode, string][]).map(([m, l]) => {
+                        const on = (form.coCloseMode || 'share') === m;
+                        return (
+                          <button key={m} type="button" role="radio" aria-checked={on} disabled={formWon && viewer.role !== 'management'}
+                            onClick={() => setForm(f => ({ ...f, coCloseMode: m, coClosePct: m === 'own' ? '1' : '50' }))}
+                            className={`rounded-full border px-3 py-1 text-sm font-medium ${on ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{l}</button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input value={form.coClosePct} onChange={e => setForm(f => ({ ...f, coClosePct: e.target.value }))} inputMode="decimal" className={`${input} w-24`}
+                        aria-label={form.coCloseMode === 'own' ? "Co-closer's own commission (% of the price)" : "Co-closer's share of the commission (%)"} disabled={formWon && viewer.role !== 'management'} />
+                      <span className="text-sm text-ink-soft">
+                        {form.coCloseMode === 'own'
+                          ? '% of the price before SST, on top; the owner keeps the full commission'
+                          : `% of the commission (owner keeps ${Number(form.coClosePct) > 0 && Number(form.coClosePct) < 100 ? 100 - Number(form.coClosePct) : '…'}%)`}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <p className="mt-1.5 text-sm text-ink-soft">Only the sales commission is shared. KPIs (Closing RM) stay with the owner.{formWon && viewer.role !== 'management' ? ' On a won deal only Management changes this.' : ''}</p>
               </div>
               <ReferralFields referrers={referrers} referrerId={form.referrerId || ''} feeType={form.referralFeeType || 'pct'} feeValue={form.referralFeeValue || ''}
@@ -1463,7 +1483,7 @@ function DealPanel(props: {
               </p>
             )}
             {coCloser(p) && (
-              <p className="text-sm text-ink-soft">Co-closed with {props.personName(coCloser(p)!.id) === 'Former team member' ? coCloser(p)!.name || 'a former team member' : props.personName(coCloser(p)!.id)}: {coCloser(p)!.pct}% of the commission (owner {100 - coCloser(p)!.pct}%)</p>
+              <p className="text-sm text-ink-soft">Co-closed with {coCloseText(p, props.personName(coCloser(p)!.id) === 'Former team member' ? coCloser(p)!.name || 'a former team member' : props.personName(coCloser(p)!.id))}</p>
             )}
             <ReferralLine deal={p} referrers={props.referrers} editable={props.editable} />
             {p.notes && <p className="whitespace-pre-line rounded-lg bg-surface px-3.5 py-2.5 text-[15px]">{p.notes}</p>}

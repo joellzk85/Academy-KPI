@@ -11,15 +11,16 @@
 // Management can type the amount instead, saved in project_pl/{dealId}.sstAmount. SST comes off profit.
 // Commission (Joel, 2026-10-20): the deal owner (sales person) earns commissionPct (3%) of the selling price before SST
 // and before HRDC's %, i.e. income minus SST. It comes off profit; it isn't a payment request (it's for payslips later).
-// Co-closed deals (2026-10-24, lib/coClose.ts): the commission is shared with the co-closer by the agreed %
-// (commissionShares); commissionTo stays the owner, who keeps the GP % KPI.
+// Co-closed deals (2026-10-24, lib/coClose.ts): the co-closer shares the owner's commission by the agreed %, or gets their
+// own % of the price on top (then commission is the total of both); commissionShares says who gets what. commissionTo
+// stays the owner, who keeps the GP % KPI.
 
 import { dealOwnerId, dealStage, dealValue, todayIso, trainingEndDate } from './deals';
 import { MoneyIn, MoneyOut, MoneySettings, dealMoneySums, inPL, moneySettled, settingsAt } from './money';
 import { mainQuote } from './checklist';
 import { quoteSst } from './quoteSst';
 import { cancelledTraining } from './trainingChange';
-import { CommissionShare, commissionShares, sharesText } from './coClose';
+import { CommissionShare, commissionShares, sharesText, sharesTotal } from './coClose';
 
 export type TrainingStatus = 'done' | 'today' | 'upcoming' | 'no_date' | 'cancelled';
 export type MoneyStatus = 'settled' | 'waiting' | 'not_invoiced';
@@ -51,7 +52,7 @@ export interface ProjectRow {
   commission: number;            // the sales person's commission (commissionPct of income before SST)
   commissionPct: number;
   commissionTo: string;          // the deal owner's id (the sales person)
-  commissionShares: CommissionShare[];   // who gets the commission: the owner, plus a co-closer's agreed %
+  commissionShares: CommissionShare[];   // who gets the commission: the owner, plus a co-closer (share or own %)
   costs: number;                 // approved and paid money out
   profit: number;
   margin: number;                // profit as % of income before SST (0 when no income)
@@ -97,12 +98,14 @@ export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], al
   const sst = sstTyped ? (typed as number) : (income * sstRate) / (100 + sstRate);
   const hrdcFee = estimate ? (isHrdc(deal) ? income * (s.hrdcDeductionPct / 100) : 0) : pl.hrdcFee + pl.shortfall;
   const beforeSst = income - sst;
-  const commission = cancelled ? 0 : Math.round(Math.max(0, beforeSst) * (s.commissionPct || 0)) / 100;
+  const ownerCommission = cancelled ? 0 : Math.round(Math.max(0, beforeSst) * (s.commissionPct || 0)) / 100;
+  const shares = commissionShares(deal, dealOwnerId(deal), ownerCommission, cancelled ? 0 : beforeSst, s.commissionPct || 0);
+  const commission = sharesTotal(shares);   // more than the owner's when the co-closer has their own %
   const profit = income - sst - hrdcFee - commission - pl.costs;
 
   return {
     deal, trainingDate, training, estimate, income, sst, sstTyped, sstRate, hrdcFee, commission, commissionPct: s.commissionPct || 0, commissionTo: dealOwnerId(deal),
-    commissionShares: commissionShares(deal, dealOwnerId(deal), commission),
+    commissionShares: shares,
     costs: pl.costs, profit,
     margin: beforeSst > 0 ? (profit / beforeSst) * 100 : 0,
     received: pl.received,

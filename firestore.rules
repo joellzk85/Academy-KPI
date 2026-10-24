@@ -216,7 +216,7 @@ service cloud.firestore {
         return !(resource.data.get('stage', '') == 'won' && request.resource.data.get('stage', '') == 'won')
           || (same('programmeId') && same('courseName') && same('fundingType')
               && (same('ownerId') || isManagement())
-              && ((same('coCloserId') && same('coClosePct') && same('referrerId') && same('referralFeeType') && same('referralFeeValue')) || isManagement())
+              && ((same('coCloserId') && same('coCloseMode') && same('coClosePct') && same('referrerId') && same('referralFeeType') && same('referralFeeValue')) || isManagement())
               && ((same('proposalValue') && same('participants'))
                   || (changeApproved('value')
                       && request.resource.data.get('proposalValue', null) == resource.data.trainingChange.get('newValue', -1)
