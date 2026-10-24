@@ -50,6 +50,7 @@ export interface RepLike {
   kpiTemplate?: string;
   kpiSet?: { items?: KpiSetItem[]; trainerId?: string } | null;   // trainerId: their trainers_directory record (trainer KPIs)
   targets?: Record<string, number | undefined>;
+  salesRing?: { monthly?: number } | null;   // sales contributor: a ring without a sales KPI (Team → KPIs)
 }
 
 // Has Management given this person KPIs? Reps and Admin always have some (their default set);
@@ -124,6 +125,16 @@ export function metricsFor(rep: RepLike): ResolvedMetric[] {
 // The person's Closing RM KPI (counted from deals won), if they have one. Rings and the company target use it.
 export function closingMetric(rep: RepLike): ResolvedMetric | undefined {
   return metricsFor(rep).find(m => m.auto === 'won');
+}
+
+// Monthly RM target behind a person's sales ring, or null for no ring. The Closing RM KPI's target; otherwise the
+// sales contributor target (Joel, 2026-10-24: Admin or Management who sell without a sales KPI still get the same
+// inner and outer ring, and their target adds to the company target). Never part of the KPI score.
+export function ringTarget(rep: RepLike): number | null {
+  const closing = hasKpis(rep, rep.role) ? closingMetric(rep) : undefined;   // Management without KPIs: no default set
+  if (closing) return closing.targetVal;
+  const monthly = Number(rep.salesRing?.monthly);
+  return monthly > 0 ? monthly : null;
 }
 
 // 'OCT-26' -> '2026-10'

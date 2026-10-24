@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, GraduationCap, ListTodo, PhoneCall, UserCheck } from 'lucide-react';
 import { Representative } from '../types';
-import { closingMetric, KPI_LIGHT_BADGE, kpiLight, kpiValueText, LIGHT_BADGE, monthKpi, monthLabel, monthPrefix, rowBarClass, weekIndexOf } from '../lib/kpi';
+import { KPI_LIGHT_BADGE, ringTarget, kpiLight, kpiValueText, LIGHT_BADGE, monthKpi, monthLabel, monthPrefix, rowBarClass, weekIndexOf } from '../lib/kpi';
 import { LIGHT_LABELS } from '../lib/kpiLibrary';
 import { addDays, dealAppointmentDate, dealNeedsAttention, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, trainingDateText } from '../lib/deals';
 import { HOW_LABELS } from '../lib/followUps';
@@ -196,7 +196,7 @@ export function personSlides(args: {
       out.push({
         key, title: 'Sales projection', subtitle: 'Won and expected, month by month',
         body: <ProjectionSlide deals={data.deals} ownerId={rep.id} today={today} clientName={p => clientNameOf(p, data.clients)} storeKey={`present:${rep.id}`}
-          monthlyTarget={closingMetric(rep)?.targetVal || 0} />,
+          monthlyTarget={ringTarget(rep) || 0} />,
       });
     } else if (key === 'next') {
       const until = addDays(today, 7);
@@ -370,7 +370,7 @@ export function companySlides(args: {
       out.push({
         key, title: 'Sales projection', subtitle: 'The whole team: won and expected, month by month',
         body: <ProjectionSlide deals={data.deals} today={today} clientName={p => clientNameOf(p, data.clients)} storeKey="present:company"
-          monthlyTarget={reps.reduce((t, r) => t + (closingMetric(r)?.targetVal || 0), 0)} />,
+          monthlyTarget={reps.reduce((t, r) => t + (ringTarget(r) || 0), 0)} />,
       });
     } else if (key === 'clients') {
       const top = wonBy(data.deals, period, p => clientNameOf(p, data.clients)).slice(0, 8);

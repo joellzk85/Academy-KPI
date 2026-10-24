@@ -224,7 +224,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   const isStaff = !isRep; // Admin or Management
 
   // Per-person KPI settings (template + targets) keyed by team member id.
-  const [repDocs, setRepDocs] = useState<Record<string, { targets?: Representative['targets']; kpiTemplate?: string; kpiSet?: { items?: KpiSetItem[] } }>>({});
+  const [repDocs, setRepDocs] = useState<Record<string, { targets?: Representative['targets']; kpiTemplate?: string; kpiSet?: { items?: KpiSetItem[] }; salesRing?: Representative['salesRing'] }>>({});
   // Typed-in weekly KPI numbers, one document per person per month: "<memberId>_<MMM-YY>".
   const [monthKpiDocs, setMonthKpiDocs] = useState<Record<string, Representative['kpi']>>({});
 
@@ -364,6 +364,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
           role: m.role,
           kpiTemplate: settings.kpiTemplate,
           kpiSet: settings.kpiSet,
+          salesRing: settings.salesRing,
           targets: settings.targets || DEFAULT_TARGETS,
           kpi: withoutAutoKpis(person, monthKpiDocs[`${m.id}_${selectedMonth}`])
         };
@@ -377,9 +378,9 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     const extra = teamMembers
       .filter(m => m.active && m.role === 'management' && !representatives.some(r => r.id === m.id))
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map(m => ({ id: m.id, name: m.name, role: m.role, kpiTemplate: '', noKpis: true, targets: DEFAULT_TARGETS, kpi: emptyKpi() as Representative['kpi'] }));
+      .map(m => ({ id: m.id, name: m.name, role: m.role, kpiTemplate: '', noKpis: true, salesRing: repDocs[m.id]?.salesRing, targets: DEFAULT_TARGETS, kpi: emptyKpi() as Representative['kpi'] }));
     return [...representatives, ...extra];
-  }, [teamMembers, representatives]);
+  }, [teamMembers, representatives, repDocs]);
 
   // Switching month only changes what is shown; nothing is copied or overwritten.
   const handleMonthChange = async (newMonth: string) => {
@@ -391,10 +392,10 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   useEffect(() => {
     if (!db) return;
     const unsubscribe = onSnapshot(collection(db, 'reps'), (snapshot) => {
-      const next: Record<string, { targets?: Representative['targets']; kpiTemplate?: string; kpiSet?: { items?: KpiSetItem[] } }> = {};
+      const next: Record<string, { targets?: Representative['targets']; kpiTemplate?: string; kpiSet?: { items?: KpiSetItem[] }; salesRing?: Representative['salesRing'] }> = {};
       snapshot.forEach((docSnap) => {
         const data: any = docSnap.data();
-        next[docSnap.id] = { targets: data.targets, kpiTemplate: data.kpiTemplate, kpiSet: data.kpiSet };
+        next[docSnap.id] = { targets: data.targets, kpiTemplate: data.kpiTemplate, kpiSet: data.kpiSet, salesRing: data.salesRing };
       });
       setRepDocs(next);
     }, (err) => console.error('Rep workspaces failed to load:', err));
@@ -1101,6 +1102,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               ) : (
               <ManagementDashboard
                 reps={representatives}
+                ringPeople={workspacePeople}
                 onSelectRep={(rep) => {
                   setRepSelectionSource('management');
                   setSelectedRepId(rep.id);

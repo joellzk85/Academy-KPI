@@ -244,6 +244,14 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
   - **Code:** `serverActivity.ts` (routes `/api/activity/open`, `/beat`, `/action`; `recordLogin`, `recordFailedLogin`, `logActivity` called from `serverAuth.ts` and `serverBackup.ts`), `lib/loginSessions.ts` (shared labels and checks), `LoginSessions.tsx` (the two views). Collections, written only by the server: `login_sessions`, `activity_log`, `login_live` (Management reads), `login_devices` (server only). Each tab of the CRM is one session; the login screen passes its session id on (`sessionStorage`) so a login and the CRM opening are one record. The device id is the same browser id client links use (`next_dev`).
   - Checked: build, and 24 checks of the server logic on a pretend database (login and open as one record, minutes once per 50 s and only your own, new device / place, two places at once but not two tabs, wrong passwords and the 3rd flagged, failed logins don't teach a new device, the browser can't fake password or team entries, 60 a minute limit, after-hours edges). Publish `firestore.rules`.
 
+## Sales contributor ring (2026-10-24)
+
+- **Why (Joel):** some Admin and Management people sell but need no sales KPI; they still need a ring showing their contribution, and it ties into the company sales number.
+- **Where:** Management → Team → KPIs for the person: tick **Sales contributor** and type a **monthly sales target RM** (required when ticked). Works with "No KPIs" too. Not offered when their set already has Closing RM (that ring comes from Closing RM). Saved as `reps/{id}.salesRing = { monthly }` (null when off).
+- **What it does:** the same inner (this month) and outer (target period) ring as reps, on their My home ("Me") and on Management's per-person rings; "See the deals" lists their won deals. Their target adds to the company target when no company target is typed in (Team performance, sales projection, My home, Present). Their KPI score never changes.
+- **Code:** `ringTarget` in `lib/kpi.ts` (Closing RM target, else the contributor target; Management without KPIs never falls back to the default set), used by `MyHome.tsx`, `ManagementDashboard.tsx` (`ringPeople`) and `PresentSlides.tsx`. No rules change (Management already writes `reps`).
+- Checked: build, and the target rule for rep, Admin, Management without KPIs, with and without the tick.
+
 ## Appraisal: KPI, attitude and reliability as three parts (2026-10-22)
 
 - **Why:** KPIs are results only. Attitude (360) and reliability sit beside them and are never blended into the KPI score; there is no combined grand total.

@@ -12,7 +12,7 @@ import { CalendarEvent, Representative } from '../types';
 import {
   OPEN_STAGES, STAGE_LABELS, DealStage, journeyStage, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, todayIso,
 } from '../lib/deals';
-import { closingMetric, countAuto, monthKpi, kpiHex, kpiValueText, KpiSources, LIGHT_BADGE, rowBarClass } from '../lib/kpi';
+import { countAuto, ringTarget, monthKpi, kpiHex, kpiValueText, KpiSources, LIGHT_BADGE, rowBarClass } from '../lib/kpi';
 import { LIGHT_LABELS } from '../lib/kpiLibrary';
 import { useKpiSources } from '../lib/useKpiSources';
 import { periodFor } from '../lib/salesTarget';
@@ -374,6 +374,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const ctx: CardCtx = {
     kpiSources,
     viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, receipts, claims, programmes, representatives, venues,
+    ringPeople: workspaces || representatives,
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
@@ -414,7 +415,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
       {/* 1. Calendar (small) and 2. Performance (one row) */}
       <div className="grid items-stretch gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
         <CompactCalendar events={events} today={today} showFull={showFullCalendar} onToggleFull={() => setShowFullCalendar(v => !v)} />
-        <Performance viewer={viewer} representatives={representatives} deals={deals} today={today} nameOf={nameOf} clientName={clientName} />
+        <Performance viewer={viewer} representatives={workspaces || representatives} deals={deals} today={today} nameOf={nameOf} clientName={clientName} />
       </div>
 
       {/* The full calendar opens full width under the calendar and Performance row (Joel, 2026-10-17) */}
@@ -551,8 +552,9 @@ function EditBar({ hidden, wide, onAdd, onReset, hiddenShortcuts, onAddShortcut 
 // company target are set by Management (lib/salesTarget.ts); not set = January to December, and the
 // company target is the sum of each person's (monthly target x months).
 // Inner (small) ring: sales won this month vs the monthly target.
+// Sales contributors without a sales KPI (Team → KPIs) get the same rings from their monthly target.
 function salesTarget(rep: Representative): number | null {
-  return closingMetric(rep)?.targetVal ?? null;
+  return ringTarget(rep);
 }
 
 function wonBetween(deals: any[], from: string, to: string, ownerId?: string): number {
@@ -815,6 +817,7 @@ type CardCtx = {
   kpiSources: KpiSources;
   viewer: Viewer; today: string; deals: any[]; wonDeals: any[]; checklists: Record<string, any>; queries: HrdcQuery[];
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; receipts: Receipt[]; claims: ClaimBack[]; programmes: any[]; representatives: Representative[]; venues: any[];
+  ringPeople: Representative[];   // everyone with a workspace (sales contributors without KPIs have rings too)
   checklistSettings: any; moneySettings: any; nameOf: (id: string) => string; clientName: (p: any) => string;
   openDeal: (p: any) => void; nav: MyHomeNav; mine: (p: any) => boolean; notices: React.ReactNode;
   shared: SharedItem[];
@@ -847,9 +850,9 @@ function feeRequestItems(c: CardCtx, deal: (p: any) => string): (Item & { dealId
 // Sales projection card: a person's own; Management picks the whole team or one person.
 function ProjectionCard({ ctx, editing }: { ctx: CardCtx; editing: boolean }) {
   const target = useSalesTarget();
-  const sellers = ctx.representatives.filter(r => salesTarget(r) !== null);
+  const sellers = ctx.ringPeople.filter(r => salesTarget(r) !== null);
   const monthlyTargetFor = (who: string) => {
-    if (who !== 'all') { const r = ctx.representatives.find(x => x.id === who); return r ? salesTarget(r) || 0 : 0; }
+    if (who !== 'all') { const r = ctx.ringPeople.find(x => x.id === who); return r ? salesTarget(r) || 0 : 0; }
     return target ? target.monthly : sellers.reduce((t, r) => t + (salesTarget(r) || 0), 0);
   };
   return (

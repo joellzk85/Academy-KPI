@@ -17,6 +17,9 @@ import {
 // A ready-made set (the old templates) can be the starting point. Management people can also have no KPIs.
 // Internal trainer (Part B): their trainer record, picked here, is what the trainer KPIs count for. Only people
 // given one can have those KPIs (Joel: some internal trainers focus on other KPIs for now).
+// Sales contributor (Joel, 2026-10-24): Admin or Management who sell without a sales KPI get the same sales ring
+// (outer: target period, inner: this month) from a monthly RM target saved as reps/{memberId}.salesRing. It is not
+// a KPI, so it never changes their score; their target adds to the company target. Not offered with Closing RM.
 
 const small = 'w-24 rounded-lg border border-line bg-white px-2.5 py-1.5 text-right text-[15px] focus:border-accent focus:outline-none';
 const input = 'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -26,7 +29,7 @@ const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink 
 const numText = (v: string) => v.replace(/[^0-9.]/g, '');
 
 interface ItemDraft { kpiId: string; slot: string; label: string; weight: string; target: string; bands: BandsDraft | null; param: string }
-interface SetDraft { none: boolean; items: ItemDraft[]; trainerId: string }
+interface SetDraft { none: boolean; items: ItemDraft[]; trainerId: string; ring?: boolean; ringMonthly?: string }
 
 function toDraft(items: KpiSetItem[]): ItemDraft[] {
   const lib = activeKpiLibrary();
@@ -50,7 +53,8 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
   const lib = activeKpiLibrary();
   const [draft, setDraft] = useState<SetDraft>(() => {
     const noneYet = member.role === 'management' && !saved?.kpiSet?.items?.length && !presetById(saved?.kpiTemplate);
-    return { none: noneYet, trainerId: saved?.kpiSet?.trainerId || '', items: noneYet ? [] : toDraft(setItemsFor({ id: member.id, role: member.role, kpiTemplate: saved?.kpiTemplate, kpiSet: saved?.kpiSet, targets: saved?.targets })) };
+    const ringMonthly = Number(saved?.salesRing?.monthly) > 0 ? String(saved.salesRing.monthly) : '';
+    return { none: noneYet, trainerId: saved?.kpiSet?.trainerId || '', ring: !!ringMonthly, ringMonthly, items: noneYet ? [] : toDraft(setItemsFor({ id: member.id, role: member.role, kpiTemplate: saved?.kpiTemplate, kpiSet: saved?.kpiSet, targets: saved?.targets })) };
   });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -87,6 +91,7 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
   });
 
   const total = draft.items.reduce((t, x) => t + (Number(x.weight) || 0), 0);
+  const hasClosing = !draft.none && draft.items.some(x => lib.defs.find(d => d.id === x.kpiId)?.measure === 'won');
   const available = useMemo(() => {
     const inSet = new Set(draft.items.map(x => x.kpiId));
     return (Object.keys(GROUP_LABELS) as KpiGroup[])
@@ -97,10 +102,16 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
   const save = async () => {
     const ref = doc(db, 'reps', member.id);
     const by = { updatedAt: new Date().toISOString(), updatedById: viewer.id, updatedByName: viewer.name };
+    let salesRing: { monthly: number } | null = null;
+    if (draft.ring && !hasClosing) {
+      const monthly = Number(draft.ringMonthly);
+      if (!(monthly > 0)) return setError('Enter a monthly sales target above 0 for the sales ring, or untick it.');
+      salesRing = { monthly };
+    }
     if (draft.none) {
       setBusy(true);
       try {
-        await setDoc(ref, { kpiTemplate: '', kpiSet: null }, { merge: true });
+        await setDoc(ref, { kpiTemplate: '', kpiSet: null, salesRing }, { merge: true });
         formDraft.clear();
         onSaved(`${member.name} has no KPIs.`);
       } catch (err) { setError(friendlyError(err)); setBusy(false); }
@@ -135,7 +146,7 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
     const targets = Object.fromEntries(items.filter(i => i.target).map(i => [i.slot, i.target]));
     setBusy(true);
     try {
-      await setDoc(ref, { kpiTemplate: 'custom', kpiSet: { items, trainerId: draft.trainerId, ...by }, targets }, { merge: true });
+      await setDoc(ref, { kpiTemplate: 'custom', kpiSet: { items, trainerId: draft.trainerId, ...by }, targets, salesRing }, { merge: true });
       formDraft.clear();
       onSaved(`${member.name}'s KPIs have been saved.`);
     } catch (err) { setError(friendlyError(err)); setBusy(false); }
@@ -167,9 +178,28 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
           {member.role === 'management' && (
             <label className="flex items-center gap-2 rounded-xl border border-line bg-white px-4 py-3 text-[15px]">
               <input type="checkbox" className="accent-[#0E6E62]" checked={draft.none} onChange={e => { setDraft(d => ({ ...d, none: e.target.checked })); setError(''); }} />
-              <span><strong>No KPIs.</strong> <span className="text-ink-soft">They keep a workspace, but no KPI page or performance ring.</span></span>
+              <span><strong>No KPIs.</strong> <span className="text-ink-soft">They keep a workspace, but no KPI page.</span></span>
             </label>
           )}
+
+          <div className="rounded-xl border border-line bg-white px-4 py-3">
+            {hasClosing ? (
+              <p className="text-[15px]"><strong>Sales ring:</strong> <span className="text-ink-soft">shown from their Closing RM target.</span></p>
+            ) : (
+              <>
+                <label className="flex items-start gap-2 text-[15px]">
+                  <input type="checkbox" className="mt-1 accent-[#0E6E62]" checked={!!draft.ring} onChange={e => { setDraft(d => ({ ...d, ring: e.target.checked })); setError(''); }} />
+                  <span><strong>Sales contributor.</strong> <span className="text-ink-soft">Show their sales ring without a sales KPI. Their deals won fill it, it never changes their KPI score, and their target adds to the company target.</span></span>
+                </label>
+                {draft.ring && (
+                  <label className="mt-2 flex items-center gap-2 pl-6 text-sm font-semibold" htmlFor="kpi-ring">
+                    Monthly sales target RM
+                    <input id="kpi-ring" inputMode="decimal" className={small} value={draft.ringMonthly || ''} onChange={e => { setDraft(d => ({ ...d, ringMonthly: numText(e.target.value) })); setError(''); }} />
+                  </label>
+                )}
+              </>
+            )}
+          </div>
 
           {!draft.none && (
             <>

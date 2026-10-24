@@ -167,6 +167,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Private room, Backup and Restore (2026-10-24):** double-click the clock (owner only); Login log, Backup, Restore (saved daily copies + last 7 days, undo) and ticked screens live there; publish `firestore.rules`; go-live checklist item 57.
 - **Task shortcut inside a deal (2026-10-24):** "+ Task" on every deal and checklist step, tag anyone; Raise payment fills in from the step; nothing to publish; go-live checklist item 58.
 - **Co-closed deals, client Found by, Referred by and referral fees (2026-10-24):** commission only is shared (KPIs stay with the owner); referral fee request raised when won; publish `firestore.rules`; go-live checklist item 59.
+- **Sales contributor ring (2026-10-24):** Team → KPIs tick gives Admin / Management who sell a sales ring without a sales KPI; nothing to publish. See `home-kpi-dashboards.md`.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

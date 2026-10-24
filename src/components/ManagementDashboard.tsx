@@ -8,7 +8,7 @@ import {
   dealWonDate, formatDate, formatRM, journeyStage, todayIso,
 } from '../lib/deals';
 import { activeHold } from '../lib/dealHold';
-import { closingMetric, kpiBarClass, kpiValueText, LIGHT_TEXT, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
+import { kpiBarClass, ringTarget, kpiValueText, LIGHT_TEXT, monthChoices, monthKpi, monthLabel, monthPrefix } from '../lib/kpi';
 import { LIGHT_LABELS } from '../lib/kpiLibrary';
 import { useKpiSources } from '../lib/useKpiSources';
 import { SalesTarget, monthsBetween, periodFor, ymLabel } from '../lib/salesTarget';
@@ -24,6 +24,7 @@ import { allFlags, closingTotals, totalsDiffer } from '../lib/dealIntegrity';
 
 interface Props {
   reps: Representative[];               // people with a workspace, with this month's typed KPIs
+  ringPeople?: Representative[];        // everyone with a workspace: sales contributors without KPIs add to the target
   pipelinesSync?: any[];                // all deals
   selectedMonth: string;                // 'OCT-26'
   onMonthChange: (m: string) => void;
@@ -38,7 +39,7 @@ interface Props {
 const card = 'rounded-2xl border border-line bg-white p-5';
 const OPEN_JOURNEY: DealStage[] = ['lead', 'proposal', 'agreed', 'quoted'];
 
-export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam, onOpenDealChecks, people = [], onOpenDeal, viewer }: Props) {
+export default function ManagementDashboard({ reps, ringPeople, pipelinesSync, selectedMonth, onMonthChange, onSelectRep, onOpenTeam, onOpenDealChecks, people = [], onOpenDeal, viewer }: Props) {
   const deals = pipelinesSync || [];
   const [clients, setClients] = useState<any[]>([]);
   useEffect(() => onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))), []);
@@ -55,8 +56,8 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
   const personName = (id: string) => reps.find(r => r.id === id)?.name || people.find(m => m.id === id)?.name || 'Former team member';
 
   // ---------- Tiles ----------
-  const sellers = reps.filter(r => !!closingMetric(r));
-  const sumMonthly = sellers.reduce((t, r) => t + (closingMetric(r)?.targetVal || 0), 0);
+  const sellers = (ringPeople || reps).filter(r => ringTarget(r) !== null);
+  const sumMonthly = sellers.reduce((t, r) => t + (ringTarget(r) || 0), 0);
   const monthTarget = target ? target.monthly : sumMonthly;
   const periodTarget = target ? target.total : sumMonthly * monthsSoFar;
   const tiles = useMemo(() => {
@@ -176,7 +177,7 @@ export default function ManagementDashboard({ reps, pipelinesSync, selectedMonth
         <section className={card}>
           <h3 className="mb-3 flex items-center gap-2 font-bold"><TrendingUp className="h-4 w-4 text-accent" /> Sales projection</h3>
           <SalesProjection deals={deals} people={sellers.map(r => ({ id: r.id, name: r.name }))} viewer={viewer} today={today}
-            monthlyTargetFor={who => who === 'all' ? monthTarget : (closingMetric(reps.find(r => r.id === who) || { id: who })?.targetVal || 0)}
+            monthlyTargetFor={who => who === 'all' ? monthTarget : (ringTarget((ringPeople || reps).find(r => r.id === who) || { id: who }) || 0)}
             onOpenDeal={onOpenDeal} clientName={clientName} storeKey={`mgmt:${viewer.id}`} />
         </section>
       )}
