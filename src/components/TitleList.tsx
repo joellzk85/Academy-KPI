@@ -12,7 +12,8 @@ import {
 import DraftBar from './DraftBar';
 import PanelResizer from './PanelResizer';
 import ProgrammeLinks, { ProgrammeLinkedInfo, linkOutline } from './ProgrammeLinks';
-import { StatusChip } from './Programmes';
+import { StatusChip, TYPE_TAB_LABELS } from './Programmes';
+import { OutlineType, outlineTypeOf, programmeTypeOf } from '../lib/outlineTb';
 import ListPager from './ListPager';
 import { LIST_SORT_LABELS, sortList, usePaged, type ListSort } from '../lib/listPaging';
 
@@ -73,15 +74,21 @@ export function groupByTitle(kind: TitleKind, programmes: Programme[], docs: Tit
 }
 
 // ---------- The list ----------
-export default function TitlesView({ kind, programmes, docs, deals, trainers, outlines, viewer, onOpenDoc, onWrite, loaded }: {
+/** A training title's type: its record's, else its newest outline's (Soft skill / Technical skill). */
+export const groupTypeOf = (g: TitleGroup, outlines: any[]): OutlineType =>
+  g.programme ? programmeTypeOf(g.programme, outlines) : g.docs.length ? outlineTypeOf(g.docs[0].raw) : 'soft';
+
+export default function TitlesView({ kind, programmes, docs, deals, trainers, outlines, viewer, onOpenDoc, onWrite, loaded, onlyType, docType }: {
   kind: TitleKind; programmes: Programme[]; docs: TitleDoc[]; deals: any[]; trainers: any[];
   outlines: any[];                      // course outlines (for linking on a training title)
+  onlyType?: OutlineType;               // training titles: show only Soft skill or Technical skill ones
+  docType?: 'outline' | 'proposal';     // what the documents are (teambuilding titles on Course outlines hold outlines)
   viewer: Viewer; loaded: boolean;
   onOpenDoc: (d: TitleDoc) => void;
   onWrite: (g: TitleGroup) => void;     // "Write outline" / "Write proposal" for this title
 }) {
   const staff = viewer.role !== 'rep';
-  const docWord = kind === 'teambuilding' ? 'proposal' : 'outline';
+  const docWord = docType || (kind === 'teambuilding' ? 'proposal' : 'outline');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');   // '' = all, '-' = no category
   const [hrdc, setHrdc] = useState<'' | HrdcStatus>('');
@@ -104,6 +111,7 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
     const q = search.trim().toLowerCase();
     const tagQ = q.startsWith('#') ? normTag(q) : '';
     const list = groups
+      .filter(g => !onlyType || kind !== 'training' || groupTypeOf(g, outlines) === onlyType)
       .filter(g => !category || (category === '-' ? !catOf(g) : catOf(g).toLowerCase() === category.toLowerCase()))
       .filter(g => !hrdc || (g.programme && programmeStatus(g.programme) === hrdc))
       .filter(g => {
@@ -115,8 +123,8 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
     // Date added: the title's own, else its newest outline or proposal.
     if (sortBy) return sortList(list, sortBy, g => g.name, g => (g.programme as any)?.createdAt || g.docs.map(d => d.date).sort().pop());
     return list.sort((a, b) => Number(!catOf(a)) - Number(!catOf(b)) || catOf(a).localeCompare(catOf(b)) || a.name.localeCompare(b.name));
-  }, [groups, search, category, hrdc, categories, sortBy]);
-  const paged = usePaged(visible, [search, category, hrdc, sortBy]);
+  }, [groups, search, category, hrdc, categories, sortBy, onlyType, outlines]);
+  const paged = usePaged(visible, [search, category, hrdc, sortBy, onlyType]);
 
   // The panel follows live changes (a new record, a rename) while it's open.
   const livePanel = panel && (panel.programme ? groups.find(g => g.programme?.id === panel.programme!.id) : groups.find(g => g.key === panel.key)) || panel;
@@ -226,7 +234,7 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
       </div>
 
       {livePanel && (
-        <TitlePanel kind={kind} group={livePanel} programmes={programmes} deals={deals} trainers={trainers} outlines={outlines} viewer={viewer}
+        <TitlePanel kind={kind} docWord={docWord} group={livePanel} programmes={programmes} deals={deals} trainers={trainers} outlines={outlines} viewer={viewer}
           docs={docs} onClose={() => setPanel(null)} />
       )}
     </div>
@@ -322,17 +330,18 @@ export async function createTitle(kind: TitleKind, name: string, viewer: Viewer,
 // ---------- A title's details (what the Programmes tab used to hold) ----------
 // Everyone sets the category and #tags. Only Admin and Management rename a title (it changes on every deal), set its
 // HRDC registration, link outlines, files and trainers, or delete it.
-const formOf = (p?: Programme, name = '') => ({
-  name: p?.name || name, category: p?.category || '', tags: programmeTags(p), days: p?.days ? String(p.days) : '',
+const formOf = (p?: Programme, name = '', type: OutlineType = 'soft') => ({
+  name: p?.name || name, skillType: (type === 'technical' ? 'technical' : 'soft') as 'soft' | 'technical', category: p?.category || '', tags: programmeTags(p), days: p?.days ? String(p.days) : '',
   hrdcStatus: programmeStatus(p) as HrdcStatus, hrdcCode: p?.hrdcCode || '', submittedDate: p?.submittedDate || '', approvedDate: p?.approvedDate || '', notes: p?.notes || '',
 });
 
-function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, viewer, onClose }: {
-  kind: TitleKind; group: TitleGroup; programmes: Programme[]; deals: any[]; trainers: any[]; outlines: any[]; docs: TitleDoc[]; viewer: Viewer; onClose: () => void;
+function TitlePanel({ kind, docWord, group, programmes, deals, trainers, outlines, docs, viewer, onClose }: {
+  kind: TitleKind; docWord: 'outline' | 'proposal'; group: TitleGroup; programmes: Programme[]; deals: any[]; trainers: any[]; outlines: any[]; docs: TitleDoc[]; viewer: Viewer; onClose: () => void;
 }) {
   const staff = viewer.role !== 'rep';
   const p = group.programme;
-  const [form, setForm] = useState(() => formOf(p, group.name));
+  const startType = groupTypeOf(group, outlines);
+  const [form, setForm] = useState(() => formOf(p, group.name, startType));
   const formDraft = useFormDraft(viewer.id, `title:${p?.id || group.key}`, form, setForm);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -357,6 +366,8 @@ function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, 
     if (staff && String(form.days || '').trim() && !(days > 0 && days <= 60 && Number.isInteger(days * 2))) return setError('Number of days: a whole or half number, e.g. 1, 2 or 0.5.');
     const mine = { category: form.category.trim(), tags: [...new Set(form.tags.map(normTag).filter(Boolean))], updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name };
     const theirs = staff ? {
+      // Kept only once chosen here; until then the title follows its outlines' type.
+      ...(kind === 'training' && (p?.skillType || form.skillType !== startType) ? { skillType: form.skillType } : {}),
       days: days || null, hrdcStatus: form.hrdcStatus, hrdcCode: form.hrdcCode.trim(),
       submittedDate: form.hrdcStatus === 'not_registered' ? '' : form.submittedDate,
       approvedDate: form.hrdcStatus === 'approved' ? form.approvedDate : '', notes: form.notes.trim(),
@@ -371,7 +382,7 @@ function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, 
         await updateDoc(doc(db, 'programmes', p.id), mine);
       } else {
         await setDoc(doc(db, 'programmes', p.id), { ...mine, ...theirs, name }, { merge: true });
-        if (p.name !== name) await afterRename(kind, p, name, programmes, deals, docs);
+        if (p.name !== name) await afterRename(docWord, p, name, programmes, deals, docs);
       }
       formDraft.clear();
       onClose();
@@ -387,9 +398,9 @@ function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, 
     const nd = usedOn, nt = trainers.filter(t => (t.programmeIds || []).includes(p.id)).length;
     if (viewer.role !== 'management') {
       if (nd) return setError(`"${p.name}" is used on ${plural(nd, 'deal')}, so it can't be deleted.`);
-      if (group.docs.length) return setError(`"${p.name}" has ${plural(group.docs.length, kind === 'teambuilding' ? 'proposal' : 'course outline')}, so it can't be deleted.`);
+      if (group.docs.length) return setError(`"${p.name}" has ${plural(group.docs.length, docWord === 'proposal' ? 'proposal' : 'course outline')}, so it can't be deleted.`);
     }
-    const parts = [nd ? plural(nd, 'deal') : '', group.docs.length ? plural(group.docs.length, kind === 'teambuilding' ? 'proposal' : 'outline') : '', nt ? plural(nt, 'trainer') : ''].filter(Boolean);
+    const parts = [nd ? plural(nd, 'deal') : '', group.docs.length ? plural(group.docs.length, docWord) : '', nt ? plural(nt, 'trainer') : ''].filter(Boolean);
     if (!window.confirm(`Delete the title "${p.name}" from the list?${parts.length ? ` It is used on ${parts.join(', ')}; the name stays on them as typed text, and it is unticked for the trainers.` : ''} Its HRDC details go with it. This can't be undone.`)) return;
     try {
       if (viewer.role === 'management') await deleteProgrammeEverywhere(p, viewer);
@@ -415,7 +426,7 @@ function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, 
         <div className="mb-5 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h3 className="text-lg font-bold">{group.name}</h3>
-            <p className="text-sm text-ink-soft">{[plural(group.docs.length, kind === 'teambuilding' ? 'proposal' : 'outline'), p ? plural(usedOn, 'deal') : 'Not in the list yet: saving adds it'].join(' · ')}</p>
+            <p className="text-sm text-ink-soft">{[plural(group.docs.length, docWord), p ? plural(usedOn, 'deal') : 'Not in the list yet: saving adds it'].join(' · ')}</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
         </div>
@@ -425,7 +436,7 @@ function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, 
             <div>
               <label htmlFor="tt-name" className={label}>Title</label>
               <input id="tt-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className={input} />
-              {p && form.name.trim() !== p.name && <p className="mt-1 text-sm text-attention">Renaming changes it on every deal and on draft {kind === 'teambuilding' ? 'proposals' : 'outlines'} with this title. Sent ones keep what was sent.</p>}
+              {p && form.name.trim() !== p.name && <p className="mt-1 text-sm text-attention">Renaming changes it on every deal and on draft {docWord}s with this title. Sent ones keep what was sent.</p>}
             </div>
           )}
           <div>
@@ -436,6 +447,22 @@ function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, 
             <label htmlFor="tt-tags" className={label}>#Tags <span className="font-normal text-ink-soft">(for finding it later)</span></label>
             <TagInput id="tt-tags" tags={form.tags} allTags={tagList} onChange={t => setForm(f => ({ ...f, tags: t }))} />
           </div>
+
+          {kind === 'training' && (
+            <div>
+              <span className={label}>Type</span>
+              {staff ? (
+                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Type">
+                  {(['soft', 'technical'] as const).map(t => (
+                    <button key={t} type="button" role="radio" aria-checked={form.skillType === t} onClick={() => setForm(f => ({ ...f, skillType: t }))}
+                      className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${form.skillType === t ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>
+                      {TYPE_TAB_LABELS[t]}
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="text-[15px]">{TYPE_TAB_LABELS[form.skillType]} <span className="text-sm text-ink-soft">(set by Admin, or by the type of its course outlines)</span></p>}
+            </div>
+          )}
 
           {staff ? (
             <>
@@ -502,7 +529,7 @@ function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, 
 
 // After a rename: deals keep a copy of the name for older screens; draft documents that carried the old title as
 // typed text are linked (outlines) or retitled (proposals), so they stay under it.
-async function afterRename(kind: TitleKind, p: Programme, name: string, programmes: Programme[], deals: any[], docs: TitleDoc[]) {
+async function afterRename(docWord: 'outline' | 'proposal', p: Programme, name: string, programmes: Programme[], deals: any[], docs: TitleDoc[]) {
   const linked = deals.filter(d => d.programmeId === p.id);
   for (let i = 0; i < linked.length; i += 400) {
     const batch = writeBatch(db);
@@ -512,7 +539,7 @@ async function afterRename(kind: TitleKind, p: Programme, name: string, programm
   const oldKey = titleKey(p.name);
   const drafts = docs.filter(d => !d.sent && titleKey(d.title) === oldKey);
   for (const d of drafts) {
-    if (kind === 'teambuilding') await updateDoc(doc(db, 'teambuilding_proposals', d.id), { title: name, programmeId: p.id }).catch(() => {});
+    if (docWord === 'proposal') await updateDoc(doc(db, 'teambuilding_proposals', d.id), { title: name, programmeId: p.id }).catch(() => {});
     else if (d.raw.programmeId !== p.id) await linkOutline(d.raw, p.id, programmes).catch(() => {});   // the old name still matches, so it follows the new one
   }
 }

@@ -79,3 +79,11 @@ Joel: "program and course outline and teambuilding titles are the same; having a
 - **#Tags** (`tags`, stored lower case without "#", e.g. `customer-service`): any number per title, suggested from tags in use. A title with no tags of its own shows tags made from its category ("Leadership & Professional Development" → #leadership #professional-development) until someone changes them. Inside an outline (Course details) and a teambuilding proposal (under Title), **Category** and **#Tags** edit the title's and save straight away. The deal's programme search also finds titles by `#tag`.
 - Outline editor: "Programme" is now **Title from the list** (training titles only).
 - Publish `firestore.rules`. Go-live checklist item 60.
+
+### Soft skill · Team building · Technical skill (Joel, 2026-10-24)
+- Every place that lists titles or outlines sorts into three buttons: **Soft skill · Team building · Technical skill**; click one and only that list shows (`TypeTabs` in `Programmes.tsx`).
+- A title's type (`programmeTypeOf` in `lib/outlineTb.ts`): "(TB)" titles are Team building; otherwise the **Type** Admin / Management set in Title details (`programmes.skillType`), else the type of its newest course outline (the outline creator picks it on the outline), else Soft skill. Title details saves the type only once it's changed there, so until then the title follows its outlines.
+- Programme picker on deals: training deals get Soft skill / Technical skill buttons (opens on the picked title's type), teambuilding deals Team building only; a title quick-added from the Technical tab is saved as Technical.
+- Course outlines: the buttons sit above By title and All outlines (remembered per browser); Team building → By title lists the "(TB)" titles with their teambuilding outlines. New outline → Start from copies only outlines of the chosen type, and a title's own type is picked to start.
+- Outline editor "Title from the list" and "Invite a trainer" drop-downs group titles under the three types.
+- No rules change (Admin and Management may already write any title field; anyone creating a title may set it). Go-live checklist item 64.

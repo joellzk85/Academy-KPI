@@ -8,8 +8,9 @@ import { CourseOutline, CourseOutlineItem, OutlineAgendaRow, QuoteSendEntry, Rep
 import { BLOOM_LEVELS, DEFAULT_OUTLINE_TERMS, DIFFICULTIES, durationText } from '../lib/outlineContent';
 import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso, trainingDays } from '../lib/deals';
 import { GapsBox } from './DealGates';
-import { Programme, isTbDeal, isTbProgramme } from '../lib/programmes';
-import { OUTLINE_TYPES, OutlineType, agendaToDays, daysToAgenda, outlineFromProposal, outlineTypeFields, outlineTypeLabel, outlineTypeOf } from '../lib/outlineTb';
+import { Programme, isTbDeal, isTbProgramme, titleKey } from '../lib/programmes';
+import { TYPE_TAB_LABELS, TypeTabs, useOutlinesForTypes } from './Programmes';
+import { OUTLINE_TYPES, OutlineType, agendaToDays, daysToAgenda, outlineFromProposal, outlineTypeFields, outlineTypeLabel, outlineTypeOf, programmeTypeOf } from '../lib/outlineTb';
 import { Agenda as DayAgenda } from './TeambuildingParts';
 import { TbProposal, blankProposalContent } from '../lib/teambuilding';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
@@ -360,15 +361,21 @@ function StartChooser({ deal, outlines, sources, onPick, onBack, onCancel, title
 }) {
   const [search, setSearch] = useState('');
   // Teambuilding for a teambuilding deal or a "(TB)" title, else Soft skill; the creator can change it.
-  const [type, setType] = useState<OutlineType>(() => (titleName ? isTbProgramme(titleName) : isTbDeal(deal)) ? 'teambuilding' : 'soft');
+  // A Soft or Technical title starts on its own type (2026-10-24).
+  const [type, setType] = useState<OutlineType>(() => {
+    if (titleName ? isTbProgramme(titleName) : isTbDeal(deal)) return 'teambuilding';
+    const prog = titleName ? sources.programmes.find(p => titleKey(p.name) === titleKey(titleName)) : sources.programmes.find(p => p.id === deal?.programmeId);
+    return prog ? programmeTypeOf(prog, outlines) : 'soft';
+  });
   const progName = (titleName || dealProgrammeName(deal, sources.programmes)).toLowerCase();
   const resolved = useMemo(() => outlines.filter(o => o.id !== 'outline_default' && !o.isHidden).map(o => resolveOutline(o, sources)), [outlines, sources]);
   const sameProgramme = (r: ReturnType<typeof resolveOutline>) =>
     !!progName && ((!titleName && !!deal?.programmeId && r.programmeId === deal.programmeId) || (r.o.courseTitle || '').trim().toLowerCase() === progName);
   const t = search.trim().toLowerCase();
   const list = resolved
+    .filter(r => outlineTypeOf(r.o) === type)
     .filter(r => !t || `${r.o.courseTitle} ${r.o.preparedForCompany} ${r.o.refNumber}`.toLowerCase().includes(t))
-    .sort((a, b) => Number(sameProgramme(b)) - Number(sameProgramme(a)) || Number(outlineTypeOf(b.o) === type) - Number(outlineTypeOf(a.o) === type) || String(b.o.date || '').localeCompare(String(a.o.date || '')))
+    .sort((a, b) => Number(sameProgramme(b)) - Number(sameProgramme(a)) || String(b.o.date || '').localeCompare(String(a.o.date || '')))
     .slice(0, 40);
   const clientName = deal ? sources.clients.find(c => c.id === deal.clientId)?.companyName || deal.client || '' : '';
 
@@ -385,13 +392,13 @@ function StartChooser({ deal, outlines, sources, onPick, onBack, onCancel, title
         ))}
       </div>
       <button type="button" onClick={() => onPick(null, type)} className={`${btnSecondary} w-full justify-start`}><FilePlus2 className="h-4 w-4" /> Blank outline</button>
-      <p className="mb-2 mt-4 text-sm font-semibold">Or copy an earlier outline{progName ? ' (same title first)' : ''}</p>
+      <p className="mb-2 mt-4 text-sm font-semibold">Or copy an earlier {OUTLINE_TYPES.find(x => x.key === type)!.label.toLowerCase()} outline{progName ? ' (same title first)' : ''}</p>
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search course title or client" className={`${input} pl-9`} aria-label="Search outlines" />
       </div>
       <ul className="mt-3 max-h-[40vh] divide-y divide-line overflow-y-auto rounded-xl border border-line">
-        {list.length === 0 && <li className="p-4 text-ink-soft">No outlines to copy yet.</li>}
+        {list.length === 0 && <li className="p-4 text-ink-soft">No {OUTLINE_TYPES.find(x => x.key === type)!.label.toLowerCase()} outlines to copy yet.</li>}
         {list.map(r => (
           <li key={r.o.id}>
             <button type="button" onClick={() => onPick(r.o, type)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface">
@@ -429,6 +436,7 @@ type ForTitle = { programmeId?: string; name: string };
 // By title (2026-10-24): one row per title with every client's outline under it; All outlines is the list as before.
 type ListView = 'titles' | 'all';
 const VIEW_KEY = 'outlines_view';
+const TYPE_KEY = 'outlines_type';
 
 function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, links, onNew, onOpen, onDuplicate, startOnShared, trainers, onAcceptInvite, inviteError, fromTrainers, onWriteTitle }: {
   onWriteTitle: (g: TitleGroup) => void;
@@ -451,15 +459,18 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
   const [ownerFilter, setOwnerFilter] = useState('');
   const [trainerFilter, setTrainerFilter] = useState('');
   const [catFilter, setCatFilter] = useState('');
+  // Soft skill · Team building · Technical skill (2026-10-24): both views show one type at a time.
+  const [typeTab, setTypeTab] = useState<OutlineType>(() => { try { return (localStorage.getItem(TYPE_KEY) as OutlineType) || 'soft'; } catch { return 'soft'; } });
+  const pickType = (t: OutlineType) => { setTypeTab(t); try { localStorage.setItem(TYPE_KEY, t); } catch { /* private window */ } };
   const [view, setViewState] = useState<ListView>(() => { try { return startOnShared ? 'all' : (localStorage.getItem(VIEW_KEY) as ListView) || 'titles'; } catch { return 'titles'; } });
   const setView = (v: ListView) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window */ } };
 
   const resolved = useMemo(() => outlines.map(o => ({ raw: o, r: resolveOutline(o, sources) })), [outlines, sources]);
   const titleDocs: TitleDoc[] = useMemo(() => resolved
-    // Teambuilding outlines sit under their "(TB)" title in Teambuilding proposal → By title (2026-10-24).
-    .filter(x => x.raw.id !== 'outline_default' && !x.raw.isHidden && !(x.raw as any).dealDeleted && outlineTypeOf(x.raw) !== 'teambuilding')
+    // Teambuilding outlines sit under their "(TB)" title (also in Teambuilding proposal → By title, 2026-10-24).
+    .filter(x => x.raw.id !== 'outline_default' && !x.raw.isHidden && !(x.raw as any).dealDeleted && (outlineTypeOf(x.raw) === 'teambuilding') === (typeTab === 'teambuilding'))
     .map(({ raw, r }) => ({ id: raw.id, title: String(r.o.courseTitle || '').trim(), programmeId: r.programmeId, company: r.o.preparedForCompany || '', ref: raw.refNumber || '', date: raw.date || '', sent: outlineSent(raw), raw })),
-  [resolved]);
+  [resolved, typeTab]);
   const isMine = (x: { raw: CourseOutline; r: { ownerId: string } }) => x.r.ownerId === rep.id || x.raw.creatorId === rep.id || (!x.raw.creatorId && !x.raw.ownerId && !!x.raw.preparedBy && x.raw.preparedBy === rep.name);
   const isShared = (o: CourseOutline) => (o.sharedWithIds || []).includes(rep.id) || o.taggedRepId === rep.id;
   const counts = { mine: resolved.filter(isMine).length, shared: resolved.filter(x => !isMine(x) && isShared(x.raw)).length, unseen: outlines.filter(unseen).length };
@@ -469,14 +480,15 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
     const t = search.trim().toLowerCase();
     const list = resolved
       .filter(x => x.raw.id !== 'outline_default' && (scope === 'everyone' ? true : scope === 'shared' ? !isMine(x) && isShared(x.raw) : isMine(x)))
+      .filter(x => outlineTypeOf(x.raw) === typeTab)
       .filter(x => showHidden || !x.raw.isHidden)
       .filter(x => !t || `${x.r.o.refNumber} ${x.r.o.courseTitle} ${x.r.o.preparedForCompany}`.toLowerCase().includes(t))
       .filter(x => !ownerFilter || x.r.ownerId === ownerFilter)
       .filter(x => !trainerFilter || x.raw.trainerId === trainerFilter)
       .filter(x => !catFilter || catOfOutline(x.r.programmeId) === catFilter);
     return sortList(list, sortBy, x => x.r.o.courseTitle || '', x => (x.raw as any).createdAt || x.raw.date);
-  }, [resolved, scope, search, showHidden, rep.id, ownerFilter, trainerFilter, catFilter, sortBy]);
-  const paged = usePaged(visible, [scope, search, showHidden, ownerFilter, trainerFilter, catFilter, sortBy]);
+  }, [resolved, scope, search, showHidden, rep.id, ownerFilter, trainerFilter, catFilter, sortBy, typeTab]);
+  const paged = usePaged(visible, [scope, search, showHidden, ownerFilter, trainerFilter, catFilter, sortBy, typeTab]);
   const owners = useMemo(() => [...new Set(resolved.map(x => x.r.ownerId).filter(Boolean))]
     .map(id => ({ id, name: personName(id) })).filter(o => o.name).sort((a, b) => a.name.localeCompare(b.name)), [resolved]);
   const outlineTrainers = useMemo(() => [...new Set(outlines.map(o => o.trainerId).filter(Boolean) as string[])]
@@ -503,17 +515,22 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
       <TrainerInvites links={links} mine={l => l.requestedById === rep.id || canSeeEveryone} trainers={trainers} me={me} onAccept={onAcceptInvite} />
       {fromTrainers}
       {inviteError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{inviteError}</p>}
-      {inviting && <InviteModal me={me} trainers={trainers} programmes={sources.programmes} onClose={() => setInviting(false)} />}
+      {inviting && <InviteModal me={me} trainers={trainers} programmes={sources.programmes} outlines={outlines} onClose={() => setInviting(false)} />}
 
+      <div className="flex flex-wrap items-center gap-2">
+      <TypeTabs value={typeTab} onChange={t => t && pickType(t)} />
       <div className="inline-flex rounded-lg border border-line bg-white p-0.5" role="tablist" aria-label="Show">
         {([['titles', 'By title'], ['all', 'All outlines']] as [ListView, string][]).map(([k, t]) => (
           <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
             className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === k ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'}`}>{t}</button>
         ))}
       </div>
+      </div>
 
       {view === 'titles' ? (
-        <TitlesView kind="training" programmes={sources.programmes as Programme[]} docs={titleDocs} deals={sources.deals} trainers={trainers} outlines={outlines.filter(o => outlineTypeOf(o) !== 'teambuilding')}
+        <TitlesView key={typeTab === 'teambuilding' ? 'tb' : 'training'} kind={typeTab === 'teambuilding' ? 'teambuilding' : 'training'} docType="outline" onlyType={typeTab}
+          programmes={sources.programmes as Programme[]} docs={titleDocs} deals={sources.deals} trainers={trainers}
+          outlines={outlines.filter(o => (outlineTypeOf(o) === 'teambuilding') === (typeTab === 'teambuilding'))}
           viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle} />
       ) : <>
       <div className="flex flex-wrap items-center gap-2">
@@ -627,7 +644,17 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 // ---------- Inviting a trainer to write an outline (Joel, 2026-10-20: "same as invite trainer") ----------
 // A link not tied to an outline yet. The trainer fills in the outline form and previews it; what they send waits
 // here until someone accepts it as a new outline (picking the deal) or discards it.
-function InviteModal({ me, trainers, programmes, onClose }: { me: Viewer; trainers: any[]; programmes: any[]; onClose: () => void }) {
+/** A drop-down's titles under Soft skill / Team building / Technical skill (the outline's own type first). */
+function ProgrammeOptions({ programmes, outlines, first }: { programmes: any[]; outlines: any[]; first?: OutlineType }) {
+  const order = (['soft', 'teambuilding', 'technical'] as OutlineType[]).sort((a, b) => Number(b === first) - Number(a === first));
+  const sorted = [...programmes].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return <>{order.map(t => {
+    const list = sorted.filter(p => programmeTypeOf(p, outlines) === t);
+    return list.length ? <optgroup key={t} label={TYPE_TAB_LABELS[t]}>{list.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup> : null;
+  })}</>;
+}
+
+function InviteModal({ me, trainers, programmes, outlines, onClose }: { me: Viewer; trainers: any[]; programmes: any[]; outlines: any[]; onClose: () => void }) {
   const [programmeId, setProgrammeId] = useState('');
   const [trainerId, setTrainerId] = useState('');
   const [link, setLink] = useState<TrainerLink | null>(null);
@@ -650,7 +677,7 @@ function InviteModal({ me, trainers, programmes, onClose }: { me: Viewer; traine
             <label className={label} htmlFor="inv-prog">Programme <span className="font-normal text-ink-soft">(optional; the trainer can type the title)</span></label>
             <select id="inv-prog" value={programmeId} onChange={e => setProgrammeId(e.target.value)} className={input}>
               <option value="">Not chosen</option>
-              {[...programmes].sort((a, b) => String(a.name).localeCompare(String(b.name))).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              <ProgrammeOptions programmes={programmes} outlines={outlines} />
             </select>
           </div>
           <div>
@@ -793,6 +820,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const clientName = r.client?.companyName || '';
   const type = outlineTypeOf(o);
   const isTb = type === 'teambuilding';
+  const typeOutlines = useOutlinesForTypes();
   // A different type keeps the title only when it's of the same kind ("(TB)" titles are for teambuilding outlines).
   const setType = (t: OutlineType) => {
     const prog = o.programmeId ? sources.programmes.find(p => p.id === o.programmeId) : null;
@@ -1134,7 +1162,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
               <label className={label} htmlFor="o-prog">Title from the list <span className="font-normal text-ink-soft">(optional; outlines with the same title are one programme)</span></label>
               <select id="o-prog" value={r.programmeId} onChange={e => set({ programmeId: e.target.value, useProgrammeName: !!e.target.value })} className={input}>
                 <option value="">{r.deal?.programmeId ? 'Use the deal\'s title' : 'None: type the title below'}</option>
-                {[...sources.programmes].filter(p => isTbProgramme(p.name) === isTb).sort((a, b) => String(a.name).localeCompare(String(b.name))).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <ProgrammeOptions programmes={sources.programmes.filter(p => isTbProgramme(p.name) === isTb)} outlines={typeOutlines} first={type} />
               </select>
               {!o.programmeId && r.deal?.programmeId && <p className="mt-0.5 text-xs text-ink-soft">From the deal.</p>}
             </div>

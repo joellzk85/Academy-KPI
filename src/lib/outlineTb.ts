@@ -1,6 +1,7 @@
 import { CourseOutline, CourseOutlineItem, OutlineAgendaRow } from '../types';
 import { TbAgendaDay, TbProposal, TbProposalActivity, blankActivity, newTbId } from './teambuilding';
 import { lines } from './outlineContent';
+import { Programme, isTbProgramme, titleKey } from './programmes';
 
 // Course outline types and the bridge between teambuilding outlines and proposals (Joel, 2026-10-24).
 // HRDC registers a teambuilding programme from its course outline; the client is pitched with the proposal.
@@ -20,6 +21,21 @@ export const outlineTypeOf = (o: Pick<CourseOutline, 'kind' | 'skillType'>): Out
 export const outlineTypeFields = (t: OutlineType): Pick<CourseOutline, 'kind' | 'skillType'> =>
   t === 'teambuilding' ? { kind: 'teambuilding', skillType: undefined } : { kind: 'training', skillType: t };
 export const outlineTypeLabel = (o: Pick<CourseOutline, 'kind' | 'skillType'>) => OUTLINE_TYPES.find(x => x.key === outlineTypeOf(o))!.label;
+
+// ---------- A title's type (Joel, 2026-10-24): every list of titles or outlines sorts into these three ----------
+/** "(TB)" titles are Teambuilding. Otherwise what Admin set on the title, else its newest outline's type (the
+ *  outline creator's choice), else Soft skill. */
+export function programmeTypeOf(p: Pick<Programme, 'id' | 'name' | 'skillType'> | undefined, outlines: any[] = []): OutlineType {
+  if (!p) return 'soft';
+  if (isTbProgramme(p.name)) return 'teambuilding';
+  if (p.skillType === 'technical' || p.skillType === 'soft') return p.skillType;
+  const key = titleKey(p.name);
+  const mine = outlines
+    .filter(o => o && o.id !== 'outline_default' && !o.isHidden && !o.dealDeleted && outlineTypeOf(o) !== 'teambuilding'
+      && (o.programmeId ? o.programmeId === p.id : titleKey(o.courseTitle) === key))
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  return mine.length ? outlineTypeOf(mine[0]) : 'soft';
+}
 
 // ---------- Agenda: the outline keeps one list (day headings + time slots); the builder works in days ----------
 export function agendaToDays(rows: OutlineAgendaRow[] | undefined): TbAgendaDay[] {

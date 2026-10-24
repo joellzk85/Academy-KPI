@@ -1,10 +1,42 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
-import { doc, setDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { Loader2, Plus, Search } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus, programmeTags, programmesFor, withTbMark } from '../lib/programmes';
 import { ProgrammeLinkedInfo, linkOutline, outlineTitle } from './ProgrammeLinks';
+import { OUTLINE_TYPES, OutlineType, outlineTypeOf, programmeTypeOf } from '../lib/outlineTb';
+
+// ---------- Soft skill · Team building · Technical skill (Joel, 2026-10-24) ----------
+// Every list of titles or outlines sorts into these three: click one and only that list shows.
+export const TYPE_TAB_LABELS: Record<OutlineType, string> = { soft: 'Soft skill', teambuilding: 'Team building', technical: 'Technical skill' };
+const TAB_ORDER: OutlineType[] = ['soft', 'teambuilding', 'technical'];
+export function TypeTabs<T extends string>({ value, onChange, types = TAB_ORDER as unknown as T[], all }: {
+  value: T | ''; onChange: (t: T | '') => void; types?: T[];
+  all?: string;   // label of an extra "everything" button, if wanted
+}) {
+  const opts: [T | '', string][] = [...(all ? [['', all] as [T | '', string]] : []), ...types.map(t => [t, TYPE_TAB_LABELS[t as unknown as OutlineType]] as [T, string])];
+  return (
+    <div className="inline-flex flex-wrap rounded-lg border border-line bg-white p-0.5" role="tablist" aria-label="Type">
+      {opts.map(([k, t]) => (
+        <button key={k || 'all'} type="button" role="tab" aria-selected={value === k} onClick={() => onChange(k)}
+          className={`rounded-md px-3 py-1.5 text-sm font-semibold ${value === k ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'}`}>{t}</button>
+      ))}
+    </div>
+  );
+}
+
+/** The course outlines, for telling Soft from Technical titles: the ones given, else read once. */
+export function useOutlinesForTypes(given?: any[]) {
+  const [loaded, setLoaded] = useState<any[]>([]);
+  useEffect(() => {
+    if (given) return;
+    let live = true;
+    getDocs(collection(db, 'course_outlines')).then(snap => { if (live) setLoaded(snap.docs.map(d => ({ id: d.id, ...d.data() }))); }).catch(() => {});
+    return () => { live = false; };
+  }, [!given]);
+  return given || loaded;
+}
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -37,8 +69,15 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
   outlines?: any[];                     // course outlines to search too
   showLinks?: boolean;                  // show the picked programme's outlines, files and trainers
 }) {
-  const programmes = programmesFor(allProgrammes, kind);
   const selected = allProgrammes.find(p => p.id === value);
+  const typeOutlines = useOutlinesForTypes(outlines);
+  // A teambuilding deal picks Team building titles; a training deal Soft or Technical skill ones.
+  const tabs: OutlineType[] = kind === 'teambuilding' ? ['teambuilding'] : kind === 'training' ? ['soft', 'technical'] : TAB_ORDER;
+  const [tab, setTab] = useState<OutlineType>(() => {
+    const t = selected ? programmeTypeOf(selected, typeOutlines) : tabs[0];
+    return tabs.includes(t) ? t : tabs[0];
+  });
+  const programmes = programmesFor(allProgrammes, kind).filter(p => programmeTypeOf(p, typeOutlines) === tab);
   const [queryText, setQueryText] = useState(selected ? '' : legacyName || '');
   const [open, setOpen] = useState(!selected && !!legacyName);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -51,7 +90,7 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
     .slice()
     .sort((a, b) => String(a.category || '~').localeCompare(String(b.category || '~')) || String(a.name).localeCompare(String(b.name)));
   const outlineMatches = !q || !outlines ? [] : outlines
-    .filter(o => !o.isHidden && !o.dealDeleted && o.id !== 'outline_default')
+    .filter(o => !o.isHidden && !o.dealDeleted && o.id !== 'outline_default' && outlineTypeOf(o) === tab)
     .map(o => ({ o, title: outlineTitle(o, allProgrammes) }))
     .filter(x => x.title && `${x.title} ${x.o.refNumber || ''}`.toLowerCase().includes(q))
     // One row per title (the same outline is often reused); a linked one first.
@@ -64,7 +103,7 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
     const dup = allProgrammes.find(p => p.name.trim().toLowerCase() === name.toLowerCase());
     if (dup) return dup;
     const id = `prog_${Date.now()}`;
-    const data = { id, name, hrdcStatus: 'not_registered' as HrdcStatus, hrdcCode: '', submittedDate: '', approvedDate: '', notes: '', createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name };
+    const data = { id, name, ...(tab === 'technical' ? { skillType: 'technical' as const } : {}), hrdcStatus: 'not_registered' as HrdcStatus, hrdcCode: '', submittedDate: '', approvedDate: '', notes: '', createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name };
     await setDoc(doc(db, 'programmes', id), data);
     return data;
   };
@@ -134,6 +173,7 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
       />
       {open && (
         <div className="mt-1 overflow-hidden rounded-lg border border-line bg-white shadow-lg">
+          {tabs.length > 1 && <div className="border-b border-line p-1.5"><TypeTabs value={tab} types={tabs} onChange={t => t && setTab(t)} /></div>}
           <div className="max-h-80 overflow-y-auto">
             {matches.map((p, i) => (
               <React.Fragment key={p.id}>
@@ -146,7 +186,7 @@ export function ProgrammePicker({ programmes: allProgrammes, value, legacyName, 
                 </button>
               </React.Fragment>
             ))}
-            {matches.length === 0 && <p className="px-3 py-2 text-sm text-ink-soft">No programme matches "{queryText}".</p>}
+            {matches.length === 0 && <p className="px-3 py-2 text-sm text-ink-soft">{q ? `No ${TYPE_TAB_LABELS[tab].toLowerCase()} programme matches "${queryText}".` : `No ${TYPE_TAB_LABELS[tab].toLowerCase()} programmes yet.`}</p>}
             {outlineMatches.length > 0 && (
               <>
                 <p className="bg-surface px-3 py-1 text-xs font-semibold text-ink-soft">Course outlines</p>

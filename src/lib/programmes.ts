@@ -38,6 +38,7 @@ export interface Programme {
   days?: number | null;      // usual length in days (half days allowed)
   outlineFiles?: ProgrammeFile[];   // course outline files uploaded on the programme (2026-10-23)
   tags?: string[];           // #tags for finding it later, stored without the "#" (2026-10-24)
+  skillType?: 'soft' | 'technical';   // set by Admin / Management on the title, or when added from a type tab (2026-10-24); see programmeTypeOf
 }
 
 // Titles are the programmes (Joel, 2026-10-24): a course outline's or teambuilding proposal's title IS the programme,
