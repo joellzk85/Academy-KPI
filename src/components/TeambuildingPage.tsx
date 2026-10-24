@@ -35,6 +35,8 @@ import { AcceptBlock } from './ProposalLinkPage';
 import { ActivityLibrary, PackageTemplate, cleanActivity, useActivities, usePackageTemplate } from './TeambuildingLibrary';
 import { FromTrainers, TbTrainerPreview, TrainerUpdateBanner, useTrainerDocs } from './TrainerDocsBox';
 import { TrainerDoc, newerFromTrainer, tbFieldsFrom } from '../lib/trainerDocs';
+import ListPager, { SortSelect, listSelect } from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { ActivityForm, Agenda, Card, NumberBox, PackageEditor, Points, UpDown, btnPrimary, btnSecondary, iconBtn, input, label, linkBtn, move } from './TeambuildingParts';
 
 // Teambuilding proposal (Joel, 2026-10-19; push A1). Its own menu item next to Course outlines, which it doesn't touch.
@@ -339,6 +341,8 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [sortBy, setSortBy] = useState<ListSort>('newest');
+  const [ownerFilter, setOwnerFilter] = useState('');
   const resolved = useMemo(() => list.map(p => ({ raw: p, r: resolveTb(p, sources) })), [list, sources]);
   const titleDocs: TitleDoc[] = useMemo(() => resolved
     .filter(x => !x.raw.isHidden && !(x.raw as any).dealDeleted)
@@ -352,12 +356,16 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
   const counts = { mine: resolved.filter(isMine).length, shared: resolved.filter(x => !isMine(x) && isShared(x.raw)).length, unseen: list.filter(unseen).length };
   const shown = useMemo(() => {
     const t = search.trim().toLowerCase();
-    return resolved
+    const rows = resolved
       .filter(x => (scope === 'everyone' ? true : scope === 'shared' ? !isMine(x) && isShared(x.raw) : isMine(x)))
       .filter(x => showHidden || !x.raw.isHidden)
       .filter(x => !t || `${x.raw.refNumber} ${x.r.p.title} ${x.r.company}`.toLowerCase().includes(t))
-      .sort((a, b) => String(b.raw.date || '').localeCompare(String(a.raw.date || '')) || String(b.raw.id).localeCompare(String(a.raw.id)));
-  }, [resolved, scope, search, showHidden, rep.id]);
+      .filter(x => !ownerFilter || x.r.ownerId === ownerFilter);
+    return sortList(rows, sortBy, x => x.r.p.title || '', x => (x.raw as any).createdAt || x.raw.date);
+  }, [resolved, scope, search, showHidden, rep.id, ownerFilter, sortBy]);
+  const paged = usePaged(shown, [scope, search, showHidden, ownerFilter, sortBy]);
+  const owners = useMemo(() => [...new Set(resolved.map(x => x.r.ownerId).filter(Boolean))]
+    .map(id => ({ id, name: personName(id) })).filter(o => o.name).sort((a, b) => a.name.localeCompare(b.name)), [resolved]);
   const canDelete = (p: TbProposal) => staff || p.creatorId === me.id || p.ownerId === me.id;
   const act = async (fn: () => Promise<void>) => { setMenu(null); setError(''); try { await fn(); } catch (e) { setError(friendlyError(e)); } };
 
@@ -390,6 +398,15 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
           <button type="button" className={btnPrimary} onClick={onNew}><Plus className="h-4 w-4" /> New proposal</button>
         </span>
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SortSelect value={sortBy} onChange={setSortBy} label="Sort proposals" />
+        {scope !== 'mine' && owners.length > 1 && (
+          <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} className={listSelect} aria-label="Rep">
+            <option value="">Any rep</option>
+            {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        )}
+      </div>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       <div className="rounded-2xl border border-line bg-white">
         {!loaded ? (
@@ -400,8 +417,8 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
             <p className="mt-1 text-[15px] text-ink-soft">Create one with New proposal, or from a deal (Deals → open a deal → Create teambuilding proposal).</p>
           </div>
         ) : (
-          <ul className="divide-y divide-line">
-            {shown.map(({ raw: p, r }) => (
+          <><ul className="divide-y divide-line">
+            {paged.pageItems.map(({ raw: p, r }) => (
               <li key={p.id} className="relative flex items-center gap-2 px-4 hover:bg-surface">
                 <button type="button" onClick={() => onOpen(p)} className="grid min-w-0 flex-1 gap-1 py-3 text-left sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_8rem] sm:items-center sm:gap-4">
                   <span className="flex min-w-0 items-center gap-3">
@@ -442,6 +459,7 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
               </li>
             ))}
           </ul>
+          <ListPager paged={paged} noun="proposals" /></>
         )}
       </div>
       </>}

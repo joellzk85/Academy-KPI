@@ -13,6 +13,8 @@ import DraftBar from './DraftBar';
 import PanelResizer from './PanelResizer';
 import ProgrammeLinks, { ProgrammeLinkedInfo, linkOutline } from './ProgrammeLinks';
 import { StatusChip } from './Programmes';
+import ListPager from './ListPager';
+import { LIST_SORT_LABELS, sortList, usePaged, type ListSort } from '../lib/listPaging';
 
 // Titles are the programmes (Joel, 2026-10-24): "Course outlines title IS the program, team building title is the
 // program." Course outlines and Teambuilding proposal each show their documents grouped by title. A title row holds
@@ -83,6 +85,7 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');   // '' = all, '-' = no category
   const [hrdc, setHrdc] = useState<'' | HrdcStatus>('');
+  const [sortBy, setSortBy] = useState<'' | ListSort>('');   // '' = grouped by category
   const [open, setOpen] = useState<string | null>(null);
   const [panel, setPanel] = useState<TitleGroup | null>(null);
 
@@ -100,7 +103,7 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     const tagQ = q.startsWith('#') ? normTag(q) : '';
-    return groups
+    const list = groups
       .filter(g => !category || (category === '-' ? !catOf(g) : catOf(g).toLowerCase() === category.toLowerCase()))
       .filter(g => !hrdc || (g.programme && programmeStatus(g.programme) === hrdc))
       .filter(g => {
@@ -108,9 +111,12 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
         const tags = programmeTags(g.programme);
         if (tagQ) return tags.some(t => t.startsWith(tagQ));
         return `${g.name} ${g.programme?.hrdcCode || ''} ${catOf(g)} ${tags.map(t => `#${t}`).join(' ')} ${g.docs.map(d => `${d.company} ${d.ref}`).join(' ')}`.toLowerCase().includes(q);
-      })
-      .sort((a, b) => Number(!catOf(a)) - Number(!catOf(b)) || catOf(a).localeCompare(catOf(b)) || a.name.localeCompare(b.name));
-  }, [groups, search, category, hrdc, categories]);
+      });
+    // Date added: the title's own, else its newest outline or proposal.
+    if (sortBy) return sortList(list, sortBy, g => g.name, g => (g.programme as any)?.createdAt || g.docs.map(d => d.date).sort().pop());
+    return list.sort((a, b) => Number(!catOf(a)) - Number(!catOf(b)) || catOf(a).localeCompare(catOf(b)) || a.name.localeCompare(b.name));
+  }, [groups, search, category, hrdc, categories, sortBy]);
+  const paged = usePaged(visible, [search, category, hrdc, sortBy]);
 
   // The panel follows live changes (a new record, a rename) while it's open.
   const livePanel = panel && (panel.programme ? groups.find(g => g.programme?.id === panel.programme!.id) : groups.find(g => g.key === panel.key)) || panel;
@@ -133,6 +139,10 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
           <option value="submitted">Waiting on HRDC</option>
           <option value="not_registered">Not registered</option>
         </select>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as '' | ListSort)} aria-label="Sort titles" className={select}>
+          <option value="">Grouped by category</option>
+          {(Object.keys(LIST_SORT_LABELS) as ListSort[]).map(k => <option key={k} value={k}>{k === 'az' ? 'Title A to Z' : k === 'za' ? 'Title Z to A' : LIST_SORT_LABELS[k]}</option>)}
+        </select>
       </div>
 
       <div className="rounded-2xl border border-line bg-white">
@@ -144,12 +154,12 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
             <p className="mt-1 text-[15px] text-ink-soft">A title is added when you write a {docWord}, or when it's typed on a deal.</p>
           </div>
         ) : (
-          <ul className="divide-y divide-line">
-            {visible.map((g, i) => {
+          <><ul className="divide-y divide-line">
+            {paged.pageItems.map((g, i, rows) => {
               const p = g.programme;
               const tags = programmeTags(p);
               const isOpen = open === g.key;
-              const showCat = i === 0 || (catOf(visible[i - 1]) || '') !== (catOf(g) || '');
+              const showCat = !sortBy && (i === 0 || (catOf(rows[i - 1]) || '') !== (catOf(g) || ''));
               return (
                 <React.Fragment key={g.key}>
                   {showCat && <li className="bg-surface px-4 py-1.5 text-xs font-semibold text-ink-soft">{catOf(g) || 'No category'}</li>}
@@ -211,6 +221,7 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
               );
             })}
           </ul>
+          <ListPager paged={paged} noun="titles" /></>
         )}
       </div>
 

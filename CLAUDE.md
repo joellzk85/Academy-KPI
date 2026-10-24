@@ -94,6 +94,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 - **Hidden records:** any screen that reads `pipelines`, `quotations`, `course_outlines` (or a deal's money, queries, teambuilding proposals) must filter with `linkedOnly` / `withoutDeleted` from `src/lib/linked.ts`. Records whose owner isn't on the Team list, and deleted deals with their documents, are hidden everywhere (Data tools and the backup still read everything).
 - **Drafts:** any new editor uses `useAutoSave`; any new form uses `useFormDraft` + `DraftBar`.
 - **Drop-down lists** close on an outside click with `useCloseOnOutside`.
+- **Long lists** use `usePaged` + `<ListPager />` (10 / 20 / 30 per page, 20 to start, remembered per browser; back to page 1 when a filter changes) and `sortList` / `<SortSelect />` for A to Z, Z to A, newest, oldest (`lib/listPaging.ts`, `ListPager.tsx`).
 - **Side panels** put `<PanelResizer />` before the panel and use the width `md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw]` (drag to resize, remembered per person on that browser).
 - **Amounts** use `formatRM` (two decimals, sen shown).
 - **Company details** (address, phone, email, quotation signatory) live only in `src/lib/company.ts`.
@@ -170,6 +171,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Sales contributor ring (2026-10-24):** Team → KPIs tick gives Admin / Management who sell a sales ring without a sales KPI; nothing to publish. See `home-kpi-dashboards.md`.
 - **Titles are the programmes (2026-10-24):** no Programmes tab; Course outlines and Teambuilding proposal → By title holds HRDC status, category (standard list + new) and #tags; anyone sets category and tags, only Admin / Management rename or change HRDC; publish `firestore.rules`; go-live checklist item 60. See `hrdc-programmes-trainers.md`.
 - **Claim and invoice copies (2026-10-24):** HRDC claim, client invoice and reimbursement invoice take a file or pasted screenshot (Ctrl+V); required on new records before Case closed, never counted as the receipt; nothing to publish; go-live checklist item 61. See `money.md`.
+- **Pages, sort and filters on every list (2026-10-24):** nothing to publish; go-live checklist item 62.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

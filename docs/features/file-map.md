@@ -10,6 +10,7 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
 - `src/components/DealsBoard.tsx`: the Deals screen (in each workspace's "Deals" tab).
 - `src/components/TeamManager.tsx`: Team tab, including the KPI set and targets per person. `LoginLog.tsx` + `lib/loginActivity.ts`: Login log (`login_days`, `config/login_rules`); `lib/firestoreTracked.ts` counts saves for it (every `firebase/firestore` import in `src/` goes through it, see `vite.config.ts`) and reports deletes. Logins, places, devices and sensitive actions: `serverActivity.ts`, `lib/loginSessions.ts`, `LoginSessions.tsx` (`login_sessions`, `activity_log`, `login_live`, `login_devices`; server writes only).
 - `src/components/DataTools.tsx`: Management → Data tools (link old records, clear old data).
+- `src/lib/listPaging.ts`, `src/components/ListPager.tsx`: pages (10 / 20 / 30, size kept in `localStorage` `next_list_page_size`), sorting (A to Z, Z to A, newest, oldest) and the shared filter drop-down style used by every long list (2026-10-24).
 - `src/App.tsx`: login gate and the main app; `representatives` are built from Team plus `reps/{id}` (KPI template and targets) plus `month_kpis/{id}_{MMM-YY}` (typed weekly numbers).
 - `src/components/RepDetailDashboard.tsx`: the rep workspace, about 6,700 lines of older code. Edit surgically.
 - `src/lib/checklist.ts`: admin checklist rules (default tasks, which tasks apply, gates before ticking, red flags).

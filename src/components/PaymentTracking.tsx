@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ListPager from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, writeBatch } from 'firebase/firestore';
 import { ExternalLink, FileCheck2, Loader2, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
@@ -118,6 +120,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
   const [person, setPerson] = useState('');
   const [show, setShow] = useState<Show>('all');
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<ListSort>('newest');
   const people2 = useMemo(() => [...new Set(lines.map(l => (l.salesPerson || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [lines]);
 
   const inYear = lines.filter(l => l.month.startsWith(year) && (!person || l.salesPerson.trim() === person));
@@ -127,6 +130,9 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
     .filter(l => show === 'all' || (show === 'paid' ? linePaid(l) : !linePaid(l)))
     .filter(l => !q || [l.programme, l.client, l.employer, l.employerCode, l.claimId, l.grantId, l.salesPerson, l.trainer].some(x => (x || '').toLowerCase().includes(q)))
     .sort((a, b) => (b.date || b.month).localeCompare(a.date || a.month) || a.groupNo.localeCompare(b.groupNo) || a.id.localeCompare(b.id));
+  // Newest is the order above (training date); the other sorts re-order it.
+  const sorted = sortBy === 'newest' ? shown : sortBy === 'oldest' ? [...shown].reverse() : sortList(shown, sortBy, l => l.client || l.employer || '', () => 0);
+  const paged = usePaged(sorted, [year, month, person, show, search, sortBy]);
   const t = totalsOf(shown);
   const byMonth = MONTHS.map((_, i) => String(i + 1).padStart(2, '0'))
     .map(m => ({ m, t: totalsOf(inYear.filter(l => l.month.slice(5, 7) === m)) })).filter(x => x.t.lines);
@@ -238,6 +244,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
         <Select label="Month" value={month} onChange={setMonth} options={[['', 'Whole year'], ...MONTHS.map((m, i) => [String(i + 1).padStart(2, '0'), m] as [string, string])]} />
         <Select label="Sales person" value={person} onChange={setPerson} options={[['', 'Everyone'], ...people2.map(p => [p, p] as [string, string])]} />
         <Select label="Show" value={show} onChange={v => setShow(v as Show)} options={[['all', 'All lines'], ['waiting', 'Waiting for payment'], ['paid', 'Paid']]} />
+        <Select label="Sort" value={sortBy} onChange={v => setSortBy(v as ListSort)} options={[['newest', 'Newest training first'], ['oldest', 'Oldest training first'], ['az', 'Client A to Z'], ['za', 'Client Z to A']]} />
         <span className="relative min-w-[14rem] flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Programme, client, claim or grant ID" aria-label="Search payment lines" className={`${input} pl-9`} />
@@ -317,7 +324,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
                 <tr><th className="px-5 py-2 font-semibold">Training</th><th className="font-semibold">Programme and client</th><th className="font-semibold">Sales</th><th className="font-semibold">Claim / grant ID</th><th className="pl-3 text-right font-semibold">Approved</th><th className="whitespace-nowrap pl-3 text-right font-semibold">After 4%</th><th className="px-5 text-right font-semibold">Payment</th></tr>
               </thead>
               <tbody className="divide-y divide-line">
-                {shown.map(l => {
+                {paged.pageItems.map(l => {
                   const paid = linePaid(l);
                   return (
                     <tr key={l.id} onClick={() => { setOpenId(l.id); setErr(''); setPayDate(today); setPayAmount(''); setPayFile(null); }} className="cursor-pointer align-top hover:bg-surface">
@@ -345,6 +352,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
             </table>
           </div>
         )}
+        <ListPager paged={paged} noun="lines" />
       </section>
 
       {/* Line panel */}

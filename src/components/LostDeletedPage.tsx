@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ListPager from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { collection, deleteDoc, doc, getDocs, onSnapshot, query, where, writeBatch } from 'firebase/firestore';
 import { isSuperManager, superConfirm } from '../lib/superManager';
 import { ChevronDown, Loader2, RotateCcw, Undo2 } from 'lucide-react';
@@ -33,6 +35,7 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [reason, setReason] = useState('');
+  const [sortBy, setSortBy] = useState<ListSort>('newest');
   const [openId, setOpenId] = useState('');
   const [busyId, setBusyId] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -63,6 +66,9 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
       && (!reason || (tab === 'lost' ? reasonOf(p) === reason : reasonOf(p).toLowerCase().includes(reason.toLowerCase()))))
     .sort((a, b) => endDate(b).localeCompare(endDate(a))),
   [list, rep, from, to, reason, tab]);
+  // Newest / oldest by the date lost or deleted; else by client name.
+  const sorted = useMemo(() => sortList(filtered, sortBy, clientName, endDate), [filtered, sortBy, clients]);
+  const paged = usePaged(sorted, [tab, rep, from, to, reason, sortBy]);
 
   // Count by reason (lost: the chosen reason; deleted: the typed reason) for the filtered list, ignoring the reason filter.
   const byReason = useMemo(() => {
@@ -176,6 +182,14 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
             <input value={reason} onChange={e => setReason(e.target.value)} className={`${field} mt-1`} placeholder="e.g. duplicate" />
           </label>
         )}
+        <label className="text-sm font-semibold">Sort<br />
+          <select value={sortBy} onChange={e => setSortBy(e.target.value as ListSort)} className={`${field} mt-1`}>
+            <option value="newest">Newest {tab} first</option>
+            <option value="oldest">Oldest {tab} first</option>
+            <option value="az">Client A to Z</option>
+            <option value="za">Client Z to A</option>
+          </select>
+        </label>
         {(rep || from || to || reason) && <button type="button" className={btnSecondary} onClick={() => { setRep(''); setFrom(''); setTo(''); setReason(''); }}><RotateCcw className="h-4 w-4" /> Clear filters</button>}
       </div>
 
@@ -198,7 +212,7 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
         {!loaded ? <p className="flex items-center gap-2 p-5 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
           : filtered.length === 0 ? <p className="p-5 text-ink-soft">{list.length ? 'No deals match these filters.' : tab === 'lost' ? 'No lost deals.' : 'No deleted deals.'}</p> : (
           <ul className="divide-y divide-line">
-            {filtered.map(p => {
+            {paged.pageItems.map(p => {
               const open = openId === p.id;
               const d = daysOpen(p);
               const nNotes = followUpNotes(p).length;
@@ -237,6 +251,7 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
             })}
           </ul>
         )}
+        {loaded && <ListPager paged={paged} noun="deals" />}
       </div>
       <p className="text-sm text-ink-soft">Old deals not yet linked to a Team member (Data tools) aren't listed.</p>
 

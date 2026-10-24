@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, Plus, Trash2, User, X } from 'lucide-react';
+import { Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, Plus, Search, Trash2, User, X } from 'lucide-react';
 import { Representative } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { dealOwnerId, dealStage, formatDate, todayIso } from '../lib/deals';
@@ -12,6 +12,8 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { ClientTouchPoint, TOUCH_HOW_LABELS, TouchHow, newTouchPointId } from '../lib/touchPoints';
 import PanelResizer from './PanelResizer';
+import ListPager, { listSelect } from './ListPager';
+import { LIST_SORT_LABELS, sortList, usePaged, type ListSort } from '../lib/listPaging';
 
 // To-do (redesigned 2026-10-17). One shared task per job (no copies): quick add at the top,
 // "My to-do" / "I asked others" / "Everyone's" (Management), grouped by when it's due.
@@ -59,6 +61,11 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenDeal, 
   const [loaded, setLoaded] = useState(false);
   const [scope, setScope] = useState<Scope>('mine');
   const [showDone, setShowDone] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'due' | ListSort>('due');
+  const [personFilter, setPersonFilter] = useState('');
+  const [dueFilter, setDueFilter] = useState<'' | TaskGroup>('');
+  const [dealFilter, setDealFilter] = useState('');   // '' any, '-' no deal, else a deal id
   const [openId, setOpenId] = useState<string | null>(null);
   const [doneAsk, setDoneAsk] = useState<Task | null>(null);   // "What happened?" before ticking a client-tagged task
   const [error, setError] = useState('');
@@ -117,15 +124,37 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenDeal, 
     asked: real.filter(t => askedOnly(t) && !isDone(t)).length,
   };
   const inScope = real.filter(t => scope === 'everyone' ? true : scope === 'mine' ? isAssignedTo(t, rep.id) : askedOnly(t));
+  const q = search.trim().toLowerCase();
+  const filtered = inScope.filter(t => {
+    if (q && !`${t.detail} ${(t.clientNames || []).join(' ')} ${t.stepLabel || ''}`.toLowerCase().includes(q)) return false;
+    if (personFilter && !isAssignedTo(t, personFilter)) return false;
+    if (dealFilter && (dealFilter === '-' ? !!t.pipelineId : t.pipelineId !== dealFilter)) return false;
+    if (dueFilter && taskGroup(t, today) !== dueFilter) return false;
+    return true;
+  });
+  // People and deals that appear on the tasks in this view, for the filters.
+  const filterPeople = useMemo(() => [...new Set(inScope.flatMap(assigneesOf))].map(id => ({ id, name: nameOf(id) })).sort((a, b) => a.name.localeCompare(b.name)), [inScope, team]);
+  const filterDeals = useMemo(() => [...new Set(inScope.map(t => t.pipelineId).filter(Boolean) as string[])]
+    .map(id => deals.find(d => d.id === id)).filter(Boolean).map(d => ({ id: d.id, label: dealLabel(d) })).sort((a, b) => a.label.localeCompare(b.label)), [inScope, deals, clients]);
 
   const grouped = useMemo(() => {
     const out: Record<TaskGroup, Task[]> = { overdue: [], today: [], week: [], later: [], nodate: [], done: [] };
-    inScope.forEach(t => out[taskGroup(t, today)].push(t));
-    (Object.keys(out) as TaskGroup[]).forEach(g => out[g].sort((a, b) => g === 'done'
-      ? String(b.doneAt || '').localeCompare(String(a.doneAt || ''))
-      : String(a.dateline || '9999').localeCompare(String(b.dateline || '9999')) || (a.createdAt || 0) - (b.createdAt || 0)));
+    filtered.forEach(t => out[taskGroup(t, today)].push(t));
+    (Object.keys(out) as TaskGroup[]).forEach(g => {
+      if (sortBy !== 'due') { out[g] = sortList(out[g], sortBy, t => t.detail || '', t => t.createdAt || t.dateCreated); return; }
+      out[g].sort((a, b) => g === 'done'
+        ? String(b.doneAt || '').localeCompare(String(a.doneAt || ''))
+        : String(a.dateline || '9999').localeCompare(String(b.dateline || '9999')) || (a.createdAt || 0) - (b.createdAt || 0));
+    });
     return out;
-  }, [inScope, today]);
+  }, [filtered, today, sortBy]);
+  // Open tasks run through the groups in order (Overdue first), so pages keep the group headings.
+  const openFlat = useMemo(() => GROUP_ORDER.filter(g => g !== 'done').flatMap(g => grouped[g]), [grouped]);
+  const resetOn = [scope, search, sortBy, personFilter, dueFilter, dealFilter];
+  const pagedOpen = usePaged(openFlat, resetOn);
+  const openTop = useRef<HTMLDivElement>(null);
+  const pagedDone = usePaged(grouped.done, resetOn);
+  const anyFilter = !!(search.trim() || personFilter || dueFilter || dealFilter);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -240,6 +269,36 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenDeal, 
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search tasks or clients" className={`${input} pl-9`} aria-label="Search tasks" />
+        </div>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'due' | ListSort)} className={listSelect} aria-label="Sort tasks">
+          <option value="due">Due date, soonest first</option>
+          {(Object.keys(LIST_SORT_LABELS) as ListSort[]).map(k => <option key={k} value={k}>{k === 'az' ? 'Task A to Z' : k === 'za' ? 'Task Z to A' : LIST_SORT_LABELS[k]}</option>)}
+        </select>
+        {scope !== 'mine' && filterPeople.length > 1 && (
+          <select value={personFilter} onChange={e => setPersonFilter(e.target.value)} className={listSelect} aria-label="Assigned to">
+            <option value="">Assigned to anyone</option>
+            {filterPeople.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
+        <select value={dueFilter} onChange={e => setDueFilter(e.target.value as '' | TaskGroup)} className={listSelect} aria-label="Due">
+          <option value="">Any due date</option>
+          {GROUP_ORDER.filter(g => g !== 'done').map(g => <option key={g} value={g}>{GROUP_LABELS[g]}</option>)}
+        </select>
+        <select value={dealFilter} onChange={e => setDealFilter(e.target.value)} className={`${listSelect} max-w-full sm:max-w-xs`} aria-label="Deal">
+          <option value="">Any deal</option>
+          <option value="-">Not about a deal</option>
+          {filterDeals.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+        </select>
+        {anyFilter && (
+          <button type="button" className="text-sm font-semibold text-accent hover:underline"
+            onClick={() => { setSearch(''); setPersonFilter(''); setDueFilter(''); setDealFilter(''); }}>Clear filters</button>
+        )}
+      </div>
+
       {/* Groups */}
       {!loaded ? (
         <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading tasks…</p>
@@ -247,27 +306,38 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenDeal, 
         <div className="space-y-5">
           {empty && (
             <div className="rounded-2xl border border-line bg-white p-8 text-center">
-              <p className="font-semibold">{scope === 'asked' ? "You haven't given anyone a task" : 'Nothing to do'}</p>
-              <p className="mt-1 text-[15px] text-ink-soft">Add a task above. Give it a due date so it shows up on time.</p>
+              <p className="font-semibold">{anyFilter ? 'No task matches these filters' : scope === 'asked' ? "You haven't given anyone a task" : 'Nothing to do'}</p>
+              <p className="mt-1 text-[15px] text-ink-soft">{anyFilter ? 'Try clearing a filter.' : 'Add a task above. Give it a due date so it shows up on time.'}</p>
             </div>
           )}
-          {GROUP_ORDER.filter(g => g !== 'done' && grouped[g].length).map(g => (
-            <section key={g}>
-              <h3 className={`mb-2 text-[15px] font-bold ${GROUP_TONE[g]}`}>{GROUP_LABELS[g]} ({grouped[g].length})</h3>
-              <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white">
-                {grouped[g].map(t => <TaskRow key={t.id} {...rowProps(t, g)} />)}
-              </ul>
-            </section>
-          ))}
+          {openFlat.length > 0 && (
+            <div ref={openTop} className="scroll-mt-4 space-y-5">
+              {GROUP_ORDER.filter(g => g !== 'done').map(g => {
+                const rows = pagedOpen.pageItems.filter(t => taskGroup(t, today) === g);
+                return rows.length ? (
+                  <section key={g}>
+                    <h3 className={`mb-2 text-[15px] font-bold ${GROUP_TONE[g]}`}>{GROUP_LABELS[g]} ({grouped[g].length})</h3>
+                    <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white">
+                      {rows.map(t => <TaskRow key={t.id} {...rowProps(t, g)} />)}
+                    </ul>
+                  </section>
+                ) : null;
+              })}
+              <div className="overflow-hidden rounded-2xl border border-line"><ListPager paged={pagedOpen} noun="open tasks" top={openTop} /></div>
+            </div>
+          )}
           {grouped.done.length > 0 && (
             <section>
               <button type="button" onClick={() => setShowDone(v => !v)} className="mb-2 flex items-center gap-1 text-[15px] font-bold text-ink-soft hover:text-ink">
                 {showDone ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />} Done ({grouped.done.length})
               </button>
               {showDone && (
-                <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white">
-                  {grouped.done.slice(0, 60).map(t => <TaskRow key={t.id} {...rowProps(t, 'done')} />)}
-                </ul>
+                <div className="overflow-hidden rounded-2xl border border-line bg-white">
+                  <ul className="divide-y divide-line">
+                    {pagedDone.pageItems.map(t => <TaskRow key={t.id} {...rowProps(t, 'done')} />)}
+                  </ul>
+                  <ListPager paged={pagedDone} noun="done tasks" />
+                </div>
               )}
             </section>
           )}

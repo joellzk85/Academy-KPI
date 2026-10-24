@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ListPager, { SortSelect } from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
-import { CheckCircle2, Copy, Link2, Loader2, MessageCircle, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Copy, Link2, Loader2, MessageCircle, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { dealStage, formatRM } from '../lib/deals';
 import { withoutDeleted } from '../lib/linked';
@@ -191,6 +193,13 @@ export default function ReferrersPage({ viewer }: { viewer: Viewer }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [toast, setToast] = useState('');
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<ListSort>('az');
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return sortList(referrers.filter(r => !q || [r.name, r.phone, r.createdByName].some(x => String(x || '').toLowerCase().includes(q))), sortBy, r => r.name || '', r => r.createdAt);
+  }, [referrers, search, sortBy]);
+  const paged = usePaged(shown, [search, sortBy]);
   useEffect(() => onSnapshot(query(collection(db, 'pipelines')), s => setDeals(withoutDeleted(s.docs.map(d => ({ ...d.data(), id: d.id })).filter((d: any) => d.referrerId)))), []);
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 3500); };
   const dealsOf = (id: string) => deals.filter(d => d.referrerId === id);
@@ -222,12 +231,23 @@ export default function ReferrersPage({ viewer }: { viewer: Viewer }) {
       </div>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       {edit && <ReferrerForm referrer={edit === 'new' ? null : edit} referrers={referrers} viewer={viewer} onDone={msg => { setEdit(null); flash(msg); }} onCancel={() => setEdit(null)} />}
+      {referrers.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="relative min-w-[14rem] flex-1 sm:max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+            <input value={search} onChange={e => setSearch(e.target.value)} className={`${input} pl-9`} placeholder="Search name or phone" aria-label="Search referrers" />
+          </label>
+          <SortSelect value={sortBy} onChange={setSortBy} label="Sort referrers" />
+        </div>
+      )}
       <div className="overflow-hidden rounded-2xl border border-line bg-white">
         {referrers.length === 0 ? (
           <p className="p-6 text-center text-ink-soft">No referrers yet. Add one here or from a deal's "Referred by" box.</p>
+        ) : shown.length === 0 ? (
+          <p className="p-6 text-center text-ink-soft">No referrer matches "{search.trim()}".</p>
         ) : (
-          <ul className="divide-y divide-line">
-            {referrers.map(r => {
+          <><ul className="divide-y divide-line">
+            {paged.pageItems.map(r => {
               const v = vendors.find(x => x.id === r.vendorId);
               const list = dealsOf(r.id);
               const fees = list.filter(d => dealStage(d) === 'won').reduce((t, d) => t + referralFee(d), 0);
@@ -268,6 +288,7 @@ export default function ReferrersPage({ viewer }: { viewer: Viewer }) {
               );
             })}
           </ul>
+          <ListPager paged={paged} noun="referrers" /></>
         )}
       </div>
       <p className="text-sm text-ink-soft">A won deal's referral fee request is raised by itself; "Raise fee request" only does it again if it was missed (never twice).</p>

@@ -22,6 +22,8 @@ import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
 import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel,
   legacyPrivateKeys, privateOf, splitTrainerPrivate, withPrivate } from '../lib/trainerProfile';
 import PanelResizer from './PanelResizer';
+import ListPager, { SortSelect, listSelect } from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { useSearchPrefill } from './GlobalSearch';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
@@ -97,6 +99,8 @@ export async function moveTrainerPrivate(dir: any[], privates: Record<string, an
 }
 
 // One biodata list as lines of text, e.g. "Bachelor of Business · Universiti Malaya · 2010".
+// HRDC accredited: a TTT number typed in, or the Accredited TTT form uploaded.
+const hasTtt = (t: Trainer) => !!(t.tttNumber || '').trim() || !!t.docs?.ttt;
 const bioText = (rows?: Record<string, string>[]) => (rows || []).filter(rowFilled).map(r => Object.values(r).map(v => String(v || '').trim()).filter(Boolean).join(' · ')).join('\n');
 const ecText = (e?: { name?: string; relationship?: string; phone?: string }) =>
   e ? [e.name, e.relationship ? `(${e.relationship})` : '', e.phone].filter(Boolean).join(' ') : '';
@@ -156,6 +160,9 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const [search, setSearch] = useState('');
   useSearchPrefill('trainers', setSearch);   // Global search opened a trainer
   const [typeFilter, setTypeFilter] = useState<TrainingType | ''>('');
+  const [sortBy, setSortBy] = useState<ListSort>('az');
+  const [progFilter, setProgFilter] = useState('');
+  const [tttFilter, setTttFilter] = useState<'' | 'yes' | 'no'>('');   // HRDC accredited: TTT number or form on file
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm());
@@ -299,9 +306,15 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
   const visible = useMemo(() => {
     const q = norm(search);
     const byType = typeFilter ? trainers.filter(t => (t.trainingTypes || []).includes(typeFilter)) : trainers;
-    const list = q ? byType.filter(t => [t.name, t.specialization, t.suggestedTopics, t.contact, t.email, teaches(t).join(' '), languagesText(t)].some(v => norm(v).includes(q))) : byType;
-    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }));
-  }, [trainers, search, programmes, typeFilter]);
+    const list = byType.filter(t => {
+      if (q && ![t.name, t.specialization, t.suggestedTopics, t.contact, t.email, teaches(t).join(' '), languagesText(t)].some(v => norm(v).includes(q))) return false;
+      if (progFilter && !(t.programmeIds || []).includes(progFilter)) return false;
+      if (tttFilter && hasTtt(t) !== (tttFilter === 'yes')) return false;
+      return true;
+    });
+    return sortList(list, sortBy, t => t.name || '', t => t.createdAt);
+  }, [trainers, search, programmes, typeFilter, progFilter, tttFilter, sortBy]);
+  const paged = usePaged(visible, [search, typeFilter, progFilter, tttFilter, sortBy]);
 
   const openTrainer = trainers.find(t => t.id === openId) || null;
 
@@ -491,6 +504,22 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, topic, language, phone or email" className={`${input} pl-9`} aria-label="Search trainers" />
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SortSelect value={sortBy} onChange={setSortBy} label="Sort trainers" />
+        <select value={progFilter} onChange={e => setProgFilter(e.target.value)} className={listSelect} aria-label="Programme they teach">
+          <option value="">Any programme</option>
+          {progOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={tttFilter} onChange={e => setTttFilter(e.target.value as '' | 'yes' | 'no')} className={listSelect} aria-label="HRDC accredited">
+          <option value="">HRDC accredited or not</option>
+          <option value="yes">HRDC accredited (TTT on file)</option>
+          <option value="no">No TTT on file</option>
+        </select>
+        {(progFilter || tttFilter || typeFilter || search.trim()) && (
+          <button type="button" className="text-sm font-semibold text-accent hover:underline"
+            onClick={() => { setProgFilter(''); setTttFilter(''); setTypeFilter(''); setSearch(''); }}>Clear filters</button>
+        )}
+      </div>
       <div className="flex flex-wrap gap-2" role="group" aria-label="Type of training">
         {[{ id: '' as const, label: 'All trainers', n: trainers.length }, ...TRAINING_TYPES.map(t => ({ ...t, n: trainers.filter(x => (x.trainingTypes || []).includes(t.id)).length }))].map(t => (
           <button key={t.id || 'all'} type="button" aria-pressed={typeFilter === t.id} onClick={() => setTypeFilter(t.id)}
@@ -505,13 +534,13 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
           <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading trainers…</p>
         ) : visible.length === 0 ? (
           <div className="p-8 text-center">
-            <p className="font-semibold">{trainers.length === 0 ? 'No trainers yet' : search.trim() ? `No trainer matches "${search.trim()}"` : 'No trainers of this type yet'}</p>
+            <p className="font-semibold">{trainers.length === 0 ? 'No trainers yet' : search.trim() ? `No trainer matches "${search.trim()}"` : 'No trainer matches these filters'}</p>
             <p className="mt-1 text-[15px] text-ink-soft">{trainers.length === 0 ? 'Add your first trainer.' : 'Check the spelling, or add them as a new trainer.'}</p>
             {trainers.length > 0 && <button type="button" onClick={startNew} className={`${btnSecondary} mt-3`}><Plus className="h-4 w-4" /> Add "{search.trim()}"</button>}
           </div>
         ) : (
-          <ul className="divide-y divide-line">
-            {visible.map(t => {
+          <><ul className="divide-y divide-line">
+            {paged.pageItems.map(t => {
               const taught = teaches(t);
               const what = taught.length ? (taught.length > 2 ? `${taught.slice(0, 2).join(', ')} +${taught.length - 2} more` : taught.join(', ')) : t.specialization;
               const sub = [what, t.contact].map(x => (x || '').trim()).filter(Boolean).join(' · ');
@@ -535,6 +564,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
               );
             })}
           </ul>
+          <ListPager paged={paged} noun="trainers" /></>
         )}
       </div>
 

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ListPager, { SortSelect } from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
 import { Building, Loader2, MapPin, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Venue } from '../types';
@@ -109,6 +111,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
 
   // Regions (Joel's venue list is grouped by state, 2026-10-20): chips to show one region.
   const [region, setRegion] = useState('');
+  const [sortBy, setSortBy] = useState<ListSort>('az');
   const regions = useMemo(() => {
     const m: Record<string, number> = {};
     venues.forEach(v => { const r = (v.region || '').trim(); if (r) m[r] = (m[r] || 0) + 1; });
@@ -119,8 +122,9 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
     const q = norm(search);
     const inRegion = region ? venues.filter(v => (v.region || '').trim() === region) : venues;
     const list = q ? inRegion.filter(v => [v.name, v.region, venueAddress(v), v.facilities, v.contact, v.distance, v.remarks].some(x => norm(x).includes(q))) : inRegion;
-    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'en', { sensitivity: 'base' }));
-  }, [venues, search, region]);
+    return sortList(list, sortBy, v => v.name || '', v => v.createdAt);
+  }, [venues, search, region, sortBy]);
+  const paged = usePaged(visible, [search, region, sortBy]);
 
   const openVenue = venues.find(v => v.id === openId) || null;
 
@@ -215,6 +219,10 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, region, facilities, contact or distance" className={`${input} pl-9`} aria-label="Search venues" />
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <SortSelect value={sortBy} onChange={setSortBy} label="Sort venues" />
+      </div>
+
       {regions.length > 0 && (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Region">
           {[['', `All (${venues.length})`] as [string, string], ...regions.map(([r, n]) => [r, `${r} (${n})`] as [string, string])].map(([r, t]) => (
@@ -229,13 +237,13 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
           <p className="flex items-center gap-2 p-6 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading venues…</p>
         ) : visible.length === 0 ? (
           <div className="p-8 text-center">
-            <p className="font-semibold">{venues.length === 0 ? 'No venues yet' : `No venue matches "${search.trim()}"`}</p>
+            <p className="font-semibold">{venues.length === 0 ? 'No venues yet' : search.trim() ? `No venue matches "${search.trim()}"` : 'No venue in this region'}</p>
             <p className="mt-1 text-[15px] text-ink-soft">{venues.length === 0 ? 'Add your first venue.' : 'Check the spelling, or add it as a new venue.'}</p>
             {venues.length > 0 && <button type="button" onClick={startNew} className={`${btnSecondary} mt-3`}><Plus className="h-4 w-4" /> Add "{search.trim()}"</button>}
           </div>
         ) : (
-          <ul className="divide-y divide-line">
-            {visible.map(v => {
+          <><ul className="divide-y divide-line">
+            {paged.pageItems.map(v => {
               const sub = [v.region, v.distance, (v.contact || '').split('\n')[0]].map(x => (x || '').trim()).filter(Boolean).join(' · ');
               const next = nextTraining[v.id];
               return (
@@ -256,6 +264,7 @@ export default function VenueManager({ rep, reps, viewer }: VenueManagerProps) {
               );
             })}
           </ul>
+          <ListPager paged={paged} noun="venues" /></>
         )}
       </div>
 

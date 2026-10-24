@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import ListPager, { SortSelect } from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import { Landmark, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
@@ -155,16 +157,19 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
   const [search, setSearch] = useState('');
   useSearchPrefill('vendors', setSearch);   // Global search opened a vendor
   const [type, setType] = useState<'' | VendorType>('');
+  const [sortBy, setSortBy] = useState<ListSort>('az');
   const [editing, setEditing] = useState<Vendor | 'new' | null>(null);
   const [error, setError] = useState('');
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return vendors
+    const list = vendors
       .map(v => ({ v, name: vendorName(v, trainers, venues) }))
       .filter(({ v, name }) => (!type || v.type === type) && (!q || [name, v.contactName, v.phone, v.email, v.bankName, v.accountName, v.notes].some(x => String(x || '').toLowerCase().includes(q))))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [vendors, trainers, venues, search, type]);
+      ;
+    return sortList(list, sortBy, x => x.name, x => x.v.createdAt);
+  }, [vendors, trainers, venues, search, type, sortBy]);
+  const paged = usePaged(shown, [search, type, sortBy]);
 
   const remove = async (v: Vendor) => {
     if (!window.confirm(`Delete the vendor "${vendorName(v, trainers, venues)}"? Payment requests already raised keep the name, but their bank details are no longer shown.`)) return;
@@ -208,6 +213,7 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
           <input value={search} onChange={e => setSearch(e.target.value)} className={`${input} pl-9`} placeholder="Search name, contact, bank" aria-label="Search vendors" />
           {search && <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-soft hover:bg-surface" aria-label="Clear search"><X className="h-4 w-4" /></button>}
         </label>
+        <SortSelect value={sortBy} onChange={setSortBy} label="Sort vendors" />
         <div className="flex flex-wrap gap-1">
           {([['', 'All'], ...VENDOR_TYPES] as [string, string][]).map(([k, l]) => (
             <button key={k || 'all'} type="button" onClick={() => setType(k as any)}
@@ -222,8 +228,9 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
       {shown.length === 0 ? (
         <p className="text-[15px] text-ink-soft">{vendors.length ? 'No vendors match.' : 'No vendors yet. Add them here, or straight from a deal\'s checklist when you enter a cost.'}</p>
       ) : (
-        <ul className="divide-y divide-line rounded-xl border border-line bg-white">
-          {shown.map(({ v, name }) => (
+        <div className="overflow-hidden rounded-xl border border-line bg-white">
+        <ul className="divide-y divide-line">
+          {paged.pageItems.map(({ v, name }) => (
             <li key={v.id} className="flex flex-wrap items-start gap-3 px-4 py-3">
               <button type="button" className="min-w-[14rem] flex-1 text-left" onClick={() => setEditing(v)}>
                 <p className="font-semibold">{name} <span className="ml-1 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">{vendorTypeLabel(v.type)}</span>
@@ -244,6 +251,8 @@ export default function VendorsPage({ viewer }: { viewer: Viewer }) {
             </li>
           ))}
         </ul>
+        <ListPager paged={paged} noun="vendors" />
+        </div>
       )}
     </div>
   );

@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { Quotation, QuotationItem, QuoteSendEntry, Representative } from '../types';
-import { STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso, trainingDateText, trainingDays } from '../lib/deals';
+import { FUNDING_LABELS, type FundingType, STAGE_LABELS, canMoveDeal, canQuote, dealOwnerId, dealStage, dealValue, formatDate, formatRM, todayIso, trainingDateText, trainingDays } from '../lib/deals';
 import { buildQuotationForDeal } from '../lib/dealDocs';
 import { quoteSst } from '../lib/quoteSst';
 import { DEFAULT_TERMS, QuoteSources, isMainDealLine, isSent, resolveQuotation } from '../lib/quoteResolve';
@@ -24,6 +24,8 @@ import { pdfErrorText } from '../lib/oldTab';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import { MarkWonBox } from './DealGates';
 import QuoteFixBox from './QuoteFixBox';
+import ListPager, { SortSelect, listSelect } from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import CustomerCodeBox, { needsCustomerCode, nudgeCustomerCode } from './CustomerCodeBox';
 import { clientCode, nextDocRef, refWithCode } from '../lib/docRefs';
 import { isItemsOnly } from '../lib/dealQuotes';
@@ -261,6 +263,11 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [sortBy, setSortBy] = useState<ListSort>('newest');
+  const [ownerFilter, setOwnerFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'' | QuoteStatus>('');
+  const [fundingFilter, setFundingFilter] = useState<'' | FundingType>('');
+  const [monthFilter, setMonthFilter] = useState('');   // 'YYYY-MM' of the quotation date
 
   const resolved = useMemo(() => quotes.map(q => ({ raw: q, r: resolveQuotation(q, sources) })), [quotes, sources]);
   const isMine = (x: { raw: Quotation; r: { ownerId: string } }) => x.r.ownerId === rep.id || x.raw.creatorId === rep.id || (!x.raw.creatorId && !x.raw.ownerId && !!x.raw.preparedBy && x.raw.preparedBy === rep.name);
@@ -269,12 +276,22 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
 
   const visible = useMemo(() => {
     const t = search.trim().toLowerCase();
-    return resolved
+    const dealOf = (q: Quotation) => (q.pipelineId ? sources.deals.find(d => d.id === q.pipelineId) : undefined);
+    const list = resolved
       .filter(x => x.raw.id !== 'q_default' && (scope === 'everyone' ? true : scope === 'shared' ? !isMine(x) && isShared(x.raw) : isMine(x)))
       .filter(x => showHidden || !x.raw.isHidden)
       .filter(x => !t || `${x.r.q.refNumber} ${x.r.q.company} ${x.r.q.attn} ${(x.r.q.items || []).map(i => i.program).join(' ')}`.toLowerCase().includes(t))
-      .sort((a, b) => String(b.raw.date || '').localeCompare(String(a.raw.date || '')) || String(b.raw.id).localeCompare(String(a.raw.id)));
-  }, [resolved, scope, search, showHidden, rep.id]);
+      .filter(x => !ownerFilter || x.r.ownerId === ownerFilter)
+      .filter(x => !statusFilter || quoteStatus(x.raw, dealOf(x.raw)) === statusFilter)
+      .filter(x => !fundingFilter || dealOf(x.raw)?.fundingType === fundingFilter)
+      .filter(x => !monthFilter || String(x.raw.date || '').slice(0, 7) === monthFilter);
+    return sortList(list, sortBy, x => x.r.q.company || '', x => (x.raw as any).createdAt || x.raw.date);
+  }, [resolved, scope, search, showHidden, rep.id, ownerFilter, statusFilter, fundingFilter, monthFilter, sortBy, sources.deals]);
+  const paged = usePaged(visible, [scope, search, showHidden, ownerFilter, statusFilter, fundingFilter, monthFilter, sortBy]);
+  const owners = useMemo(() => [...new Set(resolved.map(x => x.r.ownerId).filter(Boolean))]
+    .map(id => ({ id, name: personName(id) })).filter(o => o.name).sort((a, b) => a.name.localeCompare(b.name)), [resolved]);
+  const months = useMemo(() => [...new Set(quotes.map(q => String(q.date || '').slice(0, 7)).filter(m => /^\d{4}-\d{2}$/.test(m)))].sort().reverse(), [quotes]);
+  const anyFilter = !!(ownerFilter || statusFilter || fundingFilter || monthFilter);
 
   const canDelete = (q: Quotation) => staff || q.creatorId === me.id || q.ownerId === me.id;
   const act = async (fn: () => Promise<void>) => { setMenu(null); setError(''); try { await fn(); } catch (e) { setError(friendlyError(e)); } };
@@ -305,6 +322,33 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ref, client or programme" className={`${input} pl-9`} aria-label="Search quotations" />
         </div>
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SortSelect value={sortBy} onChange={setSortBy} label="Sort quotations" />
+        {scope !== 'mine' && owners.length > 1 && (
+          <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} className={listSelect} aria-label="Rep">
+            <option value="">Any rep</option>
+            {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        )}
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as '' | QuoteStatus)} className={listSelect} aria-label="Status">
+          <option value="">Any status</option>
+          {(Object.keys(QUOTE_STATUS_LABELS) as QuoteStatus[]).map(k => <option key={k} value={k}>{QUOTE_STATUS_LABELS[k]}</option>)}
+        </select>
+        <select value={fundingFilter} onChange={e => setFundingFilter(e.target.value as '' | FundingType)} className={listSelect} aria-label="Funding type">
+          <option value="">Any funding</option>
+          {(Object.keys(FUNDING_LABELS) as FundingType[]).map(k => <option key={k} value={k}>{FUNDING_LABELS[k]}</option>)}
+        </select>
+        {months.length > 0 && (
+          <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className={listSelect} aria-label="Month">
+            <option value="">Any month</option>
+            {months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+        )}
+        {anyFilter && (
+          <button type="button" className="text-sm font-semibold text-accent hover:underline"
+            onClick={() => { setOwnerFilter(''); setStatusFilter(''); setFundingFilter(''); setMonthFilter(''); }}>Clear filters</button>
+        )}
+      </div>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
 
       <div className="rounded-2xl border border-line bg-white">
@@ -316,8 +360,8 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
             <p className="mt-1 text-[15px] text-ink-soft">Create one with New quotation, or from a deal (Deals → open a deal → Create quotation).</p>
           </div>
         ) : (
-          <ul className="divide-y divide-line">
-            {visible.map(({ raw: q, r }) => {
+          <><ul className="divide-y divide-line">
+            {paged.pageItems.map(({ raw: q, r }) => {
               const progs = (r.q.items || []).map(i => i.program).filter(Boolean);
               return (
                 <li key={q.id} className="relative flex items-center gap-2 px-4 hover:bg-surface">
@@ -358,11 +402,22 @@ export function QuoteList({ rep, me, staff, quotes, loaded, sources, personName,
               );
             })}
           </ul>
+          <ListPager paged={paged} noun="quotations" /></>
         )}
       </div>
     </div>
   );
 }
+
+// Status filter on the list: draft or sent, or what happened to its deal.
+type QuoteStatus = 'draft' | 'sent' | 'won' | 'lost';
+const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = { draft: 'Draft', sent: 'Sent, waiting', won: 'Deal won', lost: 'Deal lost' };
+function quoteStatus(q: Quotation, deal: any): QuoteStatus {
+  const st = deal ? dealStage(deal) : '';
+  if (st === 'won' || st === 'lost') return st;
+  return isSent(q) ? 'sent' : 'draft';
+}
+const monthLabel = (ym: string) => new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
 
 function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text: string; onClick: () => void; danger?: boolean }) {
   return (

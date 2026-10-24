@@ -30,6 +30,8 @@ import { useProposalSettings } from '../lib/useProposalSettings';
 import { seesLink } from '../lib/proposalTracking';
 import { foundByFields, foundById, foundByName } from '../lib/foundBy';
 import PanelResizer from './PanelResizer';
+import ListPager from './ListPager';
+import { sortList, usePaged } from '../lib/listPaging';
 
 // Clients (redesigned 2026-10-17): one shared list, the same details as before.
 // Anyone can add and edit; only Management can delete, and only a client no deal or quotation uses.
@@ -81,9 +83,12 @@ function whatsappLink(phone: string): string {
   return d.length >= 9 ? `https://wa.me/${d}` : '';
 }
 
-type SortBy = 'name' | 'quiet' | 'recent' | 'next';
+type SortBy = 'name' | 'za' | 'newest' | 'oldest' | 'quiet' | 'recent' | 'next';
 const SORT_LABELS: Record<SortBy, string> = {
   name: 'Client name A to Z',
+  za: 'Client name Z to A',
+  newest: 'Newest added first',
+  oldest: 'Oldest added first',
   quiet: 'Longest without a touch point',
   recent: 'Most recently contacted',
   next: 'Next follow-up soonest',
@@ -115,6 +120,7 @@ export default function ClientManager({ rep, reps, viewer, onOpenDeal, onOpenQuo
   const [quietDays, setQuietDays] = useState(0);
   const [followUpBy, setFollowUpBy] = useState('');
   const [whose, setWhose] = useState('');          // '' everyone, else a person's id ("My clients" = mine)
+  const [industry, setIndustry] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<'new' | string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm());
@@ -196,11 +202,12 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
       if (!s) return false;
       if (q && ![c.companyName, c.code, c.employerName, c.industry, ...clientContacts(c).flatMap(p => [p.name, p.phone, p.email])].some(v => norm(v).includes(q))) return false;
       if (whose && !s.people.has(whose)) return false;
+      if (industry && norm(c.industry) !== industry) return false;
       if (followUpBy && !s.followUps.some(f => f.byId === followUpBy)) return false;
       if (quietDays && s.last && daysBetween(s.last.date, today) <= quietDays) return false;
       return true;
     });
-  }, [clients, summaries, search, whose, followUpBy, quietDays, today]);
+  }, [clients, summaries, search, whose, industry, followUpBy, quietDays, today]);
 
   const counts = useMemo(() => {
     const out: Record<ContactColour, number> = { green: 0, amber: 0, red: 0, never: 0 };
@@ -213,6 +220,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
     const byName = (a: Client, b: Client) => (a.companyName || '').localeCompare(b.companyName || '', 'en', { sensitivity: 'base' });
     const lastOf = (c: Client) => summaries[c.id].last?.date || '';
     const nextOf = (c: Client) => summaries[c.id].next?.date || '';
+    if (sortBy === 'za' || sortBy === 'newest' || sortBy === 'oldest') return sortList(list, sortBy, c => c.companyName || '', c => c.createdAt);
     return [...list].sort((a, b) => {
       if (sortBy === 'quiet') return (lastOf(a) || '0000').localeCompare(lastOf(b) || '0000') || byName(a, b);   // never contacted first
       if (sortBy === 'recent') return lastOf(b).localeCompare(lastOf(a)) || byName(a, b);
@@ -223,7 +231,14 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
 
   const openClient = clients.find(c => c.id === openId) || null;
   const activeTeam = team.filter(p => p.active);
-  const anyFilter = !!(colourFilter || quietDays || followUpBy || whose || search.trim());
+  const anyFilter = !!(colourFilter || quietDays || followUpBy || whose || industry || search.trim());
+  const paged = usePaged(visible, [search, sortBy, colourFilter, quietDays, followUpBy, whose, industry]);
+  // Industries as typed on clients, grouped regardless of capitals or spaces.
+  const industries = useMemo(() => {
+    const m = new Map<string, string>();
+    clients.forEach(c => { const k = norm(c.industry); if (k && !m.has(k)) m.set(k, shown(c.industry)); });
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], 'en', { sensitivity: 'base' }));
+  }, [clients]);
 
   // ---------- Add / edit ----------
   const startNew = () => {
@@ -357,6 +372,12 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
           <option value={viewer.id}>My clients</option>
           {staff && activeTeam.filter(p => p.id !== viewer.id).map(p => <option key={p.id} value={p.id}>{p.name}'s clients</option>)}
         </select>
+        {industries.length > 0 && (
+          <select value={industry} onChange={e => setIndustry(e.target.value)} className={select} aria-label="Industry">
+            <option value="">Any industry</option>
+            {industries.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+        )}
         <select value={quietDays} onChange={e => setQuietDays(Number(e.target.value))} className={select} aria-label="Not contacted in">
           <option value={0}>Any last contact</option>
           {[30, 60, 90].map(d => <option key={d} value={d}>Not contacted in {d} days</option>)}
@@ -367,7 +388,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
         </select>
         {anyFilter && (
           <button type="button" className="text-sm font-semibold text-accent hover:underline"
-            onClick={() => { setColourFilter(''); setQuietDays(0); setFollowUpBy(''); setWhose(''); setSearch(''); }}>Clear filters</button>
+            onClick={() => { setColourFilter(''); setQuietDays(0); setFollowUpBy(''); setWhose(''); setIndustry(''); setSearch(''); }}>Clear filters</button>
         )}
       </div>
 
@@ -388,7 +409,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
               <span>Client</span><span>Last touch point</span><span>Next follow-up</span><span className="text-right">Deals</span>
             </div>
             <ul className="divide-y divide-line">
-              {visible.map(c => {
+              {paged.pageItems.map(c => {
                 const s = summaries[c.id];
                 const contact = [shown(c.contactName), shown(c.phone)].filter(Boolean).join(' · ');
                 const n = dealCount(c);
@@ -419,6 +440,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
                 );
               })}
             </ul>
+            <ListPager paged={paged} noun="clients" />
           </>
         )}
       </div>

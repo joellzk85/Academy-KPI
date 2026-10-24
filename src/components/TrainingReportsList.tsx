@@ -3,6 +3,8 @@
 // "Training report" step; marking it checked or reopening it ticks or unticks that step (setReportStep).
 
 import React, { useEffect, useMemo, useState } from 'react';
+import ListPager, { listSelect } from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { FileText, Search } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
@@ -36,6 +38,7 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
   const reports = useTrainingReports();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'' | ListSort>('');   // '' = waiting to be checked first
   const [openId, setOpenId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const today = todayIso();
@@ -68,6 +71,8 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
   const q = search.trim().toLowerCase();
   const shown = rows.filter(r => inFilter(r.status, filter)
     && (!q || [r.header.programme, r.header.client, r.trainerName].some(x => x.toLowerCase().includes(q))));
+  const sorted = sortBy ? sortList(shown, sortBy, r => r.header.programme, r => r.deal.trainingDate) : shown;
+  const paged = usePaged(sorted, [filter, search, sortBy]);
   const open = rows.find(r => r.deal.id === openId) || null;
 
   const tick = (done: boolean) => {
@@ -94,6 +99,13 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
           <input className={`${input} pl-9`} value={search} onChange={e => setSearch(e.target.value)} placeholder="Search programme, client or trainer" />
         </label>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as '' | ListSort)} className={listSelect} aria-label="Sort reports">
+          <option value="">Waiting to check first</option>
+          <option value="newest">Newest training first</option>
+          <option value="oldest">Oldest training first</option>
+          <option value="az">Programme A to Z</option>
+          <option value="za">Programme Z to A</option>
+        </select>
       </div>
 
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
@@ -103,8 +115,9 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
           {rows.length ? 'No reports match.' : 'No training reports yet. They show here from the first training day.'}
         </p>
       ) : (
-        <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white">
-          {shown.map(r => (
+        <div className="overflow-hidden rounded-2xl border border-line bg-white">
+        <ul className="divide-y divide-line">
+          {paged.pageItems.map(r => (
             <li key={r.deal.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[15px] font-semibold">{r.header.programme || 'Training'}{r.header.client ? <span className="font-normal text-ink-soft"> · {r.header.client}</span> : null}</p>
@@ -127,6 +140,8 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
             </li>
           ))}
         </ul>
+        <ListPager paged={paged} noun="reports" />
+        </div>
       )}
 
       {open && <OpenReport row={open} viewer={viewer} onClose={() => setOpenId(null)} onChecked={() => tick(true)} onReopened={() => tick(false)} />}

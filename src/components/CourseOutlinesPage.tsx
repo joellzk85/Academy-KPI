@@ -28,6 +28,8 @@ import { FromTrainers, TrainerUpdateBanner, useTrainerDocs } from './TrainerDocs
 import { TrainerDoc, newerFromTrainer } from '../lib/trainerDocs';
 import TitlesView, { TitleDoc, TitleGroup } from './TitleList';
 import TitleTagsBox from './TitleTagsBox';
+import ListPager, { SortSelect, listSelect } from './ListPager';
+import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 
 // Course outlines (redesigned 2026-10-17, like quotations).
 // An outline is made for a deal (or as a general outline with no client), starting blank or from a copy
@@ -401,6 +403,10 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
   const [menu, setMenu] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [inviting, setInviting] = useState(false);
+  const [sortBy, setSortBy] = useState<ListSort>('newest');
+  const [ownerFilter, setOwnerFilter] = useState('');
+  const [trainerFilter, setTrainerFilter] = useState('');
+  const [catFilter, setCatFilter] = useState('');
   const [view, setViewState] = useState<ListView>(() => { try { return startOnShared ? 'all' : (localStorage.getItem(VIEW_KEY) as ListView) || 'titles'; } catch { return 'titles'; } });
   const setView = (v: ListView) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window */ } };
 
@@ -413,14 +419,25 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
   const isShared = (o: CourseOutline) => (o.sharedWithIds || []).includes(rep.id) || o.taggedRepId === rep.id;
   const counts = { mine: resolved.filter(isMine).length, shared: resolved.filter(x => !isMine(x) && isShared(x.raw)).length, unseen: outlines.filter(unseen).length };
 
+  const catOfOutline = (programmeId: string) => String(sources.programmes.find(p => p.id === programmeId)?.category || '').trim();
   const visible = useMemo(() => {
     const t = search.trim().toLowerCase();
-    return resolved
+    const list = resolved
       .filter(x => x.raw.id !== 'outline_default' && (scope === 'everyone' ? true : scope === 'shared' ? !isMine(x) && isShared(x.raw) : isMine(x)))
       .filter(x => showHidden || !x.raw.isHidden)
       .filter(x => !t || `${x.r.o.refNumber} ${x.r.o.courseTitle} ${x.r.o.preparedForCompany}`.toLowerCase().includes(t))
-      .sort((a, b) => String(b.raw.date || '').localeCompare(String(a.raw.date || '')) || String(b.raw.id).localeCompare(String(a.raw.id)));
-  }, [resolved, scope, search, showHidden, rep.id]);
+      .filter(x => !ownerFilter || x.r.ownerId === ownerFilter)
+      .filter(x => !trainerFilter || x.raw.trainerId === trainerFilter)
+      .filter(x => !catFilter || catOfOutline(x.r.programmeId) === catFilter);
+    return sortList(list, sortBy, x => x.r.o.courseTitle || '', x => (x.raw as any).createdAt || x.raw.date);
+  }, [resolved, scope, search, showHidden, rep.id, ownerFilter, trainerFilter, catFilter, sortBy]);
+  const paged = usePaged(visible, [scope, search, showHidden, ownerFilter, trainerFilter, catFilter, sortBy]);
+  const owners = useMemo(() => [...new Set(resolved.map(x => x.r.ownerId).filter(Boolean))]
+    .map(id => ({ id, name: personName(id) })).filter(o => o.name).sort((a, b) => a.name.localeCompare(b.name)), [resolved]);
+  const outlineTrainers = useMemo(() => [...new Set(outlines.map(o => o.trainerId).filter(Boolean) as string[])]
+    .map(id => ({ id, name: String(trainers.find(t => t.id === id)?.name || '') })).filter(t => t.name).sort((a, b) => a.name.localeCompare(b.name)), [outlines, trainers]);
+  const outlineCats = useMemo(() => [...new Set(resolved.map(x => catOfOutline(x.r.programmeId)).filter(Boolean))].sort(), [resolved, sources.programmes]);
+  const anyFilter = !!(ownerFilter || trainerFilter || catFilter);
 
   const canDelete = (o: CourseOutline) => staff || o.creatorId === me.id || o.ownerId === me.id;
   const act = async (fn: () => Promise<void>) => { setMenu(null); setError(''); try { await fn(); } catch (e) { setError(friendlyError(e)); } };
@@ -470,6 +487,31 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ref, course or client" className={`${input} pl-9`} aria-label="Search outlines" />
         </div>
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SortSelect value={sortBy} onChange={setSortBy} label="Sort outlines" />
+        {scope !== 'mine' && owners.length > 1 && (
+          <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} className={listSelect} aria-label="Rep">
+            <option value="">Any rep</option>
+            {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        )}
+        {outlineTrainers.length > 0 && (
+          <select value={trainerFilter} onChange={e => setTrainerFilter(e.target.value)} className={listSelect} aria-label="Trainer">
+            <option value="">Any trainer</option>
+            {outlineTrainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
+        {outlineCats.length > 0 && (
+          <select value={catFilter} onChange={e => setCatFilter(e.target.value)} className={listSelect} aria-label="Category">
+            <option value="">Any category</option>
+            {outlineCats.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        {anyFilter && (
+          <button type="button" className="text-sm font-semibold text-accent hover:underline"
+            onClick={() => { setOwnerFilter(''); setTrainerFilter(''); setCatFilter(''); }}>Clear filters</button>
+        )}
+      </div>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
 
       <div className="rounded-2xl border border-line bg-white">
@@ -481,8 +523,8 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
             <p className="mt-1 text-[15px] text-ink-soft">Create one with New outline, or from a deal (Deals → open a deal → Create outline).</p>
           </div>
         ) : (
-          <ul className="divide-y divide-line">
-            {visible.map(({ raw: o, r }) => (
+          <><ul className="divide-y divide-line">
+            {paged.pageItems.map(({ raw: o, r }) => (
               <li key={o.id} className="relative flex items-center gap-2 px-4 hover:bg-surface">
                 <button type="button" onClick={() => onOpen(o)} className="grid min-w-0 flex-1 gap-1 py-3 text-left sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_8rem] sm:items-center sm:gap-4">
                   <span className="min-w-0">
@@ -521,6 +563,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
               </li>
             ))}
           </ul>
+          <ListPager paged={paged} noun="outlines" /></>
         )}
       </div>
       </>}
