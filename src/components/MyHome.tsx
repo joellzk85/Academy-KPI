@@ -47,6 +47,7 @@ import { acceptToConfirm, canDecideDiscount, discountPct, pendingDiscount } from
 import { feeIsAgreed } from '../lib/trainerPortal';
 import { isTrainerFee } from '../lib/feeChecks';
 import { isSuperManager } from '../lib/superManager';
+import { useScreensOff } from '../lib/privateScreens';
 import { trainingEndDate } from '../lib/deals';
 import { GpAlert, gpAlerts } from '../lib/gpAlerts';
 import { activeKpiLibrary } from '../lib/kpiLibrary';
@@ -277,12 +278,13 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     && (c.id !== 'shared_with_me' || (hasWorkspace(viewer.id) && !!nav.openFile)));
   const shared = useSharedInbox(hasWorkspace(viewer.id) ? viewer.id : undefined).items;
 
+  const screensOff = useScreensOff();
   // Shortcuts: only the ones this person's role allows, whatever was saved.
   const mayUse = (need: Need) => need === 'all' || (need === 'workspace' ? hasWorkspace(viewer.id) : need === 'staff' ? staff : viewer.role === 'management');
   // My KPI only for people with KPIs (Management without a KPI set has a workspace but no KPI page).
-  // Backup is Management only (Joel, 2026-10-24), although it sits in Admin work.
+  // Backup lives in the private room since 2026-10-24 (no shortcut), and so does Data tools when moved there.
   const allowedShortcuts = SHORTCUTS.filter(s => mayUse(s.need) && (s.id !== 'ws_kpi' || hasKpis(viewer.id))
-    && (s.id !== 'aw_backup' || viewer.role === 'management'));
+    && s.id !== 'aw_backup' && (s.id !== 'mg_data' || !screensOff.includes('data')));
   const shortcuts: ShortcutId[] = (savedShortcuts || DEFAULT_SHORTCUTS).filter(id => allowedShortcuts.some(s => s.id === id));
   const saveShortcuts = async (next: ShortcutId[]) => {
     setSavedShortcuts(next);

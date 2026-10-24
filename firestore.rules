@@ -85,15 +85,16 @@ service cloud.firestore {
       allow read: if docId == 'setup' || (isMember() && docId != 'passwords');
       // trainer_overview (2026-10-21): who else may open Trainers → Overview; Management only.
       // forecast_settings (2026-10-21): Hot / Warm / Cold chances for the sales projection; Management only.
-      // login_rules (2026-10-22): green / amber / red rules of Team → Login log; Management only.
+      // login_rules (2026-10-22): green / amber / red rules of the Login log; since 2026-10-24 the owner only (owner override rule).
+      // screens (2026-10-24): Management screens moved to the private room; the owner only (owner override rule).
       // kpi_library (2026-10-22): the KPI library, colour points and company GP bands (Team → KPI library); Management only.
       // rating_items (2026-10-22): the 360 attitude items; reliability: the appraisal's reliability score settings. Management only.
       // month_locks (2026-10-22): months Management reopened (Deal checks → Month lock); Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'screens']))
                             || (docId in ['checklist_tasks'] && isStaff())
-                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability'] && isManagement());
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability']));
+                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability'] && isManagement());
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'screens']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -981,19 +982,17 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Logins and sensitive actions (2026-10-24, serverActivity.ts): written only by the CRM server, read only by
-    // Management (Team → Login log). login_devices (devices and places seen before) has no rule: server only.
+    // Logins and sensitive actions (2026-10-24, serverActivity.ts): written only by the CRM server. Since the private
+    // room (2026-10-24) only the owner reads them (the owner override rule below); nobody else.
+    // login_devices (devices and places seen before) and restore_log (Restore history) have no rule: server and owner only.
     match /login_sessions/{sessionId} {
-      allow read: if isManagement();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /activity_log/{entryId} {
-      allow read: if isManagement();
-      allow write: if false;
+      allow read, write: if false;
     }
     match /login_live/{memberId} {
-      allow read: if isManagement();
-      allow write: if false;
+      allow read, write: if false;
     }
 
     // Owner override: read and write anything, except the login records the CRM server keeps and owner_access itself.

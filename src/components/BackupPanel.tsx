@@ -4,8 +4,8 @@ import { BackupStatus, backupStatus, downloadBackup, downloadProposals, runBacku
 import { friendlyError } from '../lib/firebase';
 import { ZIP_GROUPS, ZipGroup, malaysiaTime } from '../lib/backup';
 
-// Admin work → Backup (2026-10-17): the daily Google Sheet copy, "Back up now" and the Excel download.
-// Admin and Management only. The server does the work (serverBackup.ts).
+// Backup (2026-10-17): the daily Google Sheet copy, "Back up now" and the Excel download. Since 2026-10-24 it lives
+// in the private room (PrivateRoom.tsx), owner only. The server does the work (serverBackup.ts).
 
 const btnPrimary =
   'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0B5A50] disabled:opacity-60';

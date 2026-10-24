@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import { registerAuthRoutes } from "./serverAuth";
 import { registerCalendarRoutes } from "./serverCalendar";
 import { registerBackupRoutes } from "./serverBackup";
+import { registerRestoreRoutes } from "./serverRestore";
 import { registerTrainerLinkRoutes } from "./serverTrainerLinks";
 import { registerMailRoutes } from "./serverMail";
 import { registerTrainerPortalRoutes } from "./serverTrainerPortal";
@@ -45,8 +46,10 @@ async function startServer() {
   // The shared Google Calendar (the server connects; nobody signs in to Google)
   registerCalendarRoutes(app);
 
-  // Data backup: daily copy to a Google Sheet and Excel download (Admin and Management)
+  // Data backup: daily copy to a Google Sheet and Excel download (owner only since 2026-10-24)
   registerBackupRoutes(app);
+  // Saved daily copies and restore (owner only, 2026-10-24)
+  registerRestoreRoutes(app);
 
   // Trainer links: a trainer fills in a course outline or their profile without logging in
   registerTrainerLinkRoutes(app);

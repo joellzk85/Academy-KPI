@@ -49,6 +49,8 @@ const ClientLinksPage = React.lazy(() => import('./components/ClientLinksPage'))
 const WorkQueue = React.lazy(() => import('./components/WorkQueue'));
 import type { AdminView } from './components/WorkQueue';
 const MyHome = React.lazy(() => import('./components/MyHome'));
+const PrivateRoom = React.lazy(() => import('./components/PrivateRoom'));
+const LoginLog = React.lazy(() => import('./components/LoginLog'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, TeamMember, ROLE_LABELS } from './types';
@@ -64,6 +66,7 @@ import { canEditMonth, kpiMonthYm, ymLabel as lockYmLabel } from './lib/monthLoc
 import DealChecksPage from './components/DealChecksPage';
 import { linkedOnly, setLinkedTeam } from './lib/linked';
 import { setSuperManager } from './lib/superManager';
+import { MovableScreen, useScreensOff } from './lib/privateScreens';
 import { SharedKind } from './lib/sharedInbox';
 import GlobalSearch, { SearchHit, setSearchPrefill } from './components/GlobalSearch';
 import Rating360Panel, { useToRateCount } from './components/Rating360';
@@ -207,7 +210,10 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   setLinkedTeam(teamMembers.map(m => m.id));
   const isManagement = currentMember.role === 'management';
   // Owner override (lib/superManager.ts): only the person's own record, which only they can read.
-  const [, setOwnerOverride] = useState(false);
+  const [ownerOverride, setOwnerOverride] = useState(false);
+  // The private room (components/PrivateRoom.tsx): double-click the clock; only with the owner override.
+  const [roomOpen, setRoomOpen] = useState(false);
+  const screensOff = useScreensOff();
   useEffect(() => {
     if (!isManagement) { setSuperManager(''); setOwnerOverride(false); return; }
     return onSnapshot(doc(db, 'owner_access', currentMember.id),
@@ -255,6 +261,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   // Login history (Team → Login log): counts this person's active minutes in the CRM.
   useActivityTracker(currentMember.id);
   const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks'>('dashboard');
+  // A screen moved to the private room leaves the Management menu (lib/privateScreens.ts).
+  useEffect(() => { if (screensOff.includes(managementView as MovableScreen)) setManagementView('dashboard'); }, [screensOff, managementView]);
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
   const [adminView, setAdminView] = useState<AdminView>('queue');
   const [adminDealId, setAdminDealId] = useState('');   // a won deal to open in the work queue (My home's After training card)
@@ -847,6 +855,25 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     }
   };
 
+  // Management → Appraisal, also shown in the private room when moved there.
+  const appraisalScreen = (
+    <Appraisal
+      viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+      people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name, role: m.role }))}
+      settingsOf={(id) => {
+        const m = teamMembers.find(x => x.id === id);
+        const s = repDocs[id] || {};
+        return { id, role: m?.role, kpiTemplate: s.kpiTemplate, kpiSet: s.kpiSet, targets: s.targets || DEFAULT_TARGETS };
+      }}
+      kpiOf={(id, month) => {
+        const m = teamMembers.find(x => x.id === id);
+        const s = repDocs[id] || {};
+        return withoutAutoKpis({ id, role: m?.role, kpiTemplate: s.kpiTemplate, kpiSet: s.kpiSet, targets: s.targets || DEFAULT_TARGETS }, monthKpiDocs[`${id}_${month}`]);
+      }}
+      deals={pipelinesSync}
+    />
+  );
+
   // Formatted date string
   const formattedDate = currentTime.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -954,7 +981,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-mono">
                 {formattedDate}
               </span>
-              <div className="flex items-center justify-end gap-1 text-slate-700">
+              <div className="flex items-center justify-end gap-1 text-slate-700 select-none" onDoubleClick={() => { if (ownerOverride) setRoomOpen(true); }}>
                 <Clock className="w-3.5 h-3.5 text-blue-500" />
                 <span className="text-xs font-extrabold font-mono tracking-tight">
                   {formattedTime}
@@ -1037,7 +1064,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'Appraisal'], ['data', 'Data tools']] as const).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'Appraisal'], ['data', 'Data tools']] as const).filter(([key]) => !screensOff.includes(key as MovableScreen)).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -1062,21 +1089,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               ) : managementView === 'team' ? (
                 <TeamManager currentMember={currentMember} teamMembers={teamMembers} />
               ) : managementView === 'appraisal' ? (
-                <Appraisal
-                  viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
-                  people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name, role: m.role }))}
-                  settingsOf={(id) => {
-                    const m = teamMembers.find(x => x.id === id);
-                    const s = repDocs[id] || {};
-                    return { id, role: m?.role, kpiTemplate: s.kpiTemplate, kpiSet: s.kpiSet, targets: s.targets || DEFAULT_TARGETS };
-                  }}
-                  kpiOf={(id, month) => {
-                    const m = teamMembers.find(x => x.id === id);
-                    const s = repDocs[id] || {};
-                    return withoutAutoKpis({ id, role: m?.role, kpiTemplate: s.kpiTemplate, kpiSet: s.kpiSet, targets: s.targets || DEFAULT_TARGETS }, monthKpiDocs[`${id}_${month}`]);
-                  }}
-                  deals={pipelinesSync}
-                />
+                appraisalScreen
               ) : managementView === 'data' ? (
                 <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'payments' ? (
@@ -1199,7 +1212,21 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
         </div>
       )}
 
-      {/* 6. Small confirmation messages */}
+      {/* 6. Private room (owner only) */}
+      {roomOpen && ownerOverride && (
+        <React.Suspense fallback={null}>
+          <PrivateRoom
+            off={screensOff}
+            onClose={() => setRoomOpen(false)}
+            loginLog={<LoginLog currentMember={currentMember} members={teamMembers.filter(m => m.active)} />}
+            screen={key => key === 'data' ? <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
+              : key === 'lost' ? <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
+              : appraisalScreen}
+          />
+        </React.Suspense>
+      )}
+
+      {/* 7. Small confirmation messages */}
       {toast && (
         <div role="status" className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-ink px-4 py-3 text-sm font-medium text-white shadow-lg">
           {toast}

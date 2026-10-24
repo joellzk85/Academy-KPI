@@ -25,7 +25,6 @@ import { useTrainingReports } from './TrainingReportAdmin';
 import { reportFlag } from '../lib/trainingReport';
 const PaymentTracking = React.lazy(() => import('./PaymentTracking'));
 import ProgrammesManager, { StatusChip } from './Programmes';
-import BackupPanel from './BackupPanel';
 import { Flag } from '../lib/checklist';
 import { HrdcQuery, Programme, grantBlockReason, isQueryOpen, isQueryOverdue } from '../lib/programmes';
 import { ClientLastTouch } from './ClientContactDot';
@@ -60,11 +59,12 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
   onOpenManagementPayments?: () => void;       // Management's Payment tracking (Management → Payment tracking)
 }) {
   // Backup is Management only (Joel, 2026-10-24): Admin never gets the tab, even when asked to open it.
-  const [view, setView] = useState<AdminView>(initialView === 'backup' && viewer.role !== 'management' ? 'queue' : initialView);
+  // Backup moved to the private room (2026-10-24); an old link to it opens the Work queue.
+  const [view, setView] = useState<AdminView>(initialView === 'backup' ? 'queue' : initialView);
   usePlace(`admin_${view}`, 2);
   const [focusDeal, setFocusDeal] = useState(initialDealId);
   // Payment tracking is in Admin work for Admin; Management has it under Management (with profit), so it isn't repeated.
-  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['vendors', 'Vendors'], ['days_out', 'Days out'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks'], ...(viewer.role === 'management' ? [['backup', 'Backup'] as [AdminView, string]] : [])];
+  const tabs: [AdminView, string][] = [['queue', 'Work queue'], ['money', 'Money'], ...(viewer.role === 'admin' ? [['payments', 'Payment tracking'] as [AdminView, string]] : []), ['vendors', 'Vendors'], ['days_out', 'Days out'], ['programmes', 'Programmes'], ['tasks', 'Checklist tasks']];
   const openPayments = viewer.role === 'admin' ? () => setView('payments') : onOpenManagementPayments;
   return (
     <div className="space-y-5 font-sans text-ink">
@@ -91,8 +91,7 @@ export default function WorkQueue({ viewer, people, onOpenQuotations, initialVie
         )
         : view === 'vendors' ? <VendorsPage viewer={viewer} />
         : view === 'days_out' ? <DaysOut viewer={viewer} people={people} />
-        : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : view === 'tasks' ? <TaskSettings viewer={viewer} />
-        : viewer.role === 'management' ? <BackupPanel /> : null}
+        : view === 'programmes' ? <ProgrammesView viewer={viewer} /> : view === 'tasks' ? <TaskSettings viewer={viewer} /> : null}
     </div>
   );
 }

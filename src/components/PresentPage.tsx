@@ -23,6 +23,7 @@ import {
 } from '../lib/presentTheme';
 import { useAutoSave } from '../lib/useAutoSave';
 import { useKpiSources } from '../lib/useKpiSources';
+import { isSuperManager } from '../lib/superManager';
 import { addDays as addLoginDays, dayKey, useLoginData, weekStart } from '../lib/loginActivity';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
@@ -139,7 +140,9 @@ export default function PresentPage({ viewer, person, reps, month, companyOnly }
 
   const personKeys = chosenPersonSlides(prefs, person?.role);
   // Profit and Login log are Management's.
-  const companyKeys = chosenCompanySlides(prefs).filter(k => isManager || !COMPANY_SLIDES.find(s => s.key === k)?.manager);
+  // The Login log slide is for the owner only (2026-10-24, lib/privateScreens.ts), like the Login log itself.
+  const slideAllowed = (k: string, manager?: boolean) => (isManager || !manager) && (k !== 'logins' || isSuperManager(viewer));
+  const companyKeys = chosenCompanySlides(prefs).filter(k => slideAllowed(k, COMPANY_SLIDES.find(s => s.key === k)?.manager));
   const loginFrom = useMemo(() => dayKey(addLoginDays(weekStart(new Date()), -21)), []);
   const loginData = useLoginData(loginFrom, isManager && companyKeys.includes('logins'));
   const periodKey: PeriodKey = (mode === 'company' ? prefs.companyPeriod : prefs.period) || 'week';
@@ -175,7 +178,7 @@ export default function PresentPage({ viewer, person, reps, month, companyOnly }
     const next = list.includes(k) ? list.filter(x => x !== k) : [...list, k];
     return all.map(s => s.key).filter(x => next.includes(x));   // keep the catalogue order
   };
-  const catalogue = mode === 'company' ? COMPANY_SLIDES.filter(s => isManager || !s.manager) : PERSON_SLIDES.filter(s => !s.admin || person?.role !== 'rep');
+  const catalogue = mode === 'company' ? COMPANY_SLIDES.filter(s => slideAllowed(s.key, s.manager)) : PERSON_SLIDES.filter(s => !s.admin || person?.role !== 'rep');
   const chosen: string[] = mode === 'company' ? companyKeys : personKeys;
 
   return (

@@ -23,6 +23,7 @@ import firebaseConfig from './firebase-applet-config.json';
 import { safeFileName } from './src/lib/proposals';
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import { logActivity } from './serverActivity';
+import { dailyCopy, ownerFrom } from './serverRestore';
 import {
   INFO_TAB, SKIP_CONFIG_DOCS, Table, ZIP_GROUPS, ZipGroup, ZipLookups, infoTable, malaysiaDay, orderCollections, sheetIdFrom,
   toTable, uniqueTabs, zipGroupsFrom, zipPlace,
@@ -36,18 +37,13 @@ const SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 const CHUNK_ROWS = 2000;
 const CHUNK_BYTES = 4_000_000;
 
-// ---------- Who may use it: Management (Joel, 2026-10-24) ----------
-// Only Management sees, downloads or sets up the backup. Admin opening the CRM still starts the daily automatic
-// Google Sheet copy (staffFrom, /api/backup/run without force), but gets nothing back from it.
+// ---------- Who may use it: only the owner (2026-10-24) ----------
+// Only the owner (Management with an owner_access record; serverRestore.ts ownerFrom) sees, downloads or sets up the
+// backup, in the private room. Admin or Management opening the CRM still starts the daily automatic Google Sheet copy
+// and the daily saved copy (staffFrom, /api/backup/run without force), but gets nothing back from it.
 async function staffFrom(req: Request) {
   const caller = await callerFrom(req);
-  if (caller.role !== 'admin' && caller.role !== 'management') throw new UserError(403, 'staff-only', 'Only Management can use the backup.');
-  return caller;
-}
-
-async function managementFrom(req: Request) {
-  const caller = await callerFrom(req);
-  if (caller.role !== 'management') throw new UserError(403, 'management-only', 'Only Management can use the backup.');
+  if (caller.role !== 'admin' && caller.role !== 'management') throw new UserError(403, 'not-allowed', 'This is not available.');
   return caller;
 }
 
@@ -241,7 +237,7 @@ async function runBackup(memberId: string, reason: string) {
 export function registerBackupRoutes(app: Express) {
   // Is the backup set up, and how did the last one go? Includes the address to share the sheet with.
   app.post('/api/backup/status', route(async req => {
-    await managementFrom(req);
+    await ownerFrom(req);
     const s = await readSettings();
     return {
       configured: !!s.sheetId, sheetId: s.sheetId || '', sheetName: s.sheetName || '',
@@ -253,7 +249,7 @@ export function registerBackupRoutes(app: Express) {
 
   // Save the Google Sheet (a link or its ID); it's tested before it's saved. Blank = disconnect.
   app.post('/api/backup/settings', route(async req => {
-    await managementFrom(req);
+    await ownerFrom(req);
     const raw = String(req.body?.sheet || '').trim();
     if (!raw) {
       await saveSettings({ sheetId: '', sheetName: '', tabs: [], lastError: '' });
@@ -272,9 +268,12 @@ export function registerBackupRoutes(app: Express) {
   app.post('/api/backup/run', route(async req => {
     const caller = await staffFrom(req);
     const force = !!req.body?.force;
-    if (caller.role !== 'management') {
-      if (force) throw new UserError(403, 'management-only', 'Only Management can use the backup.');
-      await backUpToSheet(caller, false).catch(() => {});   // errors are saved in the settings for Management to see
+    const owner = caller.role === 'management' && caller.superManager;
+    // The daily saved copy for Restore (serverRestore.ts) runs alongside, whether or not a Google Sheet is set up.
+    if (!force) dailyCopy();
+    if (!owner) {
+      if (force) throw new UserError(403, 'not-allowed', 'This is not available.');
+      await backUpToSheet(caller, false).catch(() => {});   // errors are saved in the settings for the owner to see
       return {};
     }
     if (force) await logActivity(caller.memberId, req, 'download', 'Back up now (whole CRM to the Google Sheet)');
@@ -308,7 +307,7 @@ export function registerBackupRoutes(app: Express) {
   // their storage folders (zipPlace in src/lib/backup.ts). The body's `groups` picks which (none sent = all).
   app.post('/api/backup/proposals', async (req: Request, res: ExpressResponse) => {
     try {
-      const caller = await managementFrom(req);
+      const caller = await ownerFrom(req);
       const groups = zipGroupsFrom(req.body?.groups);
       if (!groups.length) throw new UserError(400, 'nothing-picked', 'Tick at least one kind of file to download.');
       await logActivity(caller.memberId, req, 'download', `Files ZIP (${groups.join(', ')})`);
@@ -441,7 +440,7 @@ export function registerBackupRoutes(app: Express) {
   // Download everything as an Excel file.
   app.post('/api/backup/download', async (req: Request, res: ExpressResponse) => {
     try {
-      const caller = await managementFrom(req);
+      const caller = await ownerFrom(req);
       await logActivity(caller.memberId, req, 'download', 'Excel backup (whole CRM)');
       const tables = await readAllTables();
       const now = new Date();

@@ -116,7 +116,7 @@ export const COMPANY_SLIDES: SlideInfo<CompanySlide>[] = [
   { key: 'lost', label: 'Why we lost deals', hint: 'Lost deals by reason, with RM' },
   { key: 'trainings', label: 'Trainings', hint: 'Trainings delivered in the period and coming up in the next 30 days' },
   { key: 'actions', label: 'Open action points', hint: 'Every meeting action point not done yet, overdue first' },
-  { key: 'logins', label: 'Login log', hint: 'Time each person spent in the CRM: lights for the last working days and a 4-week heatmap (Team → Login log)', manager: true },
+  { key: 'logins', label: 'Login log', hint: 'Time each person spent in the CRM: lights for the last working days and a 4-week heatmap', manager: true },
 ];
 
 export function defaultPersonSlides(role?: string): PersonSlide[] {
