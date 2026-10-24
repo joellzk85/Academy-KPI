@@ -546,6 +546,11 @@ export default function RepDetailDashboard({
   const [tbFromDeal, setTbFromDeal] = useState<string | null>(null);
   const handleCreateTbForPipeline = (p: any) => { setTbStartDeal(p); setTbFromDeal(p.id); setActiveSubTab('teambuilding'); };
   const openTbFromDeal = (p: any, id: string) => { setTbToOpen(id); setTbFromDeal(p.id); setActiveSubTab('teambuilding'); };
+  // Speed build (2026-10-24): a teambuilding outline makes a proposal, and a proposal makes an outline (lib/outlineTb.ts).
+  const [tbFromOutline, setTbFromOutline] = useState<any | null>(null);
+  const [outlineFromTb, setOutlineFromTb] = useState<any | null>(null);
+  const speedBuildProposal = (o: any, dealId: string | null) => { setTbFromOutline(o); setTbFromDeal(dealId); setActiveSubTab('teambuilding'); };
+  const speedBuildOutline = (p: any, dealId: string | null) => { setOutlineFromTb(p); setOutlineFromDeal(dealId); setActiveSubTab('course_outline'); };
 
   // Real-time Firestore sync for pipelines
   useEffect(() => {
@@ -1363,11 +1368,13 @@ export default function RepDetailDashboard({
           ) : activeSubTab === 'course_outline' ? (
             <CourseOutlinesPage key={`${rep.id}-${sharedFirst === 'course_outline'}`} rep={rep} reps={reps} viewer={viewer} startDeal={outlineStartDeal} onStartHandled={() => { setOutlineStartDeal(null); setOutlineFromDeal(null); }} onOpenTab={(t) => handleSubTabChange(t as SubTab)}
               openId={outlineToOpen} onOpenHandled={() => { setOutlineToOpen(null); setOutlineFromDeal(null); }} startOnShared={sharedFirst === 'course_outline'}
-              fromDealId={outlineFromDeal} onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} />
+              fromDealId={outlineFromDeal} onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }}
+              fromTb={outlineFromTb} onFromTbHandled={() => { setOutlineFromTb(null); setOutlineFromDeal(null); }} onSpeedBuild={speedBuildProposal} />
           ) : activeSubTab === 'teambuilding' ? (
             <TeambuildingPage key={`${rep.id}-${sharedFirst === 'teambuilding'}`} rep={rep} reps={reps} viewer={viewer} startDeal={tbStartDeal} onStartHandled={() => { setTbStartDeal(null); setTbFromDeal(null); }}
               openId={tbToOpen} onOpenHandled={() => { setTbToOpen(null); setTbFromDeal(null); }} startOnShared={sharedFirst === 'teambuilding'}
-              fromDealId={tbFromDeal} onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} onOpenDeals={() => handleSubTabChange('pipeline')} />
+              fromDealId={tbFromDeal} onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} onOpenDeals={() => handleSubTabChange('pipeline')}
+              fromOutline={tbFromOutline} onFromOutlineHandled={() => { setTbFromOutline(null); setTbFromDeal(null); }} onSpeedOutline={speedBuildOutline} />
           ) : activeSubTab === 'client' ? (
             <ClientManager key={rep.id} rep={rep} reps={reps} viewer={viewer || { id: rep.id, name: rep.name, role: 'rep' }}
               openClientId={clientToOpen} onOpenClientHandled={() => setClientToOpen(null)}

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
-import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, FileText, ListChecks, Loader2, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, ClipboardList, FileText, ListChecks, Loader2, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso, trainingDateText, trainingDayList, trainingEndDate } from '../lib/deals';
 import { TrainingReportBox } from './TrainingReportAdmin';
@@ -73,8 +73,9 @@ const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const DOCS_WORD: Record<string, string> = { venue: 'venue documents', bus: 'transporter documents', facilitator: 'facilitator documents', trainer: "trainer's PO" };
 
 export default function DealChecklist({
-  deal, checklist, quotes, viewer, onCreateQuotation, onOpenQuotations, grantBlock = '', part, hideProgress,
+  deal, checklist, quotes, viewer, onCreateQuotation, onOpenQuotations, grantBlock = '', part, hideProgress, grantOutline,
 }: {
+  grantOutline?: { label: string; onOpen: () => void };   // HRDC teambuilding deals: the course outline HRDC registers
   deal: any;
   checklist: any | null;           // deal_checklists document, or null if not started
   quotes: any[];                   // quotations linked to this deal
@@ -321,6 +322,11 @@ export default function DealChecklist({
                 <TaskSummary t={t} days={days} venues={venues} trainers={trainers} quotes={quotes} withNote={!(editable && !t.done && !arranging)} />
                 {t.done && <p className="text-sm text-ink-soft">Done {formatDate(t.doneAt || '')} by {t.doneByName}</p>}
                 {t.kind === 'grant' && !t.done && grantBlock && <p className="mt-1 text-sm font-semibold text-attention">{grantBlock}</p>}
+                {t.kind === 'grant' && grantOutline && !arranging && (
+                  <button type="button" className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline" onClick={grantOutline.onOpen}>
+                    <ClipboardList className="h-4 w-4" /> {grantOutline.label}
+                  </button>
+                )}
                 {t.kind === 'grant' && !arranging && (
                   <HrdcCodes deal={deal} tasks={allTasks} editable={editable} busy={busy}
                     onApproval={code => patch(t.id, { approvalCode: code }, `${t.label}: approval code ${code ? `set to ${code}` : 'cleared'}`)}

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { clientTitle } from '../lib/programmes';
 import { deleteField, doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { ChevronDown, ChevronUp, Download, FileUp, Loader2, Plus, Trash2 } from 'lucide-react';
 import { db } from '../lib/firebase';
@@ -105,7 +106,7 @@ export default function T3Maker({ deal, saved, viewer, incoming }: {
     onSaved: setSavedJson,
   });
 
-  const courseTitle = data.courseTitle ?? (programme || deal.courseName || '');
+  const courseTitle = data.courseTitle ?? clientTitle(programme || deal.courseName || '');
   const dates = data.dates?.length ? data.dates : dealDates(deal);
   const named = data.trainees.filter(t => t.name.trim());
 

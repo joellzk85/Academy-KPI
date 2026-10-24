@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { clientTitle } from '../lib/programmes';
 import { Loader2 } from 'lucide-react';
 import { CourseOutline, Quotation } from '../types';
 import { DocKind } from '../lib/docLinks';
@@ -56,8 +57,8 @@ export default function DocLinkPage({ token }: { token: string }) {
   const isReport = data?.kind === 'report';
   const title = !data ? 'NEXT Academy'
     : isQuote ? `Quotation ${data.doc.refNumber || ''}`.trim()
-    : isReport ? `Training report${data.doc.hrHeader?.programme ? ` · ${data.doc.hrHeader.programme}` : ''}`
-    : String(data.doc.courseTitle || 'Course outline');
+    : isReport ? `Training report${data.doc.hrHeader?.programme ? ` · ${clientTitle(data.doc.hrHeader.programme)}` : ''}`
+    : clientTitle(data.doc.courseTitle) || 'Course outline';
   useEffect(() => { document.title = data ? `${title} · NEXT Academy` : 'NEXT Academy'; }, [data]);
   const company = data?.doc ? String((isQuote ? data.doc.company : isReport ? data.doc.hrHeader?.client : data.doc.preparedForCompany) || '') : '';
   useLinkTracking(token, !!data && !isReport && team === false);

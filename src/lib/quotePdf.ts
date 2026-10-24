@@ -4,6 +4,7 @@
 // rows aren't split across pages.
 
 import React from 'react';
+import { clientTitle } from './programmes';
 import { createRoot } from 'react-dom/client';
 import { CourseOutline, Quotation } from '../types';
 import QuotationDocument from '../components/QuotationDocument';
@@ -71,7 +72,7 @@ function lastBlankRow(ctx: CanvasRenderingContext2D, from: number, to: number, w
 
 // Course outlines (2026-10-19): the same one-click PDF, for Download PDF and the outline's Send.
 export const outlinePdfFileName = (o: CourseOutline) =>
-  `Course outline ${String(o.refNumber || o.id).replace(/[\\/:*?"<>|]+/g, '-')}${o.courseTitle ? ` - ${o.courseTitle.replace(/[\\/:*?"<>|]+/g, '').slice(0, 60)}` : ''}${o.preparedForCompany ? ` - ${o.preparedForCompany.replace(/[\\/:*?"<>|]+/g, '').slice(0, 40)}` : ''}.pdf`;
+  `Course outline ${String(o.refNumber || o.id).replace(/[\\/:*?"<>|]+/g, '-')}${o.courseTitle ? ` - ${clientTitle(o.courseTitle).replace(/[\\/:*?"<>|]+/g, '').slice(0, 60)}` : ''}${o.preparedForCompany ? ` - ${o.preparedForCompany.replace(/[\\/:*?"<>|]+/g, '').slice(0, 40)}` : ''}.pdf`;
 
 // The outline is already laid out as A4 pages (2026-10-19 redesign), so each page becomes one PDF page.
 export async function makeOutlinePdf(o: CourseOutline): Promise<Blob> {

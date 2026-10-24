@@ -6,6 +6,7 @@
 // Horizontal (2026-10-23): the same proposal as 16:9 slides (TeambuildingSlides), one slide per widescreen page.
 
 import React from 'react';
+import { clientTitle } from './programmes';
 import { createRoot } from 'react-dom/client';
 import TeambuildingSite from '../components/TeambuildingSite';
 import TeambuildingSlides, { SLIDE_H, SLIDE_W } from '../components/TeambuildingSlides';
@@ -22,7 +23,7 @@ const WIDE_H = 190.5;
 export type TbPdfLayout = 'vertical' | 'horizontal';
 
 export const tbPdfFileName = (r: ResolvedTb, layout: TbPdfLayout = 'vertical') =>
-  `Teambuilding proposal${layout === 'horizontal' ? ' (slides)' : ''} ${String(r.p.refNumber || r.p.id).replace(/[\\/:*?"<>|]+/g, '-')}${r.p.title ? ` - ${r.p.title.replace(/[\\/:*?"<>|]+/g, '').slice(0, 60)}` : ''}${r.company ? ` - ${r.company.replace(/[\\/:*?"<>|]+/g, '').slice(0, 40)}` : ''}.pdf`;
+  `Teambuilding proposal${layout === 'horizontal' ? ' (slides)' : ''} ${String(r.p.refNumber || r.p.id).replace(/[\\/:*?"<>|]+/g, '-')}${r.p.title ? ` - ${clientTitle(r.p.title).replace(/[\\/:*?"<>|]+/g, '').slice(0, 60)}` : ''}${r.company ? ` - ${r.company.replace(/[\\/:*?"<>|]+/g, '').slice(0, 40)}` : ''}.pdf`;
 
 function photoUrls(r: ResolvedTb): string[] {
   const p = r.p;

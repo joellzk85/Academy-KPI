@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { clientTitle } from '../lib/programmes';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { AlertTriangle, CheckCircle2, Download, FileText, Link2, Loader2, Mail, MessageCircle, Send, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
@@ -96,7 +97,7 @@ function SendDocDialog({ doc: shownQ, locked, issues, deal, client, ownerId, me,
 
   const contact = dealContact(deal, client);
   const attn = shownQ.attn || contact?.name || '';
-  const programmes = shownQ.programmes;
+  const programmes = shownQ.programmes.map(clientTitle);   // "(TB)" is for the team only
   const progText = !programmes.length ? 'the training programme'
     : programmes.length === 1 ? programmes[0]
     : programmes.length === 2 ? `${programmes[0]} and ${programmes[1]}`

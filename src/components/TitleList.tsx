@@ -472,7 +472,7 @@ function TitlePanel({ kind, group, programmes, deals, trainers, outlines, docs, 
                 <label htmlFor="tt-code" className={label}>HRDC programme code</label>
                 <input id="tt-code" value={form.hrdcCode} onChange={e => setForm(f => ({ ...f, hrdcCode: e.target.value }))} className={input} placeholder="From the HRDC portal, once given" />
               </div>
-              {p && <ProgrammeLinks programme={p} programmes={programmes} outlines={kind === 'teambuilding' ? [] : outlines} deals={deals} trainers={trainers} viewer={viewer} hideOutlines={kind === 'teambuilding'} />}
+              {p && <ProgrammeLinks programme={p} programmes={programmes} outlines={outlines} deals={deals} trainers={trainers} viewer={viewer} />}
               <div>
                 <label htmlFor="tt-notes" className={label}>Notes</label>
                 <textarea id="tt-notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className={`${input} min-h-[80px]`} />

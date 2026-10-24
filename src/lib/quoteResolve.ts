@@ -11,6 +11,7 @@
 // and to hold the locked copy once it is marked as sent.
 
 import { Quotation, QuotationItem } from '../types';
+import { clientTitle } from './programmes';
 import { dealOwnerId, formatDate, trainingDateText, trainingDays } from './deals';
 import { dealContact } from './contacts';
 
@@ -112,7 +113,7 @@ export function resolveQuotation(q: Quotation, s: QuoteSources): Resolved {
     }
     // Picked from a list = read live; typed in = kept as typed.
     const prog = it.programmeId ? s.programmes.find(p => p.id === it.programmeId) : null;
-    if (prog) { line.program = prog.name || ''; line.code = prog.hrdcCode || ''; }
+    if (prog) { line.program = clientTitle(prog.name); line.code = prog.hrdcCode || ''; }
     else if (it.programmeId) issues.push('A programme on this quotation is no longer in the programme list.', 'programme_gone');
     const trainer = it.trainerId ? s.trainers.find(t => t.id === it.trainerId) : null;
     if (trainer) line.trainer = trainer.name || '';

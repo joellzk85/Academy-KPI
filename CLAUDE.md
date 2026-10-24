@@ -172,6 +172,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Titles are the programmes (2026-10-24):** no Programmes tab; Course outlines and Teambuilding proposal → By title holds HRDC status, category (standard list + new) and #tags; anyone sets category and tags, only Admin / Management rename or change HRDC; publish `firestore.rules`; go-live checklist item 60. See `hrdc-programmes-trainers.md`.
 - **Claim and invoice copies (2026-10-24):** HRDC claim, client invoice and reimbursement invoice take a file or pasted screenshot (Ctrl+V); required on new records before Case closed, never counted as the receipt; nothing to publish; go-live checklist item 61. See `money.md`.
 - **Pages, sort and filters on every list (2026-10-24):** nothing to publish; go-live checklist item 62.
+- **Teambuilding course outlines and speed build (2026-10-24):** outline type (Teambuilding / Soft / Technical), day-by-day agenda, Speed build proposal ↔ Speed course outline, "(TB)" never printed, teambuilding deals lead with the proposal; nothing to publish; go-live checklist item 63. See `teambuilding-client-links.md`.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

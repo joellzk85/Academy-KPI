@@ -215,6 +215,7 @@ export interface OutlineAgendaRow {
   time: string;                 // e.g. 9:00 AM – 9:35 AM
   text: string;                 // e.g. Module 1: Ice breaker ("Module N" prints in bold)
   isDay?: boolean;              // a day heading row ("Day 1") instead of a time slot
+  tag?: '' | 'indoor' | 'outdoor' | 'dining' | 'both';   // teambuilding outlines: where it happens (as in proposals)
 }
 
 export interface CourseOutline {
@@ -251,6 +252,7 @@ export interface CourseOutline {
   trainerId?: string;           // the trainer who wrote / will deliver it (trainers_directory)
   fromTrainerDocId?: string;    // made from a trainer's own outline in the portal (trainer_docs, lib/trainerDocs.ts)
   fromTrainerDocVersion?: number;   // which version of it we have
+  fromTbProposalId?: string;    // made with "Speed course outline" from this teambuilding proposal (2026-10-24, lib/outlineTb.ts)
   status?: 'draft' | 'sent';
   sentAt?: string;
   sentById?: string;
@@ -259,7 +261,8 @@ export interface CourseOutline {
   sharedLog?: Record<string, { at: string; byId: string; byName: string }>;   // who shared it with each of them, and when (alerts)
   sendLog?: QuoteSendEntry[];  // each time it was emailed, WhatsApped or marked sent (2026-10-19)
   // New look and details (Joel, 2026-10-19, following his "Discover Your Office Persona" outline). All optional.
-  kind?: 'training';            // outline type; team building will be a second type later
+  kind?: 'training' | 'teambuilding';   // teambuilding outlines (2026-10-24) pick "(TB)" titles and use the proposal's agenda builder
+  skillType?: 'soft' | 'technical';     // training outlines: Soft skill (the default for older outlines) or Technical skill
   methods?: string[];           // learning methods
   dayTitles?: string[];         // "Day 1: <title>" headings on the modules page
   agenda?: OutlineAgendaRow[];  // course agenda page (only printed when it has rows)

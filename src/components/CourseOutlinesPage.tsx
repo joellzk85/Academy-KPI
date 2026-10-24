@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, UserPlus, X,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, UserPlus, X, Zap,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { CourseOutline, CourseOutlineItem, OutlineAgendaRow, QuoteSendEntry, Representative } from '../types';
 import { BLOOM_LEVELS, DEFAULT_OUTLINE_TERMS, DIFFICULTIES, durationText } from '../lib/outlineContent';
 import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso, trainingDays } from '../lib/deals';
 import { GapsBox } from './DealGates';
-import { Programme, isTbProgramme } from '../lib/programmes';
+import { Programme, isTbDeal, isTbProgramme } from '../lib/programmes';
+import { OUTLINE_TYPES, OutlineType, agendaToDays, daysToAgenda, outlineFromProposal, outlineTypeFields, outlineTypeLabel, outlineTypeOf } from '../lib/outlineTb';
+import { Agenda as DayAgenda } from './TeambuildingParts';
+import { TbProposal, blankProposalContent } from '../lib/teambuilding';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
 import CourseOutlineDocument from './CourseOutlineDocument';
 import { OutlineSendDialog } from './QuoteSendDialog';
@@ -67,8 +70,11 @@ const prepareOutline = (out: CourseOutline): CourseOutline => clean({
   ...(out.nextTraining ? { nextTraining: trimList(out.nextTraining) } : {}),
 });
 
-export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onStartHandled, onOpenTab, openId, onOpenHandled, startOnShared, fromDealId, onBackToDeal }: {
+export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onStartHandled, onOpenTab, openId, onOpenHandled, startOnShared, fromDealId, onBackToDeal, fromTb, onFromTbHandled, onSpeedBuild }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
+  fromTb?: TbProposal | null;        // "Speed course outline" on a teambuilding proposal: open the outline made from it, or make one
+  onFromTbHandled?: () => void;
+  onSpeedBuild?: (o: CourseOutline, dealId: string | null) => void;   // "Speed build proposal" on a teambuilding outline
   fromDealId?: string | null;        // opened from this deal: the editor shows "Back to deal"
   onBackToDeal?: (dealId: string) => void;
   startDeal?: any | null;            // "Create outline" on a deal: go straight to "Start from" for it
@@ -131,7 +137,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
   const dealsForPicker = deals.filter(d => (staff && me.id === rep.id ? true : dealOwnerId(d) === rep.id) && dealStage(d) !== 'lost');
 
   // forTitle: "Write outline" on a title (By title view) makes it for that title.
-  const createFrom = (deal: any | null, base: CourseOutline | null, forTitle?: ForTitle) => {
+  const createFrom = (deal: any | null, base: CourseOutline | null, forTitle?: ForTitle, type: OutlineType = 'soft') => {
     const date = todayIso();
     const ownerId = (deal && dealOwnerId(deal)) || rep.id;
     const content = base ? clean({
@@ -139,22 +145,25 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       audience: base.audience, prerequisites: base.prerequisites, overview: base.overview, outcomes: base.outcomes || [],
       items: (base.items || []).map(m => ({ ...m, id: newModule().id })),
       // The new details (2026-10-19) come along too; the terms only when the earlier outline had its own.
-      kind: 'training' as const, methods: base.methods || [], dayTitles: base.dayTitles || [],
+      methods: base.methods || [], dayTitles: base.dayTitles || [],
       agenda: (base.agenda || []).map(r => ({ ...r, id: newRow().id })),
       difficulty: base.difficulty || '', evaluation: base.evaluation || [], bloomLevel: base.bloomLevel || 0,
       nextTraining: base.nextTraining || [], designedBy: base.designedBy || '', terms: base.terms, hideTerms: !!base.hideTerms,
     }) : {
       // A blank outline for a deal starts at the deal's training days (8 hours a day).
       courseTitle: '', durationDays: deal ? trainingDays(deal) : 1, totalHours: 8 * (deal ? trainingDays(deal) : 1), category: '', level: 'Beginner' as const, audience: '', prerequisites: '', overview: '',
-      outcomes: [], items: [newModule()], kind: 'training' as const, methods: [], agenda: [],
+      outcomes: [], items: [newModule()], methods: [], agenda: [],
     };
+    // The type picked in "Start from" (Teambuilding, Soft skill or Technical skill); a title of the other kind isn't kept.
+    const keepProg = (id?: string) => (id && isTbProgramme(programmes.find(p => p.id === id)?.name) === (type === 'teambuilding') ? id : '');
+    const progId = keepProg(deal?.programmeId) || keepProg(base?.programmeId);
     const o: CourseOutline = {
-      ...content,
+      ...content, ...outlineTypeFields(type),
       id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date, clientCode(clients.find(c => c.id === deal?.clientId))), refAuto: true, date,
       preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
       clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
-      programmeId: deal?.programmeId || base?.programmeId || '',
-      useProgrammeName: !!(deal?.programmeId || base?.programmeId) || (!!deal && !!dealProgrammeName(deal, programmes)),
+      programmeId: progId,
+      useProgrammeName: !!progId || (!!deal && !deal.programmeId && !!dealProgrammeName(deal, programmes)),
       status: 'draft', sharedWithIds: [], isHidden: false,
       ...(forTitle ? (forTitle.programmeId
         ? { programmeId: forTitle.programmeId, useProgrammeName: true }
@@ -221,6 +230,29 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       setInviteError(`Couldn't make the outline: ${friendlyError(e)}`);
     }
   };
+  // "Speed course outline" on a teambuilding proposal (2026-10-24): the outline already made from it opens; else a new
+  // teambuilding outline is saved from the proposal (lib/outlineTb.ts) for the same deal and opened to check and update.
+  useEffect(() => {
+    if (!fromTb || !loaded) return;
+    onFromTbHandled?.();
+    setBackDeal(fromDealId || null);
+    const made = outlines.filter(o => o.fromTbProposalId === fromTb.id).sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)))[0];
+    if (made) { setChoosing(null); open(made); return; }
+    const deal = fromTb.pipelineId ? deals.find(d => d.id === fromTb.pipelineId) || null : null;
+    const date = todayIso();
+    const ownerId = (deal && dealOwnerId(deal)) || fromTb.ownerId || rep.id;
+    const progName = String(programmes.find(p => p.id === fromTb.programmeId)?.name || '').trim();
+    const o: CourseOutline = prepareOutline({
+      category: '', level: 'Beginner', audience: '', prerequisites: '', methods: [],
+      ...outlineFromProposal(fromTb, progName, blankProposalContent(null).subtitle),
+      id: `outline_${Date.now()}`, refNumber: nextOutlineRef(outlines, date, clientCode(clients.find(c => c.id === (deal?.clientId || fromTb.clientId)))), refAuto: true, date,
+      preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
+      clientId: deal?.clientId || fromTb.clientId || '', pipelineId: deal?.id || '', preparedForCompany: deal ? '' : fromTb.preparedForCompany || '',
+      status: 'draft', sharedWithIds: [], isHidden: false,
+    } as CourseOutline);
+    setInviteError('');
+    setDoc(doc(db, 'course_outlines', o.id), o).then(() => { setChoosing(null); open(o); }).catch(e => setInviteError(`Couldn't make the course outline: ${friendlyError(e)}`));
+  }, [fromTb, loaded]);
   const open = (o: CourseOutline) => {
     markSharedSeen(me.id, 'outline', o);   // clears this person's "Shared with me" alert for it
     setDraft({ o: clean({ ...o, items: o.items || [], outcomes: o.outcomes || [] }), isNew: false });
@@ -249,7 +281,8 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       {draft ? (
         <Editor key={draft.o.id} initial={draft.o} isNew={draft.isNew} me={me} staff={staff} reps={reps} sources={sources}
           dealsForPicker={dealsForPicker} onOpenTab={onOpenTab} onClose={() => { setDraft(null); setBackDeal(null); }} trainers={trainers} links={links}
-          backToDeal={backDeal && onBackToDeal ? leave : undefined} trainerDocs={trainerDocs} />
+          backToDeal={backDeal && onBackToDeal ? leave : undefined} trainerDocs={trainerDocs}
+          onSpeedBuild={onSpeedBuild ? (o: CourseOutline) => onSpeedBuild(o, backDeal) : undefined} />
       ) : (
         <OutlineList rep={rep} me={me} staff={staff} outlines={outlines} loaded={loaded} sources={sources} personName={personName} links={links} startOnShared={startOnShared}
           onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate}
@@ -274,7 +307,7 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
       )}
       {choosing?.step === 'start' && (
         <StartChooser deal={choosing.deal} outlines={outlines} sources={sources} titleName={choosing.forTitle?.name}
-          onPick={base => createFrom(choosing.deal, base, choosing.forTitle)} onBack={() => setChoosing({ step: 'deal', forTitle: choosing.forTitle })} onCancel={() => (backDeal ? leave() : setChoosing(null))} />
+          onPick={(base, type) => createFrom(choosing.deal, base, choosing.forTitle, type)} onBack={() => setChoosing({ step: 'deal', forTitle: choosing.forTitle })} onCancel={() => (backDeal ? leave() : setChoosing(null))} />
       )}
     </>
   );
@@ -323,9 +356,11 @@ function DealChooser({ deals, sources, personName, onPick, onCancel, allowGenera
 // ---------- Step 2: start blank or from a copy ----------
 function StartChooser({ deal, outlines, sources, onPick, onBack, onCancel, titleName }: {
   deal: any | null; outlines: CourseOutline[]; sources: OutlineSources; titleName?: string;
-  onPick: (base: CourseOutline | null) => void; onBack: () => void; onCancel: () => void;
+  onPick: (base: CourseOutline | null, type: OutlineType) => void; onBack: () => void; onCancel: () => void;
 }) {
   const [search, setSearch] = useState('');
+  // Teambuilding for a teambuilding deal or a "(TB)" title, else Soft skill; the creator can change it.
+  const [type, setType] = useState<OutlineType>(() => (titleName ? isTbProgramme(titleName) : isTbDeal(deal)) ? 'teambuilding' : 'soft');
   const progName = (titleName || dealProgrammeName(deal, sources.programmes)).toLowerCase();
   const resolved = useMemo(() => outlines.filter(o => o.id !== 'outline_default' && !o.isHidden).map(o => resolveOutline(o, sources)), [outlines, sources]);
   const sameProgramme = (r: ReturnType<typeof resolveOutline>) =>
@@ -333,14 +368,23 @@ function StartChooser({ deal, outlines, sources, onPick, onBack, onCancel, title
   const t = search.trim().toLowerCase();
   const list = resolved
     .filter(r => !t || `${r.o.courseTitle} ${r.o.preparedForCompany} ${r.o.refNumber}`.toLowerCase().includes(t))
-    .sort((a, b) => Number(sameProgramme(b)) - Number(sameProgramme(a)) || String(b.o.date || '').localeCompare(String(a.o.date || '')))
+    .sort((a, b) => Number(sameProgramme(b)) - Number(sameProgramme(a)) || Number(outlineTypeOf(b.o) === type) - Number(outlineTypeOf(a.o) === type) || String(b.o.date || '').localeCompare(String(a.o.date || '')))
     .slice(0, 40);
   const clientName = deal ? sources.clients.find(c => c.id === deal.clientId)?.companyName || deal.client || '' : '';
 
   return (
     <Modal title="Start from" onCancel={onCancel}>
       <p className="-mt-1 mb-3 text-[15px] text-ink-soft">{deal ? `For ${clientName || 'this deal'}` : 'General outline, not for a client'}{progName ? `, ${titleName || dealProgrammeName(deal, sources.programmes)}` : ''}</p>
-      <button type="button" onClick={() => onPick(null)} className={`${btnSecondary} w-full justify-start`}><FilePlus2 className="h-4 w-4" /> Blank outline</button>
+      <p className="mb-1.5 text-sm font-semibold">Type of outline</p>
+      <div className="mb-4 flex flex-wrap gap-2" role="radiogroup" aria-label="Type of outline">
+        {OUTLINE_TYPES.map(t => (
+          <button key={t.key} type="button" role="radio" aria-checked={type === t.key} onClick={() => setType(t.key)}
+            className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${type === t.key ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={() => onPick(null, type)} className={`${btnSecondary} w-full justify-start`}><FilePlus2 className="h-4 w-4" /> Blank outline</button>
       <p className="mb-2 mt-4 text-sm font-semibold">Or copy an earlier outline{progName ? ' (same title first)' : ''}</p>
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
@@ -350,10 +394,10 @@ function StartChooser({ deal, outlines, sources, onPick, onBack, onCancel, title
         {list.length === 0 && <li className="p-4 text-ink-soft">No outlines to copy yet.</li>}
         {list.map(r => (
           <li key={r.o.id}>
-            <button type="button" onClick={() => onPick(r.o)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface">
+            <button type="button" onClick={() => onPick(r.o, type)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface">
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-semibold">{r.o.courseTitle || 'Untitled'}{sameProgramme(r) && <span className="ml-2 rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Same title</span>}</span>
-                <span className="block truncate text-sm text-ink-soft">{r.o.preparedForCompany || 'General'} · {r.o.refNumber} · {summary(r.o)}</span>
+                <span className="block truncate text-sm text-ink-soft">{outlineTypeLabel(r.o)} · {r.o.preparedForCompany || 'General'} · {r.o.refNumber} · {summary(r.o)}</span>
               </span>
               <Copy className="h-4 w-4 shrink-0 text-ink-soft" />
             </button>
@@ -412,7 +456,8 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
 
   const resolved = useMemo(() => outlines.map(o => ({ raw: o, r: resolveOutline(o, sources) })), [outlines, sources]);
   const titleDocs: TitleDoc[] = useMemo(() => resolved
-    .filter(x => x.raw.id !== 'outline_default' && !x.raw.isHidden && !(x.raw as any).dealDeleted)
+    // Teambuilding outlines sit under their "(TB)" title in Teambuilding proposal → By title (2026-10-24).
+    .filter(x => x.raw.id !== 'outline_default' && !x.raw.isHidden && !(x.raw as any).dealDeleted && outlineTypeOf(x.raw) !== 'teambuilding')
     .map(({ raw, r }) => ({ id: raw.id, title: String(r.o.courseTitle || '').trim(), programmeId: r.programmeId, company: r.o.preparedForCompany || '', ref: raw.refNumber || '', date: raw.date || '', sent: outlineSent(raw), raw })),
   [resolved]);
   const isMine = (x: { raw: CourseOutline; r: { ownerId: string } }) => x.r.ownerId === rep.id || x.raw.creatorId === rep.id || (!x.raw.creatorId && !x.raw.ownerId && !!x.raw.preparedBy && x.raw.preparedBy === rep.name);
@@ -468,7 +513,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
       </div>
 
       {view === 'titles' ? (
-        <TitlesView kind="training" programmes={sources.programmes as Programme[]} docs={titleDocs} deals={sources.deals} trainers={trainers} outlines={outlines}
+        <TitlesView kind="training" programmes={sources.programmes as Programme[]} docs={titleDocs} deals={sources.deals} trainers={trainers} outlines={outlines.filter(o => outlineTypeOf(o) !== 'teambuilding')}
           viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle} />
       ) : <>
       <div className="flex flex-wrap items-center gap-2">
@@ -538,7 +583,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
                   </span>
                   <span className="min-w-0 text-[15px] text-ink-soft">
                     <span className="block truncate">{r.o.preparedForCompany || 'General'}</span>
-                    <span className="block truncate text-sm">{summary(r.o)}</span>
+                    <span className="block truncate text-sm">{outlineTypeLabel(r.o)} · {summary(r.o)}</span>
                   </span>
                   <span className="text-sm text-ink-soft sm:text-right">
                     {formatDate(o.date) || '—'}
@@ -709,8 +754,9 @@ function TrainerInvites({ links, mine, trainers, me, onAccept }: {
 }
 
 // ---------- Editor ----------
-function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, trainers, links, backToDeal, trainerDocs }: {
+function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOpenTab, onClose, trainers, links, backToDeal, trainerDocs, onSpeedBuild }: {
   initial: CourseOutline; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: OutlineSources; dealsForPicker: any[];
+  onSpeedBuild?: (o: CourseOutline) => void;   // teambuilding outlines: "Speed build proposal"
   trainerDocs: TrainerDoc[];
   onOpenTab?: (tab: Tab) => void; onClose: () => void; key?: string; trainers: any[]; links: TrainerLink[];
   backToDeal?: () => void;   // shown as "Back to deal" when opened from a deal
@@ -745,6 +791,21 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const nameOf = (id?: string) => reps.find(p => p.id === id)?.name || '';
   const items = o.items || [];
   const clientName = r.client?.companyName || '';
+  const type = outlineTypeOf(o);
+  const isTb = type === 'teambuilding';
+  // A different type keeps the title only when it's of the same kind ("(TB)" titles are for teambuilding outlines).
+  const setType = (t: OutlineType) => {
+    const prog = o.programmeId ? sources.programmes.find(p => p.id === o.programmeId) : null;
+    const keep = !prog || isTbProgramme(prog.name) === (t === 'teambuilding');
+    set({ ...outlineTypeFields(t), ...(keep ? {} : { programmeId: '', useProgrammeName: false, courseTitle: o.courseTitle || '' }) });
+  };
+  // "Speed build proposal": saved first, then the proposal made from it (or the one already made) opens.
+  const speedBuild = () => {
+    if (!onSpeedBuild) return;
+    if (!(shownO.courseTitle || '').trim() && !window.confirm('This outline has no title yet. Build the proposal anyway?')) return;
+    const go = () => onSpeedBuild({ ...shownO, programmeId: r.programmeId });
+    if (locked || !dirty) go(); else persist(o, 'Saved').then(ok => { if (ok) go(); });
+  };
 
   const persist = async (out: CourseOutline, msg: string) => {
     setBusy(true);
@@ -950,6 +1011,11 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
             {!locked && <> {' '}<button type="button" className={linkBtn} onClick={() => setEditMeta(v => !v)}>{editMeta ? 'Done' : 'Edit'}</button></>}
           </p>
         </div>
+        {isTb && onSpeedBuild && (
+          <button type="button" className={btnSecondary} disabled={busy} onClick={speedBuild} title="Make a teambuilding proposal from this outline; add photos, venues and packages there">
+            <Zap className="h-4 w-4" /> Speed build proposal
+          </button>
+        )}
       </div>
 
       {locked && (
@@ -1053,10 +1119,22 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
         <Card title="2. Course details">
           <div className="space-y-3">
             <div>
+              <p className={label}>Type of outline</p>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Type of outline">
+                {OUTLINE_TYPES.map(t => (
+                  <button key={t.key} type="button" role="radio" aria-checked={type === t.key} onClick={() => setType(t.key)}
+                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${type === t.key ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              {isTb && <p className="mt-1 text-sm text-ink-soft">For registering the teambuilding programme with HRDC. The client is pitched with the teambuilding proposal ("Speed build proposal" at the top makes one from this).</p>}
+            </div>
+            <div>
               <label className={label} htmlFor="o-prog">Title from the list <span className="font-normal text-ink-soft">(optional; outlines with the same title are one programme)</span></label>
               <select id="o-prog" value={r.programmeId} onChange={e => set({ programmeId: e.target.value, useProgrammeName: !!e.target.value })} className={input}>
                 <option value="">{r.deal?.programmeId ? 'Use the deal\'s title' : 'None: type the title below'}</option>
-                {[...sources.programmes].filter(p => !isTbProgramme(p.name)).sort((a, b) => String(a.name).localeCompare(String(b.name))).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {[...sources.programmes].filter(p => isTbProgramme(p.name) === isTb).sort((a, b) => String(a.name).localeCompare(String(b.name))).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               {!o.programmeId && r.deal?.programmeId && <p className="mt-0.5 text-xs text-ink-soft">From the deal.</p>}
             </div>
@@ -1074,7 +1152,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
                 </>
               )}
             </div>
-            <TitleTagsBox kind="training" programmeId={r.programmeId} title={shownO.courseTitle || ''} programmes={sources.programmes as Programme[]} viewer={me} />
+            <TitleTagsBox kind={isTb ? 'teambuilding' : 'training'} programmeId={r.programmeId} title={shownO.courseTitle || ''} programmes={sources.programmes as Programme[]} viewer={me} />
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className={label} htmlFor="o-days">Course duration (days)</label>
@@ -1163,7 +1241,17 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
           {!locked && <button type="button" className={`${btnSecondary} mt-3`} onClick={addItem}><Plus className="h-4 w-4" /> Add module</button>}
         </Card>
 
-        {/* 5. Agenda */}
+        {/* 5. Agenda: teambuilding outlines use the proposal's day-by-day builder (each day folds) */}
+        {isTb ? (
+          <Card title={`5. Agenda (optional${agenda.length ? `, ${agenda.filter(r => !r.isDay).length} time slots` : ''})`}>
+            <p className="mb-3 text-[15px] text-ink-soft">Day by day, like the teambuilding proposal. Click a day's arrow to fold it. Leave it empty and the outline has no agenda page.</p>
+            {locked ? (
+              <p className="text-[15px] text-ink-soft">{agenda.length ? 'See Preview.' : 'No agenda.'}</p>
+            ) : (
+              <DayAgenda collapsible days={agendaToDays(agenda)} onChange={d => set({ agenda: daysToAgenda(d) })} />
+            )}
+          </Card>
+        ) : (
         <Card title={`5. Course agenda (optional${agenda.length ? `, ${agenda.filter(r => !r.isDay).length} time slots` : ''})`}>
           <p className="mb-3 text-[15px] text-ink-soft">Only some courses need an agenda. Leave this empty and the outline has no agenda page, just the modules. If you add time slots, they print as a table on their own page. "Module 1" at the start prints in bold.</p>
           {agenda.length > 0 && (
@@ -1199,6 +1287,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
             </div>
           )}
         </Card>
+        )}
 
         {/* 6. Optional extras */}
         <Card title="6. Optional extras">

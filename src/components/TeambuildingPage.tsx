@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowLeft, BookmarkPlus, ChevronDown, ChevronRight, Copy, Download, Eye, EyeOff, FilePlus2, Laptop, Library, Link2, Loader2, Lock,
+  AlertTriangle, ArrowLeft, BookmarkPlus, ClipboardList, ChevronDown, ChevronRight, Copy, Download, Eye, EyeOff, FilePlus2, Laptop, Library, Link2, Loader2, Lock,
   MoreHorizontal, Pencil, Plus, RectangleHorizontal, RectangleVertical, RotateCcw, Search, Send, Smartphone, Table2, Trash2, Unlock, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { QuoteSendEntry, Representative } from '../types';
+import { CourseOutline, QuoteSendEntry, Representative } from '../types';
+import { proposalFromOutline } from '../lib/outlineTb';
 import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso } from '../lib/deals';
 import { dealProgrammeName } from '../lib/outlineResolve';
 import { linkedOnly } from '../lib/linked';
@@ -52,8 +53,11 @@ type Tab = 'proposals' | 'activities' | 'template';
 const TAB_KEY = 'next_tb_tab';
 const toneClass = { soft: 'text-ink-soft', attention: 'text-attention', danger: 'text-danger' };
 
-export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStartHandled, openId, onOpenHandled, startOnShared, fromDealId, onBackToDeal, onOpenDeals }: {
+export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStartHandled, openId, onOpenHandled, startOnShared, fromDealId, onBackToDeal, onOpenDeals, fromOutline, onFromOutlineHandled, onSpeedOutline }: {
   rep: Representative; reps: Representative[]; viewer?: Viewer; key?: string;
+  fromOutline?: CourseOutline | null;   // "Speed build proposal" on a teambuilding outline: open the proposal made from it, or make one
+  onFromOutlineHandled?: () => void;
+  onSpeedOutline?: (p: TbProposal, dealId: string | null) => void;   // "Speed course outline" on a proposal
   startDeal?: any | null;            // "Create teambuilding proposal" on a deal
   onStartHandled?: () => void;
   openId?: string | null;            // open this proposal straight in the editor
@@ -73,6 +77,7 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
   const [trainers, setTrainers] = useState<any[]>([]);
   const [venues, setVenues] = useState<any[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
+  const [tbOutlines, setTbOutlines] = useState<CourseOutline[]>([]);   // teambuilding course outlines (for HRDC), shown on their title
   const [loaded, setLoaded] = useState(false);
   const template = usePackageTemplate();
   const [draft, setDraft] = useState<{ p: TbProposal; isNew: boolean } | null>(null);
@@ -91,6 +96,7 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
       onSnapshot(query(collection(db, 'trainers_directory')), s => setTrainers(all(s)), () => {}),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(all(s)), () => {}),
       onSnapshot(query(collection(db, 'programmes')), s => setProgrammes(all(s)), () => {}),
+      onSnapshot(query(collection(db, 'course_outlines'), where('kind', '==', 'teambuilding')), s => setTbOutlines(linkedOnly(all(s)) as CourseOutline[]), () => {}),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -117,6 +123,30 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
     open(p);
     onOpenHandled?.();
   }, [openId, list]);
+  // "Speed build proposal" on a teambuilding course outline (2026-10-24): the proposal already made from it opens; else a
+  // draft is saved from the outline (objectives, activities, agenda, trainer, terms; lib/outlineTb.ts) with the package
+  // template, for the same deal, and opened to add photos, venues and packages.
+  useEffect(() => {
+    if (!fromOutline || !loaded || !template.loaded) return;
+    onFromOutlineHandled?.();
+    setTab('proposals');
+    setBackDeal(fromDealId || null);
+    const made = list.filter(x => x.fromOutlineId === fromOutline.id).sort((a, b) => String(b.date || b.id).localeCompare(String(a.date || a.id)))[0];
+    if (made) { setChoosing(null); open(made); return; }
+    const deal = fromOutline.pipelineId ? deals.find(d => d.id === fromOutline.pipelineId) || null : null;
+    const date = todayIso();
+    const ownerId = (deal && dealOwnerId(deal)) || fromOutline.ownerId || rep.id;
+    const p: TbProposal = JSON.parse(JSON.stringify({
+      ...blankProposalContent(template.pk), ...proposalFromOutline(fromOutline, fromOutline.programmeId || ''),
+      id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date, clientCode(clients.find(c => c.id === (deal?.clientId || fromOutline.clientId)))), refAuto: true, date,
+      preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
+      clientId: deal?.clientId || fromOutline.clientId || '', pipelineId: deal?.id || '', preparedForCompany: deal ? '' : fromOutline.preparedForCompany || '',
+      status: 'draft', sharedWithIds: [], isHidden: false,
+    }));
+    setDocError('');
+    setDoc(doc(db, 'teambuilding_proposals', p.id), cleanForSave(p)).then(() => { setChoosing(null); open(p); })
+      .catch(e => setDocError(`Couldn't make the proposal: ${friendlyError(e)}`));
+  }, [fromOutline, loaded, template.loaded]);
   const leave = () => {
     const d = backDeal;
     setDraft(null); setChoosing(null); setBackDeal(null);
@@ -177,7 +207,8 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
     return (
       <Editor key={draft.p.id} initial={draft.p} isNew={draft.isNew} me={me} staff={staff} reps={reps} sources={sources} programmes={programmes}
         dealsForPicker={dealsForPicker} templatePk={template.pk} onClose={() => { setDraft(null); setBackDeal(null); }}
-        backToDeal={backDeal && onBackToDeal ? leave : undefined} onOpenDeals={onOpenDeals} trainerDocs={trainerDocs} />
+        backToDeal={backDeal && onBackToDeal ? leave : undefined} onOpenDeals={onOpenDeals} trainerDocs={trainerDocs}
+        onSpeedOutline={onSpeedOutline ? (x: TbProposal) => onSpeedOutline(x, backDeal) : undefined} />
     );
   }
 
@@ -203,7 +234,7 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
             onUse={d => setChoosing({ step: 'deal', fromDoc: d })} onPreview={setPeekDoc} />
           {docError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{docError}</p>}
           <ProposalList rep={rep} me={me} staff={staff} list={list} loaded={loaded} sources={sources} personName={personName} startOnShared={startOnShared}
-            onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} programmes={programmes}
+            onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} programmes={programmes} tbOutlines={tbOutlines}
             onWriteTitle={g => setChoosing({ step: 'deal', forTitle: { programmeId: g.programme?.id, name: g.name } })} />
           </>
         )}
@@ -326,7 +357,8 @@ type ForTitle = { programmeId?: string; name: string };
 type ListView = 'titles' | 'all';
 const VIEW_KEY = 'tb_view';
 
-function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew, onOpen, onDuplicate, startOnShared, programmes, onWriteTitle }: {
+function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew, onOpen, onDuplicate, startOnShared, programmes, onWriteTitle, tbOutlines }: {
+  tbOutlines: CourseOutline[];
   rep: Representative; me: Viewer; staff: boolean; list: TbProposal[]; loaded: boolean; sources: TbSources; personName: (id?: string) => string;
   startOnShared?: boolean; onNew: () => void; onOpen: (p: TbProposal) => void; onDuplicate: (p: TbProposal) => Promise<void>;
   programmes: Programme[]; onWriteTitle: (g: TitleGroup) => void;
@@ -381,7 +413,7 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
         {view === 'titles' && <button type="button" className={`${btnPrimary} ml-auto`} onClick={onNew}><Plus className="h-4 w-4" /> New proposal</button>}
       </div>
       {view === 'titles' ? (
-        <TitlesView kind="teambuilding" programmes={programmes} docs={titleDocs} deals={sources.deals} trainers={sources.trainers} outlines={[]}
+        <TitlesView kind="teambuilding" programmes={programmes} docs={titleDocs} deals={sources.deals} trainers={sources.trainers} outlines={tbOutlines}
           viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle} />
       ) : <>
       <div className="flex flex-wrap items-center gap-2">
@@ -476,8 +508,9 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 }
 
 // ---------- Editor ----------
-function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsForPicker, templatePk, onClose, backToDeal, onOpenDeals, trainerDocs }: {
+function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsForPicker, templatePk, onClose, backToDeal, onOpenDeals, trainerDocs, onSpeedOutline }: {
   initial: TbProposal; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: TbSources; programmes: any[];
+  onSpeedOutline?: (p: TbProposal) => void;   // "Speed course outline"
   trainerDocs: TrainerDoc[];
   dealsForPicker: any[]; templatePk: any; onClose: () => void; backToDeal?: () => void; onOpenDeals?: () => void; key?: string;
 }) {
@@ -537,6 +570,12 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   });
   const status = note ? { text: note, tone: 'soft' as const } : autoSaveText(auto.state, dirty && touched, locked, touched);
   const close = () => leaveAfterSave(auto.flush, onClose);
+  // "Speed course outline": saved first, then the course outline made from it (or the one already made) opens.
+  const speedOutline = () => {
+    if (!onSpeedOutline) return;
+    const go = () => onSpeedOutline({ ...p, programmeId: p.programmeId || deal?.programmeId || '' });
+    if (locked || !dirty) go(); else persist(p, 'Saved').then(ok => { if (ok) go(); });
+  };
   const goBack = () => { if (backToDeal) leaveAfterSave(auto.flush, backToDeal); };
 
   // Sending the proposal: a deal at New moves to "Proposal sent", with the same check as its own button
@@ -657,6 +696,11 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
           <h2 className="truncate text-xl font-bold">{r.p.title || 'New teambuilding proposal'}</h2>
           <p className="text-sm text-ink-soft">{p.refNumber} · {formatDate(p.date)} · Prepared by {p.preparedBy || me.name}{r.ownerId ? ` · Owner ${nameOf(r.ownerId) || p.ownerName || ''}` : ''}</p>
         </div>
+        {onSpeedOutline && (
+          <button type="button" className={btnSecondary} disabled={busy} onClick={speedOutline} title="Make a course outline from this proposal (for HRDC), to check and update">
+            <ClipboardList className="h-4 w-4" /> Speed course outline
+          </button>
+        )}
       </div>
 
       {locked && (

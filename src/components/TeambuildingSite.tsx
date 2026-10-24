@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { clientTitle } from '../lib/programmes';
 import { CalendarDays, Check, ChevronDown, Clock, MapPin, Minus, Navigation, Plus, Sparkles, Users } from 'lucide-react';
 import logoUrl from '../assets/outline/next-logo.png';
 import hrdcRegisteredUrl from '../assets/outline/hrdc-registered.png';
@@ -245,7 +246,7 @@ function Hero({ r, pax, pdf, onGo }: { r: ResolvedTb; pax: number; pdf: boolean;
           </div>
         )}
         <p className="tb-rise text-sm font-semibold uppercase tracking-[0.2em] text-white/85">Teambuilding proposal{r.company ? ` · Prepared for ${r.company}` : ''}</p>
-        <h1 className="tb-rise mt-3 max-w-4xl text-4xl font-extrabold uppercase leading-[1.05] text-white sm:text-6xl" style={{ animationDelay: '80ms' }}>{p.title || 'Teambuilding proposal'}</h1>
+        <h1 className="tb-rise mt-3 max-w-4xl text-4xl font-extrabold uppercase leading-[1.05] text-white sm:text-6xl" style={{ animationDelay: '80ms' }}>{clientTitle(p.title) || 'Teambuilding proposal'}</h1>
         {p.subtitle && <p className="tb-rise mt-4 max-w-2xl text-lg leading-relaxed text-white/90" style={{ animationDelay: '160ms' }}>{p.subtitle}</p>}
         {facts.length > 0 && (
           <div className="tb-rise mt-6 flex flex-wrap gap-2" style={{ animationDelay: '240ms' }}>

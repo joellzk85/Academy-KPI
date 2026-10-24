@@ -99,6 +99,8 @@ export interface HrdcQuery {
 export const isTbProgramme = (name?: string) => /\(TB\)\s*$/i.test(String(name || ''));
 export const withTbMark = (name: string) => (isTbProgramme(name) ? name.trim() : `${name.trim()} (TB)`);
 export const isTbDeal = (deal: any) => String(deal?.type || '') === 'Teambuilding';
+/** "(TB)" is for the team only (Joel, 2026-10-24): PDFs, client links, quotations and emails print the title without it. */
+export const clientTitle = (name?: string) => String(name || '').replace(/\s*\(TB\)\s*$/i, '');
 /** The programmes a deal of this type can pick: (TB) ones for teambuilding, the rest for training; all when unknown. */
 export function programmesFor(list: Programme[], kind?: 'training' | 'teambuilding'): Programme[] {
   if (!kind) return list;

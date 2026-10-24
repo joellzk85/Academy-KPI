@@ -4,6 +4,7 @@
 // The sheet has the class "print-paper" so makeDocumentPdf can find it.
 
 import React from 'react';
+import { clientTitle } from '../lib/programmes';
 import { COMPANY } from '../lib/company';
 import {
   HrKey, INTERNAL_PARTS, REVIEW_PARTS, ReportHeaderData, TIME_LABELS, TrainingReport, absentCount, attendancePct, objectivesAverage, onHrCopy, presentCount,
@@ -38,7 +39,7 @@ export default function TrainingReportDocument({ r, h }: { r: TrainingReport; h:
 
       <table className="w-full border-collapse">
         <tbody>
-          {([['Programme', h.programme], ['Client', h.client], ['Date(s)', h.dates], ['Venue', h.venue], ['Trainer', h.trainer], ...(h.grantNumber ? [['HRDC approval code', h.grantNumber]] : [])] as [string, string][]).map(([k, v]) => (
+          {([['Programme', clientTitle(h.programme)], ['Client', h.client], ['Date(s)', h.dates], ['Venue', h.venue], ['Trainer', h.trainer], ...(h.grantNumber ? [['HRDC approval code', h.grantNumber]] : [])] as [string, string][]).map(([k, v]) => (
             <tr key={k}><td className={`${cell} w-[28%] font-semibold`}>{k}</td><td className={cell}>{v || ' '}</td></tr>
           ))}
         </tbody>

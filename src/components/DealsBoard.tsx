@@ -35,7 +35,7 @@ import { useClaimBacks } from './ClaimBacks';
 import { daysSinceTraining } from '../lib/postTraining';
 import { MoneyIn, MoneyOut, MoneySettings } from '../lib/money';
 import { ProgrammePicker, StatusChip } from './Programmes';
-import { HrdcQuery, Programme, grantBlockReason } from '../lib/programmes';
+import { HrdcQuery, Programme, grantBlockReason, isTbDeal } from '../lib/programmes';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { clientContacts, dealContact, mainContactFields, newContactId } from '../lib/contacts';
 import PickOrType from './PickOrType';
@@ -1202,20 +1202,34 @@ function DealPanel(props: {
 
   // The single main step for the stage
   const next: { title: string; hint?: string; button?: React.ReactNode } = (() => {
+    // Teambuilding deals (Joel, 2026-10-24): the client is pitched with the teambuilding proposal; the course outline
+    // (what HRDC registers) is optional here, and sending it still moves the deal on. Training deals don't show the proposal.
+    if ((st === 'lead' || st === 'appointment') && isTbDeal(p)) return {
+      title: 'Next step: send the teambuilding proposal',
+      hint: 'Send the teambuilding proposal (sending it moves the deal on), drop the proposal file below, or click "Proposal sent" if it went another way. A course outline is optional for the client; HRDC registers the programme from it.',
+      button: (
+        <>
+          {props.onCreateTeambuilding && (
+            <button type="button" disabled={props.busy} className={main} onClick={() => (draftTb ? openTb(draftTb) : props.onCreateTeambuilding!())}>
+              <PartyPopper className="h-4 w-4" /> {draftTb ? 'Open teambuilding proposal' : 'Create teambuilding proposal'}
+            </button>
+          )}
+          <button type="button" disabled={props.busy} className={btnSecondary} onClick={props.onProposal}>Proposal sent</button>
+          <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => (draftOutline ? openOutline(draftOutline) : props.onCreateOutline())}>
+            <ClipboardList className="h-4 w-4" /> {draftOutline ? 'Open course outline' : 'Course outline (optional)'}
+          </button>
+        </>
+      ),
+    };
     if (st === 'lead' || st === 'appointment') return {
       title: 'Next step: send the proposal',
-      hint: 'Send the course outline or teambuilding proposal (sending it moves the deal on), drop the proposal file below, or click "Proposal sent" if it went another way. Meeting the client first is optional.',
+      hint: 'Send the course outline (sending it moves the deal on), drop the proposal file below, or click "Proposal sent" if it went another way. Meeting the client first is optional.',
       button: (
         <>
           <button type="button" disabled={props.busy} className={main} onClick={props.onProposal}>Proposal sent</button>
           <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => (draftOutline ? openOutline(draftOutline) : props.onCreateOutline())}>
             <ClipboardList className="h-4 w-4" /> {draftOutline ? 'Open course outline' : 'Create course outline'}
           </button>
-          {props.onCreateTeambuilding && (
-            <button type="button" disabled={props.busy} className={btnSecondary} onClick={() => (draftTb ? openTb(draftTb) : props.onCreateTeambuilding!())}>
-              <PartyPopper className="h-4 w-4" /> {draftTb ? 'Open teambuilding proposal' : 'Create teambuilding proposal'}
-            </button>
-          )}
         </>
       ),
     };
@@ -1503,11 +1517,14 @@ function DealPanel(props: {
               onCreate={props.editable && canQuote(p) && !hasQuote ? props.onCreateQuotation : undefined}
               onAdd={props.editable && canQuote(p) && hasQuote ? props.onAddQuotation : undefined} />
             {!canQuote(p) && st !== 'lost' && <p className="text-sm text-ink-soft">A quotation can be made once the client approves the proposal.</p>}
-            <OutlineRows outlines={outlinesNewest} onOpen={openOutline} onCreate={props.editable && !draftOutline ? props.onCreateOutline : undefined} />
-            {(props.tbs.length > 0 || props.onCreateTeambuilding) && (
+            {/* Teambuilding deals list their proposals first (the pitch); the course outline is for HRDC */}
+            {!isTbDeal(p) && <OutlineRows outlines={outlinesNewest} onOpen={openOutline} onCreate={props.editable && !draftOutline ? props.onCreateOutline : undefined} />}
+            {(props.tbs.length > 0 || (props.onCreateTeambuilding && isTbDeal(p))) && (
               <OutlineRows outlines={tbsNewest.map(t => ({ ...t, courseTitle: t.title }))} onOpen={openTb} onCreate={props.editable && !draftTb && props.onCreateTeambuilding ? props.onCreateTeambuilding : undefined}
                 heading="Teambuilding proposals" createLabel="Create teambuilding proposal" icon={<PartyPopper className="h-4 w-4" />} />
             )}
+            {isTbDeal(p) && <OutlineRows outlines={outlinesNewest} onOpen={openOutline} onCreate={props.editable && !draftOutline ? props.onCreateOutline : undefined}
+              heading="Course outlines (for HRDC)" />}
             <ProposalFilesList dealId={p.id} files={props.proposalFiles} viewer={props.viewer} editable={props.editable} onUploaded={props.onProposalUploaded} />
           </div>
         </Fold>
@@ -1551,6 +1568,12 @@ function DealPanel(props: {
               onCreateQuotation={props.editable ? props.onCreateQuotation : undefined}
               onOpenQuotations={props.onOpenQuotations}
               grantBlock={grantBlock}
+              grantOutline={isTbDeal(p) && isHrdcDeal ? (() => {
+                // HRDC teambuilding deals: the course outline HRDC registers the programme from (2026-10-24)
+                const o = outlinesNewest.find(x => x.status === 'sent') || outlinesNewest[0];
+                return o ? { label: `Course outline for HRDC: ${o.refNumber || 'open'}`, onOpen: () => openOutline(o) }
+                  : props.editable ? { label: 'Make the course outline for HRDC', onOpen: props.onCreateOutline } : undefined;
+              })() : undefined}
             />
           </Fold>
         )}

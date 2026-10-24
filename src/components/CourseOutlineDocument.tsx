@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Mail, Phone } from 'lucide-react';
 import { CourseOutline } from '../types';
 import { COMPANY } from '../lib/company';
+import { clientTitle } from '../lib/programmes';
+import { AGENDA_TAGS } from '../lib/teambuilding';
 import {
   DEFAULT_OUTLINE_TERMS, bloomText, durationText, lines, moduleDays, parseTerms, splitModuleLabel,
 } from '../lib/outlineContent';
@@ -34,7 +36,9 @@ const FONT = "'Poppins', 'Plus Jakarta Sans', ui-sans-serif, sans-serif";
 type Block = { key: string; node: React.ReactNode };
 type Section = { key: string; title: string; blocks: Block[]; wrap?: (children: React.ReactNode) => React.ReactNode };
 
-export default function CourseOutlineDocument({ o, forPdf }: { o: CourseOutline; forPdf?: boolean }) {
+export default function CourseOutlineDocument({ o: given, forPdf }: { o: CourseOutline; forPdf?: boolean }) {
+  // "(TB)" marks teambuilding titles inside the CRM only; the printed outline never shows it.
+  const o = useMemo(() => ({ ...given, courseTitle: clientTitle(given.courseTitle) }), [given]);
   const sections = useMemo(() => buildSections(o), [o]);
   const measureRef = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState<number[][][] | null>(null);
@@ -243,7 +247,7 @@ function buildSections(o: CourseOutline): Section[] {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '170px 1fr', borderLeft: line, borderRight: line, borderBottom: line }}>
               <div style={{ ...cell, borderRight: line }}>{r.time}</div>
-              <div style={cell}>{label ? <><strong>{label}</strong>{rest ? `: ${rest}` : ''}</> : r.text}</div>
+              <div style={cell}>{label ? <><strong>{label}</strong>{rest ? `: ${rest}` : ''}</> : r.text}{r.tag && <span style={{ color: '#5f6f6a' }}> ({AGENDA_TAGS.find(t => t.key === r.tag)?.label})</span>}</div>
             </div>
           ),
         };

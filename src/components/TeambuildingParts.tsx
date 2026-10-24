@@ -286,13 +286,29 @@ export function Points({ list, onChange, prefix, titlePh, textPh }: { list: TbPo
   );
 }
 
-export function Agenda({ days, onChange }: { days: TbAgendaDay[]; onChange: (d: TbAgendaDay[]) => void }) {
+// collapsible (teambuilding course outlines, 2026-10-24): each day folds to its heading and number of time slots;
+// days already filled in start folded, a new or empty one starts open.
+export function Agenda({ days, onChange, collapsible }: { days: TbAgendaDay[]; onChange: (d: TbAgendaDay[]) => void; collapsible?: boolean }) {
   const setDay = (i: number, c: Partial<TbAgendaDay>) => onChange(days.map((d, k) => (k === i ? { ...d, ...c } : d)));
+  const filled = (d: TbAgendaDay) => d.rows.some(r => (r.time || r.text).trim());
+  const [shut, setShut] = useState<Record<string, boolean>>(() => (collapsible ? Object.fromEntries(days.filter(filled).map(d => [d.id, true])) : {}));
   return (
     <div className="space-y-4">
-      {days.map((d, i) => (
+      {days.map((d, i) => (collapsible && shut[d.id]) ? (
+        <div key={d.id} className="flex items-center gap-2 rounded-xl border border-line p-3">
+          <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setShut(x => ({ ...x, [d.id]: false }))} aria-expanded={false}>
+            <ChevronRight className="h-4 w-4 shrink-0 text-ink-soft" />
+            <span className="truncate font-semibold">{d.title || `Day ${i + 1}`}</span>
+            <span className="shrink-0 text-sm text-ink-soft">{d.rows.length} time slot{d.rows.length === 1 ? '' : 's'}</span>
+          </button>
+          <UpDown i={i} n={days.length} onMove={by => onChange(move(days, i, by))} />
+        </div>
+      ) : (
         <div key={d.id} className="rounded-xl border border-line p-3">
           <div className="mb-2 flex items-center gap-2">
+            {collapsible && (
+              <button type="button" className={iconBtn} onClick={() => setShut(x => ({ ...x, [d.id]: true }))} aria-expanded aria-label="Fold this day"><ChevronDown className="h-4 w-4" /></button>
+            )}
             <input value={d.title} onChange={e => setDay(i, { title: e.target.value })} className={`${input} font-semibold`} placeholder={`Day ${i + 1}: Leadership alignment and recognition`} aria-label="Day heading" />
             <UpDown i={i} n={days.length} onMove={by => onChange(move(days, i, by))} />
             <button type="button" className={iconBtn} onClick={() => { if (!d.rows.some(x => x.text.trim()) || window.confirm('Remove this day and its rows?')) onChange(days.filter((_, k) => k !== i)); }} aria-label="Remove day"><Trash2 className="h-4 w-4" /></button>

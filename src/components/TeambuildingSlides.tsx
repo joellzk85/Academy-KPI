@@ -1,4 +1,5 @@
 import React from 'react';
+import { clientTitle } from '../lib/programmes';
 import { CalendarDays, Check, Clock, MapPin, Navigation, Sparkles, Users } from 'lucide-react';
 import logoUrl from '../assets/outline/next-logo.png';
 import hrdcRegisteredUrl from '../assets/outline/hrdc-registered.png';
@@ -208,7 +209,7 @@ function Cover({ r, pax }: { r: ResolvedTb; pax: number }) {
       <div className="flex flex-col justify-center px-16 py-14">
         {r.clientLogo && <img src={r.clientLogo} alt={r.company || 'Client logo'} className="mb-8 h-20 w-auto max-w-[14rem] self-start object-contain" />}
         <p className="text-sm font-semibold uppercase tracking-[0.2em]" style={{ color: TB.tealDark }}>Teambuilding proposal{r.company ? ` · Prepared for ${r.company}` : ''}</p>
-        <h1 className="mt-3 text-[52px] font-extrabold leading-[1.05]">{p.title || 'Teambuilding proposal'}</h1>
+        <h1 className="mt-3 text-[52px] font-extrabold leading-[1.05]">{clientTitle(p.title) || 'Teambuilding proposal'}</h1>
         {p.subtitle && <p className="mt-4 max-w-2xl text-lg leading-relaxed text-[#3c4c47]">{p.subtitle}</p>}
         {facts.length > 0 && (
           <div className="mt-8 flex flex-wrap gap-3">
