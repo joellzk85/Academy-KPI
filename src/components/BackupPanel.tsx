@@ -12,6 +12,7 @@ const btnPrimary =
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const SHEETS_API = 'https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=gen-lang-client-0779528352';
+const STORAGE_FILES = 'https://console.firebase.google.com/project/gen-lang-client-0779528352/storage/gen-lang-client-0779528352.firebasestorage.app/files';
 
 export default function BackupPanel() {
   const [status, setStatus] = useState<BackupStatus | null>(null);
@@ -138,9 +139,14 @@ export default function BackupPanel() {
               </label>
             ))}
           </div>
-          <button type="button" className={`${btnSecondary} mt-3`} disabled={!!busy || !zipGroups.length} onClick={downloadZip}>
-            {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all files (ZIP)
-          </button>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button type="button" className={btnSecondary} disabled={!!busy || !zipGroups.length} onClick={downloadZip}>
+              {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} Download all files (ZIP)
+            </button>
+            <a href={STORAGE_FILES} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline">
+              See where files are stored (Firebase) <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </div>
         </div>
 
         {note && <p className="mt-3 text-sm text-accent">{note}</p>}
