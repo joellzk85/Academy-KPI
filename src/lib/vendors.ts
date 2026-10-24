@@ -8,11 +8,11 @@
 
 import { isSuperManager } from './superManager';
 
-export type VendorType = 'trainer' | 'venue' | 'transport' | 'facilitator' | 'materials' | 'other';
+export type VendorType = 'trainer' | 'venue' | 'transport' | 'facilitator' | 'materials' | 'referrer' | 'other';
 
 export const VENDOR_TYPES: [VendorType, string][] = [
   ['trainer', 'Trainer'], ['venue', 'Venue'], ['transport', 'Transport (bus)'], ['facilitator', 'Facilitator'],
-  ['materials', 'Materials or printing'], ['other', 'Other'],
+  ['materials', 'Materials or printing'], ['referrer', 'Referrer (referral fee)'], ['other', 'Other'],
 ];
 export const vendorTypeLabel = (t?: string) => VENDOR_TYPES.find(([k]) => k === t)?.[1] || 'Other';
 

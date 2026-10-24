@@ -84,3 +84,7 @@ Moved from CLAUDE.md on 2026-10-21. Detailed history of what was built and agree
 ## Venue address (2026-10-23)
 
 Venues have Address lines 1 to 4, Postcode and State (Malaysian states and federal territories). The address shows on the venue's page and is searchable. If Region is left empty, it takes the State. Nothing to publish.
+
+## Found by (Joel, 2026-10-24)
+
+Every client has **Found by** (`foundById`, `foundByName`; `lib/foundBy.ts`): the rep, Admin or manager who brought the client in. It's set to whoever adds the client (Clients → Add client, or the quick add on a deal) and shown on the client's page. It doesn't lock the client: everyone still sees and uses it. **Only Management changes it**: in Edit client (Found by drop-down), or **Move Found by** at the top of Clients to move every client found by one person (e.g. a rep who left) to someone else at once. Clients added before this show who typed them in. `firestore.rules`: a new client's Found by must be the person adding it unless Management; only Management changes it later.

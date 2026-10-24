@@ -211,10 +211,12 @@ service cloud.firestore {
       // manager approves a pending "Change value / pax" request, to the value asked.
       // Process audit (2026-10-22): the owner (who gets the Closing RM and commission) doesn't change either, except by
       // Management; an approved value change also sets the participants asked for.
+      // Co-closer and referral fee (2026-10-24, lib/coClose.ts, lib/referrers.ts): also Management only once won.
       function wonLockOk() {
         return !(resource.data.get('stage', '') == 'won' && request.resource.data.get('stage', '') == 'won')
           || (same('programmeId') && same('courseName') && same('fundingType')
               && (same('ownerId') || isManagement())
+              && ((same('coCloserId') && same('coClosePct') && same('referrerId') && same('referralFeeType') && same('referralFeeValue')) || isManagement())
               && ((same('proposalValue') && same('participants'))
                   || (changeApproved('value')
                       && request.resource.data.get('proposalValue', null) == resource.data.trainingChange.get('newValue', -1)
@@ -695,9 +697,31 @@ service cloud.firestore {
     }
 
     // Clients: every team member can add and edit; only Management can delete.
+    // Found by (2026-10-24, lib/foundBy.ts): a new client is found by whoever adds it; only Management changes it.
     match /clients/{clientId} {
-      allow read, create, update: if isMember();
+      allow read: if isMember();
+      allow create: if isMember()
+        && (!('foundById' in request.resource.data) || request.resource.data.foundById == request.auth.uid || isManagement());
+      allow update: if isMember()
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['foundById', 'foundByName']) || isManagement());
       allow delete: if isManagement();
+    }
+
+    // Referrers (2026-10-24, lib/referrers.ts): every member reads the names and adds a new one by name and phone;
+    // Admin and Management change the name, phone and notes; only the CRM server sets the vendor and the link
+    // (serverReferrers.ts). referrer_links/{token}: written only by the server; Admin and Management read what the
+    // referrer typed (bank details).
+    match /referrers/{referrerId} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.createdById == request.auth.uid
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.keys().hasOnly(['id', 'name', 'phone', 'createdById', 'createdByName', 'createdAt']);
+      allow update: if isStaff() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'notes']);
+      allow delete: if isManagement();
+    }
+    match /referrer_links/{token} {
+      allow read: if isStaff();
+      allow write: if false;
     }
 
     // Client touch points (2026-10-18): everyone reads; anyone adds one as themselves;

@@ -19,6 +19,10 @@ const proposalToken = window.location.pathname.match(/^\/p\/([a-f0-9]{32})\/?$/)
 const PaymentLinkPage = lazy(() => import('./components/PaymentLinkPage'));
 const paymentToken = window.location.pathname.match(/^\/pay\/([a-f0-9]{32})\/?$/)?.[1];
 
+// A referrer's link (/ref/<token>): their bank details for the referral fee (ReferrerLinkPage.tsx, 2026-10-24).
+const ReferrerLinkPage = lazy(() => import('./components/ReferrerLinkPage'));
+const referrerToken = window.location.pathname.match(/^\/ref\/([a-f0-9]{32})\/?$/)?.[1];
+
 // The trainer portal (/trainer): trainers with access log in by email (TrainerPortal.tsx, 2026-10-21).
 const TrainerPortal = lazy(() => import('./components/TrainerPortal'));
 const portalMatch = window.location.pathname.match(/^\/trainer(?:\/join\/([a-f0-9]{32}))?\/?$/);
@@ -29,6 +33,8 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {trainerPortal ? (
       <Suspense fallback={null}><TrainerPortal inviteToken={portalInvite} /></Suspense>
+    ) : referrerToken ? (
+      <Suspense fallback={null}><ReferrerLinkPage token={referrerToken} /></Suspense>
     ) : paymentToken ? (
       <Suspense fallback={null}><PaymentLinkPage token={paymentToken} /></Suspense>
     ) : trainerToken ? (

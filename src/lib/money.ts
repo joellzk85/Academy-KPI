@@ -13,7 +13,7 @@ export type InSource = 'hrdc' | 'client';
 export type OutStatus = 'pending' | 'approved' | 'rejected' | 'paid';
 export type OutTiming = 'before' | 'after';
 
-export const OUT_CATEGORIES = ['Trainer', 'Venue', 'Hotel', 'Bus', 'Materials', 'Facilitator', 'Commission', 'Staff claim', 'Other'];
+export const OUT_CATEGORIES = ['Trainer', 'Venue', 'Hotel', 'Bus', 'Materials', 'Facilitator', 'Commission', 'Referral fee', 'Staff claim', 'Other'];
 
 // When a training's payment is due (Joel, 2026-10-20: "pre training payment tick, post training payment tick").
 export const TIMING_LABELS: Record<OutTiming, string> = { before: 'Pre-training', after: 'Post-training' };
@@ -136,6 +136,9 @@ export interface MoneyOut {
   // Paid on behalf of the client (2026-10-22): the client pays us back on a reimbursement invoice (lib/onBehalf.ts).
   // Never a cost in the P&L.
   onBehalf?: boolean;
+  // Referral fee (2026-10-24, lib/referrers.ts): raised by the server when the deal is won (id ref_<dealId>).
+  referrerId?: string;
+  autoRaised?: boolean;
 }
 
 // ---------- When a payment can be paid (Joel, 2026-10-21: the payment-out flowchart) ----------

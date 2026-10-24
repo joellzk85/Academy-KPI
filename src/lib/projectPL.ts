@@ -11,12 +11,15 @@
 // Management can type the amount instead, saved in project_pl/{dealId}.sstAmount. SST comes off profit.
 // Commission (Joel, 2026-10-20): the deal owner (sales person) earns commissionPct (3%) of the selling price before SST
 // and before HRDC's %, i.e. income minus SST. It comes off profit; it isn't a payment request (it's for payslips later).
+// Co-closed deals (2026-10-24, lib/coClose.ts): the commission is shared with the co-closer by the agreed %
+// (commissionShares); commissionTo stays the owner, who keeps the GP % KPI.
 
 import { dealOwnerId, dealStage, dealValue, todayIso, trainingEndDate } from './deals';
 import { MoneyIn, MoneyOut, MoneySettings, dealMoneySums, inPL, moneySettled, settingsAt } from './money';
 import { mainQuote } from './checklist';
 import { quoteSst } from './quoteSst';
 import { cancelledTraining } from './trainingChange';
+import { CommissionShare, commissionShares, sharesText } from './coClose';
 
 export type TrainingStatus = 'done' | 'today' | 'upcoming' | 'no_date' | 'cancelled';
 export type MoneyStatus = 'settled' | 'waiting' | 'not_invoiced';
@@ -48,6 +51,7 @@ export interface ProjectRow {
   commission: number;            // the sales person's commission (commissionPct of income before SST)
   commissionPct: number;
   commissionTo: string;          // the deal owner's id (the sales person)
+  commissionShares: CommissionShare[];   // who gets the commission: the owner, plus a co-closer's agreed %
   costs: number;                 // approved and paid money out
   profit: number;
   margin: number;                // profit as % of income before SST (0 when no income)
@@ -98,6 +102,7 @@ export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], al
 
   return {
     deal, trainingDate, training, estimate, income, sst, sstTyped, sstRate, hrdcFee, commission, commissionPct: s.commissionPct || 0, commissionTo: dealOwnerId(deal),
+    commissionShares: commissionShares(deal, dealOwnerId(deal), commission),
     costs: pl.costs, profit,
     margin: beforeSst > 0 ? (profit / beforeSst) * 100 : 0,
     received: pl.received,
@@ -166,7 +171,7 @@ export function projectPLBackupRows(rows: ProjectRow[], clientName: (deal: any) 
       r.deal.id, r.trainingDate, clientName(r.deal), employerName(r.deal), r.deal.courseName || '', r.deal.fundingType || '', personName(dealOwnerId(r.deal)),
       TRAINING_STATUS_LABELS[r.training], MONEY_STATUS_LABELS[r.money],
       r2(r.income), r.estimate ? 'Yes' : 'No', r2(r.sst), r.sstTyped ? 'Typed' : r.sstRate ? `Automatic (${r.sstRate}%)` : 'None',
-      r2(r.hrdcFee), r2(r.commission), personName(r.commissionTo), r2(r.costs), r2(r.profit), Math.round(r.margin), r2(r.received), r2(r.toComeIn), r2(r.toPayOut), r2(r.pendingApproval),
+      r2(r.hrdcFee), r2(r.commission), sharesText(r.commissionShares, personName), r2(r.costs), r2(r.profit), Math.round(r.margin), r2(r.received), r2(r.toComeIn), r2(r.toPayOut), r2(r.pendingApproval),
     ]),
   ];
 }

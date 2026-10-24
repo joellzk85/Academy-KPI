@@ -289,6 +289,8 @@ export interface Client {
   createdAt?: number;
   createdBy?: string;
   createdByName?: string;
+  foundById?: string;    // who found the client (2026-10-24, lib/foundBy.ts); only Management changes it
+  foundByName?: string;
 }
 
 export interface Trainer {

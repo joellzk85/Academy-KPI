@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import {
   Building2, CheckCircle2, ChevronRight, Circle, Download, FileText, ImagePlus, ListTodo, Loader2, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, Repeat2, Search, Trash2, X,
 } from 'lucide-react';
@@ -28,6 +28,7 @@ import { ContactBadge, ContactDot } from './ClientContactDot';
 import { useAllLinks } from '../lib/useProposalLinks';
 import { useProposalSettings } from '../lib/useProposalSettings';
 import { seesLink } from '../lib/proposalTracking';
+import { foundByFields, foundById, foundByName } from '../lib/foundBy';
 import PanelResizer from './PanelResizer';
 
 // Clients (redesigned 2026-10-17): one shared list, the same details as before.
@@ -66,6 +67,7 @@ const emptyForm = () => ({
   companyName: '', code: '', employerName: '', employerCode: '', industry: '', address: '', hrdcRegistered: true,
   logoUrl: '',   // optional company logo (2026-10-21), shown on teambuilding proposal covers
   contacts: [emptyContact()] as Contact[],
+  foundById: '',   // who found the client (2026-10-24): set to whoever adds it; only Management changes it
 });
 type Form = ReturnType<typeof emptyForm>;
 
@@ -123,6 +125,7 @@ export default function ClientManager({ rep, reps, viewer, onOpenDeal, onOpenQuo
   const [panelError, setPanelError] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
+  const [moving, setMoving] = useState(false);   // Management: move every client found by someone to someone else
 
   useEffect(() => {
     const subs = [
@@ -232,6 +235,7 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
       companyName: c.companyName || '', code: c.code || '', employerName: c.employerName || '', employerCode: c.employerCode || '', industry: c.industry || '', address: c.address || '', hrdcRegistered: !!c.hrdcRegistered,
       logoUrl: c.logoUrl || '',
       contacts: clientContacts(c).length ? clientContacts(c) : [emptyContact()],
+      foundById: foundById(c),
     });
     setFormError(''); setDupId(null); setEditing(c.id);
   };
@@ -264,15 +268,19 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
       logoUrl: form.logoUrl || '',
       contacts, ...mainContactFields(contacts),
     };
+    // Found by: whoever adds the client; Management may pick someone else, now or later (firestore.rules).
+    const finder = viewer.role === 'management' ? team.find(p => p.id === form.foundById) : null;
+    const old = editing && editing !== 'new' ? clients.find(c => c.id === editing) : null;
+    const foundBy = finder && finder.id !== foundById(old) ? foundByFields(finder) : editing === 'new' ? foundByFields(viewer) : {};
     setBusy(true);
     try {
       if (editing === 'new') {
         const id = `client_${Date.now()}`;
-        await setDoc(doc(db, 'clients', id), { id, ...details, notes: '', createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
+        await setDoc(doc(db, 'clients', id), { id, ...details, ...foundBy, notes: '', createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name });
         setOpenId(id);
         flash('Client added');
       } else if (editing) {
-        await setDoc(doc(db, 'clients', editing), details, { merge: true });
+        await setDoc(doc(db, 'clients', editing), { ...details, ...foundBy }, { merge: true });
         flash('Client saved');
       }
       formDraft.clear();
@@ -315,8 +323,12 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
           <h2 className="text-xl font-bold">Clients</h2>
           <p className="text-[15px] text-ink-soft">{clients.length} {clients.length === 1 ? 'company' : 'companies'}, shared by the whole team</p>
         </div>
-        <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add client</button>
+        <div className="flex flex-wrap gap-2">
+          {viewer.role === 'management' && <button type="button" onClick={() => setMoving(m => !m)} className={btnSecondary} aria-expanded={moving}><Repeat2 className="h-4 w-4" /> Move Found by</button>}
+          <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> Add client</button>
+        </div>
       </div>
+      {moving && <MoveFoundBy clients={clients} team={activeTeam} onDone={msg => { setMoving(false); flash(msg); }} />}
 
       {/* Colour counts: tap one to show only those */}
       <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by how recently each client was contacted">
@@ -496,6 +508,19 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
                   <textarea id="c-address" value={form.address} onChange={e => set({ address: e.target.value })} rows={3} className={`${input} resize-y`} />
                 </div>
                 <ClientLogoBox url={form.logoUrl || ''} onChange={logoUrl => set({ logoUrl })} me={viewer} />
+                {viewer.role === 'management' ? (
+                  <div>
+                    <label className={label} htmlFor="c-found">Found by</label>
+                    <select id="c-found" value={form.foundById || (editing === 'new' ? viewer.id : '')} onChange={e => set({ foundById: e.target.value })} className={`${input} sm:max-w-[20rem]`}>
+                      {!form.foundById && editing !== 'new' && <option value="">{foundByName(clients.find(c => c.id === editing)) || 'Not recorded'}</option>}
+                      {form.foundById && !activeTeam.some(p => p.id === form.foundById) && <option value={form.foundById}>{foundByName(clients.find(c => c.id === editing)) || 'Former team member'} (left)</option>}
+                      {activeTeam.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <p className="mt-1 text-sm text-ink-soft">Who brought this client in. It doesn't lock the client: everyone can still use it.</p>
+                  </div>
+                ) : editing !== 'new' && foundByName(clients.find(c => c.id === editing)) ? (
+                  <p className="text-sm text-ink-soft">Found by {foundByName(clients.find(c => c.id === editing))}. Only Management changes this.</p>
+                ) : null}
               </fieldset>
 
               <fieldset className="space-y-3">
@@ -547,6 +572,64 @@ It repeats the deal won on ${formatDate(dealWonDate(src))}, goes straight to "Cl
   );
 }
 
+// Management (Joel, 2026-10-24): when a rep leaves, move all the clients they found to someone else in one go.
+function MoveFoundBy({ clients, team, onDone }: { clients: Client[]; team: { id: string; name: string }[]; onDone: (msg: string) => void }) {
+  const finders = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; n: number }>();
+    clients.forEach(c => {
+      const id = foundById(c);
+      if (!id) return;
+      const e = m.get(id) || { id, name: team.find(p => p.id === id)?.name || foundByName(c) || 'Former team member', n: 0 };
+      e.n++;
+      m.set(id, e);
+    });
+    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [clients, team]);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const move = async () => {
+    const target = team.find(p => p.id === to);
+    const list = clients.filter(c => foundById(c) === from);
+    if (!from || !target) return setError('Pick both names.');
+    if (from === to) return setError('Pick two different people.');
+    if (!window.confirm(`Change Found by to ${target.name} on ${list.length} client${list.length === 1 ? '' : 's'}?`)) return;
+    setBusy(true); setError('');
+    try {
+      for (let i = 0; i < list.length; i += 400) {
+        const b = writeBatch(db);
+        list.slice(i, i + 400).forEach(c => b.update(doc(db, 'clients', c.id), foundByFields(target)));
+        await b.commit();
+      }
+      onDone(`${list.length} client${list.length === 1 ? '' : 's'} moved to ${target.name}`);
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="rounded-2xl border border-line bg-white p-4">
+      <p className="text-[15px] font-semibold">Move Found by</p>
+      <p className="mt-0.5 text-sm text-ink-soft">For example when a rep leaves: every client they found gets a new Found by name. Deals don't change.</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <select value={from} onChange={e => setFrom(e.target.value)} className={select} aria-label="Clients found by">
+          <option value="">Clients found by…</option>
+          {finders.map(f => <option key={f.id} value={f.id}>{f.name} ({f.n})</option>)}
+        </select>
+        <span className="text-sm text-ink-soft">move to</span>
+        <select value={to} onChange={e => setTo(e.target.value)} className={select} aria-label="Move to">
+          <option value="">Pick a person…</option>
+          {team.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <button type="button" onClick={move} disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Move</button>
+      </div>
+      {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
+    </div>
+  );
+}
+
 function ClientPanel(props: {
   client: Client; summary: ClientSummary; deals: any[]; quotes: any[]; outlines: any[]; files: ProposalFile[]; tasks: any[];
   touchPoints: ClientTouchPoint[]; moneyIn: MoneyIn[]; team: { id: string; name: string }[]; personName: (id: string) => string;
@@ -575,6 +658,7 @@ function ClientPanel(props: {
           {shown(c.employerName) && <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">Employer name:</span> {c.employerName}</p>}
           {shown(c.employerCode) && <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">HRD Corp employer code:</span> <span className="font-mono">{c.employerCode}</span></p>}
           <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">Customer code:</span> {clientCode(c) || 'not set yet (Edit to add one)'}</p>
+          {foundByName(c) && <p className="mt-0.5 text-[15px]"><span className="text-ink-soft">Found by:</span> {foundByName(c)}</p>}
           <p className="mt-0.5 text-[15px] text-ink-soft">{[shown(c.industry), c.hrdcRegistered ? 'HRDC registered' : 'Not HRDC registered'].filter(Boolean).join(' · ')}</p>
         </div>
         <button type="button" onClick={props.onClose} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>

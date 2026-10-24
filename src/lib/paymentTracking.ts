@@ -19,6 +19,7 @@ export interface TrackLine extends PaymentLine {
   dealId?: string;           // set for lines read from a deal's Money section
   hiddenBy?: string;         // an imported line replaced by a deal's line with the same claim ID
   employerCode?: string;     // deal lines: the client's HRD Corp employer code (2026-10-23)
+  commissionSplit?: { name: string; amount: number }[];   // a co-closed deal's commission per person (2026-10-24, lib/coClose.ts)
 }
 
 export const isIsoDay = (s: any) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -69,6 +70,7 @@ export function dealLines(args: {
         otherFee: null, otherFeeLabel: '', venueCost: null, transport: null, facilitators: null,
         grossProfit: row ? Math.round(row.profit * 100) / 100 : null, margin: row ? Math.round(row.margin * 100) / 100 : null,
         remarks: hrdc ? 'HRDC claim' : 'Client invoice',
+        ...(row && row.commissionShares.length > 1 ? { commissionSplit: row.commissionShares.map(x => ({ name: args.personName(x.id), amount: Math.round(x.amount * 100) / 100 })) } : {}),
       });
     });
   });
@@ -108,14 +110,22 @@ export function totalsOf(lines: TrackLine[]): Totals {
 /** Sales amount (approved) and commission per sales person; commission counted once per training. */
 export function byPerson(lines: TrackLine[]): { name: string; approved: number; commission: number; lines: number; waiting: number }[] {
   const m = new Map<string, { name: string; approved: number; commission: number; lines: number; waiting: number; groups: Set<string> }>();
-  lines.forEach(l => {
-    const name = (l.salesPerson || '').trim() || 'No sales person';
+  const entry = (name: string) => {
     const e = m.get(name.toLowerCase()) || { name, approved: 0, commission: 0, lines: 0, waiting: 0, groups: new Set<string>() };
+    m.set(name.toLowerCase(), e);
+    return e;
+  };
+  lines.forEach(l => {
+    const e = entry((l.salesPerson || '').trim() || 'No sales person');
     e.approved += l.approved || 0;
     e.lines++;
     if (!linePaid(l)) e.waiting += lineNet(l);
-    if (!e.groups.has(l.groupNo)) { e.groups.add(l.groupNo); e.commission += l.commission || 0; }
-    m.set(name.toLowerCase(), e);
+    // A co-closed deal's commission goes to each person by the agreed % (2026-10-24); sales amount stays with the owner.
+    const split = l.commissionSplit?.length ? l.commissionSplit : [{ name: e.name, amount: l.commission || 0 }];
+    split.forEach(x => {
+      const p = x.name === e.name ? e : entry(x.name);
+      if (!p.groups.has(l.groupNo)) { p.groups.add(l.groupNo); p.commission += x.amount || 0; }
+    });
   });
   return [...m.values()].map(({ groups, ...rest }) => rest).sort((a, b) => b.approved - a.approved);
 }

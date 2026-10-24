@@ -9,6 +9,7 @@ import { paxOf } from '../lib/trainingChange';
 import { ProgrammePicker } from './Programmes';
 import { Programme } from '../lib/programmes';
 import { startChecklist, useChecklistSettings } from './DealChecklist';
+import { raiseReferralFee } from './Referrers';
 
 // Asking for details when they matter (Joel, 2026-10-18). When a step is blocked, a small box asks only
 // for what's missing, right there, then carries on with the step. Shared by the deal panel, the Deals list
@@ -170,13 +171,15 @@ export async function markDealWon(deal: any, wonDate: string, extra: Record<stri
     winCount: (Number(deal.winCount) || 0) + 1,
     history: history(deal, viewer, `Won (${formatRM(value)})`),
   });
+  // Referred deal (2026-10-24): the server raises the referral fee request for a manager's approval.
+  const refMsg = deal.referrerId ? await raiseReferralFee(deal.id) : '';
   try {
     const existing = await getDoc(doc(db, 'deal_checklists', deal.id));
     await startChecklist(deal, settings, viewer, existing.exists() ? existing.data() : undefined);
-    return 'Deal won and handed to admin';
+    return `Deal won and handed to admin${refMsg ? `. ${refMsg}` : ''}`;
   } catch (err) {
     console.error('Checklist could not be started:', err);
-    return 'Deal won. Admin can start its checklist from the work queue.';
+    return `Deal won. Admin can start its checklist from the work queue.${refMsg ? ` ${refMsg}` : ''}`;
   }
 }
 

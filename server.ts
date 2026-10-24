@@ -15,6 +15,7 @@ import { registerPhotoRoutes } from "./serverPhotos";
 import { registerProposalLinkRoutes } from "./serverProposalLinks";
 import { registerLinkVisitRoutes } from "./serverLinkVisits";
 import { registerPaymentLinkRoutes } from "./serverPaymentLinks";
+import { registerReferrerRoutes } from "./serverReferrers";
 import { registerBlueprintRoutes } from "./serverBlueprint";
 import { registerKpiRoutes } from "./serverKpi";
 import { registerActivityRoutes } from "./serverActivity";
@@ -69,6 +70,9 @@ async function startServer() {
 
   // Payment links for accounts: open a payment request without logging in and click "Payment made" (/pay/<token>)
   registerPaymentLinkRoutes(app);
+
+  // Referrers: their own link for bank details (/ref/<token>), accepting it, and the referral fee raised when a deal is won
+  registerReferrerRoutes(app);
 
   // Photos for the teambuilding proposal PDF (read by the server, so the PDF can include them)
   registerPhotoRoutes(app);

@@ -56,6 +56,9 @@ import { valueDropBlocked } from '../lib/dealOffers';
 import PanelResizer from './PanelResizer';
 import { PotentialBox, PotentialButtons, PotentialChip, monthOptions } from './DealPotential';
 import { POTENTIAL_LABELS, Potential, forecastMonthLabel, potentialOf } from '../lib/forecast';
+import { coCloseProblem, coCloser } from '../lib/coClose';
+import { ReferralFeeType, Referrer, referralProblem } from '../lib/referrers';
+import { ReferralFields, ReferralLine, raiseReferralFee, useReferrers } from './Referrers';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -121,6 +124,11 @@ const emptyForm = () => ({
   ownerId: '',
   taggedRepIds: [] as string[],
   tagNote: '',
+  coCloserId: '',        // closed together (2026-10-24, lib/coClose.ts): the co-closer gets coClosePct % of the commission
+  coClosePct: '',
+  referrerId: '',        // referred by (2026-10-24, lib/referrers.ts)
+  referralFeeType: 'pct' as ReferralFeeType,
+  referralFeeValue: '',
   notes: '',
 });
 
@@ -144,6 +152,7 @@ export default function DealsBoard({
   const [proposalFiles, setProposalFiles] = useState<ProposalFile[]>([]);
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const [venues, setVenues] = useState<any[]>([]);
+  const referrers = useReferrers();
   const moneySettings = useMoneySettings();
   const [loaded, setLoaded] = useState(false);
 
@@ -309,6 +318,11 @@ export default function DealsBoard({
       ownerId: dealOwnerId(p) || owner.id,
       taggedRepIds: p.taggedRepIds || [],
       tagNote: p.tagNote || '',
+      coCloserId: coCloser(p)?.id || '',
+      coClosePct: coCloser(p) ? String(coCloser(p)!.pct) : '',
+      referrerId: p.referrerId || '',
+      referralFeeType: p.referralFeeType === 'rm' ? 'rm' : 'pct',
+      referralFeeValue: Number(p.referralFeeValue) > 0 ? String(p.referralFeeValue) : '',
       notes: p.notes || '',
     });
     setFormError('');
@@ -348,6 +362,12 @@ export default function DealsBoard({
     if (viewer.role === 'rep' && newOwner.id !== viewer.id && editing === 'new') {
       return setFormError('You can only create deals for yourself.');
     }
+    const coId = form.coCloserId || '';   // older saved drafts have no co-closer or referrer
+    const coProblem = coCloseProblem(newOwner.id, coId, form.coClosePct || '');
+    if (coProblem) return setFormError(coProblem);
+    const refId = form.referrerId && referrers.some(r => r.id === form.referrerId) ? form.referrerId : '';
+    const refProblem = referralProblem(refId, form.referralFeeType || 'pct', form.referralFeeValue || '');
+    if (refProblem) return setFormError(refProblem);
 
     setBusy(true);
     try {
@@ -393,8 +413,19 @@ export default function DealsBoard({
         ownerName: newOwner.name,
         taggedRepIds: form.taggedRepIds.filter(x => x !== newOwner.id),
         tagNote: form.tagNote.trim(),
+        coCloserId: coId,
+        coCloserName: coId ? people.find(r => r.id === coId)?.name || '' : '',
+        coClosePct: coId ? Number(form.coClosePct) : 0,
+        referrerId: refId,
+        referrerName: refId ? referrers.find(r => r.id === refId)?.name || '' : '',
+        referralFeeType: refId ? form.referralFeeType || 'pct' : '',
+        referralFeeValue: refId && String(form.referralFeeValue || '').trim() ? Number(form.referralFeeValue) : 0,
         notes: form.notes.trim(),
       };
+      // A won deal's co-closer and referral fee change only by Management (firestore.rules), like its owner.
+      if (existing && dealStage(existing) === 'won' && viewer.role !== 'management') {
+        ['coCloserId', 'coCloserName', 'coClosePct', 'referrerId', 'referrerName', 'referralFeeType', 'referralFeeValue'].forEach(k => delete data[k]);
+      }
       if (existing && dateLocked(existing)) { delete data.trainingDate; delete data.trainingDays; }
       if (existing && valueLocked(existing)) { ['programmeId', 'courseName', 'enquiryNote', 'fundingType', 'proposalValue', 'participants'].forEach(k => delete data[k]); }
       if (!existing) {
@@ -410,7 +441,9 @@ export default function DealsBoard({
       formDraft.clear();
       setEditing(null);
       setOpenId(id);
-      flash(existing ? 'Deal saved' : 'Deal created');
+      // Management added or changed the referral fee on a won deal: raise it, or update it while still pending.
+      const refMsg = existing && dealStage(existing) === 'won' && data.referrerId ? await raiseReferralFee(id) : '';
+      flash(existing ? `Deal saved${refMsg ? `. ${refMsg}` : ''}` : 'Deal created');
     } catch (err) {
       setFormError(friendlyError(err));
     } finally {
@@ -795,6 +828,7 @@ export default function DealsBoard({
               linkSettings={proposalAlerts.settings}
               checklist={checklists[openDeal.id] || null}
               venue={dealVenue(checklists[openDeal.id] || null, quotes.filter(q => q.pipelineId === openDeal.id), venues)}
+              referrers={referrers}
               programme={programmeOf(openDeal)}
               courseName={askedFor(openDeal)}
               queries={queries.filter(q => q.dealId === openDeal.id)}
@@ -1000,6 +1034,27 @@ export default function DealsBoard({
                 <p className="mt-1.5 text-sm text-ink-soft">The owner gets the KPI credit and is the only rep who can edit this deal.</p>
               </div>
               <div>
+                <label htmlFor="d-coclose" className={label}>Co-closed with <span className="font-normal text-ink-soft">(optional)</span></label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select id="d-coclose" value={form.coCloserId || ''} className={`${input} sm:max-w-[16rem]`} disabled={formWon && viewer.role !== 'management'}
+                    onChange={e => setForm(f => ({ ...f, coCloserId: e.target.value, coClosePct: e.target.value ? f.coClosePct || '50' : '' }))}>
+                    <option value="">Nobody (owner only)</option>
+                    {people.filter(r => r.id !== form.ownerId).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                  {form.coCloserId && (
+                    <>
+                      <input value={form.coClosePct} onChange={e => setForm(f => ({ ...f, coClosePct: e.target.value }))} inputMode="decimal" className={`${input} w-24`}
+                        aria-label="Co-closer's share of the commission (%)" disabled={formWon && viewer.role !== 'management'} />
+                      <span className="text-sm text-ink-soft">% of the commission (owner keeps {Number(form.coClosePct) > 0 && Number(form.coClosePct) < 100 ? 100 - Number(form.coClosePct) : '…'}%)</span>
+                    </>
+                  )}
+                </div>
+                <p className="mt-1.5 text-sm text-ink-soft">Only the sales commission is shared. KPIs (Closing RM) stay with the owner.{formWon && viewer.role !== 'management' ? ' On a won deal only Management changes this.' : ''}</p>
+              </div>
+              <ReferralFields referrers={referrers} referrerId={form.referrerId || ''} feeType={form.referralFeeType || 'pct'} feeValue={form.referralFeeValue || ''}
+                dealValue={Number(form.proposalValue) || 0} disabled={formWon && viewer.role !== 'management'} viewer={viewer}
+                onChange={patch => setForm(f => ({ ...f, ...patch }))} />
+              <div>
                 <span className={label}>Ask teammates for help (optional)</span>
                 <div className="flex flex-wrap gap-2">
                   {people.filter(r => r.id !== form.ownerId).map(r => {
@@ -1066,6 +1121,7 @@ function DealPanel(props: {
   dealLinks: any[]; linkSettings: any;
   programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
   venue: Picked | null;
+  referrers: Referrer[];
   moneyIn: MoneyIn[]; moneyOut: MoneyOut[]; moneySettings: MoneySettings;
   stagePanel: StagePanel; setStagePanel: (v: StagePanel) => void; stageError: string;
   alert: FollowUpAlert | null; onFollowUpDone: (msg: string) => void; deleteBlocker: () => string;
@@ -1406,6 +1462,10 @@ function DealPanel(props: {
                 {p.tagNote ? `. "${p.tagNote}"` : ''}
               </p>
             )}
+            {coCloser(p) && (
+              <p className="text-sm text-ink-soft">Co-closed with {props.personName(coCloser(p)!.id) === 'Former team member' ? coCloser(p)!.name || 'a former team member' : props.personName(coCloser(p)!.id)}: {coCloser(p)!.pct}% of the commission (owner {100 - coCloser(p)!.pct}%)</p>
+            )}
+            <ReferralLine deal={p} referrers={props.referrers} editable={props.editable} />
             {p.notes && <p className="whitespace-pre-line rounded-lg bg-surface px-3.5 py-2.5 text-[15px]">{p.notes}</p>}
             {props.editable && <button type="button" className={btnSecondary} onClick={props.onEdit}>Edit details</button>}
           </div>
@@ -1814,7 +1874,7 @@ function ClientPicker({ clients, value, legacyName, viewer, onChange }: {
       await setDoc(doc(db, 'clients', id), {
         id, companyName: name, contactName: newClient.contactName.trim(), designation: '', phone: newClient.phone.trim(),
         email: '', address: '', industry: '', hrdcRegistered: newClient.hrdcRegistered, notes: '',
-        createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name,
+        createdAt: Date.now(), createdBy: viewer.id, createdByName: viewer.name, foundById: viewer.id, foundByName: viewer.name,
       });
       onChange(id);
       setAdding(false);

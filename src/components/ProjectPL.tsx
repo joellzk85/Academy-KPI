@@ -333,7 +333,7 @@ function Breakdown({ r, viewer, personName }: { r: ProjectRow; viewer: { id: str
         )}
         <p className="mt-2 text-ink-soft">Received {formatRM(r.received)} · still to come in {formatRM(r.toComeIn)}</p>
         <SstBox r={r} viewer={viewer} />
-        <p className="mt-2"><span className="font-semibold">Commission</span> {formatRM(r.commission)} <span className="text-ink-soft">({r.commissionPct}% of {formatRM(r.income - r.sst)}, the price before SST and HRDC's %; for {personName(r.commissionTo)})</span></p>
+        <p className="mt-2"><span className="font-semibold">Commission</span> {formatRM(r.commission)} <span className="text-ink-soft">({r.commissionPct}% of {formatRM(r.income - r.sst)}, the price before SST and HRDC's %; for {r.commissionShares.length > 1 ? r.commissionShares.map(x => `${personName(x.id)} ${x.pct}% (${formatRM(x.amount)})`).join(', ') : personName(r.commissionTo)})</span></p>
       </div>
       <div>
         <p className="mb-1 font-semibold">Costs (approved and paid)</p>

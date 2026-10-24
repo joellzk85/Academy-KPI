@@ -119,7 +119,7 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
         <Stat label="Received so far" value={formatRM(row.received)} />
       </div>
       <p className="text-sm text-ink-soft">
-        SST {formatRM(row.sst)}{row.sstTyped ? ' (typed in Project P&L)' : ''} · HRDC {formatRM(row.hrdcFee)} · Commission {row.commissionPct}% {formatRM(row.commission)} (sales person) · Costs approved or paid {formatRM(row.costs)}
+        SST {formatRM(row.sst)}{row.sstTyped ? ' (typed in Project P&L)' : ''} · HRDC {formatRM(row.hrdcFee)} · Commission {row.commissionPct}% {formatRM(row.commission)} ({row.commissionShares.length > 1 ? `co-closed: ${row.commissionShares.map(x => `${x.id === row.commissionTo ? (deal.ownerName || 'owner') : (deal.coCloserName || 'co-closer')} ${x.pct}% ${formatRM(x.amount)}`).join(', ')}` : 'sales person'}) · Costs approved or paid {formatRM(row.costs)}
       </p>
       <p className="text-sm text-ink-soft">
         {row.estimate ? 'Expected (nothing invoiced yet)' : 'Invoiced, not paid yet'}: <strong className="text-ink">{formatRM(row.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(row.toPayOut)}</strong>
