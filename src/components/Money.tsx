@@ -13,7 +13,7 @@ import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { Receipt, needsReceipt } from '../lib/postTraining';
-import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
+import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, removeReceipt, uploadReceipt } from './PaymentReceipts';
 import PaymentSummaryPanel from './PaymentSummaryPanel';
 import { BankRequestsBox, TrainerFeeRequests } from './TrainerPortalAdmin';
 import { FixRequest, PLTick, resubmitRequest } from './StepCosts';
@@ -214,6 +214,9 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
   });
   // Kept in this browser until it's saved (lib/useFormDraft.ts).
   const draft = useFormDraft(viewer.id, `money-in:${source}:${deal.id}${topUp ? `:topup:${topUp.claimId}` : ''}`, f, setF);
+  // The copy of the claim or invoice we sent (2026-10-24): uploaded with the record, or later on its line.
+  const [file, setFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
   const { busy, error, setError, run } = useRun();
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -222,12 +225,25 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
     if (!(amount > 0)) return setError('Enter the amount, for example 15000.');
     const id = `in_${Date.now()}`;
     return run(async () => {
+      let copy: Receipt | null = null;
+      if (file) {
+        setProgress(0);
+        try { copy = await uploadReceipt(file, { dealId: deal.id, moneyInId: id, recordId: '', kind: 'copy' }, viewer, setProgress); }
+        catch (e) { setProgress(null); throw new Error(receiptError(e)); }
+        setProgress(null);
+      }
       const what = `${topUp ? 'Top-up invoice' : IN_SOURCE_LABELS[source]}${f.invoiceNo.trim() ? ` ${f.invoiceNo.trim()}` : ''} recorded (${formatRM(amount)})${override ? `, before the grant or delivery was ticked: ${override}` : ''}`;
-      await withDealHistory(deal.id, viewer, what, batch => batch.set(doc(db, 'money_in', id), {
-        id, dealId: deal.id, source, invoiceNo: f.invoiceNo.trim(), invoiceDate: f.invoiceDate, amount, paidDate: '', paidAmount: 0, note: f.note.trim(),
-        ...(topUp ? { topUpFor: topUp.claimId } : {}),
-        createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
-      }));
+      try {
+        await withDealHistory(deal.id, viewer, what, batch => batch.set(doc(db, 'money_in', id), {
+          id, dealId: deal.id, source, invoiceNo: f.invoiceNo.trim(), invoiceDate: f.invoiceDate, amount, paidDate: '', paidAmount: 0, note: f.note.trim(),
+          ...(topUp ? { topUpFor: topUp.claimId } : {}),
+          copyNeeded: true, createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
+        }));
+      } catch (e) {
+        if (copy) await removeReceipt(copy).catch(() => {});   // don't leave a copy without its record
+        throw e;
+      }
+      setFile(null);
       draft.clear();
       onDone();
     });
@@ -244,10 +260,13 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
       </div>
       {source === 'hrdc' && amt > 0 && <p className="text-sm text-ink-soft">HRDC keeps {settings.hrdcDeductionPct}%, so we expect {formatRM(amt * (1 - settings.hrdcDeductionPct / 100))}.</p>}
       <input value={f.note} onChange={e => setF(x => ({ ...x, note: e.target.value }))} className={input} placeholder="Note (optional)" aria-label="Note" />
+      <ReceiptPick file={file} onFile={setFile} what="copy"
+        label={source === 'hrdc' ? 'Copy of the HRDC claim (PDF or screenshot of the submission)' : 'Copy of the invoice sent'} />
+      {!file && <p className="text-sm text-ink-soft">No copy at hand? Save now and add it later on the line; the case closes once it's in.</p>}
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
         <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
-        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{progress !== null ? `Uploading… ${progress}%` : 'Save'}</button>
       </div>
     </form>
   );

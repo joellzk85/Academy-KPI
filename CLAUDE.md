@@ -169,6 +169,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Co-closed deals, client Found by, Referred by and referral fees (2026-10-24):** commission only is shared (KPIs stay with the owner); referral fee request raised when won; publish `firestore.rules`; go-live checklist item 59.
 - **Sales contributor ring (2026-10-24):** Team → KPIs tick gives Admin / Management who sell a sales ring without a sales KPI; nothing to publish. See `home-kpi-dashboards.md`.
 - **Titles are the programmes (2026-10-24):** no Programmes tab; Course outlines and Teambuilding proposal → By title holds HRDC status, category (standard list + new) and #tags; anyone sets category and tags, only Admin / Management rename or change HRDC; publish `firestore.rules`; go-live checklist item 60. See `hrdc-programmes-trainers.md`.
+- **Claim and invoice copies (2026-10-24):** HRDC claim, client invoice and reimbursement invoice take a file or pasted screenshot (Ctrl+V); required on new records before Case closed, never counted as the receipt; nothing to publish; go-live checklist item 61. See `money.md`.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

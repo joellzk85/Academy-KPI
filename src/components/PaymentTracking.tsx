@@ -74,7 +74,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
   // Admin sees costs and profit too (Joel, 2026-10-22).
   const seesProfit = viewer.role !== 'rep';
   const receipts = useReceipts(true);
-  const receiptsOf = (l: TrackLine) => receipts.filter(r => (l.dealId ? r.moneyInId === l.id.slice(5) : r.recordId === l.id));
+  const receiptsOf = (l: TrackLine) => receipts.filter(r => r.kind !== 'copy' && (l.dealId ? r.moneyInId === l.id.slice(5) : r.recordId === l.id));
   const moneyInOf = (l: TrackLine) => (l.dealId ? ins.find(m => m.id === l.id.slice(5)) : undefined);
   const [payFile, setPayFile] = useState<File | null>(null);
   const [records, setRecords] = useState<TrackLine[] | null>(null);

@@ -5,17 +5,18 @@ import { db, friendlyError } from '../lib/firebase';
 import { daysUntil } from '../lib/checklist';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 import { MoneyOut, MoneySettings, OUT_STATUS_LABELS } from '../lib/money';
-import { BehalfStatus, ClaimBack, behalfStatus, claimFor, claimPaid, claimReceipts, invoiceable } from '../lib/onBehalf';
+import { BehalfStatus, ClaimBack, behalfStatus, claimCopies, claimFor, claimPaid, claimReceipts, invoiceable } from '../lib/onBehalf';
 import { Receipt, daysSinceTraining } from '../lib/postTraining';
 import { withoutDeleted } from '../lib/linked';
 import { askReason, deleteMoney, undoPayment, withDealHistory as withHistory } from '../lib/moneyActions';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
-import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt } from './PaymentReceipts';
+import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, removeReceipt, uploadReceipt } from './PaymentReceipts';
 
 // Claim back from client (Joel, 2026-10-22): costs we paid on the client's behalf (cost lines ticked "Pay on behalf
 // of client" on the before-training checklist) are billed on a separate reimbursement invoice (claim_backs), then the
-// client's payment is recorded with its receipt. Logic: lib/onBehalf.ts. Admin and Management only.
+// client's payment is recorded with its receipt. The invoice's copy is uploaded too (2026-10-24, required on invoices
+// made since). Logic: lib/onBehalf.ts. Admin and Management only.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -65,7 +66,7 @@ export function ClaimBackStep({ deal, viewer, b, receipts, settings }: { deal: a
       {b.claims.length > 0 && (
         <ul className="space-y-2">
           {[...b.claims].sort((x, y) => String(x.invoiceDate).localeCompare(String(y.invoiceDate))).map(c => (
-            <ClaimRow key={c.id} c={c} viewer={viewer} receipts={claimReceipts(c, receipts)} outs={b.outs} settings={settings} />
+            <ClaimRow key={c.id} c={c} viewer={viewer} receipts={claimReceipts(c, receipts)} copies={claimCopies(c, receipts)} outs={b.outs} settings={settings} />
           ))}
         </ul>
       )}
@@ -82,6 +83,8 @@ export function ClaimBackStep({ deal, viewer, b, receipts, settings }: { deal: a
 function ClaimForm({ deal, viewer, ready, onDone }: { deal: any; viewer: Viewer; ready: MoneyOut[]; onDone: () => void }) {
   const [f, setF] = useState({ invoiceNo: '', invoiceDate: todayIso(), picked: ready.map(o => o.id), amount: '', note: '' });
   const draft = useFormDraft(viewer.id, `claim-back:${deal.id}`, f, setF);
+  const [file, setFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // Draft ids that are no longer ready (e.g. invoiced since) are dropped.
@@ -97,16 +100,26 @@ function ClaimForm({ deal, viewer, ready, onDone }: { deal: any; viewer: Viewer;
     if (!(amount > 0)) return setError('Enter the amount billed.');
     const id = `cb_${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
     setBusy(true); setError('');
+    let copy: Receipt | null = null;
     try {
+      if (file) {
+        setProgress(0);
+        try { copy = await uploadReceipt(file, { dealId: deal.id, moneyInId: '', recordId: '', claimBackId: id, kind: 'copy' }, viewer, setProgress); }
+        catch (e) { throw new Error(receiptError(e)); }
+        finally { setProgress(null); }
+      }
       await withHistory(deal.id, viewer, `Reimbursement invoice${f.invoiceNo.trim() ? ` ${f.invoiceNo.trim()}` : ''} to the client: ${formatRM(amount)} paid on their behalf (${picked.map(o => o.description || o.category).join(', ')})`,
         batch => batch.set(doc(db, 'claim_backs', id), {
           id, dealId: deal.id, moneyOutIds: picked.map(o => o.id), invoiceNo: f.invoiceNo.trim(), invoiceDate: f.invoiceDate, amount: round(amount),
           paidDate: '', paidAmount: 0, paidAt: '', paidById: '', paidByName: '', note: f.note.trim(),
-          createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
+          copyNeeded: true, createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
         }));
       draft.clear();
       onDone();
-    } catch (err) { setError(friendlyError(err)); } finally { setBusy(false); }
+    } catch (err) {
+      if (copy) await removeReceipt(copy).catch(() => {});   // don't leave a copy without its invoice
+      setError(err instanceof Error && !(err as any).code ? err.message : friendlyError(err));
+    } finally { setBusy(false); }
   };
 
   return (
@@ -129,18 +142,20 @@ function ClaimForm({ deal, viewer, ready, onDone }: { deal: any; viewer: Viewer;
       </div>
       {amount > 0 && Math.abs(amount - total) > 0.005 && <p className="text-sm text-attention">The costs add up to {formatRM(total)}; you're billing {formatRM(amount)}.</p>}
       <input value={f.note} onChange={e => setF(x => ({ ...x, note: e.target.value }))} className={input} placeholder="Note (optional)" aria-label="Note" />
+      <ReceiptPick file={file} onFile={setFile} what="copy" label="Copy of the reimbursement invoice sent" />
+      {!file && <p className="text-sm text-ink-soft">No copy at hand? Save now and add it later on the invoice; the case closes once it's in.</p>}
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
         <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
-        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{progress !== null ? `Uploading… ${progress}%` : 'Save'}</button>
       </div>
     </form>
   );
 }
 
 /** One reimbursement invoice, with "Record payment" (date, amount and the receipt) and its receipts. */
-export function ClaimRow({ c, viewer, receipts, outs, settings, context }: {
-  c: ClaimBack; viewer: Viewer; receipts: Receipt[]; outs: MoneyOut[]; settings?: MoneySettings; context?: string; key?: string;
+export function ClaimRow({ c, viewer, receipts, copies = [], outs, settings, context }: {
+  c: ClaimBack; viewer: Viewer; receipts: Receipt[]; copies?: Receipt[]; outs: MoneyOut[]; settings?: MoneySettings; context?: string; key?: string;
 }) {
   const [paying, setPaying] = useState(false);
   const [pay, setPay] = useState({ date: todayIso(), amount: String(c.amount) });
@@ -199,6 +214,7 @@ export function ClaimRow({ c, viewer, receipts, outs, settings, context }: {
           {paid
             ? <p className="text-sm text-accent">Paid back {formatRM(c.paidAmount || 0)} on {formatDate(c.paidDate || '')}{Number(c.paidAmount) < Number(c.amount) - 0.005 ? ` · ${formatRM(Number(c.amount) - Number(c.paidAmount))} less than billed` : ''}</p>
             : <p className={`text-sm ${overdue ? 'font-semibold text-danger' : 'text-ink-soft'}`}>{overdue && <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />}Not paid back yet ({age} day{age === 1 ? '' : 's'})</p>}
+          {c.copyNeeded && !copies.length && <p className="text-sm font-semibold text-attention">Invoice copy not uploaded yet: the case closes once it's in.</p>}
           {paid && !!c.paidAt && !receipts.length && <p className="text-sm font-semibold text-attention">Receipt not uploaded yet: the case closes once it's in.</p>}
         </div>
         <span className="flex shrink-0 gap-1">
@@ -208,9 +224,14 @@ export function ClaimRow({ c, viewer, receipts, outs, settings, context }: {
           {(!paid || viewer.role === 'management') && <button type="button" disabled={busy} className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={remove} aria-label="Delete"><Trash2 className="h-4 w-4" /></button>}
         </span>
       </div>
+      <ReceiptList receipts={copies} viewer={viewer} copyLabel="Invoice copy" />
+      {!copies.length && (
+        <ReceiptDrop target={{ dealId: c.dealId, moneyInId: '', recordId: '', claimBackId: c.id, kind: 'copy' }} viewer={viewer} small
+          prompt="Upload the invoice copy" />
+      )}
       {paying && (
         <div className="mt-3 space-y-3 rounded-lg border border-line bg-white p-3">
-          <ReceiptPick file={file} onFile={setFile} />
+          <ReceiptPick file={file} onFile={setFile} label="Receipt from the client" />
           <div className="flex flex-wrap items-end gap-2">
             <div><label className={small} htmlFor={`cbd-${c.id}`}>Received on</label><input id={`cbd-${c.id}`} type="date" value={pay.date} onChange={e => setPay(p => ({ ...p, date: e.target.value }))} className={input} /></div>
             <div><label className={small} htmlFor={`cba-${c.id}`}>Amount received (RM)</label><input id={`cba-${c.id}`} inputMode="decimal" value={pay.amount} onChange={e => setPay(p => ({ ...p, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>

@@ -11,6 +11,9 @@
 //   7. Payments out (2026-10-21): every payment request on the deal (trainer, venue...) approved and paid.
 //   8. Claim back from client (2026-10-22), only when something was paid on the client's behalf (hotel, bus...):
 //      billed on a reimbursement invoice and paid back with its receipt (lib/onBehalf.ts).
+//   Copies (Joel, 2026-10-24): the HRDC claim or invoice we send out has its copy uploaded too (a file or a pasted
+//   screenshot, payment_receipts kind 'copy'), required on records made since then (copyNeeded). A copy never counts
+//   as the payment receipt.
 //   Then the deal is "Case closed": every step done, every invoice and claim received with its receipt, and no
 //   payment request (trainer, venue...) still waiting for approval or to be paid.
 //
@@ -40,6 +43,7 @@ export interface Receipt {
   recordId: string;        // the imported Payment tracking line (payment_records) it's for ('' for a deal's)
   moneyOutId?: string;     // a payment we made (money_out), e.g. a venue booking raised from the checklist (2026-10-20)
   claimBackId?: string;    // the client paying back what we paid on their behalf (claim_backs, 2026-10-22)
+  kind?: 'copy';           // the copy of the claim or invoice we sent (2026-10-24); none = the payment receipt
   name: string;
   size: number;
   type: string;
@@ -63,7 +67,9 @@ export const INVOICE_WORDS: Record<InSource, string> = { hrdc: 'HRDC claim', cli
 
 /** A payment recorded since this update needs its receipt. */
 export const needsReceipt = (m: MoneyIn) => isPaid(m) && !!m.paidAt;
-export const receiptsFor = (m: { id: string }, receipts: Receipt[]) => receipts.filter(r => r.moneyInId === m.id);
+export const receiptsFor = (m: { id: string }, receipts: Receipt[]) => receipts.filter(r => r.moneyInId === m.id && r.kind !== 'copy');
+/** The uploaded copies of the claim or invoice itself (2026-10-24). */
+export const copiesFor = (m: { id: string }, receipts: Receipt[]) => receipts.filter(r => r.moneyInId === m.id && r.kind === 'copy');
 
 /** Days since the training's last day (1 = it ended yesterday), or null while it hasn't ended or has no date. */
 export function daysSinceTraining(deal: any, today = todayIso()): number | null {
@@ -81,6 +87,7 @@ export interface PostStatus {
   docsOpen: ChecklistTask[];        // needed and not done
   unpaid: MoneyIn[];
   noReceipt: MoneyIn[];             // received, receipt still to upload
+  noCopy: MoneyIn[];                // recorded, copy of the claim or invoice still to upload
   outsOpen: MoneyOut[];             // payment requests waiting for approval or to be paid
   shortfallsOpen: MoneyIn[];        // HRDC paid less, no top-up invoice raised and not written off (process audit, 2026-10-22)
   beforeOpen: ChecklistTask[];      // before-training steps still open (the case can't close with them open)
@@ -110,6 +117,7 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   const docsOpen = docs.filter(t => !t.done && !isOptional(t));
   const unpaid = ins.filter(m => !isPaid(m));
   const noReceipt = ins.filter(m => needsReceipt(m) && !receiptsFor(m, receipts).length);
+  const noCopy = ins.filter(m => m.copyNeeded && !copiesFor(m, receipts).length);
   const outsOpen = outs.filter(o => o.status === 'pending' || o.status === 'approved');
   // Process audit (2026-10-22): an HRDC shortfall needs a top-up invoice to the client (or Management writes it off),
   // and the before-training steps must be done too, before the case can close (the same "closed" everywhere).
@@ -126,7 +134,7 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
     ...queries.filter(q => q.dealId === deal?.id && !q.answeredDate).map(q => ({ what: 'HRDC query', text: String(q.question || 'Not answered yet').slice(0, 80) })),
     ...(pendingDiscount(deal) ? [{ what: 'Discount', text: 'Waiting for a manager' }] : []),
   ];
-  const closed = ended && paymentDone && behalf.done && docsOpen.length === 0 && loopsOpen.length === 0;
+  const closed = ended && paymentDone && behalf.done && docsOpen.length === 0 && noCopy.length === 0 && loopsOpen.length === 0;
   const started = ins.length > 0 || after.some(t => t.done);
   const hrdcOrder = docsFirst(deal);
   const invoiceStep = hrdcOrder ? 2 : 1;
@@ -141,6 +149,9 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   } else if (!invoiceDone) {
     step = invoiceStep;
     next = invoiceNext();
+  } else if (noCopy.length) {
+    step = invoiceStep;
+    next = `Upload the copy of the ${noCopy.map(m => INVOICE_WORDS[m.source]).join(' and the ')}`;
   } else if (docsOpen.length) {
     step = 2;
     next = docsNext();
@@ -170,7 +181,7 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
     ? [...ins.map(m => m.paidDate || ''), ...docs.map(t => t.doneAt || ''), ...receipts.filter(r => ins.some(m => m.id === r.moneyInId)).map(r => r.at.slice(0, 10)),
       ...outs.map(o => o.paidDate || ''), ...behalf.claims.map(c => c.paidDate || '')].filter(isDay).map(d => d.slice(0, 10)).sort().pop() || ''
     : '';
-  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, outsOpen, shortfallsOpen, beforeOpen, loopsOpen, invoiceStep, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
+  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, noCopy, outsOpen, shortfallsOpen, beforeOpen, loopsOpen, invoiceStep, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
 }
 
 /** Reminders from the day after the training until the case is closed (the work queue, My home's After training card). */
@@ -206,6 +217,7 @@ export function postTrainingFlags(deal: any, tasks: ChecklistTask[] | undefined,
   });
   st.shortfallsOpen.forEach(m => flags.push({ level: 'danger', text: `HRDC paid ${formatRM(shortfall(m, s))} less than expected: raise a top-up invoice to the client` }));
   st.noReceipt.forEach(m => flags.push({ level: 'attention', text: `Payment received ${formatDate(m.paidDate || '')}, receipt not uploaded yet` }));
+  st.noCopy.forEach(m => flags.push({ level: 'attention', text: `${m.source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}${m.invoiceNo ? ` ${m.invoiceNo}` : ''}: copy not uploaded yet` }));
   flags.push(...behalfFlags(st.behalf, since, s, today));
   if (st.paymentDone && !st.docsOpen.length && st.loopsOpen.length) flags.push({ level: 'attention', text: `Case can't close yet, still open: ${st.loopsOpen.map(l => l.text).join(', ')}` });
   return flags;

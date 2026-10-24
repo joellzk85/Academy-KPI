@@ -57,6 +57,8 @@ export interface MoneyIn {
   // HRDC paid less than expected (process audit, 2026-10-22): the gap is billed to the client on a top-up invoice (a
   // client invoice with topUpFor = this claim's id), or Management writes it off with a reason.
   topUpFor?: string;
+  // Recorded since 2026-10-24: the copy of the claim or invoice must be uploaded before "Case closed" (lib/postTraining.ts).
+  copyNeeded?: boolean;
   shortfallWriteOff?: { byId: string; byName: string; at: string; reason: string; amount: number };
   // Process audit (2026-10-22): only Management undoes a payment (stamped), and nothing is erased (marked deleted).
   lastUndo?: UndoStamp;

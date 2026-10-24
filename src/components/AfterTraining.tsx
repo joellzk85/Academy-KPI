@@ -4,12 +4,12 @@ import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM, todayIso, trainingEndDate } from '../lib/deals';
 import { DEFAULT_MONEY_SETTINGS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, TIMING_LABELS, isPaid, isPayable, payableFrom, shortfall } from '../lib/money';
-import { INVOICE_WORDS, Receipt, docsFirst, invoicesNeeded, postTraining, receiptsFor } from '../lib/postTraining';
+import { INVOICE_WORDS, Receipt, copiesFor, docsFirst, invoicesNeeded, postTraining, receiptsFor } from '../lib/postTraining';
 import { hrdcClaimBlock, progress } from '../lib/checklist';
 import { askReason, withDealHistory } from '../lib/moneyActions';
 import DealChecklist, { HrdcCodes } from './DealChecklist';
 import { InForm, InRow } from './Money';
-import { useReceipts } from './PaymentReceipts';
+import { ReceiptDrop, ReceiptList, useReceipts } from './PaymentReceipts';
 import { ClaimBackStep, useClaimBacks } from './ClaimBacks';
 import { ClaimBack } from '../lib/onBehalf';
 
@@ -18,6 +18,7 @@ import { ClaimBack } from '../lib/onBehalf';
 //   output assessment; certificates optional), 3. Payment received, with the receipt, 4. Payments out (2026-10-21:
 //   the training's payment requests approved and paid), 5. Claim back from client (2026-10-22, only when something was
 //   paid on the client's behalf). Logic: lib/postTraining.ts.
+// Step 1 holds the copy of each claim or invoice sent (2026-10-24: a file or a pasted screenshot).
 // Admin and Management do it; reps see where it stands (no amounts' actions, no receipts).
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -102,17 +103,26 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
       )}
 
       {/* 1. Issue invoice */}
-      <Step n={st.invoiceStep} order={hrdcOrder ? 'order-3' : 'order-2'} title={hrdcOrder ? `Submit the HRDC claim${needed.includes('client') ? ' and invoice the client' : ''}` : 'Issue invoice'} done={st.invoiceDone}
+      <Step n={st.invoiceStep} order={hrdcOrder ? 'order-3' : 'order-2'} title={hrdcOrder ? `Submit the HRDC claim${needed.includes('client') ? ' and invoice the client' : ''}` : 'Issue invoice'} done={st.invoiceDone && !st.noCopy.length}
         sub={needed.length ? `The ${needed.map(s => INVOICE_WORDS[s]).join(' and the ')}: issued by accounts, recorded here` : 'Set how the deal is paid to see what to invoice'}>
         {sortedIns.length > 0 && (
           <ul className="space-y-1.5">
-            {sortedIns.map(m => (
-              <li key={m.id} className="rounded-lg border border-line bg-white px-3 py-2 text-[15px]">
-                <span className="font-semibold">{m.source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}{m.invoiceNo ? ` ${m.invoiceNo}` : ''}</span>
-                {staff && <> · {formatRM(m.amount)}</>}
-                <span className="text-ink-soft"> · {m.source === 'hrdc' ? 'submitted' : 'invoiced'} {formatDate(m.invoiceDate)}</span>
-              </li>
-            ))}
+            {sortedIns.map(m => {
+              const copies = copiesFor(m, receipts);
+              const word = m.source === 'hrdc' ? 'Claim copy' : 'Invoice copy';
+              return (
+                <li key={m.id} className="rounded-lg border border-line bg-white px-3 py-2 text-[15px]">
+                  <span className="font-semibold">{m.source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}{m.invoiceNo ? ` ${m.invoiceNo}` : ''}</span>
+                  {staff && <> · {formatRM(m.amount)}</>}
+                  <span className="text-ink-soft"> · {m.source === 'hrdc' ? 'submitted' : 'invoiced'} {formatDate(m.invoiceDate)}</span>
+                  {staff && m.copyNeeded && !copies.length && <p className="text-sm font-semibold text-attention">{word} not uploaded yet: the case closes once it's in.</p>}
+                  {staff && <ReceiptList receipts={copies} viewer={viewer} copyLabel={word} />}
+                  {staff && !copies.length && (
+                    <ReceiptDrop target={{ dealId: deal.id, moneyInId: m.id, recordId: '', kind: 'copy' }} viewer={viewer} small prompt={`Upload the ${word.toLowerCase()}`} />
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
         {!sortedIns.length && <p className="text-[15px] text-ink-soft">{staff ? 'Nothing recorded yet.' : 'Not issued yet.'}</p>}

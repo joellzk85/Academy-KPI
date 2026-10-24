@@ -112,3 +112,12 @@ What was built:
 - **Accept:** Admin work → Referrers → **See bank details** → **Accept bank details**: the server saves them on the referrer's vendor record (Vendors, type "Referrer (referral fee)") stamped as waiting for a manager's check, like any vendor's bank change, and fills in the vendor on their fee requests not yet paid.
 - **Fee request raised by itself:** when a referred deal is won (and its fee is set), the server raises a pending **Referral fee** payment request, `money_out/ref_<dealId>` (one per deal, never twice), requested by whoever won the deal, post-training, Include in P&L ticked. A manager approves it as usual (never their own); approved, it's a cost in that deal's P&L; it goes to accounts on a payment summary once the bank details are checked. A missed one can be raised from Admin work → Referrers → **Raise fee request**.
 - **Rules to publish:** `firestore.rules` (`referrers`, `referrer_links`, `clients` Found by, `pipelines` won-deal lock for the co-closer and referral fee).
+
+## Claim and invoice copies, pasted screenshots (Joel, 2026-10-24)
+
+- Joel: "other than just recording the claim details, upload document / screenshot", for the HRDC claim and the reimbursement invoice (costs paid on the client's behalf, e.g. venue), "make sure no open loop".
+- The HRDC claim / client invoice form (`InForm`, Money.tsx) and the reimbursement invoice form (ClaimBacks.tsx) take the copy we sent: a file or a pasted screenshot. Or later on the line (After training step 1, step 5).
+- Stored like receipts (`payment_receipts`, Storage `receipts/`) with `kind: 'copy'`. `receiptsFor` / `claimReceipts` skip copies, so a claim screenshot never counts as the payment receipt; `copiesFor` / `claimCopies` read them.
+- Required (Claude's default, Joel said "let's build" without choosing): records made since then carry `copyNeeded: true`; the case can't close until the copy is in (`noCopy` in postTraining.ts and onBehalf.ts), with a flag on My home and the work queue. Older records need none.
+- Every file box takes Ctrl+V: the box under the mouse or focused, else the newest open form's box. A screenshot is named `screenshot-YYYYMMDD-HHMM.png`.
+- No rules change: `money_in` / `claim_backs` create allows the extra field; `payment_receipts` create checks only the uploader and path.

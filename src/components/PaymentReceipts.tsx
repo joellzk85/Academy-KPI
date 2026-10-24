@@ -14,9 +14,43 @@ import { openProposalFile, storageError } from './ProposalFiles';
 // - The file: Firebase Storage receipts/{id}_{name} (storage.rules).
 // - The record: payment_receipts/{id} (lib/postTraining.ts Receipt). The backup copies the records.
 // Same file types and size as the checklist files: PDF, Word, Excel or a photo, up to 100 MB.
+// Copies (Joel, 2026-10-24): the same boxes hold the copy of the HRDC claim or invoice we sent (kind 'copy'), and every
+// box takes a pasted screenshot (Ctrl+V): the box under the mouse or focused, else the newest one in an open form.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
-export type ReceiptTarget = { dealId: string; moneyInId: string; recordId: string; moneyOutId?: string; claimBackId?: string };
+export type ReceiptTarget = { dealId: string; moneyInId: string; recordId: string; moneyOutId?: string; claimBackId?: string; kind?: 'copy' };
+
+type PasteTaker = (f: File) => void;
+let hovered: PasteTaker | null = null;
+const pickers: PasteTaker[] = [];
+let listening = false;
+function onPaste(e: ClipboardEvent) {
+  const take = hovered || pickers[pickers.length - 1];
+  let f = e.clipboardData?.files?.[0];
+  if (!take || !f) return;
+  // A screenshot comes in as "image.png": give it a name that says what it is.
+  if (f.type.startsWith('image/') && /^image\.\w+$/i.test(f.name)) {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+    f = new File([f], `screenshot-${stamp}.${f.type === 'image/jpeg' ? 'jpg' : 'png'}`, { type: f.type });
+  }
+  e.preventDefault();
+  take(f);
+}
+/** Lets a box take a pasted file: while hovered or focused, or (picker) as the newest open form's box. */
+function usePaste(take: PasteTaker, picker: boolean) {
+  const latest = useRef(take);
+  latest.current = take;
+  const me = useRef<PasteTaker>(f => latest.current(f)).current;
+  useEffect(() => {
+    if (!listening) { document.addEventListener('paste', onPaste); listening = true; }
+    if (picker) pickers.push(me);
+    return () => { const i = pickers.indexOf(me); if (i >= 0) pickers.splice(i, 1); if (hovered === me) hovered = null; };
+  }, [picker, me]);
+  const on = () => { hovered = me; };
+  const off = () => { if (hovered === me) hovered = null; };
+  return { onMouseEnter: on, onMouseLeave: off, onFocus: on, onBlur: off };
+}
+const PASTE_HINT = 'or paste a screenshot (Ctrl+V)';
 
 /** Receipts, live: one deal's, or (no dealId) all of them. Only Admin and Management may read them. */
 export function useReceipts(enabled: boolean, dealId?: string): Receipt[] {
@@ -50,10 +84,16 @@ export async function uploadReceipt(file: File, target: ReceiptTarget, viewer: V
   return rec;
 }
 
+/** Removes a receipt's file and record (also used when the record it belongs to couldn't be saved). */
+export async function removeReceipt(r: Receipt) {
+  await deleteObject(ref(storage, r.path)).catch((e: any) => { if (e?.code !== 'storage/object-not-found') throw e; });
+  await deleteDoc(doc(db, 'payment_receipts', r.id));
+}
+
 export const receiptError = (e: any) => (e instanceof Error && !(e as any).code ? e.message : storageError(e));
 
 /** The receipts already uploaded, with open and delete. */
-export function ReceiptList({ receipts, viewer }: { receipts: Receipt[]; viewer: Viewer }) {
+export function ReceiptList({ receipts, viewer, copyLabel = 'Copy' }: { receipts: Receipt[]; viewer: Viewer; copyLabel?: string }) {
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
   if (!receipts.length) return null;
@@ -61,8 +101,7 @@ export function ReceiptList({ receipts, viewer }: { receipts: Receipt[]; viewer:
     if (!window.confirm(`Delete the receipt "${r.name}"? This can't be undone.`)) return;
     setBusyId(r.id); setError('');
     try {
-      await deleteObject(ref(storage, r.path)).catch((e: any) => { if (e?.code !== 'storage/object-not-found') throw e; });
-      await deleteDoc(doc(db, 'payment_receipts', r.id));
+      await removeReceipt(r);
     } catch (e) {
       setError(storageError(e));
     } finally {
@@ -76,7 +115,7 @@ export function ReceiptList({ receipts, viewer }: { receipts: Receipt[]; viewer:
           <li key={r.id} className="flex items-center gap-2 px-3 py-2">
             <FileCheck2 className="h-4 w-4 shrink-0 text-accent" />
             <button type="button" onClick={async () => { setError(''); setError(await openProposalFile(r as any)); }} className="min-w-0 flex-1 text-left">
-              <span className="flex items-center gap-1.5 text-[15px] font-medium text-accent hover:underline"><span className="truncate">Receipt: {r.name}</span><ExternalLink className="h-3.5 w-3.5 shrink-0" /></span>
+              <span className="flex items-center gap-1.5 text-[15px] font-medium text-accent hover:underline"><span className="truncate">{r.kind === 'copy' ? copyLabel : 'Receipt'}: {r.name}</span><ExternalLink className="h-3.5 w-3.5 shrink-0" /></span>
               <span className="block text-sm text-ink-soft">{r.byName} · {formatDate(r.at)} · {sizeText(r.size)}</span>
             </button>
             {(r.byId === viewer.id || viewer.role === 'management') && (
@@ -98,13 +137,15 @@ export function ReceiptDrop({ target, viewer, prompt = 'Drop the receipt here, o
   const [over, setOver] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState('');
-  const upload = async (files: FileList | null) => {
+  const upload = async (files: FileList | File[] | null) => {
     const f = files?.[0];
     if (!f || progress !== null) return;
     setError(''); setProgress(0);
     try { await uploadReceipt(f, target, viewer, setProgress); } catch (e) { setError(receiptError(e)); } finally { setProgress(null); }
   };
+  const paste = usePaste(f => upload([f]), false);
   const drag = {
+    ...paste,
     onDragOver: (e: React.DragEvent) => { e.preventDefault(); setOver(true); },
     onDragLeave: () => setOver(false),
     onDrop: (e: React.DragEvent) => { e.preventDefault(); setOver(false); upload(e.dataTransfer.files); },
@@ -112,7 +153,7 @@ export function ReceiptDrop({ target, viewer, prompt = 'Drop the receipt here, o
   return (
     <div className="mt-2">
       {small ? (
-        <button type="button" onClick={() => input.current?.click()} {...drag}
+        <button type="button" onClick={() => input.current?.click()} {...drag} title={`Drop a file, ${PASTE_HINT}, or click to choose`}
           className={`inline-flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-1.5 text-sm font-semibold ${over ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink hover:bg-surface'}`}>
           {progress !== null ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading… {progress}%</> : <><Upload className="h-3.5 w-3.5 text-accent" /> {prompt}</>}
         </button>
@@ -122,7 +163,7 @@ export function ReceiptDrop({ target, viewer, prompt = 'Drop the receipt here, o
           className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed px-4 py-3 text-center ${over ? 'border-accent bg-accent-soft' : 'border-line bg-white hover:border-accent/50 hover:bg-surface'}`}>
           {progress !== null
             ? <span className="flex items-center gap-2 text-sm font-semibold text-accent"><Loader2 className="h-4 w-4 animate-spin" /> Uploading… {progress}%</span>
-            : <><span className="flex items-center gap-2 text-[15px] font-semibold"><Upload className="h-4 w-4 text-accent" /> {prompt}</span><span className="text-sm text-ink-soft">{CHECKLIST_FILE_KINDS}</span></>}
+            : <><span className="flex items-center gap-2 text-[15px] font-semibold"><Upload className="h-4 w-4 text-accent" /> {prompt}</span><span className="text-sm text-ink-soft">{CHECKLIST_FILE_KINDS}, {PASTE_HINT}</span></>}
         </div>
       )}
       <input ref={input} type="file" accept={CHECKLIST_FILE_ACCEPT} className="hidden" onChange={e => { upload(e.target.files); e.target.value = ''; }} />
@@ -132,31 +173,34 @@ export function ReceiptDrop({ target, viewer, prompt = 'Drop the receipt here, o
 }
 
 /** Choose the receipt inside a "payment received" form; it's uploaded when the form is saved. */
-export function ReceiptPick({ file, onFile }: { file: File | null; onFile: (f: File | null) => void }) {
+export function ReceiptPick({ file, onFile, label = 'Receipt from the client or HRDC', what = 'receipt' }: {
+  file: File | null; onFile: (f: File | null) => void; label?: string; what?: string;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [error, setError] = useState('');
-  const take = (files: FileList | null) => {
+  const take = (files: FileList | File[] | null) => {
     const f = files?.[0];
     if (!f) return;
     const problem = checklistFileProblem(f.name, f.size);
     setError(problem);
     if (!problem) onFile(f);
   };
+  const paste = usePaste(f => take([f]), !file);
   return (
     <div>
-      <span className="mb-1 block text-sm font-medium text-ink-soft">Receipt from the client or HRDC</span>
+      <span className="mb-1 block text-sm font-medium text-ink-soft">{label}</span>
       {file ? (
         <p className="flex items-center gap-2 rounded-lg border border-accent/30 bg-accent-soft/50 px-3 py-2 text-[15px]">
           <Paperclip className="h-4 w-4 shrink-0 text-accent" /><span className="min-w-0 flex-1 truncate">{file.name}</span>
-          <button type="button" onClick={() => onFile(null)} className="rounded-md p-1 text-ink-soft hover:bg-white" aria-label="Remove the chosen receipt"><X className="h-4 w-4" /></button>
+          <button type="button" onClick={() => onFile(null)} className="rounded-md p-1 text-ink-soft hover:bg-white" aria-label={`Remove the chosen ${what}`}><X className="h-4 w-4" /></button>
         </p>
       ) : (
-        <button type="button" onClick={() => input.current?.click()}
+        <button type="button" onClick={() => input.current?.click()} {...paste}
           onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
           onDrop={e => { e.preventDefault(); setOver(false); take(e.dataTransfer.files); }}
           className={`flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-2.5 text-[15px] font-semibold ${over ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>
-          <Upload className="h-4 w-4 text-accent" /> Drop the receipt here, or click to choose
+          <Upload className="h-4 w-4 shrink-0 text-accent" /> Drop the {what} here, {PASTE_HINT}, or click to choose
         </button>
       )}
       <input ref={input} type="file" accept={CHECKLIST_FILE_ACCEPT} className="hidden" onChange={e => { take(e.target.files); e.target.value = ''; }} />
