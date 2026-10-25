@@ -24,7 +24,10 @@ import { db, friendlyError } from '../lib/firebase';
 import { linkedOnly } from '../lib/linked';
 import { usePlace } from '../lib/loginActivity';
 import { useInternalTrainer } from '../lib/useInternalTrainer';
+import { useOneToOnes } from '../lib/useOneToOnes';
+import { waitingOn } from '../lib/oneToOne';
 const InternalTrainerPortal = React.lazy(() => import('./TrainerPortal').then(m => ({ default: m.InternalTrainerPortal })));
+const OneToOnePage = React.lazy(() => import('./OneToOnePage'));
 
 interface RepDetailDashboardProps {
   rep: Representative;
@@ -45,7 +48,7 @@ interface RepDetailDashboardProps {
   onOpenSubTabHandled?: () => void;
 }
 
-type SubTab = 'my_trainings' | 'quotation' | 'kpi' | 'present' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
+type SubTab = 'one_to_one' | 'my_trainings' | 'quotation' | 'kpi' | 'present' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
 
 
 // Tombstone list of pipeline IDs the user has deleted, so other views
@@ -1317,6 +1320,10 @@ export default function RepDetailDashboard({
   // Files shared with this person that they haven't opened (only in their own workspace: the alerts are theirs).
   const inbox = useSharedInbox(viewer && viewer.id !== rep.id ? undefined : rep.id);
   const myTrainerRecord = useInternalTrainer(rep.id);
+  // 1-to-1 (2026-10-25): everyone's own workspace only; a session is private to the two people in it.
+  const ownSpace = !viewer || viewer.id === rep.id;
+  const oto = useOneToOnes(ownSpace ? rep.id : '');
+  const otoWaiting = ownSpace ? oto.sessions.filter(s => waitingOn(s, rep.id)).length : 0;
   const workspaceMenuItems: MenuItem[] = [
     ...(rep.noKpis ? [] : [{ key: 'kpi' as const, label: MENU_LABELS.kpi, alert: kpiAsksOpen ? `${kpiAsksOpen} teammate request${kpiAsksOpen === 1 ? '' : 's'}` : undefined }]),
     ...(presentOnMenu ? [{ key: 'present' as const, label: MENU_LABELS.present }] : []),
@@ -1334,6 +1341,7 @@ export default function RepDetailDashboard({
     // Internal trainers (2026-10-25): their trainings, photos, T3 and training reports. Own workspace only (it
     // works with the person's own login).
     ...(myTrainerRecord && (!viewer || viewer.id === rep.id) ? [{ key: 'my_trainings' as const, label: MENU_LABELS.my_trainings }] : []),
+    ...(ownSpace ? [{ key: 'one_to_one' as const, label: MENU_LABELS.one_to_one, count: otoWaiting, alert: otoWaiting ? `${otoWaiting} 1-to-1 waiting for you` : undefined }] : []),
   ];
 
   const getSectionTitle = () => {
@@ -1367,7 +1375,11 @@ export default function RepDetailDashboard({
         {/* Right Side: Active Workspace Section */}
         <div className="min-w-0 flex-1 space-y-5">
           
-          {activeSubTab === 'my_trainings' ? (
+          {activeSubTab === 'one_to_one' ? (
+            ownSpace
+              ? <Suspense fallback={null}><OneToOnePage me={viewer || { id: rep.id, name: rep.name, role: (rep.role as any) || 'rep' }} reps={reps} month={selectedMonth} /></Suspense>
+              : <p className="rounded-2xl border border-line bg-white p-5 text-[15px] text-ink-soft">1-to-1 sessions are private to the two people in them.</p>
+          ) : activeSubTab === 'my_trainings' ? (
             myTrainerRecord && (!viewer || viewer.id === rep.id)
               ? <Suspense fallback={null}><InternalTrainerPortal /></Suspense>
               : <p className="rounded-2xl border border-line bg-white p-5 text-[15px] text-ink-soft">My trainings is for internal trainers. Management links a person to their trainer record in Team.</p>

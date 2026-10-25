@@ -57,6 +57,18 @@ export function useKpiSources(opts: { months?: string[]; people?: RepLike[] } = 
     return () => { live = false; };
   }, [need360, monthKey]);
 
-  return useMemo(() => ({ claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360 }),
-    [claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360]);
+  // 1-to-1 sessions held (2026-10-25): dates only, from the server (the sessions themselves are private).
+  const [oneToOnes, setOneToOnes] = useState<Record<string, string[]>>({});
+  const needOto = (opts.people || []).some(p => metricsFor(p).some(m => m.auto === 'one_to_ones'));
+  useEffect(() => {
+    if (!needOto || !monthKey) return;
+    let live = true;
+    callServer<{ held: Record<string, string[]> }>('/api/one-to-one/held', { months: monthKey.split(',') }, true)
+      .then(r => { if (live) setOneToOnes(r.held || {}); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [needOto, monthKey]);
+
+  return useMemo(() => ({ claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes }),
+    [claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes]);
 }

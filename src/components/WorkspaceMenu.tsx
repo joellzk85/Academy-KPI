@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, BookOpen, Building2, CalendarDays, ChevronsLeft, ChevronsRight, ClipboardCheck, FileText, GraduationCap, ListTodo, MapPin, PartyPopper, Presentation, TrendingUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, BookOpen, Building2, CalendarDays, ChevronsLeft, ChevronsRight, ClipboardCheck, FileText, GraduationCap, ListTodo, MapPin, MessagesSquare, PartyPopper, Presentation, TrendingUp } from 'lucide-react';
 
 // The workspace's left menu. It can be collapsed to a slim strip of icons (remembered per browser).
 // On small screens it becomes a row of buttons that scrolls sideways.
@@ -9,7 +9,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, BookOpen, Building2, Calend
 // (user_prefs/{their id}.menuOrder), so a manager opening someone's workspace sees their own order.
 // Only the order changes: which items appear is still decided by the person's role.
 
-export type MenuKey = 'kpi' | 'present' | 'pipeline' | 'quotation' | 'course_outline' | 'teambuilding' | 'client' | 'trainerList' | 'venue' | 'admin_work' | 'tasks' | 'my_trainings';
+export type MenuKey = 'kpi' | 'present' | 'pipeline' | 'quotation' | 'course_outline' | 'teambuilding' | 'client' | 'trainerList' | 'venue' | 'admin_work' | 'tasks' | 'my_trainings' | 'one_to_one';
 
 export interface MenuItem { key: MenuKey; label: string; alert?: string; count?: number }   // count: shown in the red dot (e.g. files shared with you)
 
@@ -26,6 +26,7 @@ const ICONS: Record<MenuKey, React.ComponentType<{ className?: string }>> = {
   admin_work: ClipboardCheck,
   tasks: ListTodo,
   my_trainings: CalendarDays,
+  one_to_one: MessagesSquare,
 };
 
 const STORE_KEY = 'next_menu_collapsed';
@@ -132,5 +133,5 @@ function Count({ n, label, className = '' }: { n: number; label?: string; classN
 // Plain names for each menu item (also used for the page header).
 export const MENU_LABELS: Record<MenuKey, string> = {
   kpi: 'KPI', present: 'Present', pipeline: 'Deals', quotation: 'Quotations', course_outline: 'Course outlines', teambuilding: 'Teambuilding proposal', client: 'Clients',
-  trainerList: 'Trainers', venue: 'Venues', admin_work: 'Admin work', tasks: 'To-do', my_trainings: 'My trainings',
+  trainerList: 'Trainers', venue: 'Venues', admin_work: 'Admin work', tasks: 'To-do', my_trainings: 'My trainings', one_to_one: '1-to-1',
 };

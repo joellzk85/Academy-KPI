@@ -77,6 +77,8 @@ export const MEASURE_INFO: Record<string, MeasureInfo> = {
   new_activities: { label: 'new teambuilding activities approved by Management this month', unit: 'count', weekly: true },
   // 360 rating (Part C): average stars received in closed rating rounds of this month (lib/rating360.ts).
   rating_360: { label: 'average 360 rating received, closed rounds this month', unit: 'rating' },
+  // 1-to-1 (2026-10-25, lib/oneToOne.ts): sessions held this month, from the server (sessions are private).
+  one_to_ones: { label: '1-to-1 sessions held this month', unit: 'count', weekly: true },
 };
 
 export const GROUP_LABELS: Record<KpiGroup, string> = { sales: 'Sales', admin: 'Admin and operations', trainer: 'Trainer', management: 'Management', other: 'Other' };
@@ -119,6 +121,7 @@ export const BUILT_IN_KPIS: KpiDef[] = [
   { id: 'new_activities', name: 'Design new activity', group: 'trainer', description: 'New teambuilding activities this person added that Management approved this month.', measure: 'new_activities', unit: 'count', ...HI(3, 2, 1) },
   // Everyone. Hidden (appraisal Part B now, not a KPI); kept so old months still show it.
   { id: 'rating_360', name: '360 rating', group: 'other', description: 'Average stars (1-5) teammates gave in the 360 rating rounds of this month, once Management closes the round. Now part of the appraisal (attitude), not a KPI.', measure: 'rating_360', unit: 'rating', ...HI(4.5, 4, 3), hidden: true },
+  { id: 'one_to_ones', name: '1-to-1 sessions held', group: 'other', description: '1-to-1 sessions held this month (marked Meeting done). Counts for the staff member and for the person running them.', measure: 'one_to_ones', unit: 'count', ...T(1) },
   // Management
   { id: 'gp_company', name: 'Company gross profit', group: 'management', description: 'Overall gross profit % of every training held this month. Bands are the company GP setting.', measure: 'gp_company', unit: 'pct', ...HI(50, 40, 30) },
   { id: 'team_avg', name: 'Team average KPI score', group: 'management', description: 'Average KPI score of everyone else with KPIs.', measure: 'team_avg', unit: 'pct', ...T(80) },

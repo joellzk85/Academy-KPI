@@ -117,7 +117,8 @@ export default function TasksPage({ rep, reps, viewer, onOpenDeals, onOpenDeal, 
     .filter(d => dealStage(d) !== 'lost' && (me.role !== 'rep' || dealOwnerId(d) === rep.id))
     .sort((a, b) => dealLabel(a).localeCompare(dealLabel(b))), [deals, clients, rep.id, me.role]);
 
-  const real = tasks.filter(isRealTask);
+  // 1-to-1 actions stay between the two people in the 1-to-1.
+  const real = tasks.filter(t => isRealTask(t) && (t.source !== '121' || isAssignedTo(t, me.id) || assignerOf(t) === me.id));
   const askedOnly = (t: Task) => assignerOf(t) === rep.id && !(assigneesOf(t).length === 1 && isAssignedTo(t, rep.id));
   const counts = {
     mine: real.filter(t => isAssignedTo(t, rep.id) && !isDone(t)).length,
@@ -404,6 +405,7 @@ function TaskRow({ t, g, scope, rep, canTick, nameOf, deal, dealLabel, onOpenCli
       <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }} className="min-w-0 flex-1 cursor-pointer text-left">
         <DetailText t={t} onOpenClient={onOpenClient} className={`block whitespace-pre-line text-[15px] ${done ? 'text-ink-soft line-through' : ''}`} />
         <span className="mt-0.5 block text-sm text-ink-soft">
+          {t.source === '121' && <span className="mr-1.5 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">From 1-to-1{t.meetingDate ? `, ${formatDate(t.meetingDate)}` : ''}</span>}
           {t.source === 'meeting' && <span className="mr-1.5 rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent">Action point{t.meetingDate ? `, meeting ${formatDate(t.meetingDate)}` : ''}</span>}
           {[who, deal ? dealLabel(deal) : '', deal && t.stepLabel ? t.stepLabel : ''].filter(Boolean).join(' · ')}
         </span>

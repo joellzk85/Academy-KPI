@@ -4,6 +4,8 @@
 //   - deal appointments              (pipelines[].appointment)
 //   - training dates of won deals    (pipelines[].trainingDate), at the training time (quotation or deal), else all day;
 //     a training of several days (pipelines[].trainingDays) gets one event per day ("train:<id>", "train:<id>:d2", …)
+//   - 1-to-1 sessions booked or held (one_to_ones, 2026-10-25): "1-to-1: <name>" only, 90 minutes. The shared
+//     calendar is seen by the whole team, so nothing else from the session goes there ("oto:<id>").
 // Each item has a fixed Google event id made from its CRM key, so syncing twice never makes duplicates.
 
 import { addDays, dealOwnerId, dealStage, trainingDays } from './deals';
@@ -26,6 +28,7 @@ export interface GoogleItem {
 export interface SyncData {
   events: any[]; deals: any[]; checklists: Record<string, any>; quotes: any[];
   clients: any[]; programmes: any[]; venues: any[]; trainers: any[]; team: { id: string; name: string }[];
+  oneToOnes?: { id: string; personId: string; status: string; date: string; time?: string }[];
 }
 
 const isDate = (v: any) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v);
@@ -151,6 +154,17 @@ export function buildDesired(s: SyncData): GoogleItem[] {
       });
       }
     }
+  });
+
+  // 4. 1-to-1 sessions, booked or held
+  (s.oneToOnes || []).forEach(o => {
+    if (!o?.id || (o.status !== 'booked' && o.status !== 'held') || !isDate(o.date)) return;
+    out.push({
+      key: `oto:${o.id}`,
+      summary: `1-to-1: ${nameOf(o.personId) || 'team member'}`,
+      description: footer,
+      ...whenFor(o.date, o.time, 1.5),
+    });
   });
   return out;
 }

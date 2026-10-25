@@ -29,7 +29,10 @@ export interface Task {
   ownerRepId?: string;        // old field: whose list the old copy sat in
   isHidden?: boolean;
   // Action points from the weekly presentation (2026-10-21, lib/present.ts): always a deadline and one responsible person.
-  source?: 'meeting';
+  // 1-to-1 actions (2026-10-25, components/OneToOnePage.tsx): source '121', the session, its date as meetingDate.
+  // Only the two people in the 1-to-1 see them in To-do (not in Management's "Everyone's").
+  source?: 'meeting' | '121';
+  oneToOneId?: string;
   meetingDate?: string;
   meetingSlide?: string;      // the slide on screen when it was raised
   // Shortcut from inside a deal (2026-10-24, components/DealTasks.tsx): the checklist step it's about, and for

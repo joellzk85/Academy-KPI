@@ -58,6 +58,8 @@ import { hasKpis, metricsFor } from './lib/kpi';
 import { KpiSetItem } from './lib/kpiLibrary';
 import { useKpiLibrary } from './lib/useKpiLibrary';
 import { appointmentEvents, trainingEvents } from './lib/appointments';
+import { useOneToOnes } from './lib/useOneToOnes';
+import { oneToOneEvents } from './lib/oneToOne';
 import { googleEvents, syncCalendar } from './lib/googleCalendar';
 import { runBackup } from './lib/backupApi';
 import { useFollowUpRules } from './lib/useFollowUpRules';
@@ -757,9 +759,12 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   };
 
   const selectedRep = workspacePeople.find(r => r.id === selectedRepId);
+  const myOneToOnes = useOneToOnes(currentMember.id);
 
-  // Team calendar = typed events + appointments booked on deals + won deals' training days (read from the deals, never copied).
-  const allCalendarEvents = [...calendarEvents, ...googleCalEvents, ...appointmentEvents(pipelinesSync, id => teamMembers.find(m => m.id === id)?.name || ''), ...trainingEvents(pipelinesSync, quotationsSync)];
+  // Team calendar = typed events + appointments booked on deals + won deals' training days (read from the deals, never copied)
+  // + this person's own 1-to-1s (2026-10-25; nobody else's).
+  const allCalendarEvents = [...calendarEvents, ...googleCalEvents, ...appointmentEvents(pipelinesSync, id => teamMembers.find(m => m.id === id)?.name || ''), ...trainingEvents(pipelinesSync, quotationsSync),
+    ...oneToOneEvents(myOneToOnes.sessions, currentMember.id, id => teamMembers.find(m => m.id === id)?.name || '')];
 
   // The calendar and notices on My home reuse the old home page's parts.
   const homeDashboardProps = {

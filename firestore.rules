@@ -91,11 +91,17 @@ service cloud.firestore {
       // rating_items (2026-10-22): the 360 attitude items; reliability: the appraisal's reliability score settings. Management only.
       // scorecard (2026-10-25): the performance scorecard's weights per level, people's levels and competency skills. Management only.
       // month_locks (2026-10-22): months Management reopened (Deal checks → Month lock); Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens']))
+      // one_to_one (2026-10-25): see below.
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one']))
                             || (docId in ['checklist_tasks'] && isStaff())
-                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard'] && isManagement());
+                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard'] && isManagement())
+                            // one_to_one (2026-10-25): who runs the 1-to-1s and the questions. The owner sets it (owner
+                            // override rule); the person who runs them changes the questions, never who runs them.
+                            || (docId == 'one_to_one' && isMember() && resource != null
+                                && resource.data.get('coachId', '') == request.auth.uid
+                                && request.resource.data.get('coachId', '') == request.auth.uid);
       allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens']));
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -611,6 +617,79 @@ service cloud.firestore {
         || (isMember() && (request.auth.uid in taskPeople(resource.data) || request.auth.uid in resource.data.get('assignedToIds', [])));
       allow delete: if isManagement()
         || (isMember() && resource.data.get('assignedById', resource.data.get('ownerRepId', '')) == request.auth.uid);
+    }
+
+    // 1-to-1 sessions (2026-10-25, src/lib/oneToOne.ts). config/one_to_one names the person who runs them (coachId).
+    // A session is read only by the two people in it (not Management). Either one asks for a time ('requested');
+    // only the other one accepts or declines. A new date, time or place always goes back to 'requested', asked by
+    // whoever changed it. Only the person running them marks a session held. The staff member changes only their
+    // own answers (before, after), their rating, "I agree" and the booking; the rating and "I agree" once it is held.
+    function otoCoachId() {
+      return get(/databases/$(database)/documents/config/one_to_one).data.get('coachId', '');
+    }
+    match /one_to_ones/{sessionId} {
+      function inIt(d) {
+        return request.auth.uid == d.get('personId', '') || request.auth.uid == d.get('coachId', '');
+      }
+      function changed() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+      function statusOk() {
+        return (!('status' in changed())
+                && !changed().hasAny(['date', 'time', 'place', 'requestedById']))
+          || (request.resource.data.status == 'requested' && resource.data.status in ['requested', 'booked']
+              && request.resource.data.requestedById == request.auth.uid)
+          || (request.resource.data.status in ['booked', 'declined'] && resource.data.status == 'requested'
+              && resource.data.requestedById != request.auth.uid
+              && !changed().hasAny(['date', 'time', 'place', 'requestedById']))
+          || (request.resource.data.status == 'cancelled' && resource.data.status in ['requested', 'booked']
+              && !changed().hasAny(['date', 'time', 'place', 'requestedById']))
+          || (request.resource.data.status == 'held' && resource.data.status == 'booked'
+              && request.auth.uid == resource.data.coachId
+              && !changed().hasAny(['date', 'time', 'place', 'requestedById']));
+      }
+      allow read: if isMember() && inIt(resource.data);
+      allow create: if isMember()
+        && exists(/databases/$(database)/documents/config/one_to_one)
+        && request.resource.data.coachId == otoCoachId()
+        && request.resource.data.personId is string && request.resource.data.personId != ''
+        && request.resource.data.personId != request.resource.data.coachId
+        && inIt(request.resource.data)
+        && request.resource.data.requestedById == request.auth.uid
+        && request.resource.data.status == 'requested';
+      allow update: if isMember() && inIt(resource.data)
+        && request.resource.data.personId == resource.data.personId
+        && request.resource.data.coachId == resource.data.coachId
+        && statusOk()
+        && (request.auth.uid == resource.data.coachId
+            || (changed().hasOnly(['status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote',
+                                   'cancelledById', 'cancelledAt', 'before', 'after', 'staffRating', 'staffComment', 'staffRatedAt',
+                                   'agreedAt', 'agreeComment', 'updatedAt'])
+                && (!changed().hasAny(['after', 'staffRating', 'staffComment', 'staffRatedAt', 'agreedAt', 'agreeComment'])
+                    || resource.data.status == 'held')
+                && (!('staffRating' in changed())
+                    || (request.resource.data.staffRating is int && request.resource.data.staffRating >= 1 && request.resource.data.staffRating <= 5))));
+      allow delete: if false;
+    }
+    // The coach's private notes on a session: the person running it only, ever.
+    match /one_to_one_private/{sessionId} {
+      allow read, write: if isMember()
+        && exists(/databases/$(database)/documents/one_to_ones/$(sessionId))
+        && get(/databases/$(database)/documents/one_to_ones/$(sessionId)).data.coachId == request.auth.uid;
+    }
+    // The coach's rating of a held session. The staff member reads it only once they have given their own.
+    match /one_to_one_ratings/{sessionId} {
+      function session() {
+        return get(/databases/$(database)/documents/one_to_ones/$(sessionId)).data;
+      }
+      allow read: if isMember()
+        && exists(/databases/$(database)/documents/one_to_ones/$(sessionId))
+        && (session().coachId == request.auth.uid
+            || (session().personId == request.auth.uid && session().get('staffRating', 0) is int && session().get('staffRating', 0) >= 1));
+      allow write: if isMember()
+        && exists(/databases/$(database)/documents/one_to_ones/$(sessionId))
+        && session().coachId == request.auth.uid && session().status == 'held'
+        && request.resource.data.rating is int && request.resource.data.rating >= 1 && request.resource.data.rating <= 5;
     }
 
     // Course outlines: same as quotations. Reps change their own, ones shared with them, or ones they're

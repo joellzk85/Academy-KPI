@@ -134,6 +134,7 @@ Calm and readable, replacing the old cramped ALL-CAPS look. Use the Plus Jakarta
 | `clients-directories-calendar.md` | Client history, Clients, Trainers, Venues, To-do, Google Calendar |
 | `backup-and-tidyup.md` | Data backup, tidy-up done and still open |
 | `process-audit.md` | Process audit fixes (2026-10-22): money controls, deal rules, HRDC gates, PDPA |
+| `one-to-one.md` | 1-to-1 sessions: booking and accepting, before / during / after questions (editable), actions to To-do, ratings, private notes, calendar, KPI |
 | `full-deal-test.md` | Full deal test of 22 Oct 2026: every problem found, Joel's fix / leave decisions, the four fix batches and what is done |
 
 ## 6. Status and Joel's open to-dos
@@ -179,6 +180,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Internal trainers in the CRM (2026-10-25):** Team → Trainer links a staff member to their trainer record; My trainings in their workspace (photos, T3, their own training report; no PO or fee); only they write the report; Trainer KPIs tick in KPIs; publish **both** rules files; go-live checklist item 66. See `trainer-portal.md`.
 - **Performance scorecard and HEART values (2026-10-25):** one overall appraisal score; quarterly reviews; Use HEART values in 360 items; publish `firestore.rules`; go-live checklist item 67.
 - **KPI & appraisal tab, appraisal round, self review (2026-10-25):** one tab (KPIs moved out of Team), hidden in the private room by default with a tick in Screens to bring it back to Management; Commence appraisal with a deadline; self reviews (never counted) and comments on every section; nothing seen until released; publish `firestore.rules`; go-live checklist item 68. See `home-kpi-dashboards.md`.
+- **1-to-1 sessions (2026-10-25):** a 1-to-1 tab for everyone; only the person running them (picked in its Settings by the owner) sees everyone's, nobody else; publish `firestore.rules`; go-live checklist item 69. See `one-to-one.md`.
 - **Not built yet:** external trainer link for teambuilding proposals (A2); Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

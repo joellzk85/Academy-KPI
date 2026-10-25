@@ -93,15 +93,17 @@ let syncing: Promise<any> | null = null;
 async function loadSyncData() {
   const { db } = admin();
   const all = async (name: string) => (await db.collection(name).get()).docs.map(d => ({ ...d.data(), id: d.id }) as any);
-  const [events, deals, checklistDocs, quotes, clients, programmes, venues, trainers, team] = await Promise.all([
+  const [events, deals, checklistDocs, quotes, clients, programmes, venues, trainers, team, otoDocs] = await Promise.all([
     all('events'), all('pipelines'), all('deal_checklists'), all('quotations'), all('clients'), all('programmes'),
-    all('venues_directory'), all('trainers_directory'), all('team'),
+    all('venues_directory'), all('trainers_directory'), all('team'), all('one_to_ones'),
   ]);
+  // 1-to-1s: only what the calendar needs (never the answers).
+  const oneToOnes = otoDocs.map((o: any) => ({ id: o.id, personId: String(o.personId || ''), status: String(o.status || ''), date: String(o.date || ''), time: String(o.time || '') }));
   const checklists: Record<string, any> = {};
   checklistDocs.forEach((c: any) => { checklists[c.id] = c; });
   // Old deals and quotations not linked to a Team member yet stay off the calendar (src/lib/linked.ts).
   const teamIds = new Set<string>(team.map((t: any) => t.id));
-  return { events, deals: deals.filter((d: any) => ownedByTeam(d, teamIds)), checklists, quotes: quotes.filter((q: any) => ownedByTeam(q, teamIds)), clients, programmes, venues, trainers, team: team.map((t: any) => ({ id: t.id, name: t.name || '' })) };
+  return { events, deals: deals.filter((d: any) => ownedByTeam(d, teamIds)), checklists, quotes: quotes.filter((q: any) => ownedByTeam(q, teamIds)), clients, programmes, venues, trainers, team: team.map((t: any) => ({ id: t.id, name: t.name || '' })), oneToOnes };
 }
 
 function eventBody(item: GoogleItem, id: string) {
