@@ -45,7 +45,7 @@ const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.le
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const one = (n: number | null) => (n === null ? '–' : (Math.round(n * 10) / 10).toString());
 
-export default function OneToOnePage({ me, reps, month }: { me: Viewer; reps: Representative[]; month: string }) {
+export default function OneToOnePage({ me, reps, month, startPersonId }: { me: Viewer; reps: Representative[]; month: string; startPersonId?: string }) {
   const { coachId, questions, sessions, loaded } = useOneToOnes(me.id);
   const team = useTeamList();
   const active = team.filter(p => p.active);
@@ -54,7 +54,8 @@ export default function OneToOnePage({ me, reps, month }: { me: Viewer; reps: Re
   const isOwner = isSuperManager(me);
   const numbers = useMemo(() => sessionNumbers(sessions), [sessions]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [personId, setPersonId] = useState<string | null>(null);
+  // Opened from someone's workspace by the coach: start on that person.
+  const [personId, setPersonId] = useState<string | null>(startPersonId || null);
   const [showSettings, setShowSettings] = useState(false);
   const [booking, setBooking] = useState<{ personId: string } | null>(null);
   const [profileOf, setProfileOf] = useState<string | null>(null);

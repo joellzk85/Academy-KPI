@@ -20,7 +20,7 @@ Joel: everyone has a 90-minute 1-to-1 with the person who runs them, about work 
 
 - `src/lib/oneToOne.ts` (types, default questions, session numbers, waiting-on, calendar events, KPI dates), `src/lib/useOneToOnes.ts`, `src/components/OneToOnePage.tsx` (overview, list, booking, session, ratings, settings).
 - Collections: `config/one_to_one` (`coachId`, `questions`), `one_to_ones/{id}`, `one_to_one_private/{id}` (coach notes), `one_to_one_ratings/{id}` (coach's rating).
-- Menu: `one_to_one` in `WorkspaceMenu.tsx`, shown in `RepDetailDashboard.tsx` for your own workspace only. CRM calendar: `App.tsx`. Google: `calendarSync.ts` (`oto:<id>`), `serverCalendar.ts`. KPI: `kpiLibrary.ts`, `kpi.ts` (`one_to_ones`), `useKpiSources.ts`, `serverKpi.ts`. To-do: `tasks.ts`, `TasksPage.tsx`.
+- Menu: `one_to_one` in `WorkspaceMenu.tsx`, shown in `RepDetailDashboard.tsx` in your own workspace, and for the owner (who runs them) in every workspace, opened on that person (Joel, 2026-10-25). CRM calendar: `App.tsx`. Google: `calendarSync.ts` (`oto:<id>`), `serverCalendar.ts`. KPI: `kpiLibrary.ts`, `kpi.ts` (`one_to_ones`), `useKpiSources.ts`, `serverKpi.ts`. To-do: `tasks.ts`, `TasksPage.tsx`.
 - Rules (`firestore.rules`): sessions read only by the two people; staff change only the booking, Before / After answers, their rating and "I agree" (rating and agree only once held); only the coach marks held; date, time or place changes always go back to "Waiting to accept"; no deletes. 49 rule tests passed on the Firestore emulator (2026-10-25).
 
 ## Changes the same day (Joel, 2026-10-25, second round)
