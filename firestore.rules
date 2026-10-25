@@ -89,12 +89,13 @@ service cloud.firestore {
       // screens (2026-10-24): Management screens moved to the private room; the owner only (owner override rule).
       // kpi_library (2026-10-22): the KPI library, colour points and company GP bands (Team → KPI library); Management only.
       // rating_items (2026-10-22): the 360 attitude items; reliability: the appraisal's reliability score settings. Management only.
+      // scorecard (2026-10-25): the performance scorecard's weights per level, people's levels and competency skills. Management only.
       // month_locks (2026-10-22): months Management reopened (Deal checks → Month lock); Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'screens']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens']))
                             || (docId in ['checklist_tasks'] && isStaff())
-                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability'] && isManagement());
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'screens']));
+                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard'] && isManagement());
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -790,6 +791,20 @@ service cloud.firestore {
     }
     match /appraisal_notes/{noteId} {
       allow read, write: if isManagement();
+    }
+    // Quarterly scorecard reviews (2026-10-25, src/lib/scorecard.ts): competency skills and the manager's HEART
+    // rating, 1-5. Management only, and never your own review. Document id = <memberId>_<YYYY>-Q<n>.
+    match /scorecard_reviews/{reviewId} {
+      function validReview(d) {
+        return d.memberId is string && d.memberId != request.auth.uid
+          && d.quarter is string && d.quarter.matches('^[0-9]{4}-Q[1-4]$')
+          && reviewId == d.memberId + '_' + d.quarter
+          && d.skills is map && d.values is map && d.na is list && d.notes is map
+          && d.byId == request.auth.uid;
+      }
+      allow read, delete: if isManagement();
+      allow create, update: if isManagement() && validReview(request.resource.data)
+        && (resource == null || resource.data.memberId != request.auth.uid);
     }
 
     // KPI settings per person (template and targets): Management only.

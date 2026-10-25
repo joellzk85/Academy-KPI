@@ -7,8 +7,8 @@ import { callServer, db, friendlyError } from '../lib/firebase';
 import { useFormDraft } from '../lib/useFormDraft';
 import { formatDate, todayIso } from '../lib/deals';
 import {
-  activeItems, itemProblem, itemStars, MIN_COMMENT, needsComment, newItemId, Rating360, RatingItem, RatingPair, RatingRound, RoundMode, RoundView,
-  ratingId, ratingOverall, readRatingItems, readRound, roundPairs, STAR_WORDS, summarise, toRate,
+  activeItems, isHeart, itemProblem, itemStars, MIN_COMMENT, needsComment, newItemId, Rating360, RatingItem, RatingPair, RatingRound, RoundMode, RoundView,
+  ratingId, ratingOverall, readRatingItems, readRound, roundPairs, STAR_WORDS, summarise, toRate, withHeart,
 } from '../lib/rating360';
 
 // 360 rating (Joel, 2026-10-22; KPI Part C): one side panel with three tabs.
@@ -100,7 +100,7 @@ export default function Rating360Panel({ viewer, people, onClose, startTab }: {
   );
 }
 
-function Stars({ value, onChange, size = 'h-7 w-7' }: { value: number; onChange?: (n: number) => void; size?: string }) {
+export function Stars({ value, onChange, size = 'h-7 w-7' }: { value: number; onChange?: (n: number) => void; size?: string }) {
   return (
     <span className="inline-flex items-center gap-0.5" role={onChange ? 'radiogroup' : undefined} aria-label="Stars">
       {[1, 2, 3, 4, 5].map(n => (
@@ -110,6 +110,27 @@ function Stars({ value, onChange, size = 'h-7 w-7' }: { value: number; onChange?
           </button>
         ) : <Star key={n} className={`${size} ${n <= value ? 'fill-[#F59E0B] text-[#F59E0B]' : 'text-line'}`} />
       ))}
+    </span>
+  );
+}
+
+// What Level 1 and Level 5 look like for an item (HEART values, scorecard skills).
+export function LevelHints({ low, high }: { low?: string; high?: string }) {
+  if (!low && !high) return null;
+  return (
+    <span className="mb-2 grid gap-1 text-sm text-ink-soft sm:grid-cols-2">
+      {low && <span><strong className="text-ink">1 star:</strong> {low}</span>}
+      {high && <span><strong className="text-ink">5 stars:</strong> {high}</span>}
+    </span>
+  );
+}
+
+// A full-width box for what 1 or 5 stars look like, with its label in front.
+export function HintInput({ stars, ...rest }: { stars: 1 | 5 } & React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className="w-14 shrink-0 text-sm font-semibold text-ink-soft">{stars} star{stars > 1 ? 's' : ''}</span>
+      <input {...rest} />
     </span>
   );
 }
@@ -201,6 +222,7 @@ function RateForm({ viewer, round, rateeId, rateeName, existing, onDone }: {
           return (
             <div key={it.id} className="rounded-xl bg-surface p-3.5">
               <span className={label}>{it.name}</span>
+              <LevelHints low={it.low} high={it.high} />
               <span className="flex flex-wrap items-center gap-3"><Stars value={n} onChange={x => setStars(it.id, x)} /><span className="text-sm text-ink-soft">{STAR_WORDS[n]}</span></span>
               {needsComment(n) && (
                 <div className="mt-2">
@@ -520,7 +542,7 @@ function ItemsForm({ viewer, items, onDone }: { viewer: Viewer; items: RatingIte
     setBusy(true);
     try {
       await setDoc(doc(db, 'config', 'rating_items'), {
-        items: list.map((i, n) => ({ id: i.id, name: i.name.trim(), active: i.active, order: n + 1 })),
+        items: list.map((i, n) => ({ id: i.id, name: i.name.trim(), active: i.active, order: n + 1, low: (i.low || '').trim(), high: (i.high || '').trim() })),
         updatedAt: new Date().toISOString(), updatedById: viewer.id, updatedByName: viewer.name,
       });
       draft.clear();
@@ -534,15 +556,29 @@ function ItemsForm({ viewer, items, onDone }: { viewer: Viewer; items: RatingIte
       <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
         <div>
           <h4 className="text-lg font-bold">Items to rate</h4>
-          <p className="text-sm text-ink-soft">Everyone scores each item that is on, 1 to 5. Turning an item off keeps its past ratings.</p>
+          <p className="text-sm text-ink-soft">Everyone scores each item that is on, 1 to 5. Turning an item off keeps its past ratings. These are also the Behavioural part of the appraisal.</p>
         </div>
+        {!isHeart(list) && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-accent-soft px-3.5 py-2.5">
+            <span className="text-sm">Use the HEART values (Humility, Expertise, Accountability, Remarkable, Trustworthiness). Other items are turned off, not deleted.</span>
+            <button type="button" className={secondaryBtn} onClick={() => { setList(withHeart(list)); setError(''); }}>Use HEART values</button>
+          </div>
+        )}
         <ul className="space-y-2">
           {list.map((it, idx) => (
-            <li key={it.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2">
-              <input className={`${input} flex-1 min-w-[10rem]`} value={it.name} onChange={e => change(it.id, { name: e.target.value })} aria-label="Item name" />
-              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="accent-[#0E6E62]" checked={it.active} onChange={e => change(it.id, { active: e.target.checked })} /> On</label>
-              <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-white disabled:opacity-30" disabled={idx === 0} onClick={() => move(idx, -1)} aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
-              <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-white disabled:opacity-30" disabled={idx === list.length - 1} onClick={() => move(idx, 1)} aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
+            <li key={it.id} className={`space-y-2 rounded-lg bg-surface px-3 py-2 ${it.active ? '' : 'opacity-70'}`}>
+              <span className="flex flex-wrap items-center gap-2">
+                <input className={`${input} flex-1 min-w-[10rem]`} value={it.name} onChange={e => change(it.id, { name: e.target.value })} aria-label="Item name" />
+                <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="accent-[#0E6E62]" checked={it.active} onChange={e => change(it.id, { active: e.target.checked })} /> On</label>
+                <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-white disabled:opacity-30" disabled={idx === 0} onClick={() => move(idx, -1)} aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
+                <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-white disabled:opacity-30" disabled={idx === list.length - 1} onClick={() => move(idx, 1)} aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
+              </span>
+              {it.active && (
+                <span className="grid gap-2">
+                  <HintInput stars={1} className={input} value={it.low || ''} onChange={e => change(it.id, { low: e.target.value })} placeholder="What 1 star looks like" aria-label={`${it.name || 'Item'}: what 1 star looks like`} />
+                  <HintInput stars={5} className={input} value={it.high || ''} onChange={e => change(it.id, { high: e.target.value })} placeholder="What 5 stars look like" aria-label={`${it.name || 'Item'}: what 5 stars look like`} />
+                </span>
+              )}
             </li>
           ))}
         </ul>

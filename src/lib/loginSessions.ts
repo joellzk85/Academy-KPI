@@ -67,7 +67,7 @@ const RECORD_LABELS: Record<string, string> = {
   programmes: 'Programme', proposal_files: 'Proposal file', checklist_files: 'Checklist file', payment_receipts: 'Payment receipt',
   hrdc_queries: 'HRDC query', cost_estimates: 'Costing estimate', reliability_excused: 'Day out of office', tb_activities: 'Teambuilding activity',
   reliability_incidents: 'Reliability incident', training_reports: 'Training report', deal_checklists: 'Deal checklist', claim_backs: 'Claim back',
-  trainer_private: 'Trainer personal details', doc_links: 'Client link', ratings_360: '360 rating', appraisal_notes: 'Appraisal note',
+  trainer_private: 'Trainer personal details', doc_links: 'Client link', ratings_360: '360 rating', appraisal_notes: 'Appraisal note', scorecard_reviews: 'Scorecard review',
   month_kpis: 'Month KPIs', events: 'Calendar event', trainer_docs: 'Trainer document',
 };
 export const recordLabel = (path: string) => {

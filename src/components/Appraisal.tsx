@@ -1,31 +1,37 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { CalendarCheck, ClipboardList, Loader2, Plus, Settings2, Smile, Target, Trash2, X } from 'lucide-react';
+import { Award, CalendarCheck, ClipboardList, Gauge, GraduationCap, Loader2, Plus, Settings2, Smile, Target, Trash2, X } from 'lucide-react';
 import DaysOut, { useExcusedDays } from './DaysOut';
 import { ItemAverages, RatingDetail, useAllRatings, useRatingItems, useRatingRounds } from './Rating360';
+import { ReviewPanel, ScorecardSettingsPanel, useReviews, useScorecard } from './Scorecard';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
-import { hasKpis, kpiValueText, LIGHT_BADGE, LIGHT_TEXT, monthKpi, RepLike, setItemsFor } from '../lib/kpi';
+import { hasKpis, kpiBarClass, kpiLight, kpiValueText, LIGHT_BADGE, LIGHT_TEXT, monthKpi, RepLike, setItemsFor } from '../lib/kpi';
 import { appraisalSetItems, LIGHT_LABELS } from '../lib/kpiLibrary';
 import { useKpiSources } from '../lib/useKpiSources';
 import { useLoginData } from '../lib/loginActivity';
-import { itemStars, summarise } from '../lib/rating360';
+import { itemStars, RatingItem, summarise } from '../lib/rating360';
 import {
   DEFAULT_RELIABILITY, EXCUSE_LABELS, Incident, INCIDENT_LABELS, IncidentKind, readIncident, readReliabilitySettings, reliabilityFor,
   ReliabilitySettings, settingsProblem,
 } from '../lib/reliability';
+import {
+  behaviouralScore, competencyScore, Level, LEVEL_LABELS, levelFor, overallScore, Part, PART_LABELS, PART_QUESTIONS, PARTS, perItemAvg,
+  performanceScore, quarterMonths, quartersIn, quarterText, Review, reviewSkillAvg, reviewValuesAvg, ScorecardSettings, skillsFor, Weights,
+} from '../lib/scorecard';
 import { useAutoSave } from '../lib/useAutoSave';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 
 // Appraisal (Joel, 2026-10-22), Management → Appraisal, Management only. One person and a month (or a range of
-// months), in three separate cards with no combined total:
-// - Part A KPI: results only, the same score as the KPI page (lib/kpi.ts monthKpi) without the 360 rating KPI
-//   (lib/kpiLibrary.ts appraisalSetItems). A range shows each month's score and their average.
-// - Part B Attitude: closed 360 rounds of those months: average per item, overall, and every rating with who gave it
-//   (lib/rating360.ts).
-// - Part C Reliability: from the Login log, with days out of office left out and incidents taken off
-//   (lib/reliability.ts). Incidents and the score settings are kept here.
+// months, with quick picks for quarters and half years). Since 2026-10-25 it is the performance scorecard
+// (lib/scorecard.ts): three parts that add up to one overall score, weighted by the person's level (Joel replaced
+// the earlier "no combined total"):
+// - Performance: the KPI score (results; lib/kpi.ts monthKpi without the 360 rating KPI, lib/kpiLibrary.ts
+//   appraisalSetItems; a range averages the months) mixed with reliability (process; from the Login log, with days
+//   out of office left out and incidents taken off, lib/reliability.ts). Incidents and its settings are kept here.
+// - Competency: the manager's quarterly review of skills (scorecard_reviews); the quarters touching the period averaged.
+// - Behavioural: the HEART values; teammates' closed 360 rounds of those months mixed with the manager's review.
 // - Management notes per person per period: appraisal_notes/{memberId}_{from}_{to}, saving themselves.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -69,18 +75,31 @@ export default function Appraisal({ viewer, people, settingsOf, kpiOf, deals }: 
   const [who, setWho] = useState(people[0]?.id || '');
   const [from, setFrom] = useState(thisMonth);
   const [to, setTo] = useState(thisMonth);
+  const [showSettings, setShowSettings] = useState(false);
+  const settings = useScorecard();
   const person = people.find(p => p.id === who);
   const months = useMemo(() => monthsBetween(from, to < from ? from : to), [from, to]);
   const period = { from: months[0], to: months[months.length - 1] };
   const periodText = months.length > 1 ? `${monthText(period.from)} to ${monthText(period.to)}` : monthText(period.from);
+  // Quick picks: the quarters and half years of this year and last year.
+  const year = Number(thisMonth.slice(0, 4));
+  const picks: [string, string, string][] = [year, year - 1].flatMap(y => [
+    ...[1, 2, 3, 4].map(n => [quarterText(`${y}-Q${n}`), ...quarterMonths(`${y}-Q${n}`)] as [string, string, string]),
+    [`First half ${y}`, `${y}-01`, `${y}-06`] as [string, string, string],
+    [`Second half ${y}`, `${y}-07`, `${y}-12`] as [string, string, string],
+  ]);
 
   return (
     <div className="space-y-5 font-sans text-ink">
-      <div>
-        <h2 className="text-xl font-bold">Appraisal</h2>
-        <p className="mt-0.5 text-[15px] text-ink-soft">Results, attitude and reliability, each on its own. They are not added together.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Appraisal</h2>
+          <p className="mt-0.5 text-[15px] text-ink-soft">Performance, competency and behavioural add up to one overall score, weighted by each person's level.</p>
+        </div>
+        <button type="button" className={secondaryBtn} onClick={() => setShowSettings(true)}><Settings2 className="h-4 w-4" /> Scorecard settings</button>
       </div>
-      <section className={`${card} grid gap-3 sm:grid-cols-3`}>
+      {showSettings && <ScorecardSettingsPanel viewer={viewer} people={people} settings={settings} onClose={() => setShowSettings(false)} />}
+      <section className={`${card} grid gap-3 sm:grid-cols-2 lg:grid-cols-4`}>
         <div>
           <label htmlFor="ap-who" className={label}>Person</label>
           <select id="ap-who" className={input} value={who} onChange={e => setWho(e.target.value)}>
@@ -89,21 +108,69 @@ export default function Appraisal({ viewer, people, settingsOf, kpiOf, deals }: 
         </div>
         <div><label htmlFor="ap-from" className={label}>From month</label><input id="ap-from" type="month" className={input} value={from} onChange={e => { setFrom(e.target.value || thisMonth); if (to < e.target.value) setTo(e.target.value); }} /></div>
         <div><label htmlFor="ap-to" className={label}>To month (up to 12)</label><input id="ap-to" type="month" className={input} value={to} min={from} onChange={e => setTo(e.target.value || from)} /></div>
+        <div>
+          <label htmlFor="ap-pick" className={label}>Quarter or half year</label>
+          <select id="ap-pick" className={input} value={picks.find(([, f, t]) => f === from && t === to)?.[0] || ''}
+            onChange={e => { const x = picks.find(([n]) => n === e.target.value); if (x) { setFrom(x[1]); setTo(x[2]); } }}>
+            <option value="">Choose…</option>
+            {picks.map(([n]) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
       </section>
       {!person ? (
         <p className={`${card} text-center text-ink-soft`}>Choose a person.</p>
       ) : (
         <>
-          <p className="text-[15px]"><strong>{person.name}</strong> · {periodText}</p>
-          <div className="grid gap-4 lg:grid-cols-3">
-            <KpiCard person={person} months={months} people={people} settingsOf={settingsOf} kpiOf={kpiOf} deals={deals} />
-            <AttitudeCard memberId={person.id} months={months} people={people} />
-            <ReliabilityCard viewer={viewer} person={person} people={people} from={`${period.from}-01`} to={lastDay(period.to)} />
-          </div>
+          <PersonScorecard key={person.id} viewer={viewer} person={person} months={months} periodText={periodText} people={people} settings={settings}
+            settingsOf={settingsOf} kpiOf={kpiOf} deals={deals} />
           <NotesCard key={`${person.id}_${period.from}_${period.to}`} viewer={viewer} memberId={person.id} from={period.from} to={period.to} />
         </>
       )}
     </div>
+  );
+}
+
+// One person's scorecard for the period: works out each part, then the overall score on top.
+function PersonScorecard({ viewer, person, months, periodText, people, settings, settingsOf, kpiOf, deals }: {
+  viewer: Viewer; person: Person; months: string[]; periodText: string; people: Person[]; settings: ScorecardSettings;
+  settingsOf: (id: string) => RepLike; kpiOf: (id: string, month: string) => any; deals: any[]; key?: string;
+}) {
+  const from = `${months[0]}-01`, to = lastDay(months[months.length - 1]);
+  const level = levelFor(settings, person.id, person.role);
+  const weights = settings.weights[level];
+  const quarters = quartersIn(months);
+  const kpi = useKpiPart(person, months, people, settingsOf, kpiOf, deals);
+  const rel = useReliabilityPart(person.id, from, to);
+  const ratingItems = useRatingItems();
+  const peers = usePeerPart(person.id, months);
+  const allReviews = useReviews(person.id);
+  const reviews = allReviews.filter(r => quarters.includes(r.quarter)).sort((a, b) => a.quarter.localeCompare(b.quarter));
+  const [reviewing, setReviewing] = useState(false);
+
+  // Every value rated in the review counts, as with the 360 ratings (older reviews keep items now turned off).
+  const managerValues = reviews.map(r => reviewValuesAvg(r, Object.keys(r.values))).filter((x): x is number => x !== null);
+  const managerAvg = managerValues.length ? managerValues.reduce((a, b) => a + b, 0) / managerValues.length : null;
+  const behaviour = behaviouralScore(peers.sum.overall?.avg ?? null, managerAvg, settings.peerShare);
+  const parts: Record<Part, number | null> = {
+    performance: performanceScore(kpi.avg, rel.r.score, settings.reliabilityShare),
+    competency: competencyScore(reviews.map(r => reviewSkillAvg(r, skillsFor(settings, level)))),
+    behavioural: behaviour.score,
+  };
+  const overall = overallScore(parts, weights);
+  const canReview = person.id !== viewer.id;
+  const review = () => setReviewing(true);
+  return (
+    <>
+      <OverallCard name={person.name} periodText={periodText} level={level} weights={weights} parts={parts} overall={overall} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <KpiCard person={person} kpi={kpi} />
+        <ReliabilityCard viewer={viewer} person={person} people={people} from={from} rel={rel} />
+        <CompetencyCard person={person} level={level} quarters={quarters} reviews={reviews} settings={settings} score={parts.competency} canReview={canReview} onReview={review} />
+        <BehaviouralCard person={person} quarters={quarters} reviews={reviews} peers={peers} managerAvg={managerAvg} behaviour={behaviour} peerShare={settings.peerShare}
+          ratingItems={ratingItems} people={people} canReview={canReview} onReview={review} />
+      </div>
+      {reviewing && <ReviewPanel viewer={viewer} person={person} level={level} quarters={quarters} reviews={allReviews} settings={settings} ratingItems={ratingItems} onClose={() => setReviewing(false)} />}
+    </>
   );
 }
 
@@ -123,11 +190,59 @@ function Big({ value, unit, note }: { value: string; unit?: string; note?: strin
     </div>
   );
 }
+function Bar({ pct }: { pct: number }) {
+  return <span className="block h-2 overflow-hidden rounded-full bg-white"><span className={`block h-full rounded-full ${kpiBarClass(pct)}`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} /></span>;
+}
 
-// ---------- Part A: KPI ----------
-function KpiCard({ person, months, people, settingsOf, kpiOf, deals }: {
-  person: Person; months: string[]; people: Person[]; settingsOf: (id: string) => RepLike; kpiOf: (id: string, month: string) => any; deals: any[];
+// ---------- Overall ----------
+function OverallCard({ name, periodText, level, weights, parts, overall }: {
+  name: string; periodText: string; level: Level; weights: Weights; parts: Record<Part, number | null>; overall: ReturnType<typeof overallScore>;
 }) {
+  return (
+    <section className={card}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-lg font-bold">{name}</p>
+          <p className="text-[15px] text-ink-soft">{periodText} · {LEVEL_LABELS[level]}</p>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl bg-surface px-4 py-3">
+          <Gauge className={`h-8 w-8 ${overall.score === null ? 'text-ink-soft' : LIGHT_TEXT[kpiLight(overall.score)]}`} />
+          <div>
+            <p className="text-3xl font-bold tabular-nums">{overall.score === null ? '–' : `${overall.score}%`}</p>
+            <p className="text-sm text-ink-soft">Overall score</p>
+          </div>
+        </div>
+      </div>
+      <ul className="mt-4 grid gap-3 sm:grid-cols-3">
+        {PARTS.map(p => (
+          <li key={p} className="rounded-xl bg-surface px-3.5 py-2.5">
+            <p className="flex items-center justify-between gap-2 text-[15px] font-semibold">
+              {PART_LABELS[p]}
+              {parts[p] === null
+                ? <span className="text-sm font-normal text-ink-soft">Nothing yet</span>
+                : <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${LIGHT_BADGE[kpiLight(parts[p] as number)]}`}>{parts[p]}%</span>}
+            </p>
+            <p className="mb-2 text-sm text-ink-soft">
+              {PART_QUESTIONS[p]} Weight {weights[p]}%{overall.used.includes(p) && overall.effective[p] !== weights[p] ? `, counts ${overall.effective[p]}% now` : ''}.
+            </p>
+            <Bar pct={parts[p] ?? 0} />
+          </li>
+        ))}
+      </ul>
+      {overall.missing.length > 0 && (
+        <p className="mt-3 text-sm text-attention">
+          {overall.missing.map(p => PART_LABELS[p]).join(' and ')} {overall.missing.length === 1 ? 'has' : 'have'} nothing to score in this period, so the overall score uses the other parts only.
+        </p>
+      )}
+    </section>
+  );
+}
+
+// ---------- Performance: KPI (results) ----------
+function useKpiPart(person: Person, period: string[], people: Person[], settingsOf: (id: string) => RepLike, kpiOf: (id: string, month: string) => any, deals: any[]) {
+  // Months still to come are left out of the average (a quarter or half year picked early).
+  const thisMonth = todayIso().slice(0, 7);
+  const months = period.filter(m => m <= thisMonth);
   const codes = months.map(kpiCode);
   const withKpis = people.map(p => ({ ...settingsOf(p.id), id: p.id, role: p.role })).filter(r => hasKpis(r, r.role));
   const sources = useKpiSources({ months: codes, people: withKpis });
@@ -138,12 +253,19 @@ function KpiCard({ person, months, people, settingsOf, kpiOf, deals }: {
     code,
     ...monthKpi({ ...rep, kpi: kpiOf(person.id, code) }, deals, code, { ...sources, people: withKpis.map(p => ({ ...p, kpi: kpiOf(p.id, code) })) }),
   })) : [], [person.id, codes.join(), sources, deals, JSON.stringify(items)]);
-  const avg = results.length ? Math.round(results.reduce((t, r) => t + r.score, 0) / results.length) : 0;
+  const avg = results.length ? Math.round(results.reduce((t, r) => t + r.score, 0) / results.length) : null;
+  return { items, months, results, avg };
+}
+
+function KpiCard({ person, kpi }: { person: Person; kpi: ReturnType<typeof useKpiPart> }) {
+  const { items, months, results, avg } = kpi;
   return (
     <section className={card}>
-      <CardHead icon={Target} part="Part A" title="KPI (results)" />
+      <CardHead icon={Target} part="Performance · results" title="KPI" />
       {!items.length ? (
         <p className="text-ink-soft">No KPIs set for {person.name}. Management sets them in Team → KPIs.</p>
+      ) : !results.length ? (
+        <p className="text-ink-soft">This period hasn't started yet.</p>
       ) : (
         <>
           <Big value={`${avg}%`} note={results.length > 1 ? `Average of ${results.length} months` : 'KPI score'} />
@@ -168,48 +290,127 @@ function KpiCard({ person, months, people, settingsOf, kpiOf, deals }: {
               ))}
             </ul>
           )}
-          <p className="mt-3 text-sm text-ink-soft">Attitude is not part of this score.</p>
+          <p className="mt-3 text-sm text-ink-soft">The 360 rating is not part of this score; it counts in Behavioural.</p>
         </>
       )}
     </section>
   );
 }
 
-// ---------- Part B: Attitude (360) ----------
-function AttitudeCard({ memberId, months, people }: { memberId: string; months: string[]; people: Person[] }) {
+// ---------- Competency (quarterly review) ----------
+function CompetencyCard({ person, level, quarters, reviews, settings, score, canReview, onReview }: {
+  person: Person; level: Level; quarters: string[]; reviews: Review[]; settings: ScorecardSettings; score: number | null; canReview: boolean; onReview: () => void;
+}) {
+  const skills = skillsFor(settings, level);
+  const avgs = perItemAvg(reviews.map(r => r.skills), (id, i) => reviews[i].na.includes(id));
+  const nameOf = (id: string) => settings.skills.find(k => k.id === id)?.name || 'Skill no longer used';
+  const ids = [...skills.map(k => k.id).filter(id => avgs[id]), ...Object.keys(avgs).filter(id => !skills.some(k => k.id === id))];
+  const missing = quarters.filter(q => !reviews.some(r => r.quarter === q));
+  return (
+    <section className={card}>
+      <CardHead icon={GraduationCap} part="Competency" title="Skills (quarterly review)" />
+      {score === null ? (
+        <p className="text-ink-soft">No review for {quarters.map(quarterText).join(', ')} yet.</p>
+      ) : (
+        <>
+          <Big value={`${score}%`} note={`From ${reviews.length} review${reviews.length === 1 ? '' : 's'} (stars ÷ 5)`} />
+          <ul className="space-y-1.5">
+            {ids.map(id => (
+              <li key={id} className="flex items-center justify-between gap-2 rounded-lg bg-surface px-3 py-1.5 text-[15px]">
+                <span>{nameOf(id)}</span><strong className="tabular-nums">{avgs[id].avg.toFixed(1)} / 5</strong>
+              </li>
+            ))}
+          </ul>
+          <ReviewNotes reviews={reviews} nameOf={nameOf} kind="skills" />
+        </>
+      )}
+      {missing.length > 0 && reviews.length > 0 && <p className="mt-3 text-sm text-attention">Not reviewed yet: {missing.map(quarterText).join(', ')}.</p>}
+      {canReview
+        ? <button type="button" className={`${secondaryBtn} mt-3`} onClick={onReview}><Award className="h-4 w-4" /> Review {person.name}</button>
+        : <p className="mt-3 text-sm text-ink-soft">Your own review is done by another manager.</p>}
+    </section>
+  );
+}
+
+// Reasons given for low scores (and, with the skills, the review comments).
+function ReviewNotes({ reviews, nameOf, kind }: { reviews: Review[]; nameOf: (id: string) => string; kind: 'skills' | 'values' }) {
+  const rows = reviews.flatMap(r => [
+    ...Object.entries(r.notes).filter(([id, t]) => t && r[kind][id] !== undefined)
+      .map(([id, t]) => ({ key: `${r.id}_${id}`, q: r.quarter, by: r.byName, text: `${nameOf(id)} (${r[kind][id]}/5): ${t}` })),
+    ...(kind === 'skills' && r.comment ? [{ key: `${r.id}_c`, q: r.quarter, by: r.byName, text: r.comment }] : []),
+  ]);
+  if (!rows.length) return null;
+  return (
+    <ul className="mt-3 space-y-1.5">
+      {rows.map(x => (
+        <li key={x.key} className="rounded-lg bg-surface px-3 py-2 text-[15px]">
+          <span className="block text-sm text-ink-soft">{quarterText(x.q)} · {x.by || 'Management'}</span>
+          <span className="whitespace-pre-line">{x.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// ---------- Behavioural: HEART values (teammates' 360 + the manager's review) ----------
+function usePeerPart(memberId: string, months: string[]) {
   const rounds = useRatingRounds().filter(r => months.includes(r.month));
   const closed = rounds.filter(r => r.status === 'closed');
   const stillOpen = rounds.filter(r => r.status === 'open').length;
   const all = useAllRatings();
-  const items = useRatingItems();
   const mine = all.filter(x => x.rateeId === memberId && closed.some(r => r.id === x.roundId));
-  const sum = summarise(mine);
+  return { mine, sum: summarise(mine), stillOpen };
+}
+
+function BehaviouralCard({ person, quarters, reviews, peers, managerAvg, behaviour, peerShare, ratingItems, people, canReview, onReview }: {
+  person: Person; quarters: string[]; reviews: Review[]; peers: ReturnType<typeof usePeerPart>; managerAvg: number | null;
+  behaviour: { score: number | null; stars: number | null }; peerShare: number; ratingItems: RatingItem[]; people: Person[];
+  canReview: boolean; onReview: () => void;
+}) {
+  const { mine, sum, stillOpen } = peers;
   const nameOf = (id: string) => people.find(p => p.id === id)?.name;
+  const valueName = (id: string) => ratingItems.find(i => i.id === id)?.name || 'Item no longer used';
+  const managerItems = perItemAvg(reviews.map(r => r.values));
   return (
     <section className={card}>
-      <CardHead icon={Smile} part="Part B" title="Attitude (360)" />
-      {!sum.overall ? (
-        <p className="text-ink-soft">No ratings from closed rounds in this period.</p>
+      <CardHead icon={Smile} part="Behavioural" title="HEART values" />
+      {behaviour.score === null ? (
+        <p className="text-ink-soft">No closed 360 rounds or manager review in this period.</p>
       ) : (
-        <>
-          <Big value={one(sum.overall.avg)} unit="/ 5" note={`Overall, from ${sum.overall.count} rating${sum.overall.count === 1 ? '' : 's'}`} />
-          <ItemAverages avgs={sum.items} items={items} />
+        <Big value={`${behaviour.score}%`} note={`${one(behaviour.stars as number)} / 5 · teammates ${peerShare}%, manager ${100 - peerShare}% (if one is missing, the other counts in full)`} />
+      )}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <p className="flex justify-between rounded-lg bg-surface px-3 py-2 text-[15px]">Teammates (360) <strong className="tabular-nums">{sum.overall ? `${one(sum.overall.avg)} / 5` : '–'}</strong></p>
+        <p className="flex justify-between rounded-lg bg-surface px-3 py-2 text-[15px]">Manager <strong className="tabular-nums">{managerAvg === null ? '–' : `${one(managerAvg)} / 5`}</strong></p>
+      </div>
+      {Object.keys(managerItems).length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1 text-sm font-semibold">Manager's rating ({quarters.map(quarterText).join(', ')})</p>
+          <ItemAverages avgs={managerItems} items={ratingItems} />
+          <ReviewNotes reviews={reviews} nameOf={valueName} kind="values" />
+        </div>
+      )}
+      {sum.overall && (
+        <div className="mt-3">
+          <p className="mb-1 text-sm font-semibold">Teammates, from {sum.overall.count} rating{sum.overall.count === 1 ? '' : 's'}</p>
+          <ItemAverages avgs={sum.items} items={ratingItems} />
           <ul className="mt-3 space-y-2">
             {mine.map(x => (
               <li key={x.id} className="rounded-xl bg-surface px-3 py-2">
-                <RatingDetail r={{ stars: x.stars, itemStars: itemStars(x), itemComments: x.comments, comment: x.comment }} items={items}
+                <RatingDetail r={{ stars: x.stars, itemStars: itemStars(x), itemComments: x.comments, comment: x.comment }} items={ratingItems}
                   who={<strong>{x.raterName || nameOf(x.raterId)}</strong>} />
               </li>
             ))}
           </ul>
-        </>
+        </div>
       )}
       {stillOpen > 0 && <p className="mt-3 text-sm text-attention">{stillOpen} round{stillOpen === 1 ? '' : 's'} in this period still open; ratings count once closed.</p>}
+      {canReview && <button type="button" className={`${secondaryBtn} mt-3`} onClick={onReview}><Award className="h-4 w-4" /> Review {person.name}</button>}
     </section>
   );
 }
 
-// ---------- Part C: Reliability ----------
+// ---------- Performance: reliability (process) ----------
 function useIncidents(memberId: string): Incident[] {
   const [list, setList] = useState<Incident[]>([]);
   useEffect(() => onSnapshot(query(collection(db, 'reliability_incidents'), where('memberId', '==', memberId)),
@@ -222,21 +423,27 @@ function useReliabilitySettings(): ReliabilitySettings {
   return s;
 }
 
-function ReliabilityCard({ viewer, person, people, from, to }: { viewer: Viewer; person: Person; people: Person[]; from: string; to: string }) {
+function useReliabilityPart(memberId: string, from: string, to: string) {
   const { rules, days, error, countedOf } = useLoginData(from);
-  const excusedAll = useExcusedDays(from, person.id);
-  const incidents = useIncidents(person.id);
+  const excusedAll = useExcusedDays(from, memberId);
+  const incidents = useIncidents(memberId);
   const settings = useReliabilitySettings();
-  const [show, setShow] = useState<'' | 'days' | 'incident' | 'settings'>('');
   const excused = (excusedAll || []).filter(e => e.date <= to);
-  const r = reliabilityFor({ from, to, today: todayIso(), rules, minutesOf: d => countedOf(person.id, d), excused, incidents, settings });
+  const r = reliabilityFor({ from, to, today: todayIso(), rules, minutesOf: d => countedOf(memberId, d), excused, incidents, settings });
+  // Nothing counts until the Login log has loaded.
+  return { r: days === null ? { ...r, score: null } : r, loading: days === null, error, settings };
+}
+
+function ReliabilityCard({ viewer, person, people, from, rel }: { viewer: Viewer; person: Person; people: Person[]; from: string; rel: ReturnType<typeof useReliabilityPart> }) {
+  const { r, loading, error, settings } = rel;
+  const [show, setShow] = useState<'' | 'days' | 'incident' | 'settings'>('');
   const byReason = Object.entries(r.excused.reduce((m, e) => ({ ...m, [e.reason]: (m[e.reason] || 0) + 1 }), {} as Record<string, number>));
   const removeIncident = async (i: Incident) => { try { await deleteDoc(doc(db, 'reliability_incidents', i.id)); } catch { /* shown by the list staying */ } };
   return (
     <section className={card}>
-      <CardHead icon={CalendarCheck} part="Part C" title="Reliability" />
+      <CardHead icon={CalendarCheck} part="Performance · process" title="Reliability" />
       {error && <p role="alert" className="mb-3 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
-      {days === null ? (
+      {loading ? (
         <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
       ) : (
         <>

@@ -16,6 +16,10 @@
 // - Result per person per month (summarise): average per item, and overall = the average of each rating's own
 //   average. Shown on the appraisal (components/Appraisal.tsx), separate from the KPI score.
 // - The old "360 rating" KPI (lib/kpiLibrary.ts) is hidden and left out of the appraisal; it uses the overall.
+// - HEART values (Joel, 2026-10-25): the items are NEXT Academy's core values (Humility, Expertise, Accountability,
+//   Remarkable, Trustworthiness), each with a Level 1 (`low`) and Level 5 (`high`) description shown to the rater.
+//   They are the Behavioural part of the performance scorecard (lib/scorecard.ts); the manager rates the same items
+//   in the quarterly review. The first three items stay, turned off, so older ratings keep their names.
 
 export type RoundMode = 'all' | 'picked';
 export type RoundView = 'open' | 'closed';
@@ -40,17 +44,41 @@ export interface Rating360 {
   comment: string; at: string;
 }
 
-export interface RatingItem { id: string; name: string; active: boolean; order: number }
-export const DEFAULT_RATING_ITEMS: RatingItem[] = [
-  { id: 'teamwork', name: 'Teamwork', active: true, order: 1 },
-  { id: 'leadership', name: 'Leadership', active: true, order: 2 },
-  { id: 'communication', name: 'Communication', active: true, order: 3 },
+export interface RatingItem { id: string; name: string; active: boolean; order: number; low?: string; high?: string }
+export const HEART_ITEMS: RatingItem[] = [
+  { id: 'humility', name: 'Humility', active: true, order: 1, low: 'Defends their own way; rarely asks for feedback', high: 'Seeks feedback, gives credit to others, owns mistakes openly' },
+  { id: 'expertise', name: 'Expertise', active: true, order: 2, low: 'Needs guidance on the basics of the role', high: 'The go-to person others learn from; keeps sharpening the craft' },
+  { id: 'accountability', name: 'Accountability', active: true, order: 3, low: 'Does assigned work when reminded', high: 'Owns the outcome end to end, flags problems early, no excuses' },
+  { id: 'remarkable', name: 'Remarkable', active: true, order: 4, low: 'Meets the minimum standard', high: 'Clients and trainees remember the experience; keeps raising the bar' },
+  { id: 'trustworthiness', name: 'Trustworthiness', active: true, order: 5, low: 'Follows the rules when watched', high: 'Keeps every promise; handles client data and money with full integrity' },
 ];
+const OLD_ITEMS: RatingItem[] = [
+  { id: 'teamwork', name: 'Teamwork', active: false, order: 6 },
+  { id: 'leadership', name: 'Leadership', active: false, order: 7 },
+  { id: 'communication', name: 'Communication', active: false, order: 8 },
+];
+export const DEFAULT_RATING_ITEMS: RatingItem[] = [...HEART_ITEMS, ...OLD_ITEMS];
+// Switch a saved list to the HEART values: every other item is turned off (never deleted), HEART items go first.
+export function withHeart(items: RatingItem[]): RatingItem[] {
+  const heart = HEART_ITEMS.map(h => {
+    const saved = items.find(i => i.id === h.id);
+    return { ...h, low: saved?.low || h.low, high: saved?.high || h.high, active: true };
+  });
+  const rest = items.filter(i => !HEART_ITEMS.some(h => h.id === i.id)).map(i => ({ ...i, active: false }));
+  return [...heart, ...rest].map((i, n) => ({ ...i, order: n + 1 }));
+}
+export const isHeart = (items: RatingItem[]) => {
+  const on = items.filter(i => i.active).map(i => i.id);
+  return on.length === HEART_ITEMS.length && HEART_ITEMS.every(h => on.includes(h.id));
+};
 
 export function readRatingItems(d: any): RatingItem[] {
   const list: RatingItem[] = (Array.isArray(d?.items) ? d.items : [])
     .filter((x: any) => x && typeof x.id === 'string' && x.id && typeof x.name === 'string' && x.name.trim())
-    .map((x: any, i: number) => ({ id: x.id, name: x.name.trim(), active: x.active !== false, order: Number.isFinite(x.order) ? x.order : i + 1 }));
+    .map((x: any, i: number) => ({
+      id: x.id, name: x.name.trim(), active: x.active !== false, order: Number.isFinite(x.order) ? x.order : i + 1,
+      low: typeof x.low === 'string' ? x.low : '', high: typeof x.high === 'string' ? x.high : '',
+    }));
   return (list.length ? list : DEFAULT_RATING_ITEMS).slice().sort((a, b) => a.order - b.order);
 }
 export const activeItems = (items: RatingItem[]) => items.filter(i => i.active);
