@@ -6,18 +6,23 @@ import { useEffect, useState } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
-// KPI & appraisal always stays in Management (Joel, 2026-10-25), so it is no longer movable.
-export type MovableScreen = 'data' | 'lost';
+// KPI & appraisal is movable again and starts in the private room (Joel, 2026-10-25): the whole tab, KPIs included.
+export type MovableScreen = 'data' | 'appraisal' | 'lost';
 
 export const MOVABLE_SCREENS: { key: MovableScreen; label: string; hint: string }[] = [
   { key: 'data', label: 'Data tools', hint: 'Suggested: linking and clearing old records is one-off work for you alone.' },
+  { key: 'appraisal', label: 'KPI & appraisal', hint: 'Suggested: KPIs, scorecards, the appraisal round and their settings, for you alone. Staff still see their own My appraisal card.' },
   { key: 'lost', label: 'Lost and deleted', hint: 'Optional: bringing back deleted deals. Without it, others can only delete, not restore.' },
 ];
 
-export const DEFAULT_OFF: MovableScreen[] = ['data'];
+export const DEFAULT_OFF: MovableScreen[] = ['data', 'appraisal'];
 
-export const offFrom = (d: any): MovableScreen[] =>
-  Array.isArray(d?.off) ? MOVABLE_SCREENS.map(s => s.key).filter(k => d.off.includes(k)) : DEFAULT_OFF;
+// `known` lists the screens the owner has already chosen for; a screen added later starts at its default.
+export const offFrom = (d: any): MovableScreen[] => {
+  if (!Array.isArray(d?.off)) return DEFAULT_OFF;
+  const known: string[] = Array.isArray(d.known) ? d.known : ['data', 'lost'];
+  return MOVABLE_SCREENS.map(s => s.key).filter(k => (known.includes(k) ? d.off.includes(k) : DEFAULT_OFF.includes(k)));
+};
 
 /** Which screens are moved to the private room (read by every Management screen menu). */
 export function useScreensOff(): MovableScreen[] {
@@ -26,4 +31,4 @@ export function useScreensOff(): MovableScreen[] {
   return off;
 }
 
-export const saveScreensOff = (off: MovableScreen[]) => setDoc(doc(db, 'config', 'screens'), { off, updatedAt: Date.now() });
+export const saveScreensOff = (off: MovableScreen[]) => setDoc(doc(db, 'config', 'screens'), { off, known: MOVABLE_SCREENS.map(s => s.key), updatedAt: Date.now() });

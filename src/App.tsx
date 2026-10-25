@@ -853,6 +853,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   };
 
   // Management → KPI & appraisal (Joel, 2026-10-25): KPIs, scorecards, the appraisal round and their settings.
+  // Starts in the private room (lib/privateScreens.ts); the owner can untick it to bring it back to Management.
   const appraisalScreen = (
     <PerformanceHub
       currentMember={currentMember}
@@ -1208,7 +1209,8 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
             onClose={() => setRoomOpen(false)}
             loginLog={<LoginLog currentMember={currentMember} members={teamMembers.filter(m => m.active)} />}
             screen={key => key === 'data' ? <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
-              : <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />}
+              : key === 'lost' ? <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
+              : appraisalScreen}
           />
         </React.Suspense>
       )}
