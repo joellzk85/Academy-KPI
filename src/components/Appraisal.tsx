@@ -1,38 +1,42 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { Award, CalendarCheck, ClipboardList, Gauge, GraduationCap, Loader2, Plus, Settings2, Smile, Target, Trash2, X } from 'lucide-react';
+import { Award, CalendarCheck, ClipboardList, Gauge, GraduationCap, Loader2, Plus, Smile, Target, Trash2, X } from 'lucide-react';
 import DaysOut, { useExcusedDays } from './DaysOut';
-import { ItemAverages, RatingDetail, useAllRatings, useRatingItems, useRatingRounds } from './Rating360';
-import { ReviewPanel, ScorecardSettingsPanel, useReviews, useScorecard } from './Scorecard';
+import { useAllRatings, useRatingItems, useRatingRounds } from './Rating360';
+import { ReviewPanel, useReviews } from './Scorecard';
+import { CardComments, collectComments, ScoreTable, useSelfReviews } from './AppraisalParts';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 import { hasKpis, kpiBarClass, kpiLight, kpiValueText, LIGHT_BADGE, LIGHT_TEXT, monthKpi, RepLike, setItemsFor } from '../lib/kpi';
 import { appraisalSetItems, LIGHT_LABELS } from '../lib/kpiLibrary';
 import { useKpiSources } from '../lib/useKpiSources';
 import { useLoginData } from '../lib/loginActivity';
-import { itemStars, RatingItem, summarise } from '../lib/rating360';
+import { activeItems, RatingItem, summarise } from '../lib/rating360';
+import { ResultRow } from '../lib/appraisalCycle';
 import {
   DEFAULT_RELIABILITY, EXCUSE_LABELS, Incident, INCIDENT_LABELS, IncidentKind, readIncident, readReliabilitySettings, reliabilityFor,
   ReliabilitySettings, settingsProblem,
 } from '../lib/reliability';
 import {
   behaviouralScore, competencyScore, Level, LEVEL_LABELS, levelFor, overallScore, Part, PART_LABELS, PART_QUESTIONS, PARTS, perItemAvg,
-  performanceScore, quarterMonths, quartersIn, quarterText, Review, reviewSkillAvg, reviewValuesAvg, ScorecardSettings, skillsFor, Weights,
+  performanceScore, quarterMonths, quartersIn, quarterText, reviewSkillAvg, reviewValuesAvg, ScorecardSettings, skillsFor, Weights,
 } from '../lib/scorecard';
 import { useAutoSave } from '../lib/useAutoSave';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 
-// Appraisal (Joel, 2026-10-22), Management → Appraisal, Management only. One person and a month (or a range of
-// months, with quick picks for quarters and half years). Since 2026-10-25 it is the performance scorecard
-// (lib/scorecard.ts): three parts that add up to one overall score, weighted by the person's level (Joel replaced
-// the earlier "no combined total"):
+// Appraisal (Joel, 2026-10-22), Management → KPI & appraisal → Scorecards, Management only. One person and a month
+// (or a range of months, with quick picks for quarters and half years). Since 2026-10-25 it is the performance
+// scorecard (lib/scorecard.ts): three parts that add up to one overall score, weighted by the person's level:
 // - Performance: the KPI score (results; lib/kpi.ts monthKpi without the 360 rating KPI, lib/kpiLibrary.ts
 //   appraisalSetItems; a range averages the months) mixed with reliability (process; from the Login log, with days
-//   out of office left out and incidents taken off, lib/reliability.ts). Incidents and its settings are kept here.
+//   out of office left out and incidents taken off, lib/reliability.ts). Incidents are kept here.
 // - Competency: the manager's quarterly review of skills (scorecard_reviews); the quarters touching the period averaged.
 // - Behavioural: the HEART values; teammates' closed 360 rounds of those months mixed with the manager's review.
+// - Since the appraisal round (lib/appraisalCycle.ts): the person's self review is shown next to the manager's and
+//   teammates' stars (never counted), and every card lists everyone's comments on that section.
 // - Management notes per person per period: appraisal_notes/{memberId}_{from}_{to}, saving themselves.
+// The settings (weights, levels, skills, HEART values, reliability score) are in KPI & appraisal → Settings.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 type Person = { id: string; name: string; role: string };
@@ -51,7 +55,7 @@ const lastDay = (ym: string) => {
   const d = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0);
   return `${ym}-${String(d.getDate()).padStart(2, '0')}`;
 };
-function monthsBetween(from: string, to: string): string[] {
+export function monthsBetween(from: string, to: string): string[] {
   const out: string[] = [];
   let y = Number(from.slice(0, 4)), m = Number(from.slice(5, 7));
   while (out.length < 12) {
@@ -64,19 +68,19 @@ function monthsBetween(from: string, to: string): string[] {
 }
 const one = (n: number) => (Math.round(n * 10) / 10).toFixed(1);
 
-export default function Appraisal({ viewer, people, settingsOf, kpiOf, deals }: {
-  viewer: Viewer;
+export type ScorecardSources = {
   people: Person[];                                        // active team members
+  settings: ScorecardSettings;
   settingsOf: (memberId: string) => RepLike;               // KPI set, template and targets (reps/{id})
   kpiOf: (memberId: string, month: string) => any;         // typed weekly numbers for 'OCT-26'
   deals: any[];
-}) {
+};
+
+export default function Appraisal({ viewer, people, settings, settingsOf, kpiOf, deals }: { viewer: Viewer } & ScorecardSources) {
   const thisMonth = todayIso().slice(0, 7);
   const [who, setWho] = useState(people[0]?.id || '');
   const [from, setFrom] = useState(thisMonth);
   const [to, setTo] = useState(thisMonth);
-  const [showSettings, setShowSettings] = useState(false);
-  const settings = useScorecard();
   const person = people.find(p => p.id === who);
   const months = useMemo(() => monthsBetween(from, to < from ? from : to), [from, to]);
   const period = { from: months[0], to: months[months.length - 1] };
@@ -91,14 +95,7 @@ export default function Appraisal({ viewer, people, settingsOf, kpiOf, deals }: 
 
   return (
     <div className="space-y-5 font-sans text-ink">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold">Appraisal</h2>
-          <p className="mt-0.5 text-[15px] text-ink-soft">Performance, competency and behavioural add up to one overall score, weighted by each person's level.</p>
-        </div>
-        <button type="button" className={secondaryBtn} onClick={() => setShowSettings(true)}><Settings2 className="h-4 w-4" /> Scorecard settings</button>
-      </div>
-      {showSettings && <ScorecardSettingsPanel viewer={viewer} people={people} settings={settings} onClose={() => setShowSettings(false)} />}
+      <p className="text-[15px] text-ink-soft">Performance, competency and behavioural add up to one overall score, weighted by each person's level.</p>
       <section className={`${card} grid gap-3 sm:grid-cols-2 lg:grid-cols-4`}>
         <div>
           <label htmlFor="ap-who" className={label}>Person</label>
@@ -121,8 +118,8 @@ export default function Appraisal({ viewer, people, settingsOf, kpiOf, deals }: 
         <p className={`${card} text-center text-ink-soft`}>Choose a person.</p>
       ) : (
         <>
-          <PersonScorecard key={person.id} viewer={viewer} person={person} months={months} periodText={periodText} people={people} settings={settings}
-            settingsOf={settingsOf} kpiOf={kpiOf} deals={deals} />
+          <PersonScorecard key={person.id} viewer={viewer} person={person} months={months} periodText={periodText}
+            src={{ people, settings, settingsOf, kpiOf, deals }} />
           <NotesCard key={`${person.id}_${period.from}_${period.to}`} viewer={viewer} memberId={person.id} from={period.from} to={period.to} />
         </>
       )}
@@ -130,11 +127,10 @@ export default function Appraisal({ viewer, people, settingsOf, kpiOf, deals }: 
   );
 }
 
-// One person's scorecard for the period: works out each part, then the overall score on top.
-function PersonScorecard({ viewer, person, months, periodText, people, settings, settingsOf, kpiOf, deals }: {
-  viewer: Viewer; person: Person; months: string[]; periodText: string; people: Person[]; settings: ScorecardSettings;
-  settingsOf: (id: string) => RepLike; kpiOf: (id: string, month: string) => any; deals: any[]; key?: string;
-}) {
+// Everything on one person's scorecard for a period: each part, the overall score, the star rows and the comments.
+// Also used to make the released copy (AppraisalRound.tsx).
+export function usePersonScorecard(person: Person, months: string[], src: ScorecardSources) {
+  const { people, settings, settingsOf, kpiOf, deals } = src;
   const from = `${months[0]}-01`, to = lastDay(months[months.length - 1]);
   const level = levelFor(settings, person.id, person.role);
   const weights = settings.weights[level];
@@ -145,7 +141,8 @@ function PersonScorecard({ viewer, person, months, periodText, people, settings,
   const peers = usePeerPart(person.id, months);
   const allReviews = useReviews(person.id);
   const reviews = allReviews.filter(r => quarters.includes(r.quarter)).sort((a, b) => a.quarter.localeCompare(b.quarter));
-  const [reviewing, setReviewing] = useState(false);
+  const selfs = useSelfReviews(person.id).filter(s => quarters.includes(s.quarter));
+  const skills = skillsFor(settings, level);
 
   // Every value rated in the review counts, as with the 360 ratings (older reviews keep items now turned off).
   const managerValues = reviews.map(r => reviewValuesAvg(r, Object.keys(r.values))).filter((x): x is number => x !== null);
@@ -153,23 +150,60 @@ function PersonScorecard({ viewer, person, months, periodText, people, settings,
   const behaviour = behaviouralScore(peers.sum.overall?.avg ?? null, managerAvg, settings.peerShare);
   const parts: Record<Part, number | null> = {
     performance: performanceScore(kpi.avg, rel.r.score, settings.reliabilityShare),
-    competency: competencyScore(reviews.map(r => reviewSkillAvg(r, skillsFor(settings, level)))),
+    competency: competencyScore(reviews.map(r => reviewSkillAvg(r, skills))),
     behavioural: behaviour.score,
   };
   const overall = overallScore(parts, weights);
+
+  const nameOf = (id: string) => people.find(p => p.id === id)?.name || 'Former team member';
+  const skillName = (id: string) => settings.skills.find(k => k.id === id)?.name || 'Skill no longer used';
+  const valueName = (id: string) => ratingItems.find(i => i.id === id)?.name || 'Item no longer used';
+  const mSkills = perItemAvg(reviews.map(r => r.skills), (id, i) => reviews[i].na.includes(id));
+  const sSkills = perItemAvg(selfs.map(s => s.skills), (id, i) => selfs[i].na.includes(id));
+  const mValues = perItemAvg(reviews.map(r => r.values));
+  const sValues = perItemAvg(selfs.map(s => s.values));
+  const ids = (base: string[], ...maps: Record<string, unknown>[]) => Array.from(new Set([...base, ...maps.flatMap(m => Object.keys(m))]));
+  const skillRows: ResultRow[] = ids(skills.map(k => k.id), mSkills, sSkills).map(id => ({
+    id, name: skillName(id), group: settings.skills.find(k => k.id === id)?.group, self: sSkills[id]?.avg ?? null, manager: mSkills[id]?.avg ?? null,
+  }));
+  const valueRows: ResultRow[] = ids(activeItems(ratingItems).map(i => i.id), mValues, sValues, peers.sum.items).map(id => ({
+    id, name: valueName(id), self: sValues[id]?.avg ?? null, peers: peers.sum.items[id]?.avg ?? null, manager: mValues[id]?.avg ?? null,
+  }));
+  const comments = collectComments({
+    personName: person.name, selfs, reviews, ratings: peers.mine, raterName: x => x.raterName || nameOf(x.raterId), skillName, valueName,
+  });
+  return {
+    from, to, level, weights, quarters, kpi, rel, ratingItems, peers, allReviews, reviews, selfs, managerAvg, behaviour, parts, overall,
+    skillRows, valueRows, comments, ready: !rel.loading,
+  };
+}
+export type PersonScorecardData = ReturnType<typeof usePersonScorecard>;
+
+// One person's scorecard for the period: works out each part, then the overall score on top.
+function PersonScorecard({ viewer, person, months, periodText, src }: {
+  viewer: Viewer; person: Person; months: string[]; periodText: string; src: ScorecardSources; key?: string;
+}) {
+  const sc = usePersonScorecard(person, months, src);
+  const [reviewing, setReviewing] = useState(false);
   const canReview = person.id !== viewer.id;
   const review = () => setReviewing(true);
   return (
     <>
-      <OverallCard name={person.name} periodText={periodText} level={level} weights={weights} parts={parts} overall={overall} />
+      <OverallCard name={person.name} periodText={periodText} level={sc.level} weights={sc.weights} parts={sc.parts} overall={sc.overall} />
+      {sc.selfs.length === 0 && <p className="rounded-xl bg-surface px-4 py-2.5 text-sm text-ink-soft">No self review from {person.name} for {sc.quarters.map(quarterText).join(', ')}.</p>}
       <div className="grid gap-4 lg:grid-cols-2">
-        <KpiCard person={person} kpi={kpi} />
-        <ReliabilityCard viewer={viewer} person={person} people={people} from={from} rel={rel} />
-        <CompetencyCard person={person} level={level} quarters={quarters} reviews={reviews} settings={settings} score={parts.competency} canReview={canReview} onReview={review} />
-        <BehaviouralCard person={person} quarters={quarters} reviews={reviews} peers={peers} managerAvg={managerAvg} behaviour={behaviour} peerShare={settings.peerShare}
-          ratingItems={ratingItems} people={people} canReview={canReview} onReview={review} />
+        <KpiCard person={person} kpi={sc.kpi} comments={sc.comments.kpi} />
+        <ReliabilityCard viewer={viewer} person={person} people={src.people} from={sc.from} rel={sc.rel} comments={sc.comments.reliability} />
+        <CompetencyCard person={person} sc={sc} canReview={canReview} onReview={review} />
+        <BehaviouralCard person={person} sc={sc} peerShare={src.settings.peerShare} canReview={canReview} onReview={review} />
       </div>
-      {reviewing && <ReviewPanel viewer={viewer} person={person} level={level} quarters={quarters} reviews={allReviews} settings={settings} ratingItems={ratingItems} onClose={() => setReviewing(false)} />}
+      {sc.comments.overall.length > 0 && (
+        <section className={card}>
+          <h3 className="mb-2 text-lg font-bold">Manager's overall comment</h3>
+          <CardComments list={sc.comments.overall} />
+        </section>
+      )}
+      {reviewing && <ReviewPanel viewer={viewer} person={person} level={sc.level} quarters={sc.quarters} reviews={sc.allReviews} settings={src.settings} ratingItems={sc.ratingItems} onClose={() => setReviewing(false)} />}
     </>
   );
 }
@@ -195,15 +229,16 @@ function Bar({ pct }: { pct: number }) {
 }
 
 // ---------- Overall ----------
-function OverallCard({ name, periodText, level, weights, parts, overall }: {
-  name: string; periodText: string; level: Level; weights: Weights; parts: Record<Part, number | null>; overall: ReturnType<typeof overallScore>;
+export function OverallCard({ name, periodText, level, weights, parts, overall }: {
+  name: string; periodText: string; level: Level | string; weights: Weights; parts: Record<Part, number | null>;
+  overall: { score: number | null; used: Part[]; missing: Part[]; effective: Weights };
 }) {
   return (
     <section className={card}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-lg font-bold">{name}</p>
-          <p className="text-[15px] text-ink-soft">{periodText} · {LEVEL_LABELS[level]}</p>
+          <p className="text-[15px] text-ink-soft">{periodText} · {LEVEL_LABELS[level as Level] || level}</p>
         </div>
         <div className="flex items-center gap-3 rounded-xl bg-surface px-4 py-3">
           <Gauge className={`h-8 w-8 ${overall.score === null ? 'text-ink-soft' : LIGHT_TEXT[kpiLight(overall.score)]}`} />
@@ -257,13 +292,13 @@ function useKpiPart(person: Person, period: string[], people: Person[], settings
   return { items, months, results, avg };
 }
 
-function KpiCard({ person, kpi }: { person: Person; kpi: ReturnType<typeof useKpiPart> }) {
+function KpiCard({ person, kpi, comments }: { person: Person; kpi: ReturnType<typeof useKpiPart>; comments: PersonScorecardData['comments']['kpi'] }) {
   const { items, months, results, avg } = kpi;
   return (
     <section className={card}>
       <CardHead icon={Target} part="Performance · results" title="KPI" />
       {!items.length ? (
-        <p className="text-ink-soft">No KPIs set for {person.name}. Management sets them in Team → KPIs.</p>
+        <p className="text-ink-soft">No KPIs set for {person.name}. Set them in KPI & appraisal → Settings → KPIs for each person.</p>
       ) : !results.length ? (
         <p className="text-ink-soft">This period hasn't started yet.</p>
       ) : (
@@ -293,62 +328,29 @@ function KpiCard({ person, kpi }: { person: Person; kpi: ReturnType<typeof useKp
           <p className="mt-3 text-sm text-ink-soft">The 360 rating is not part of this score; it counts in Behavioural.</p>
         </>
       )}
+      <CardComments list={comments} />
     </section>
   );
 }
 
 // ---------- Competency (quarterly review) ----------
-function CompetencyCard({ person, level, quarters, reviews, settings, score, canReview, onReview }: {
-  person: Person; level: Level; quarters: string[]; reviews: Review[]; settings: ScorecardSettings; score: number | null; canReview: boolean; onReview: () => void;
-}) {
-  const skills = skillsFor(settings, level);
-  const avgs = perItemAvg(reviews.map(r => r.skills), (id, i) => reviews[i].na.includes(id));
-  const nameOf = (id: string) => settings.skills.find(k => k.id === id)?.name || 'Skill no longer used';
-  const ids = [...skills.map(k => k.id).filter(id => avgs[id]), ...Object.keys(avgs).filter(id => !skills.some(k => k.id === id))];
+function CompetencyCard({ person, sc, canReview, onReview }: { person: Person; sc: PersonScorecardData; canReview: boolean; onReview: () => void }) {
+  const { quarters, reviews, parts, skillRows, comments } = sc;
+  const score = parts.competency;
   const missing = quarters.filter(q => !reviews.some(r => r.quarter === q));
   return (
     <section className={card}>
       <CardHead icon={GraduationCap} part="Competency" title="Skills (quarterly review)" />
-      {score === null ? (
-        <p className="text-ink-soft">No review for {quarters.map(quarterText).join(', ')} yet.</p>
-      ) : (
-        <>
-          <Big value={`${score}%`} note={`From ${reviews.length} review${reviews.length === 1 ? '' : 's'} (stars ÷ 5)`} />
-          <ul className="space-y-1.5">
-            {ids.map(id => (
-              <li key={id} className="flex items-center justify-between gap-2 rounded-lg bg-surface px-3 py-1.5 text-[15px]">
-                <span>{nameOf(id)}</span><strong className="tabular-nums">{avgs[id].avg.toFixed(1)} / 5</strong>
-              </li>
-            ))}
-          </ul>
-          <ReviewNotes reviews={reviews} nameOf={nameOf} kind="skills" />
-        </>
-      )}
+      {score === null
+        ? <p className="mb-3 text-ink-soft">No manager review for {quarters.map(quarterText).join(', ')} yet.</p>
+        : <Big value={`${score}%`} note={`From ${reviews.length} review${reviews.length === 1 ? '' : 's'} (stars ÷ 5)`} />}
+      <ScoreTable rows={skillRows.filter(r => r.self !== null || r.manager !== null)} />
+      <CardComments list={comments.skills} />
       {missing.length > 0 && reviews.length > 0 && <p className="mt-3 text-sm text-attention">Not reviewed yet: {missing.map(quarterText).join(', ')}.</p>}
       {canReview
         ? <button type="button" className={`${secondaryBtn} mt-3`} onClick={onReview}><Award className="h-4 w-4" /> Review {person.name}</button>
         : <p className="mt-3 text-sm text-ink-soft">Your own review is done by another manager.</p>}
     </section>
-  );
-}
-
-// Reasons given for low scores (and, with the skills, the review comments).
-function ReviewNotes({ reviews, nameOf, kind }: { reviews: Review[]; nameOf: (id: string) => string; kind: 'skills' | 'values' }) {
-  const rows = reviews.flatMap(r => [
-    ...Object.entries(r.notes).filter(([id, t]) => t && r[kind][id] !== undefined)
-      .map(([id, t]) => ({ key: `${r.id}_${id}`, q: r.quarter, by: r.byName, text: `${nameOf(id)} (${r[kind][id]}/5): ${t}` })),
-    ...(kind === 'skills' && r.comment ? [{ key: `${r.id}_c`, q: r.quarter, by: r.byName, text: r.comment }] : []),
-  ]);
-  if (!rows.length) return null;
-  return (
-    <ul className="mt-3 space-y-1.5">
-      {rows.map(x => (
-        <li key={x.key} className="rounded-lg bg-surface px-3 py-2 text-[15px]">
-          <span className="block text-sm text-ink-soft">{quarterText(x.q)} · {x.by || 'Management'}</span>
-          <span className="whitespace-pre-line">{x.text}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -362,49 +364,25 @@ function usePeerPart(memberId: string, months: string[]) {
   return { mine, sum: summarise(mine), stillOpen };
 }
 
-function BehaviouralCard({ person, quarters, reviews, peers, managerAvg, behaviour, peerShare, ratingItems, people, canReview, onReview }: {
-  person: Person; quarters: string[]; reviews: Review[]; peers: ReturnType<typeof usePeerPart>; managerAvg: number | null;
-  behaviour: { score: number | null; stars: number | null }; peerShare: number; ratingItems: RatingItem[]; people: Person[];
-  canReview: boolean; onReview: () => void;
-}) {
-  const { mine, sum, stillOpen } = peers;
-  const nameOf = (id: string) => people.find(p => p.id === id)?.name;
-  const valueName = (id: string) => ratingItems.find(i => i.id === id)?.name || 'Item no longer used';
-  const managerItems = perItemAvg(reviews.map(r => r.values));
+function BehaviouralCard({ person, sc, peerShare, canReview, onReview }: { person: Person; sc: PersonScorecardData; peerShare: number; canReview: boolean; onReview: () => void }) {
+  const { peers, managerAvg, behaviour, valueRows, comments } = sc;
+  const { sum, stillOpen } = peers;
   return (
     <section className={card}>
       <CardHead icon={Smile} part="Behavioural" title="HEART values" />
       {behaviour.score === null ? (
-        <p className="text-ink-soft">No closed 360 rounds or manager review in this period.</p>
+        <p className="mb-3 text-ink-soft">No closed 360 ratings or manager review in this period.</p>
       ) : (
         <Big value={`${behaviour.score}%`} note={`${one(behaviour.stars as number)} / 5 · teammates ${peerShare}%, manager ${100 - peerShare}% (if one is missing, the other counts in full)`} />
       )}
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="mb-3 grid gap-2 sm:grid-cols-2">
         <p className="flex justify-between rounded-lg bg-surface px-3 py-2 text-[15px]">Teammates (360) <strong className="tabular-nums">{sum.overall ? `${one(sum.overall.avg)} / 5` : '–'}</strong></p>
         <p className="flex justify-between rounded-lg bg-surface px-3 py-2 text-[15px]">Manager <strong className="tabular-nums">{managerAvg === null ? '–' : `${one(managerAvg)} / 5`}</strong></p>
       </div>
-      {Object.keys(managerItems).length > 0 && (
-        <div className="mt-3">
-          <p className="mb-1 text-sm font-semibold">Manager's rating ({quarters.map(quarterText).join(', ')})</p>
-          <ItemAverages avgs={managerItems} items={ratingItems} />
-          <ReviewNotes reviews={reviews} nameOf={valueName} kind="values" />
-        </div>
-      )}
-      {sum.overall && (
-        <div className="mt-3">
-          <p className="mb-1 text-sm font-semibold">Teammates, from {sum.overall.count} rating{sum.overall.count === 1 ? '' : 's'}</p>
-          <ItemAverages avgs={sum.items} items={ratingItems} />
-          <ul className="mt-3 space-y-2">
-            {mine.map(x => (
-              <li key={x.id} className="rounded-xl bg-surface px-3 py-2">
-                <RatingDetail r={{ stars: x.stars, itemStars: itemStars(x), itemComments: x.comments, comment: x.comment }} items={ratingItems}
-                  who={<strong>{x.raterName || nameOf(x.raterId)}</strong>} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {stillOpen > 0 && <p className="mt-3 text-sm text-attention">{stillOpen} round{stillOpen === 1 ? '' : 's'} in this period still open; ratings count once closed.</p>}
+      <ScoreTable peers rows={valueRows.filter(r => r.self !== null || r.manager !== null || (r.peers ?? null) !== null)} />
+      {sum.overall && <p className="mt-1 text-sm text-ink-soft">From {sum.overall.count} teammate rating{sum.overall.count === 1 ? '' : 's'}.</p>}
+      <CardComments list={comments.values} />
+      {stillOpen > 0 && <p className="mt-3 text-sm text-attention">{stillOpen} 360 round{stillOpen === 1 ? '' : 's'} in this period still open; ratings count once closed.</p>}
       {canReview && <button type="button" className={`${secondaryBtn} mt-3`} onClick={onReview}><Award className="h-4 w-4" /> Review {person.name}</button>}
     </section>
   );
@@ -417,7 +395,7 @@ function useIncidents(memberId: string): Incident[] {
     s => setList(s.docs.map(d => readIncident(d.id, d.data()))), () => setList([])), [memberId]);
   return list;
 }
-function useReliabilitySettings(): ReliabilitySettings {
+export function useReliabilitySettings(): ReliabilitySettings {
   const [s, setS] = useState<ReliabilitySettings>(DEFAULT_RELIABILITY);
   useEffect(() => onSnapshot(doc(db, 'config', 'reliability'), d => setS(readReliabilitySettings(d.data())), () => {}), []);
   return s;
@@ -434,9 +412,11 @@ function useReliabilityPart(memberId: string, from: string, to: string) {
   return { r: days === null ? { ...r, score: null } : r, loading: days === null, error, settings };
 }
 
-function ReliabilityCard({ viewer, person, people, from, rel }: { viewer: Viewer; person: Person; people: Person[]; from: string; rel: ReturnType<typeof useReliabilityPart> }) {
-  const { r, loading, error, settings } = rel;
-  const [show, setShow] = useState<'' | 'days' | 'incident' | 'settings'>('');
+function ReliabilityCard({ viewer, person, people, from, rel, comments }: {
+  viewer: Viewer; person: Person; people: Person[]; from: string; rel: ReturnType<typeof useReliabilityPart>; comments: PersonScorecardData['comments']['reliability'];
+}) {
+  const { r, loading, error } = rel;
+  const [show, setShow] = useState<'' | 'days' | 'incident'>('');
   const byReason = Object.entries(r.excused.reduce((m, e) => ({ ...m, [e.reason]: (m[e.reason] || 0) + 1 }), {} as Record<string, number>));
   const removeIncident = async (i: Incident) => { try { await deleteDoc(doc(db, 'reliability_incidents', i.id)); } catch { /* shown by the list staying */ } };
   return (
@@ -476,11 +456,10 @@ function ReliabilityCard({ viewer, person, people, from, rel }: { viewer: Viewer
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={secondaryBtn} onClick={() => setShow(show === 'days' ? '' : 'days')}>Days out of office</button>
         <button type="button" className={secondaryBtn} onClick={() => setShow(show === 'incident' ? '' : 'incident')}><Plus className="h-4 w-4" /> Incident</button>
-        <button type="button" className={secondaryBtn} onClick={() => setShow('settings')}><Settings2 className="h-4 w-4" /> Score settings</button>
       </div>
       {show === 'days' && <div className="mt-3"><DaysOut viewer={viewer} people={people} memberId={person.id} fromKey={from} /></div>}
       {show === 'incident' && <IncidentForm viewer={viewer} memberId={person.id} onDone={() => setShow('')} />}
-      {show === 'settings' && <SettingsDialog viewer={viewer} settings={settings} onClose={() => setShow('')} />}
+      <CardComments list={comments} />
     </section>
   );
 }
@@ -522,7 +501,7 @@ function IncidentForm({ viewer, memberId, onDone }: { viewer: Viewer; memberId: 
   );
 }
 
-function SettingsDialog({ viewer, settings, onClose }: { viewer: Viewer; settings: ReliabilitySettings; onClose: () => void }) {
+export function ReliabilitySettingsDialog({ viewer, settings, onClose }: { viewer: Viewer; settings: ReliabilitySettings; onClose: () => void }) {
   const [s, setS] = useState<ReliabilitySettings>(settings);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);

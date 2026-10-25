@@ -6,11 +6,11 @@ import { useEffect, useState } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
-export type MovableScreen = 'data' | 'appraisal' | 'lost';
+// KPI & appraisal always stays in Management (Joel, 2026-10-25), so it is no longer movable.
+export type MovableScreen = 'data' | 'lost';
 
 export const MOVABLE_SCREENS: { key: MovableScreen; label: string; hint: string }[] = [
   { key: 'data', label: 'Data tools', hint: 'Suggested: linking and clearing old records is one-off work for you alone.' },
-  { key: 'appraisal', label: 'Appraisal', hint: 'Optional: staff appraisals, if only you should see and write them.' },
   { key: 'lost', label: 'Lost and deleted', hint: 'Optional: bringing back deleted deals. Without it, others can only delete, not restore.' },
 ];
 

@@ -42,6 +42,7 @@ export interface Rating360 {
   items?: Record<string, number>;       // itemId → 1-5
   comments?: Record<string, string>;    // itemId → why (items scored 1 or 2)
   comment: string; at: string;
+  sections?: Record<string, string>;    // comments on the other appraisal sections: kpi, reliability, skills (2026-10-25)
 }
 
 export interface RatingItem { id: string; name: string; active: boolean; order: number; low?: string; high?: string }

@@ -29,7 +29,7 @@ const btnLink = 'inline-flex items-center gap-1 text-sm font-semibold text-accen
 
 const OPTION_NAMES = ['A', 'B', 'C', 'D'];
 const pctText = (v: number) => `${(Number.isFinite(v) ? v : 0).toFixed(1)}%`;
-// GP colour: the company gross profit bands (Team → KPI library, Joel 2026-10-22); a loss is always red.
+// GP colour: the company gross profit bands (KPI & appraisal → Settings → KPI library, Joel 2026-10-22); a loss is always red.
 const gpTone = (pct: number) => (pct < 0 ? 'text-danger' : LIGHT_TEXT[gpLight(pct)]);
 
 // A number box that lets you type freely ("12.", "") and hands back a number.

@@ -23,9 +23,11 @@ const MONTH = /^\d{4}-\d{2}$/;
 //   average per item and overall, and comments, with who gave them only when the round's view is open.
 // - POST /api/ratings/scores { months } → { scores: { [month]: { [memberId]: { avg, count } } } } from closed rounds
 //   (the old 360 rating KPI; avg = overall attitude). Management gets everyone; anyone else only their own.
+// A round started by Commence appraisal counts only once Management releases that appraisal (Joel, 2026-10-25).
 async function closedRounds(db: any, months?: string[]) {
-  const snap = await db.collection('rating_rounds').where('status', '==', 'closed').get();
-  return snap.docs.map((d: any) => readRound(d.id, d.data())).filter((r: RatingRound) => !months || months.includes(r.month));
+  const [snap, cycles] = await Promise.all([db.collection('rating_rounds').where('status', '==', 'closed').get(), db.collection('appraisal_cycles').get()]);
+  const hidden = new Set(cycles.docs.filter((d: any) => d.data()?.status !== 'released').map((d: any) => String(d.data()?.roundId || '')));
+  return snap.docs.map((d: any) => readRound(d.id, d.data())).filter((r: RatingRound) => !hidden.has(r.id) && (!months || months.includes(r.month)));
 }
 
 export function registerRatingRoutes(app: Express) {

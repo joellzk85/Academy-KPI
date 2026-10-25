@@ -1,7 +1,7 @@
 // Strange GP and costs left out of the P&L (Joel, 2026-10-23, full deal test batch 4): the manager and the deal owner
 // get an alert on My home when
 // - a training cost is left out of the P&L (not "Pay on behalf"), with the reason given;
-// - a training's GP % is below the company's red band (Team → KPI library, 30% to start), once it has costs;
+// - a training's GP % is below the company's red band (KPI & appraisal → Settings → KPI library, 30% to start), once it has costs;
 // - its GP % is above 85% after the training: usually a cost that was never raised.
 // The owner's alert (from the server, serverKpi.ts) never shows cost amounts: reps can't see costs. Pure, so it can be tested.
 import type { ProjectRow } from './projectPL';

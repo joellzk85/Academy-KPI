@@ -1,5 +1,5 @@
 // KPI library (Joel, 2026-10-22). Management keeps one list of KPIs; each person's KPI set picks from it, with
-// their own target or colour bands and weight (Team → KPIs). The list starts with the built-in KPIs below; Management
+// their own target or colour bands and weight (KPI & appraisal → Settings → KPIs). The list starts with the built-in KPIs below; Management
 // can rename them, change their default target or bands, hide them, and add their own ("create KPIs as we go").
 // - Stored in config/kpi_library: { overrides: { [builtInId]: changes }, custom: KpiDef[], points, gpBands }
 //   (Management only). Built-ins live here in code so new ones reach everyone; only the changes are saved.
@@ -45,7 +45,7 @@ export interface MeasureInfo {
   scope?: 'company';               // counted for the whole company, not the person
   asOfToday?: boolean;             // a count of how things stand today (not by month)
   weekly?: boolean;                // has a week-by-week breakdown
-  trainer?: boolean;               // counted for the person's trainer record (Team → KPIs → Internal trainer)
+  trainer?: boolean;               // counted for the person's trainer record (KPI & appraisal → Settings → KPIs → Internal trainer)
 }
 
 export const MEASURE_INFO: Record<string, MeasureInfo> = {

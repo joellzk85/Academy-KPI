@@ -10,7 +10,7 @@
 //   (the KPI rule for "nothing to count").
 // - Stars become % as stars ÷ 5 (3 = 60%, 4 = 80%, 5 = 100%), so every part uses the KPI traffic light.
 // Settings: config/scorecard (Management only). Reviews: scorecard_reviews/{memberId}_{YYYY-Qn} (Management only,
-// never your own). Screens: components/Appraisal.tsx and components/Scorecard.tsx.
+// never your own), with comments per section since the appraisal round (lib/appraisalCycle.ts). Screens: components/Appraisal.tsx and components/Scorecard.tsx.
 
 export type Level = 'executive' | 'manager' | 'senior';
 export const LEVELS: Level[] = ['executive', 'manager', 'senior'];
@@ -134,6 +134,7 @@ export interface Review {
   values: Record<string, number>;        // HEART item id → 1-5 (the manager's rating)
   notes: Record<string, string>;         // skill or value id → why (needed for 1 or 2)
   comment: string;
+  sections?: Record<string, string>;     // comments per section: kpi, reliability, skills, values (lib/appraisalCycle.ts)
   byId?: string; byName?: string; updatedAt?: string;
 }
 export const reviewId = (memberId: string, quarter: string) => `${memberId}_${quarter}`;
@@ -145,7 +146,9 @@ export function readReview(id: string, d: any): Review {
     skills: starsMap(d?.skills), na: Array.isArray(d?.na) ? d.na.filter((x: any) => typeof x === 'string') : [],
     values: starsMap(d?.values),
     notes: Object.fromEntries(Object.entries(d?.notes || {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>,
-    comment: String(d?.comment || ''), byId: d?.byId, byName: d?.byName, updatedAt: d?.updatedAt,
+    comment: String(d?.comment || ''),
+    sections: Object.fromEntries(Object.entries(d?.sections || {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>,
+    byId: d?.byId, byName: d?.byName, updatedAt: d?.updatedAt,
   };
 }
 

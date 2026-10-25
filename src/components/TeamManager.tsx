@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Eye, EyeOff, Gauge, GraduationCap, KeyRound, Loader2, Mail, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
+import { Eye, EyeOff, GraduationCap, KeyRound, Loader2, Mail, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
 import { collection, deleteField, doc, getDocs, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
-import { defaultTemplateIdFor, hasKpis, templateById, metricsFor } from '../lib/kpi';
-import KpiSetEditor from './KpiSetEditor';
-import KpiLibraryPanel from './KpiLibraryPanel';
 import { db, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember, TeamRole, ROLE_LABELS } from '../types';
 import OutlookSetup from './OutlookSetup';
@@ -179,23 +176,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     }
   };
 
-  // KPI set per person and the KPI library (Joel, 2026-10-22): side panels (KpiSetEditor, KpiLibraryPanel).
-  // Management have no KPIs unless a KPI set is chosen for them (Joel, 2026-10-17).
-  const [kpiPerson, setKpiPerson] = useState<TeamMember | null>(null);
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  const kpiSummary = (m: TeamMember) => {
-    const saved = kpiDocs[m.id];
-    if (!hasKpis(saved, m.role)) return 'None';
-    if (saved?.kpiSet?.items?.length) {
-      const n = metricsFor({ id: m.id, role: m.role, kpiSet: saved.kpiSet }).length;
-      return `Own set, ${n} KPI${n === 1 ? '' : 's'}`;
-    }
-    const chosen = templateById(saved?.kpiTemplate);
-    return chosen ? chosen.name : `${templateById(defaultTemplateIdFor(m.role))!.name} (default)`;
-  };
-  const usedBy = (kpiId: string) => activeMembers
-    .filter(m => (kpiDocs[m.id]?.kpiSet?.items || []).some((i: any) => i.kpiId === kpiId))
-    .map(m => m.name);
+  // KPIs per person and the KPI library moved to Management → KPI & appraisal → Settings (Joel, 2026-10-25).
 
   const roleOrder: Record<TeamRole, number> = { management: 0, admin: 1, rep: 2 };
   const activeMembers = useMemo(
@@ -349,9 +330,6 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
             This is the only place people are added or removed. Names here appear on the login screen and in every dropdown across the CRM.
           </p>
         </div>
-        <button type="button" className={secondaryBtn} onClick={() => setLibraryOpen(true)}>
-          <Gauge className="h-3.5 w-3.5" /> KPI library
-        </button>
       </div>
 
       {notice && (
@@ -388,7 +366,6 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                     </p>
                     <p className="mt-0.5 text-sm text-ink-soft">
                       {m.mustChangePassword ? 'Has not set their own password yet' : 'Active'}
-                      <span className="block">KPIs: {kpiSummary(m)}</span>
                       {trainerOf(m.id) && <span className="block">Internal trainer: {trainerOf(m.id)!.name}</span>}
                       <span className="block truncate">{workEmails[m.id] ? `Work email: ${workEmails[m.id]}` : 'No work email yet (needed to send quotations by email)'}</span>
                     </p>
@@ -407,9 +384,6 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                       <option value="admin">{ROLE_LABELS.admin}</option>
                       <option value="management">{ROLE_LABELS.management}</option>
                     </select>
-                    <button type="button" className={secondaryBtn} onClick={() => setKpiPerson(m)}>
-                      <Gauge className="h-3.5 w-3.5" /> KPIs
-                    </button>
                     <button type="button" className={secondaryBtn} onClick={() => openTrainer(m)}>
                       <GraduationCap className="h-3.5 w-3.5" /> Trainer
                     </button>
@@ -505,14 +479,6 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
       </div>
 
       {/* Dialogs */}
-      {kpiPerson && (
-        <KpiSetEditor member={kpiPerson} viewer={currentMember} saved={kpiDocs[kpiPerson.id]}
-          onClose={() => setKpiPerson(null)} onSaved={text => { flash('ok', text); setKpiPerson(null); }} />
-      )}
-      {libraryOpen && (
-        <KpiLibraryPanel viewer={currentMember} usedBy={usedBy}
-          onClose={() => setLibraryOpen(false)} onSaved={text => { flash('ok', text); setLibraryOpen(false); }} />
-      )}
       {dialog && dialog.kind === 'trainer' && (
         <Dialog title={`Is ${dialog.member.name} an internal trainer?`} onClose={closeDialog}>
           <p className="mb-4 text-[15px] leading-relaxed text-ink-soft">

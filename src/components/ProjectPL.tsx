@@ -12,7 +12,7 @@ import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { LIGHT_TEXT } from '../lib/kpi';
 import { gpLight } from '../lib/kpiLibrary';
 
-// Margin colour: the company gross profit bands (Team → KPI library, Joel 2026-10-22); a loss is always red.
+// Margin colour: the company gross profit bands (KPI & appraisal → Settings → KPI library, Joel 2026-10-22); a loss is always red.
 const marginTone = (profit: number, margin: number) => (profit < 0 ? 'text-danger' : LIGHT_TEXT[gpLight(margin)]);
 
 // Management → Project P&L (2026-10-17). One row per won deal (training session), worked out

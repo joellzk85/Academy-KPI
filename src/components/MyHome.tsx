@@ -551,7 +551,7 @@ function EditBar({ hidden, wide, onAdd, onReset, hiddenShortcuts, onAddShortcut 
 // company target are set by Management (lib/salesTarget.ts); not set = January to December, and the
 // company target is the sum of each person's (monthly target x months).
 // Inner (small) ring: sales won this month vs the monthly target.
-// Sales contributors without a sales KPI (Team → KPIs) get the same rings from their monthly target.
+// Sales contributors without a sales KPI (KPI & appraisal → Settings → KPIs) get the same rings from their monthly target.
 function salesTarget(rep: Representative): number | null {
   return ringTarget(rep);
 }

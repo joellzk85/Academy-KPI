@@ -11,7 +11,7 @@ import {
   LIGHT_LABELS, MEASURE_INFO, newCustomKpiId, ScorePoints, UNIT_LABELS,
 } from '../lib/kpiLibrary';
 
-// Team → KPI library (Management, Joel 2026-10-22): every KPI that can go in a person's KPI set, the points each
+// KPI & appraisal → Settings → KPI library (Management, Joel 2026-10-22): every KPI that can go in a person's KPI set, the points each
 // colour earns, and the company gross profit bands (also used by Project P&L and the Costing estimator).
 // Saved to config/kpi_library (lib/kpiLibrary.ts): only the changes to built-in KPIs, plus the KPIs Management made.
 

@@ -13,7 +13,7 @@ import {
   activeKpiLibrary, bandsProblem, GROUP_LABELS, isGpMeasure, KPI_PRESETS, KpiGroup, KpiSetItem, MEASURE_INFO, presetById, slotFor,
 } from '../lib/kpiLibrary';
 
-// Team → KPIs for one person (Management, Joel 2026-10-22): pick KPIs from the KPI library, set each one's target
+// KPI & appraisal → Settings → KPIs for one person (Management, Joel 2026-10-22): pick KPIs from the KPI library, set each one's target
 // or colour bands and its weight; the weights must add up to 100%. Saved as reps/{memberId}.kpiSet (lib/kpi.ts).
 // A ready-made set (the old templates) can be the starting point. Management people can also have no KPIs.
 // Internal trainer (Part B): their trainer record is what the trainer KPIs count for. Since 2026-10-25 (Joel) the

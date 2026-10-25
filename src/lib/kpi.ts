@@ -50,7 +50,7 @@ export interface RepLike {
   kpiTemplate?: string;
   kpiSet?: { items?: KpiSetItem[]; trainerId?: string } | null;   // trainerId: their trainers_directory record (trainer KPIs)
   targets?: Record<string, number | undefined>;
-  salesRing?: { monthly?: number } | null;   // sales contributor: a ring without a sales KPI (Team → KPIs)
+  salesRing?: { monthly?: number } | null;   // sales contributor: a ring without a sales KPI (KPI & appraisal → Settings → KPIs)
 }
 
 // Has Management given this person KPIs? Reps and Admin always have some (their default set);

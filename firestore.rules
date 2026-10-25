@@ -807,6 +807,33 @@ service cloud.firestore {
         && (resource == null || resource.data.memberId != request.auth.uid);
     }
 
+    // Appraisal round (2026-10-25, src/lib/appraisalCycle.ts). Everyone reads the rounds; Management commences,
+    // closes and releases them.
+    match /appraisal_cycles/{cycleId} {
+      allow read: if isMember();
+      allow write: if isManagement();
+    }
+    // Self review: only the person writes their own, only while the round is open and they are in it. The person
+    // and Management read it. Document id = <cycleId>_<memberId>.
+    match /self_reviews/{selfId} {
+      function cycleOf(d) { return get(/databases/$(database)/documents/appraisal_cycles/$(d.cycleId)).data; }
+      allow read: if isManagement() || (isMember() && resource.data.memberId == request.auth.uid);
+      allow create, update: if isMember() && request.resource.data.memberId == request.auth.uid
+        && request.resource.data.cycleId is string
+        && selfId == request.resource.data.cycleId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/appraisal_cycles/$(request.resource.data.cycleId))
+        && cycleOf(request.resource.data).get('status', '') == 'open'
+        && request.auth.uid in cycleOf(request.resource.data).get('people', [])
+        && request.resource.data.skills is map && request.resource.data.values is map
+        && (resource == null || resource.data.memberId == request.auth.uid);
+      allow delete: if isManagement();
+    }
+    // Released results: Management writes them when releasing a round; the person reads their own once released.
+    match /appraisal_results/{resultId} {
+      allow read: if isManagement() || (isMember() && resource.data.memberId == request.auth.uid && resource.data.released == true);
+      allow write: if isManagement();
+    }
+
     // KPI settings per person (template and targets): Management only.
     match /reps/{memberId} {
       allow read: if isMember();

@@ -21,7 +21,6 @@ import {
   KeyRound,
   UserCircle2,
   ArrowLeft,
-  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -40,7 +39,8 @@ const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
 const PaymentTracking = React.lazy(() => import('./components/PaymentTracking'));
 import { useActivityTracker, usePlace } from './lib/loginActivity';
 const TeamManager = React.lazy(() => import('./components/TeamManager'));
-const Appraisal = React.lazy(() => import('./components/Appraisal'));
+const PerformanceHub = React.lazy(() => import('./components/PerformanceHub'));
+const MyAppraisalCard = React.lazy(() => import('./components/MyAppraisal'));
 const DataTools = React.lazy(() => import('./components/DataTools'));
 const FollowUpRulesPage = React.lazy(() => import('./components/FollowUpRulesPage'));
 const TeamFollowUpsPage = React.lazy(() => import('./components/TeamFollowUps'));
@@ -69,7 +69,6 @@ import { setSuperManager } from './lib/superManager';
 import { MovableScreen, useScreensOff } from './lib/privateScreens';
 import { SharedKind } from './lib/sharedInbox';
 import GlobalSearch, { SearchHit, setSearchPrefill } from './components/GlobalSearch';
-import Rating360Panel, { useToRateCount } from './components/Rating360';
 
 // Firestore does not support arrays nested inside arrays (e.g. string[][]).
 // These fields on Representative.kpi are arrays-of-arrays in memory
@@ -249,14 +248,11 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   };
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  // 360 rating (KPI Part C): the panel, and how many teammates this person still has to rate.
-  const [show360, setShow360] = useState(false);
-  const toRateCount = useToRateCount(currentMember.id);
   // Follow-up rules (Management → Follow-up rules) drive the follow-up alerts on every screen.
   useFollowUpRules();
   // Month lock (2026-10-22): which locked months Management reopened (lib/monthLock.ts).
   useMonthLocks();
-  // KPI library (Team → KPI library): every screen's KPIs, colour bands and the company GP bands.
+  // KPI library (KPI & appraisal → Settings): every screen's KPIs, colour bands and the company GP bands.
   useKpiLibrary();
   // Login history (Team → Login log): counts this person's active minutes in the CRM.
   useActivityTracker(currentMember.id);
@@ -856,11 +852,11 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
     }
   };
 
-  // Management → Appraisal, also shown in the private room when moved there.
+  // Management → KPI & appraisal (Joel, 2026-10-25): KPIs, scorecards, the appraisal round and their settings.
   const appraisalScreen = (
-    <Appraisal
-      viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
-      people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name, role: m.role }))}
+    <PerformanceHub
+      currentMember={currentMember}
+      teamMembers={teamMembers}
       settingsOf={(id) => {
         const m = teamMembers.find(x => x.id === id);
         const s = repDocs[id] || {};
@@ -938,12 +934,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               outlines={outlinesSync}
               onOpen={openSearchHit}
             />
-            {toRateCount > 0 && (
-              <button type="button" onClick={() => setShow360(true)}
-                className="hidden items-center gap-1.5 rounded-lg border border-attention/40 bg-attention-soft px-3 py-1.5 text-sm font-semibold text-attention hover:opacity-90 sm:inline-flex">
-                <Star className="h-4 w-4" /> Rate teammates ({toRateCount})
-              </button>
-            )}
             {/* Logged-in person + menu */}
             <div className="relative">
               <button
@@ -965,9 +955,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
                     <p className="text-sm font-semibold text-ink">{currentMember.name}</p>
                     <p className="text-xs text-ink-soft">{ROLE_LABELS[currentMember.role]}</p>
                   </div>
-                  <button role="menuitem" onClick={() => { setShowUserMenu(false); setShow360(true); }} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface">
-                    <Star className="h-4 w-4 text-ink-soft" /> 360 rating{toRateCount > 0 ? ` (${toRateCount} to rate)` : ''}
-                  </button>
                   <button role="menuitem" onClick={() => { setShowUserMenu(false); setShowChangePassword(true); }} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface">
                     <KeyRound className="h-4 w-4 text-ink-soft" /> Change my password
                   </button>
@@ -994,14 +981,6 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
         </div>
       </header>
-
-      {show360 && (
-        <Rating360Panel
-          viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
-          people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name }))}
-          onClose={() => setShow360(false)}
-        />
-      )}
 
       {/* 2. Main Workspace Layout Area */}
       <main className="flex-1 py-8 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
@@ -1065,7 +1044,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'Appraisal'], ['data', 'Data tools']] as const).filter(([key]) => !screensOff.includes(key as MovableScreen)).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'KPI & appraisal'], ['data', 'Data tools']] as const).filter(([key]) => !screensOff.includes(key as MovableScreen)).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -1128,6 +1107,13 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
+              {/* My appraisal: only when an appraisal round is open for this person or a result is released. */}
+              <div className="mb-5 empty:hidden">
+                <React.Suspense fallback={null}>
+                  <MyAppraisalCard viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+                    people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name }))} />
+                </React.Suspense>
+              </div>
               <MyHome
                 viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
                 people={teamMembers.map(m => ({ id: m.id, name: m.name, role: m.role, active: m.active }))}
@@ -1222,8 +1208,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
             onClose={() => setRoomOpen(false)}
             loginLog={<LoginLog currentMember={currentMember} members={teamMembers.filter(m => m.active)} />}
             screen={key => key === 'data' ? <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
-              : key === 'lost' ? <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
-              : appraisalScreen}
+              : <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />}
           />
         </React.Suspense>
       )}
