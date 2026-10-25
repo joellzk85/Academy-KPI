@@ -4,7 +4,7 @@ Joel: everyone has a 90-minute 1-to-1 with the person who runs them, about work 
 
 ## Agreed with Joel
 
-- **One person runs them** (Joel). Picked in 1-to-1 → Settings → "Who runs the 1-to-1s", which only the owner override login sees; no names in code. That person sees everyone's sessions with an overview. **Nobody else, the other manager included, sees any session.**
+- **One person runs them** (Joel): always the owner override login, set automatically (`App.tsx`); no names in code. The "Who runs the 1-to-1s" setting was removed the same day (Joel: nobody but him may see anyone's sessions); an earlier pick is put back to the owner on his next load. That person sees everyone's sessions with an overview. **Nobody else, the other manager included, sees any session.**
 - **Who types what:** Before the meeting (staff, about 10 minutes): mood, focus item, what they won, learned, blockers, help needed, 1-year and 5-year goals (goals copy forward from last time). During (the coach): last session's actions (Done / In progress / Dropped), next steps as an action list, what we talked about; the coach can also edit the staff member's answers. After (staff): feedback for the coach or company, rating, "I agree this is a fair record" (with an optional comment).
 - **Questions are editable:** Settings has Before / During / After lists. Add, edit, reorder, remove; answer types: short, long, rating 1 to 5, yes/no, action list (During only); "copy the last answer into the next session". Changes save themselves. A session keeps the questions it was asked with once it is marked held; answers to removed questions are never lost.
 - **Session rating by both:** the staff member rates (1 to 5 + comment) after the meeting; the coach rates too. The staff member sees the coach's rating only after giving their own (enforced in the database).
@@ -25,7 +25,7 @@ Joel: everyone has a 90-minute 1-to-1 with the person who runs them, about work 
 
 ## Changes the same day (Joel, 2026-10-25, second round)
 
-- **No setup:** when nobody is picked yet, the owner override login becomes the person running 1-to-1s automatically on their next load (`App.tsx`); still changeable in Settings. The tab is always on everyone's menu; staff see only their own sessions and their past list (to reread notes); the coach sees everyone's.
+- **No setup:** when nobody is picked yet, the owner override login becomes the person running 1-to-1s automatically on their next load (`App.tsx`); no longer changeable (see above). The tab is always on everyone's menu; staff see only their own sessions and their past list (to reread notes); the coach sees everyone's.
 - **Simple booking:** Book 1-to-1 (staff, and the coach with a person picker) → date and time → **calendar check** of both people (other 1-to-1s, deal appointments they own, CRM events they're tagged in; server `/api/one-to-one/availability`, plain labels only: "Busy: Client appointment, 11:00 AM–12:00 PM", or "Free on both calendars"; booking anyway asks first) → place → the Before questions in the same form → Send. The other person still **accepts** (kept on purpose).
 - **Session details:** date, day, time, session #, place and **asked for by** (`initiatedById`, set when booked, never changes; database rule).
 - **Both fill in everything:** Before, During (including actions and → To-do) and After are open to both; only the coach has private notes and marks Meeting done; ratings stay one each.

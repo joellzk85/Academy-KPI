@@ -70,7 +70,7 @@ export default function OneToOnePage({ me, reps, month }: { me: Viewer; reps: Re
   const needsMe = sessions.filter(s => waitingOn(s, me.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   if (showSettings && (isCoach || isOwner)) {
-    return <SettingsView me={me} coachId={coachId} questions={questions} isOwner={isOwner} isCoach={isCoach} people={active} onBack={() => setShowSettings(false)} />;
+    return <SettingsView coachId={coachId} questions={questions} isOwner={isOwner} isCoach={isCoach} onBack={() => setShowSettings(false)} />;
   }
   if (profileOf) {
     return <ProfileView memberId={profileOf} name={nameOf(profileOf)} me={me} isCoach={isCoach} onBack={() => setProfileOf(null)} />;
@@ -897,27 +897,18 @@ function KpiSnapshot({ rep, month }: { rep: Representative; month: string }) {
   );
 }
 
-// ---------- Settings: who runs 1-to-1s (owner) and the questions (coach) ----------
-function SettingsView({ me, coachId, questions, isOwner, isCoach, people, onBack }: {
-  me: Viewer; coachId: string; questions: OtoQuestions; isOwner: boolean; isCoach: boolean; people: { id: string; name: string }[]; onBack: () => void;
+// ---------- Settings: the questions (the owner always runs 1-to-1s) ----------
+function SettingsView({ coachId, questions, isOwner, isCoach, onBack }: {
+  coachId: string; questions: OtoQuestions; isOwner: boolean; isCoach: boolean; onBack: () => void;
 }) {
   const [qs, setQs] = useState<OtoQuestions>(questions);
   const [savedJson, setSavedJson] = useState(JSON.stringify(questions));
-  const [coach, setCoach] = useState(coachId);
-  const [error, setError] = useState('');
   const canEditQs = isCoach || isOwner;
   const auto = useAutoSave({
     value: qs, dirty: JSON.stringify(qs) !== savedJson, enabled: canEditQs && !!coachId,
     write: async (v) => { await setDoc(doc(db, 'config', 'one_to_one'), { questions: clean(v), updatedAt: Date.now() }, { merge: true }); },
     onSaved: setSavedJson,
   });
-  const saveCoach = async () => {
-    setError('');
-    if (!coach) return setError('Pick a person.');
-    try {
-      await setDoc(doc(db, 'config', 'one_to_one'), { coachId: coach, ...(coachId ? {} : { questions: clean(qs) }), updatedAt: Date.now() }, { merge: true });
-    } catch (err) { setError(friendlyError(err)); }
-  };
   const setStage = (st: OtoStage, list: OtoQuestion[]) => setQs(q => ({ ...q, [st]: list }));
 
   return (
@@ -929,21 +920,6 @@ function SettingsView({ me, coachId, questions, isOwner, isCoach, people, onBack
         </div>
         <SaveState state={auto.state} />
       </div>
-
-      {isOwner && (
-        <section className={card}>
-          <h3 className="text-lg font-bold">Who runs the 1-to-1s</h3>
-          <p className="mt-1 text-sm text-ink-soft">This person sees everyone’s sessions and books with anyone. Nobody else sees them.</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <select className={`${input} max-w-xs`} value={coach} onChange={e => setCoach(e.target.value)} aria-label="Who runs the 1-to-1s">
-              <option value="">Pick a person</option>
-              {people.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === me.id ? ' (you)' : ''}</option>)}
-            </select>
-            <button type="button" className={btnPrimary} disabled={coach === coachId} onClick={saveCoach}>Save</button>
-          </div>
-          {error && <p className="mt-2 text-sm font-semibold text-danger" role="alert">{error}</p>}
-        </section>
-      )}
 
       {canEditQs && coachId && (['before', 'during', 'after'] as OtoStage[]).map(st => (
         <QuestionEditor key={st} stage={st} list={qs[st]} onChange={l => setStage(st, l)} />
