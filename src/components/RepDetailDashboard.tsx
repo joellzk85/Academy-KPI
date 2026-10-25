@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Representative, GoogleLinks, Client } from '../types';
 import { getRepMetrics } from '../initialData';
 import { countAuto, autoValueFor, salesIsFromDeals } from '../lib/kpi';
@@ -23,6 +23,8 @@ import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, deleteDoc
 import { db, friendlyError } from '../lib/firebase';
 import { linkedOnly } from '../lib/linked';
 import { usePlace } from '../lib/loginActivity';
+import { useInternalTrainer } from '../lib/useInternalTrainer';
+const InternalTrainerPortal = React.lazy(() => import('./TrainerPortal').then(m => ({ default: m.InternalTrainerPortal })));
 
 interface RepDetailDashboardProps {
   rep: Representative;
@@ -43,7 +45,7 @@ interface RepDetailDashboardProps {
   onOpenSubTabHandled?: () => void;
 }
 
-type SubTab = 'quotation' | 'kpi' | 'present' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
+type SubTab = 'my_trainings' | 'quotation' | 'kpi' | 'present' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
 
 
 // Tombstone list of pipeline IDs the user has deleted, so other views
@@ -1314,6 +1316,7 @@ export default function RepDetailDashboard({
     : pipelines.some(p => dealOwnerId(p) !== rep.id && p.taggedRepIds?.includes(rep.id) && !p.completedTags?.includes(rep.id)) ? 'Help asked' : undefined;
   // Files shared with this person that they haven't opened (only in their own workspace: the alerts are theirs).
   const inbox = useSharedInbox(viewer && viewer.id !== rep.id ? undefined : rep.id);
+  const myTrainerRecord = useInternalTrainer(rep.id);
   const workspaceMenuItems: MenuItem[] = [
     ...(rep.noKpis ? [] : [{ key: 'kpi' as const, label: MENU_LABELS.kpi, alert: kpiAsksOpen ? `${kpiAsksOpen} teammate request${kpiAsksOpen === 1 ? '' : 's'}` : undefined }]),
     ...(presentOnMenu ? [{ key: 'present' as const, label: MENU_LABELS.present }] : []),
@@ -1328,6 +1331,9 @@ export default function RepDetailDashboard({
     { key: 'venue', label: MENU_LABELS.venue },
     ...((rep.role === 'admin' || rep.role === 'management') && onOpenAdminWork ? [{ key: 'admin_work' as const, label: MENU_LABELS.admin_work }] : []),
     { key: 'tasks', label: MENU_LABELS.tasks, alert: tasks.some(t => needsDoingNow(t, rep.id, todayIso())) ? 'Task due' : undefined },
+    // Internal trainers (2026-10-25): their trainings, photos, T3 and training reports. Own workspace only (it
+    // works with the person's own login).
+    ...(myTrainerRecord && (!viewer || viewer.id === rep.id) ? [{ key: 'my_trainings' as const, label: MENU_LABELS.my_trainings }] : []),
   ];
 
   const getSectionTitle = () => {
@@ -1361,7 +1367,11 @@ export default function RepDetailDashboard({
         {/* Right Side: Active Workspace Section */}
         <div className="min-w-0 flex-1 space-y-5">
           
-          {activeSubTab === 'quotation' ? (
+          {activeSubTab === 'my_trainings' ? (
+            myTrainerRecord && (!viewer || viewer.id === rep.id)
+              ? <Suspense fallback={null}><InternalTrainerPortal /></Suspense>
+              : <p className="rounded-2xl border border-line bg-white p-5 text-[15px] text-ink-soft">My trainings is for internal trainers. Management links a person to their trainer record in Team.</p>
+          ) : activeSubTab === 'quotation' ? (
             <QuotationsPage key={`${rep.id}-${sharedFirst === 'quotation'}`} rep={rep} reps={reps} viewer={viewer} onOpenTab={(t) => handleSubTabChange(t as SubTab)} startOnShared={sharedFirst === 'quotation'}
               openFromDeal={quoteFromDeal} onOpenFromDealHandled={() => setQuoteFromDeal(null)}
               onBackToDeal={(dealId) => { setDealToOpen(dealId); setActiveSubTab('pipeline'); }} />

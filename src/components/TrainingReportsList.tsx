@@ -11,6 +11,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { dealStage, formatDate, isDeletedDeal, todayIso, trainingDateText } from '../lib/deals';
 import { approvalCodeOf, effectiveTrainer, effectiveVenue, leadTrainerTask } from '../lib/checklist';
 import { STATUS_TEXT, ReportStatus, TrainingReport } from '../lib/trainingReport';
+import { isInternalTrainer } from '../lib/trainerPortal';
 import { ReportPanel, setReportStep, useTrainingReport, useTrainingReports } from './TrainingReportAdmin';
 import type { ReportHeader } from './TrainingReportDocument';
 
@@ -30,7 +31,7 @@ const inFilter = (s: Status, f: Filter) =>
   f === 'all' || (f === 'check' ? s === 'submitted' : f === 'checked' ? s === 'checked' : s === 'none' || s === 'draft' || s === 'returned');
 const FILTERS: [Filter, string][] = [['all', 'All'], ['check', 'Needs checking'], ['waiting', 'With the trainer'], ['checked', 'Checked']];
 
-interface Row { deal: any; report: TrainingReport | null; status: Status; trainerId: string; trainerName: string; header: ReportHeader; names: string[] }
+interface Row { deal: any; report: TrainingReport | null; status: Status; trainerId: string; trainerName: string; internal: boolean; header: ReportHeader; names: string[] }
 
 export default function TrainingReportsList({ viewer, deals, checklists, quotes, trainers }: {
   viewer: Viewer; deals: any[]; checklists: Record<string, any>; quotes: any[]; trainers: any[];
@@ -61,7 +62,10 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
         grantNumber: approvalCodeOf(tasks),
       };
       const names = (checklists[d.id]?.t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean);
-      return { deal: d, report, status: (report?.status || 'none') as Status, trainerId: report?.trainerId || tr?.id || '', trainerName, header, names };
+      const trainerId = report?.trainerId || tr?.id || '';
+      // An internal trainer writes their own report (2026-10-25).
+      const internal = isInternalTrainer(trainers.find(t => t.id === trainerId));
+      return { deal: d, report, status: (report?.status || 'none') as Status, trainerId, trainerName, internal, header, names };
     })
     .filter((x): x is Row => !!x)
     // Waiting to be checked first, then the latest training first.
@@ -132,6 +136,8 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
               </span>
               {r.status === 'none' && !r.trainerId ? (
                 <span className="text-sm text-ink-soft">Pick the trainer on the deal first</span>
+              ) : r.status === 'none' && r.internal ? (
+                <span className="text-sm text-ink-soft">Internal trainer: they write it</span>
               ) : (
                 <button type="button" className={r.status === 'submitted' ? btnPrimary : btnSecondary} onClick={() => { setError(''); setOpenId(r.deal.id); }}>
                   <FileText className="h-4 w-4" /> {r.status === 'none' ? 'Write the report' : r.status === 'submitted' ? 'Check' : 'Open'}
@@ -160,7 +166,7 @@ function OpenReport({ row, viewer, onClose, onChecked, onReopened }: { row: Row;
   }, [row.deal.id]);
   if (saved === undefined || outputFiles === null) return null;
   return (
-    <ReportPanel deal={row.deal} viewer={viewer} saved={saved} trainerId={row.trainerId} trainerName={row.trainerName || 'The trainer'} header={row.header}
+    <ReportPanel deal={row.deal} viewer={viewer} saved={saved} trainerId={row.trainerId} trainerName={row.trainerName || 'The trainer'} internal={row.internal} header={row.header}
       names={row.names} outputFiles={outputFiles} onClose={onClose} onChecked={onChecked} onReopened={onReopened} />
   );
 }

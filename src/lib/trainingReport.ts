@@ -76,6 +76,11 @@ export interface TrainingReport {
   hrHeader?: ReportHeaderData;     // the deal details HR's copy shows, saved by the CRM (for the client link)
 }
 
+// The trainer's own part of a saved report. For an internal trainer (2026-10-25) only they write it (through the
+// server); Admin and Management may change everything else (status, participants' rating, HR's copy), and
+// firestore.rules refuses a change to these keys from the CRM.
+export const TRAINER_KEYS = ['registered', 'days', 'objectives', 'observations', 'outstanding', 'attention', 'followUps', 'photos', 'internal', 'trainerId', 'trainerName', 'submittedAt', 'submittedByName'] as const;
+
 export interface Revision { at: string; byName: string; changes: string[] }
 export interface ReportHeaderData { programme: string; client: string; dates: string; venue: string; trainer: string; grantNumber: string }
 export type TrainerPart = ReturnType<typeof cleanTrainerPart>;

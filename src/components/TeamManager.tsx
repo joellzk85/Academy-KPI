@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Eye, EyeOff, Gauge, KeyRound, Loader2, Mail, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
-import { collection, doc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { Eye, EyeOff, Gauge, GraduationCap, KeyRound, Loader2, Mail, RotateCcw, UserMinus, UserPlus, X } from 'lucide-react';
+import { collection, deleteField, doc, getDocs, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
 import { defaultTemplateIdFor, hasKpis, templateById, metricsFor } from '../lib/kpi';
 import KpiSetEditor from './KpiSetEditor';
 import KpiLibraryPanel from './KpiLibraryPanel';
@@ -86,6 +86,7 @@ type DialogState =
   | { kind: 'reset'; member: TeamMember }
   | { kind: 'reactivate'; member: TeamMember }
   | { kind: 'email'; member: TeamMember }
+  | { kind: 'trainer'; member: TeamMember }
   | { kind: 'remove'; member: TeamMember; openDeals: { id: string; client: string }[] | null }
   | null;
 
@@ -121,6 +122,42 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
     snap.forEach(d => { next[d.id] = String(d.data().email || ''); });
     setWorkEmails(next);
   }, () => {}), []);
+  // Internal trainers (Joel, 2026-10-25): Management links a person to their record in Trainers
+  // (trainers_directory.memberId). They then get My trainings in their workspace: photos, T3 and their own training
+  // reports, no PO or fee. Their trainer KPIs are switched on separately, in KPIs.
+  const [trainers, setTrainers] = useState<{ id: string; name: string; memberId: string }[]>([]);
+  useEffect(() => onSnapshot(collection(db, 'trainers_directory'), snap => {
+    setTrainers(snap.docs.map(d => ({ id: d.id, name: String(d.data().name || ''), memberId: String(d.data().memberId || '') }))
+      .filter(t => t.name).sort((a, b) => a.name.localeCompare(b.name)));
+  }, () => setTrainers([])), []);
+  const trainerOf = (memberId: string) => trainers.find(t => t.memberId === memberId) || null;
+  const [dialogTrainer, setDialogTrainer] = useState('');
+  const openTrainer = (m: TeamMember) => {
+    setDialogTrainer(trainerOf(m.id)?.id || '');
+    setDialogError('');
+    setDialog({ kind: 'trainer', member: m });
+  };
+  const saveTrainer = async () => {
+    if (!dialog || dialog.kind !== 'trainer') return;
+    const m = dialog.member;
+    const pick = trainers.find(t => t.id === dialogTrainer) || null;
+    const other = pick?.memberId && pick.memberId !== m.id ? activeMembers.find(x => x.id === pick.memberId) || teamMembers.find(x => x.id === pick.memberId) : null;
+    if (other && !window.confirm(`${pick!.name} is linked to ${other.name} now. Link it to ${m.name} instead?`)) return;
+    setDialogBusy(true);
+    try {
+      const batch = writeBatch(db);
+      trainers.filter(t => t.memberId === m.id && t.id !== pick?.id).forEach(t => batch.update(doc(db, 'trainers_directory', t.id), { memberId: deleteField() }));
+      if (pick && pick.memberId !== m.id) batch.update(doc(db, 'trainers_directory', pick.id), { memberId: m.id });
+      // Trainer KPIs already switched on follow the new record.
+      if (kpiDocs[m.id]?.kpiSet?.trainerId && pick) batch.set(doc(db, 'reps', m.id), { kpiSet: { trainerId: pick.id } }, { merge: true });
+      await batch.commit();
+      flash('ok', pick ? `${m.name} is now an internal trainer (${pick.name}).` : `${m.name} is no longer an internal trainer.`);
+      closeDialog();
+    } catch (err) {
+      setDialogError(friendlyError(err));
+      setDialogBusy(false);
+    }
+  };
   const [dialogEmail, setDialogEmail] = useState('');
   const openEmail = (m: TeamMember) => {
     setDialogEmail(workEmails[m.id] || '');
@@ -352,6 +389,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                     <p className="mt-0.5 text-sm text-ink-soft">
                       {m.mustChangePassword ? 'Has not set their own password yet' : 'Active'}
                       <span className="block">KPIs: {kpiSummary(m)}</span>
+                      {trainerOf(m.id) && <span className="block">Internal trainer: {trainerOf(m.id)!.name}</span>}
                       <span className="block truncate">{workEmails[m.id] ? `Work email: ${workEmails[m.id]}` : 'No work email yet (needed to send quotations by email)'}</span>
                     </p>
                   </div>
@@ -371,6 +409,9 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                     </select>
                     <button type="button" className={secondaryBtn} onClick={() => setKpiPerson(m)}>
                       <Gauge className="h-3.5 w-3.5" /> KPIs
+                    </button>
+                    <button type="button" className={secondaryBtn} onClick={() => openTrainer(m)}>
+                      <GraduationCap className="h-3.5 w-3.5" /> Trainer
                     </button>
                     <button type="button" className={secondaryBtn} onClick={() => openEmail(m)}>
                       <Mail className="h-3.5 w-3.5" /> Work email
@@ -471,6 +512,30 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
       {libraryOpen && (
         <KpiLibraryPanel viewer={currentMember} usedBy={usedBy}
           onClose={() => setLibraryOpen(false)} onSaved={text => { flash('ok', text); setLibraryOpen(false); }} />
+      )}
+      {dialog && dialog.kind === 'trainer' && (
+        <Dialog title={`Is ${dialog.member.name} an internal trainer?`} onClose={closeDialog}>
+          <p className="mb-4 text-[15px] leading-relaxed text-ink-soft">
+            Pick their record in Trainers. They then see My trainings in their workspace: the trainings they are picked for, where they send the photos and T3 and write their training reports. No PO or fee. Admin and Management can upload the photos and T3 for them, but only they write the report. Their trainer KPIs are switched on in KPIs.
+          </p>
+          <label htmlFor="dlg-trainer" className={labelClass}>Their trainer record</label>
+          <select id="dlg-trainer" value={dialogTrainer} onChange={e => { setDialogTrainer(e.target.value); setDialogError(''); }} className={inputClass}>
+            <option value="">Not an internal trainer</option>
+            {trainers.map(t => {
+              const linked = t.memberId && t.memberId !== dialog.member.id ? teamMembers.find(x => x.id === t.memberId)?.name : '';
+              return <option key={t.id} value={t.id}>{t.name}{linked ? ` (linked to ${linked})` : ''}</option>;
+            })}
+          </select>
+          <p className="mt-1.5 text-sm text-ink-soft">Not in the list? Add them in Trainers first.</p>
+          {dialogError && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{dialogError}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" className={secondaryBtn} onClick={closeDialog}>Cancel</button>
+            <button type="button" className={primaryBtn} disabled={dialogBusy} onClick={saveTrainer}>
+              {dialogBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save
+            </button>
+          </div>
+        </Dialog>
       )}
       {dialog && dialog.kind === 'email' && (
         <Dialog title={`Work email for ${dialog.member.name}`} onClose={closeDialog}>

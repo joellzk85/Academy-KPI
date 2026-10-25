@@ -97,9 +97,9 @@ Joel asked for every KPI to be selectable and editable for reps, Admin and Manag
 ### Trainer KPIs and activity approval (Joel, 2026-10-22; Part B of 3)
 
 **Internal trainer**
-- **Where:** Team → KPIs has an **Internal trainer** drop-down listing records from Trainers. It's saved as `reps/{id}.kpiSet.trainerId`.
-- **Who gets trainer KPIs:** only people given a trainer record. Joel: some internal trainers focus on other KPIs for now.
-- **Save check:** a set with trainer KPIs can't be saved without one.
+- **Where (changed 2026-10-25):** Team → **Trainer** links the person to their record in Trainers (`trainers_directory.memberId`, see `trainer-portal.md`, Internal trainers). Team → KPIs has a **Trainer KPIs** tick (only for linked people) that switches the trainer KPIs on; it saves the linked record as `reps/{id}.kpiSet.trainerId`. Unticked, the Trainer group isn't offered and its KPIs come off the set. (Before: an Internal trainer drop-down in KPIs.)
+- **Who gets trainer KPIs:** only internal trainers Management ticks. Joel: some internal trainers focus on other KPIs for now.
+- **Save check:** a set with trainer KPIs can't be saved for someone not linked. Changing the link in Team moves ticked trainer KPIs to the new record.
 - **Which trainings count:** trainings that ended this month where the person's trainer record is the training report's trainer, or the trainer ticked on the deal's checklist.
 
 **New KPIs in the library (Trainer group)**

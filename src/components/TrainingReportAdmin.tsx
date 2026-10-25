@@ -11,7 +11,7 @@ import { callServer, db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso, trainingDays, trainingEndDate } from '../lib/deals';
 import { linkedOnly } from '../lib/linked';
 import {
-  HrKey, INTERNAL_PARTS, PUBLIC_PARTS, ReportPhoto, STATUS_TEXT, TrainingReport, cleanParticipant, dealPax, newReport, onHrCopy, reportDates, reportGaps, withDates, withPax,
+  HrKey, INTERNAL_PARTS, PUBLIC_PARTS, ReportPhoto, STATUS_TEXT, TRAINER_KEYS, TrainingReport, cleanParticipant, dealPax, newReport, onHrCopy, reportDates, reportGaps, withDates, withPax,
 } from '../lib/trainingReport';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { jobId } from '../lib/trainerPortal';
@@ -74,11 +74,12 @@ async function savePdf(r: TrainingReport, h: ReportHeader) {
 }
 
 /** The box on the "Training report" step. */
-export function TrainingReportBox({ deal, viewer, trainerId, trainerName, header, names, outputFiles, onChecked, onReopened }: {
+export function TrainingReportBox({ deal, viewer, trainerId, trainerName, internalIds = [], header, names, outputFiles, onChecked, onReopened }: {
   deal: any;
   viewer: Viewer;
   trainerId: string;               // the trainer picked on the Trainer step ('' if none yet)
   trainerName: string;
+  internalIds?: string[];          // trainer records linked to a team member (internal trainers write their own report)
   header: ReportHeader;
   names: string[];                 // the T3 participants list
   outputFiles: string[];           // names of the files on the Output assessment step
@@ -93,6 +94,7 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, header
   const started = String(deal.trainingDate || '').slice(0, 10) <= todayIso();
   const ended = !!trainingEndDate(deal) && trainingEndDate(deal) < todayIso();
   if (r === undefined) return null;
+  const internal = internalIds.includes(r?.trainerId || trainerId);
 
   const pdf = async () => {
     if (!r) return;
@@ -113,12 +115,14 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, header
             </>
           ) : (
             <span className="text-ink-soft">
-              No report yet. {trainerId ? `${trainerName} can write it in the trainer portal from the first training day` : 'Pick the trainer on the Trainer step first'}{staff ? ', or you can write it here.' : '.'}
+              No report yet. {!trainerId ? 'Pick the trainer on the Trainer step first.'
+                : internal ? `${trainerName} writes it in My trainings from the first training day (only they can write it).`
+                : `${trainerName} can write it in the trainer portal from the first training day${staff ? ', or you can write it here.' : '.'}`}
             </span>
           )}
         </p>
         <div className="flex flex-wrap gap-2">
-          {staff && (r || (started && trainerId)) && (
+          {staff && (r || (started && trainerId && !internal)) && (
             <button type="button" className={r?.status === 'submitted' ? btnPrimary : btnSecondary} onClick={() => setOpen(true)}>
               <FileText className="h-4 w-4" /> {!r ? 'Write the report' : r.status === 'submitted' ? 'Check the report' : 'Open the report'}
             </button>
@@ -132,15 +136,15 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, header
       {!r && ended && trainerId && <p className="mt-1 text-sm font-semibold text-attention">The training has ended: waiting for {trainerName}'s report.</p>}
       {error && <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
       {open && (
-        <ReportPanel deal={deal} viewer={viewer} saved={r} trainerId={r?.trainerId || trainerId} trainerName={r?.trainerName || trainerName} header={header}
+        <ReportPanel deal={deal} viewer={viewer} saved={r} trainerId={r?.trainerId || trainerId} trainerName={r?.trainerName || trainerName} internal={internal} header={header}
           names={names} outputFiles={outputFiles} onClose={() => setOpen(false)} onChecked={onChecked} onReopened={onReopened} />
       )}
     </div>
   );
 }
 
-export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, header, names, outputFiles, onClose, onChecked, onReopened }: {
-  deal: any; viewer: Viewer; saved: TrainingReport | null; trainerId: string; trainerName: string; header: ReportHeader;
+export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, internal = false, header, names, outputFiles, onClose, onChecked, onReopened }: {
+  deal: any; viewer: Viewer; saved: TrainingReport | null; trainerId: string; trainerName: string; internal?: boolean; header: ReportHeader;
   names: string[]; outputFiles: string[]; onClose: () => void; onChecked: () => void; onReopened: () => void;
 }) {
   const staff = viewer.role !== 'rep';
@@ -174,13 +178,17 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, heade
   }, [deal.id]);
 
   const locked = !staff || report?.status === 'checked';
+  // An internal trainer's own part is theirs alone (Joel, 2026-10-25): the team checks it, sends it back, adds the
+  // participants' rating and picks HR's sections, but never writes it.
+  const partLocked = locked || internal;
   const json = report ? JSON.stringify(report) : '';
   const dirty = !!report && json !== savedJson;
   // Merged, so the trainer's changes not sent yet and their change list (kept by the server) are never overwritten.
   // The deal details are saved with it for HR's link.
   const write = async (v: TrainingReport | null) => {
     if (!v) return;
-    const { trainerDraft, revisions, ...rest } = v;
+    const { trainerDraft, revisions, ...all } = v;
+    const rest = internal ? Object.fromEntries(Object.entries(all).filter(([k]) => !(TRAINER_KEYS as readonly string[]).includes(k))) : all;
     await setDoc(doc(db, 'training_reports', deal.id), clean({ ...rest, hrHeader: header, updatedAt: nowIso(), updatedByName: viewer.name }), { merge: true });
   };
   const { state, flush } = useAutoSave({ value: report, dirty, enabled: !!report && !locked, write, onSaved: setSavedJson });
@@ -275,13 +283,13 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, heade
           {report.photos.map(ph => (
             <li key={ph.path} className="relative">
               <img src={ph.url} alt="" className="aspect-square w-full rounded-lg object-cover" />
-              {!locked && <button type="button" className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-ink-soft hover:text-danger" aria-label={`Take ${ph.name} off the report`}
+              {!partLocked && <button type="button" className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-ink-soft hover:text-danger" aria-label={`Take ${ph.name} off the report`}
                 onClick={() => setReport({ ...report, photos: report.photos.filter(x => x.path !== ph.path) })}><X className="h-3.5 w-3.5" /></button>}
             </li>
           ))}
         </ul>
       ) : <p className="text-sm text-ink-soft">No photos on the report yet.</p>}
-      {!locked && morePhotos.length > 0 && (
+      {!partLocked && morePhotos.length > 0 && (
         <div>
           <p className="mb-1 text-sm font-semibold">From the trainer's fee request: click to add</p>
           <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6">
@@ -317,7 +325,8 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, heade
           {report?.status === 'returned' && <p className="rounded-lg bg-attention-soft px-3 py-2.5 text-sm"><strong>Sent back{report.returnedByName ? ` by ${report.returnedByName}` : ''}:</strong> {report.returnNote}</p>}
           {report?.status === 'checked' && staff && <p className="flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent"><Lock className="h-4 w-4" /> Checked{report.checkedByName ? ` by ${report.checkedByName}` : ''}. Reopen it to make changes.</p>}
 
-          {saved?.trainerDraft && <p className="rounded-lg bg-surface px-3 py-2.5 text-sm text-ink-soft">{trainerName} is changing the report in the trainer portal. You'll see the changes once they send them.</p>}
+          {saved?.trainerDraft && <p className="rounded-lg bg-surface px-3 py-2.5 text-sm text-ink-soft">{trainerName} is changing the report in {internal ? 'My trainings' : 'the trainer portal'}. You'll see the changes once they send them.</p>}
+          {internal && staff && <p className="rounded-lg bg-surface px-3 py-2.5 text-sm text-ink-soft">{trainerName} is an internal trainer: only they write this report (in My trainings). You can check it, send it back with a note, and add the participants' rating.</p>}
 
           {/* Management: which sections go on HR's copy (2026-10-21: every section) */}
           {report && staff && (
@@ -358,7 +367,7 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, heade
             </section>
           )}
 
-          {report && <TrainingReportForm value={report} onChange={setReport} names={names} pax={pax} paxNote="From the deal's Participants. Change it there if it's wrong." programmes={programmes} disabled={locked} photos={photos} teamPart={teamPart} />}
+          {report && <TrainingReportForm value={report} onChange={setReport} names={names} pax={pax} paxNote="From the deal's Participants. Change it there if it's wrong." programmes={programmes} disabled={partLocked} photos={photos} teamPart={teamPart} />}
 
           {saved?.revisions?.length ? <RevisionList revisions={saved.revisions} title={`${trainerName}'s changes after sending`} /> : null}
 

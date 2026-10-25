@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, query, setDoc } from 'firebase/firestore';
+import React, { useMemo, useState } from 'react';
+import { doc, setDoc } from 'firebase/firestore';
 import { ArrowDown, ArrowUp, Loader2, Trash2, X } from 'lucide-react';
 import PanelResizer from './PanelResizer';
 import DraftBar from './DraftBar';
 import { BandsDraft, BandsEditor, bandsToDraft, draftToBands } from './KpiLibraryPanel';
 import { db, friendlyError } from '../lib/firebase';
 import { useFormDraft } from '../lib/useFormDraft';
+import { useInternalTrainer } from '../lib/useInternalTrainer';
 import { setItemsFor } from '../lib/kpi';
 import { TeamMember } from '../types';
 import {
@@ -15,8 +16,9 @@ import {
 // Team → KPIs for one person (Management, Joel 2026-10-22): pick KPIs from the KPI library, set each one's target
 // or colour bands and its weight; the weights must add up to 100%. Saved as reps/{memberId}.kpiSet (lib/kpi.ts).
 // A ready-made set (the old templates) can be the starting point. Management people can also have no KPIs.
-// Internal trainer (Part B): their trainer record, picked here, is what the trainer KPIs count for. Only people
-// given one can have those KPIs (Joel: some internal trainers focus on other KPIs for now).
+// Internal trainer (Part B): their trainer record is what the trainer KPIs count for. Since 2026-10-25 (Joel) the
+// record is linked in Team → Trainer, and the trainer KPIs are switched on here with a tick ("Trainer KPIs"), so an
+// internal trainer can focus on other KPIs for now. The tick saves the linked record as kpiSet.trainerId.
 // Sales contributor (Joel, 2026-10-24): Admin or Management who sell without a sales KPI get the same sales ring
 // (outer: target period, inner: this month) from a monthly RM target saved as reps/{memberId}.salesRing. It is not
 // a KPI, so it never changes their score; their target adds to the company target. Not offered with Closing RM.
@@ -29,7 +31,7 @@ const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink 
 const numText = (v: string) => v.replace(/[^0-9.]/g, '');
 
 interface ItemDraft { kpiId: string; slot: string; label: string; weight: string; target: string; bands: BandsDraft | null; param: string }
-interface SetDraft { none: boolean; items: ItemDraft[]; trainerId: string; ring?: boolean; ringMonthly?: string }
+interface SetDraft { none: boolean; items: ItemDraft[]; trainerId: string; trainerKpis?: boolean; ring?: boolean; ringMonthly?: string }
 
 function toDraft(items: KpiSetItem[]): ItemDraft[] {
   const lib = activeKpiLibrary();
@@ -54,14 +56,18 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
   const [draft, setDraft] = useState<SetDraft>(() => {
     const noneYet = member.role === 'management' && !saved?.kpiSet?.items?.length && !presetById(saved?.kpiTemplate);
     const ringMonthly = Number(saved?.salesRing?.monthly) > 0 ? String(saved.salesRing.monthly) : '';
-    return { none: noneYet, trainerId: saved?.kpiSet?.trainerId || '', ring: !!ringMonthly, ringMonthly, items: noneYet ? [] : toDraft(setItemsFor({ id: member.id, role: member.role, kpiTemplate: saved?.kpiTemplate, kpiSet: saved?.kpiSet, targets: saved?.targets })) };
+    const items = noneYet ? [] : toDraft(setItemsFor({ id: member.id, role: member.role, kpiTemplate: saved?.kpiTemplate, kpiSet: saved?.kpiSet, targets: saved?.targets }));
+    const trainerKpis = !!saved?.kpiSet?.trainerId || items.some(x => lib.defs.find(d => d.id === x.kpiId)?.group === 'trainer');
+    return { none: noneYet, trainerId: saved?.kpiSet?.trainerId || '', trainerKpis, ring: !!ringMonthly, ringMonthly, items };
   });
+  const linked = useInternalTrainer(member.id);
+  const isTrainerKpi = (kpiId: string) => lib.defs.find(d => d.id === kpiId)?.group === 'trainer';
+  const setTrainerKpis = (on: boolean) => {
+    setDraft(d => ({ ...d, trainerKpis: on, items: on ? d.items : d.items.filter(x => !isTrainerKpi(x.kpiId)) }));
+    setError('');
+  };
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [trainers, setTrainers] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => onSnapshot(query(collection(db, 'trainers_directory')),
-    s => setTrainers(s.docs.map(d => ({ id: d.id, name: String((d.data() as any).name || '') })).filter(t => t.name).sort((a, b) => a.name.localeCompare(b.name))),
-    () => setTrainers([])), []);
   const formDraft = useFormDraft(viewer.id, `kpi-set:${member.id}`, draft, setDraft);
 
   const setItem = (i: number, ch: Partial<ItemDraft>) => { setDraft(d => ({ ...d, items: d.items.map((x, j) => (j === i ? { ...x, ...ch } : x)) })); setError(''); };
@@ -95,9 +101,10 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
   const available = useMemo(() => {
     const inSet = new Set(draft.items.map(x => x.kpiId));
     return (Object.keys(GROUP_LABELS) as KpiGroup[])
+      .filter(g => g !== 'trainer' || draft.trainerKpis)
       .map(g => ({ g, defs: lib.defs.filter(d => d.group === g && !d.hidden && !inSet.has(d.id)) }))
       .filter(x => x.defs.length);
-  }, [draft.items, lib]);
+  }, [draft.items, draft.trainerKpis, lib]);
 
   const save = async () => {
     const ref = doc(db, 'reps', member.id);
@@ -140,13 +147,14 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
       items.push(item);
     }
     const trainerKpi = items.find(i => MEASURE_INFO[lib.defs.find(d => d.id === i.kpiId)!.measure]?.trainer);
-    if (trainerKpi && !draft.trainerId) return setError('Pick their trainer record under Internal trainer, or take out the trainer KPIs.');
+    if (trainerKpi && !linked) return setError(`Link ${member.name} to their trainer record first (Team → Trainer), or take out the trainer KPIs.`);
+    const trainerId = draft.trainerKpis && linked ? linked.id : '';
     if (Math.abs(total - 100) > 0.01) return setError(`The weights add up to ${Math.round(total * 100) / 100}%. They must add up to 100%.`);
     // Old screens still read targets by slot.
     const targets = Object.fromEntries(items.filter(i => i.target).map(i => [i.slot, i.target]));
     setBusy(true);
     try {
-      await setDoc(ref, { kpiTemplate: 'custom', kpiSet: { items, trainerId: draft.trainerId, ...by }, targets, salesRing }, { merge: true });
+      await setDoc(ref, { kpiTemplate: 'custom', kpiSet: { items, trainerId, ...by }, targets, salesRing }, { merge: true });
       formDraft.clear();
       onSaved(`${member.name}'s KPIs have been saved.`);
     } catch (err) { setError(friendlyError(err)); setBusy(false); }
@@ -204,12 +212,14 @@ export default function KpiSetEditor({ member, viewer, saved, onClose, onSaved }
           {!draft.none && (
             <>
               <div className="rounded-xl border border-line bg-white px-4 py-3">
-                <label className="block text-sm font-semibold" htmlFor="kpi-trainer">Internal trainer</label>
-                <select id="kpi-trainer" className={`${input} mt-1`} value={draft.trainerId} onChange={e => { setDraft(d => ({ ...d, trainerId: e.target.value })); setError(''); }}>
-                  <option value="">Not a trainer for KPIs</option>
-                  {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-                <p className="mt-1 text-sm text-ink-soft">Their record in Trainers. The trainer KPIs (output assessment, feedback speed) count the trainings where this trainer taught.</p>
+                <label className={`flex items-start gap-2 text-[15px] ${linked || draft.trainerKpis ? '' : 'text-ink-soft'}`}>
+                  <input type="checkbox" className="mt-1 accent-[#0E6E62]" disabled={!linked && !draft.trainerKpis} checked={!!draft.trainerKpis} onChange={e => setTrainerKpis(e.target.checked)} />
+                  <span><strong>Trainer KPIs.</strong> <span className="text-ink-soft">
+                    {linked
+                      ? `Switch on the trainer KPIs (output assessment, feedback speed, new activities). They count the trainings where ${linked.name} taught.`
+                      : `Only for internal trainers: link ${member.name} to their trainer record first (Team → Trainer).`}
+                  </span></span>
+                </label>
               </div>
               <ul className="space-y-3">
                 {draft.items.map((x, i) => {

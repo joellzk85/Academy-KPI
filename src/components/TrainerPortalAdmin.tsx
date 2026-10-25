@@ -387,8 +387,9 @@ export function TrainerClash({ deal, trainerId, trainerName }: { deal: any; trai
 }
 
 // ---------- A deal's Trainer step: rating, PO accepted or declined, the trainer's fee request ----------
-export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
+export function TrainerJobBox({ deal, task, trainerName, viewer, outs, internal = false }: {
   deal: any; task: { id: string; trainerId?: string }; trainerName: string; viewer: Viewer; outs: MoneyOut[];
+  internal?: boolean;   // an internal trainer (on the team, 2026-10-25): My trainings in the CRM, no PO or fee
 }) {
   const trainerId = task.trainerId || '';
   const job = useTrainerJobs({ dealId: deal.id }).find(j => j.trainerId === trainerId);
@@ -433,9 +434,10 @@ export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
 
   return (
     <div className="mt-3 space-y-3 rounded-lg border border-line bg-surface/60 p-3">
-      <p className="text-sm font-semibold">Trainer portal</p>
-      {!hasPortal && !job && <p className="text-sm text-ink-soft">{trainerName} has no portal access. Give it in Trainers if they should see this training, the PO and request their fee there.</p>}
-      {hasPortal && !job?.poAcceptedAt && !declined && (
+      <p className="text-sm font-semibold">{internal ? 'Internal trainer' : 'Trainer portal'}</p>
+      {internal && !claim && <p className="text-sm text-ink-soft">{trainerName} sees this training in My trainings, sends the photos and T3 there and writes the training report. You can also upload the photos and T3 on the steps below.</p>}
+      {!internal && !hasPortal && !job && <p className="text-sm text-ink-soft">{trainerName} has no portal access. Give it in Trainers if they should see this training, the PO and request their fee there.</p>}
+      {!internal && hasPortal && !job?.poAcceptedAt && !declined && (
         <p className="text-sm text-ink-soft">{trainerName} sees this training in the portal; {autoPo ? 'their PO is made automatically from the trainer fee, waiting for them to accept' : 'their PO is made automatically once the trainer fee is added'}.</p>
       )}
       {job?.poAcceptedAt && (
@@ -453,7 +455,7 @@ export function TrainerJobBox({ deal, task, trainerName, viewer, outs }: {
       {claim && (
         <div className="space-y-2">
           <p className="text-sm">
-            <strong>Fee requested</strong> on {isoDay(claim.submittedAt)}
+            <strong>{claim.internal ? 'Photos and T3 sent' : 'Fee requested'}</strong> on {isoDay(claim.submittedAt)}
             {claim.status === 'returned' && <span className="text-attention"> · sent back to the trainer: {claim.returnNote}</span>}
           </p>
           {flag && staff && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm font-semibold text-danger">{flag}</p>}

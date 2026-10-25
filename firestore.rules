@@ -580,9 +580,12 @@ service cloud.firestore {
         return ['gender', 'address', 'emergencyContact', 'race', 'nationality', 'rate'];
       }
       allow read: if isMember();
-      allow create: if isMember() && (isStaff() || !request.resource.data.keys().hasAny(privateKeys()));
+      // Internal trainer (2026-10-25): memberId links the record to a team member; only Management sets it (Team).
+      allow create: if isMember() && (isStaff() || !request.resource.data.keys().hasAny(privateKeys()))
+        && (isManagement() || !('memberId' in request.resource.data));
       allow update: if isMember()
-        && (isStaff() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(privateKeys()));
+        && (isStaff() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(privateKeys()))
+        && (isManagement() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['memberId']));
       allow delete: if isManagement();
     }
 
@@ -922,11 +925,25 @@ service cloud.firestore {
     }
     // Training reports (2026-10-21), one per deal: the trainer writes theirs through the CRM server (portal);
     // Admin and Management read, fix, check or write it. Only Management changes what HR sees (showToHr).
+    // Internal trainers (2026-10-25: a trainer record linked to a team member) write their own part only through the
+    // server; the team checks, sends back, adds the participants' rating and picks HR's sections, but never writes it.
     match /training_reports/{dealId} {
+      function internalTrainer(tid) {
+        return tid is string && tid != ''
+          && exists(/databases/$(database)/documents/trainers_directory/$(tid))
+          && get(/databases/$(database)/documents/trainers_directory/$(tid)).data.get('memberId', '') != '';
+      }
+      function trainerKeys() {
+        return ['registered', 'days', 'objectives', 'observations', 'outstanding', 'attention', 'followUps', 'photos',
+                'internal', 'trainerId', 'trainerName', 'submittedAt', 'submittedByName'];
+      }
       allow read: if isMember();
-      allow create: if isStaff() && (!('showToHr' in request.resource.data) || isManagement());
+      allow create: if isStaff() && (!('showToHr' in request.resource.data) || isManagement())
+        && !internalTrainer(request.resource.data.get('trainerId', ''));
       allow update: if isStaff()
-        && (request.resource.data.get('showToHr', {}) == resource.data.get('showToHr', {}) || isManagement());
+        && (request.resource.data.get('showToHr', {}) == resource.data.get('showToHr', {}) || isManagement())
+        && (!internalTrainer(resource.data.get('trainerId', ''))
+            || !request.resource.data.diff(resource.data).affectedKeys().hasAny(trainerKeys()));
       allow delete: if isManagement();
     }
     // Invite links to the trainer portal (/trainer/join/<token>): Admin and Management make and cancel them; the

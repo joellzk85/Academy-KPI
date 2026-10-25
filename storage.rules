@@ -125,9 +125,15 @@ service firebase.storage {
       return request.auth != null && request.auth.uid == 'tr_' + trainerId
         && firestore.exists(a) && firestore.get(a).data.active == true;
     }
+    // An internal trainer (2026-10-25: trainers_directory/{trainerId}.memberId is their team login) uploads into the
+    // same folder from My trainings in the CRM.
+    function internalTrainer(trainerId) {
+      let t = /databases/(default)/documents/trainers_directory/$(trainerId);
+      return isMember() && firestore.exists(t) && firestore.get(t).data.get('memberId', '') == request.auth.uid;
+    }
     match /trainer_portal/{trainerId}/{rest=**} {
       allow read: if isMember() || portalTrainer(trainerId);
-      allow create: if portalTrainer(trainerId) && trainerFileOk();
+      allow create: if (portalTrainer(trainerId) || internalTrainer(trainerId)) && trainerFileOk();
       allow update, delete: if false;
     }
 

@@ -29,6 +29,8 @@ import { cleanTrainerPart, dealPax, newReport, reportChanges, reportDates, repor
 const BUCKET = String((firebaseConfig as any).storageBucket || '');
 const nowIso = () => new Date().toISOString();
 const PORTAL = ' (trainer portal)';
+// Who did it, for History: "(trainer portal)" for a trainer outside the team; an internal trainer's own name (CRM).
+const byName = (t: any, account: any) => (t.name || 'Trainer') + (account?.internalTrainer ? '' : PORTAL);
 
 // ---------- Who is calling ----------
 async function staffFrom(req: Request) {
@@ -48,7 +50,7 @@ export async function trainerFrom(req: Request) {
   try { uid = (await auth.verifyIdToken(token, true)).uid; }
   catch { throw new UserError(401, 'not-logged-in', 'Your login has expired. Log in again.'); }
   const trainerId = trainerIdFromUid(uid);
-  if (!trainerId) throw new UserError(403, 'no-access', 'This login is not a trainer portal login.');
+  if (!trainerId) return internalTrainerFrom(db, uid);
   // Their personal details (gender, address, emergency contact, race, nationality, rate) live in trainer_private
   // (process audit, 2026-10-22: PDPA) and are merged in, so the portal, the PO and the fee read them as before.
   const [acc, tr, priv] = await Promise.all([db.collection('trainer_accounts').doc(trainerId).get(), db.collection('trainers_directory').doc(trainerId).get(), db.collection('trainer_private').doc(trainerId).get()]);
@@ -58,6 +60,24 @@ export async function trainerFrom(req: Request) {
     acc.ref.update({ lastSeenAt: nowIso() }).catch(() => {});
   }
   return { db, trainerId, trainer: { ...withPrivate(tr.data() as any, priv.data()), id: trainerId }, account: acc.data() as any };
+}
+
+// Internal trainers (Joel, 2026-10-25): a team member whom Management linked to their trainer record in Team
+// (trainers_directory.memberId) uses the same screens inside the CRM with their CRM login. No PO, no fee, no bank.
+async function internalTrainerFrom(db: Firestore, uid: string) {
+  const link = (await db.collection('auth_map').doc(uid).get()).data();
+  if (!link?.active) throw new UserError(403, 'no-access', 'This login no longer has access.');
+  const found = await db.collection('trainers_directory').where('memberId', '==', uid).limit(1).get();
+  if (found.empty) throw new UserError(403, 'no-access', "You aren't set up as an internal trainer. Ask Management to link you to your trainer record in Team.");
+  const tr = found.docs[0];
+  const priv = await db.collection('trainer_private').doc(tr.id).get();
+  return { db, trainerId: tr.id, trainer: { ...withPrivate(tr.data() as any, priv.data()), id: tr.id }, account: { email: '', internalTrainer: true, memberId: uid } as any };
+}
+
+async function externalFrom(req: Request) {
+  const who = await trainerFrom(req);
+  if (who.account.internalTrainer) throw new UserError(403, 'internal', "Internal trainers don't have a PO, fee or bank details here.");
+  return who;
 }
 
 async function logAccount(db: Firestore, trainerId: string, byName: string, action: string) {
@@ -139,6 +159,7 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
   ]);
   const progName = (id?: string) => String(progs.docs.find((d: any) => d.id === id)?.data().name || '').trim();
   const today = todayIso();
+  const internal = !!trainer?.memberId;
   const trainings = [];
   for (const { deal, task, checklist } of await myTrainings(db, trainerId)) {
     const quotes = (await db.collection('quotations').where('pipelineId', '==', deal.id).get()).docs.map(d => ({ ...d.data(), id: d.id }));
@@ -148,8 +169,9 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
     const rep: any = (await db.collection('training_reports').doc(deal.id).get()).data();
     const report = rep && rep.trainerId === trainerId ? { status: rep.status, returnNote: rep.returnNote || '', submittedAt: rep.submittedAt || '' } : null;
     // Only fees a manager has agreed reach the trainer and the PO (2026-10-23).
-    const lines = (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected' && feeIsAgreed(o));
-    const files = await poFiles(db, deal.id, task.id);
+    // An internal trainer (on the team) has no PO and no fee (Joel, 2026-10-25).
+    const lines = internal ? [] : (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected' && feeIsAgreed(o));
+    const files = internal ? [] : await poFiles(db, deal.id, task.id);
     const start = String(deal.trainingDate || '').slice(0, 10);
     const client = String(clients.docs.find((d: any) => d.id === deal.clientId)?.data().companyName || deal.client || '');
     const venueOn = venue && !(checklist.tasks || []).some((x: any) => x.kind === 'venue' && x.needed === false);
@@ -176,6 +198,7 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
       cancelled,
       movedFrom: moved?.from || '',
       fee: lines.map(o => ({ id: o.id, description: o.description || '', amount: Number(o.amount) || 0, status: o.status, paidDate: o.paidDate || '', statusText: feeStatusText(o) })),
+      internalTrainer: internal,
       claim: job.claim ? { status: job.claim.status, submittedAt: job.claim.submittedAt, returnNote: job.claim.returnNote || '', photos: job.claim.photos || [], t3: job.claim.t3 || [] } : null,
       rating: job.rating ? { stars: job.rating.stars, note: job.rating.note || '', at: job.rating.at } : null,
       report,
@@ -335,7 +358,7 @@ export function registerTrainerPortalRoutes(app: Express) {
     const vendor: any = vendorDoc?.data() || null;
     const trainings = await trainingDetails(db, trainerId, t, { progs, venues, clients, vendor });
     return {
-      trainerId, email: account.email,
+      trainerId, email: account.email, internalTrainer: !!account.internalTrainer,
       programmes: progs.docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name)),
       icOnFile: !!priv.data()?.icNumber || !!t.icOnFile,
       profile: {
@@ -387,7 +410,7 @@ export function registerTrainerPortalRoutes(app: Express) {
 
   // Payment details: address and TIN save straight away; a new bank account waits for Admin or Management.
   app.post('/api/portal/payment', route(async req => {
-    const { db, trainerId, trainer: t } = await trainerFrom(req);
+    const { db, trainerId, trainer: t } = await externalFrom(req);
     const by = (t.name || 'Trainer') + PORTAL;
     const address = String(req.body?.address ?? '').replace(/\u0000/g, '').trim().slice(0, 500);
     const tin = cleanTin(req.body?.tin);
@@ -415,7 +438,7 @@ export function registerTrainerPortalRoutes(app: Express) {
   // Download a PO from a training (only that trainer's own trainings).
   app.post('/api/portal/po', async (req: Request, res: Response) => {
     try {
-      const { db, trainerId } = await trainerFrom(req);
+      const { db, trainerId } = await externalFrom(req);
       const { deal, task } = await assigned(db, trainerId, req.body?.dealId);
       const f = (await poFiles(db, deal.id, task.id)).find(x => x.id === String(req.body?.fileId || ''));
       if (!f) throw new UserError(404, 'no-file', 'That PO is no longer there. Refresh the page.');
@@ -431,7 +454,7 @@ export function registerTrainerPortalRoutes(app: Express) {
   });
 
   app.post('/api/portal/accept-po', route(async req => {
-    const { db, trainerId, trainer: t } = await trainerFrom(req);
+    const { db, trainerId, trainer: t } = await externalFrom(req);
     const { deal } = await assignedLive(db, trainerId, req.body?.dealId);
     const mine = (await trainingDetails(db, trainerId, t)).find(x => x.dealId === deal.id)!;
     if (!mine.po.length && !mine.poAuto) throw new UserError(400, 'no-po', "There's no PO on this training yet.");
@@ -446,7 +469,7 @@ export function registerTrainerPortalRoutes(app: Express) {
   // Decline the PO (Joel, 2026-10-21: "trainer can reject - it notifies in Admin work"): a reason is needed. The
   // dates are no longer blocked, and Admin work shows a red flag until another trainer is picked or Admin clears it.
   app.post('/api/portal/decline-po', route(async req => {
-    const { db, trainerId, trainer: t } = await trainerFrom(req);
+    const { db, trainerId, trainer: t } = await externalFrom(req);
     const { deal } = await assignedLive(db, trainerId, req.body?.dealId);
     const reason = String(req.body?.reason ?? '').replace(/\u0000/g, '').trim().slice(0, 500);
     if (!reason) throw new UserError(400, 'invalid', 'Tell NEXT Academy why, so they can arrange things.');
@@ -475,7 +498,10 @@ export function registerTrainerPortalRoutes(app: Express) {
       const cal: any = (await db.collection('trainer_calendars').doc(token).get()).data();
       if (!cal?.trainerId) throw new UserError(404, 'not-found', 'Not found');
       const [acc, tr] = await Promise.all([db.collection('trainer_accounts').doc(cal.trainerId).get(), db.collection('trainers_directory').doc(cal.trainerId).get()]);
-      if (!acc.data()?.active || !tr.exists) throw new UserError(404, 'not-found', 'Not found');
+      // An internal trainer's link works while they are on the team and linked to this record (2026-10-25).
+      const memberId = String(tr.data()?.memberId || '');
+      const internalOk = !!memberId && !!(await db.collection('auth_map').doc(memberId).get()).data()?.active;
+      if ((!acc.data()?.active && !internalOk) || !tr.exists) throw new UserError(404, 'not-found', 'Not found');
       const list = (await trainingDetails(db, cal.trainerId, { ...tr.data(), id: cal.trainerId })).filter(x => x.start && !x.poDeclined && !x.cancelled);
       const host = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.headers.host}`;
       res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
@@ -484,7 +510,7 @@ export function registerTrainerPortalRoutes(app: Express) {
         uid: `${x.dealId}-${cal.trainerId}@nextacademy`, start: x.start, end: x.end,
         summary: `NEXT Academy: ${x.programme}${x.client ? ` (${x.client})` : ''}`,
         location: x.venue ? [x.venue.name, x.venue.region].filter(Boolean).join(', ') : '',
-        description: `${x.confirmed ? 'Confirmed' : 'Being arranged'}. Details and PO: ${host}/trainer`,
+        description: `${x.confirmed ? 'Confirmed' : 'Being arranged'}. ${internalOk ? `Details: ${host}` : `Details and PO: ${host}/trainer`}`,
       }))));
     } catch (err: any) {
       if (!(err instanceof UserError)) console.error('[portal] calendar', err);
@@ -495,11 +521,14 @@ export function registerTrainerPortalRoutes(app: Express) {
   // Request training fee: photos + T3 (the training report comes later). Saved once, on trainer_jobs (one per
   // trainer per training); the fee lines Admin raised on the Trainer step are not copied or changed, and the red
   // flag in Admin work reads both. No amount is typed here, and no payment request is made.
+  // An internal trainer (2026-10-25) sends the photos and T3 the same way, with no fee: the record is marked
+  // internal, so no fee flag or fee checks follow.
   app.post('/api/portal/claim', route(async req => {
-    const { db, trainerId, trainer: t } = await trainerFrom(req);
+    const { db, trainerId, trainer: t, account } = await trainerFrom(req);
+    const internal = !!account.internalTrainer;
     const { deal, task } = await assignedLive(db, trainerId, req.body?.dealId);
     const start = String(deal.trainingDate || '').slice(0, 10);
-    if (!start || start > todayIso()) throw new UserError(400, 'too-early', 'You can request your fee once the training has started.');
+    if (!start || start > todayIso()) throw new UserError(400, 'too-early', `You can ${internal ? 'send the photos and T3' : 'request your fee'} once the training has started.`);
     const folder = claimFolder(trainerId, deal.id);
     // Photos are uploaded once (Joel, 2026-10-23): none sent here = the training report's photos.
     const sentPhotos = cleanFiles(req.body?.photos, folder, 40);
@@ -507,19 +536,24 @@ export function registerTrainerPortalRoutes(app: Express) {
     const t3 = cleanFiles(req.body?.t3, folder, 10);
     const problem = claimProblem(photos, t3);
     if (problem) throw new UserError(400, 'invalid', problem);
-    const lines = await feeLines(db, deal.id, task.id, trainerId);
-    const live = lines.filter(o => o.status !== 'rejected');
-    if (live.length && live.every(o => o.status === 'paid')) throw new UserError(400, 'paid', 'Your fee for this training has already been paid.');
+    if (internal && !photos.length && !t3.length) throw new UserError(400, 'invalid', 'Add the training photos or the T3 form first.');
+    if (!internal) {
+      const live = (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected');
+      if (live.length && live.every(o => o.status === 'paid')) throw new UserError(400, 'paid', 'Your fee for this training has already been paid.');
+    }
     const ref = db.collection('trainer_jobs').doc(jobId(deal.id, trainerId));
     const before: any = (await ref.get()).data()?.claim;
     const at = nowIso();
-    const by = (t.name || 'Trainer') + PORTAL;
+    const by = byName(t, account);
     await ref.set({
       dealId: deal.id, trainerId,
-      claim: { status: 'submitted', photos, t3, submittedAt: at, returnNote: '', history: [...(before?.history || []), { at, byName: by, action: before ? 'Sent again' : 'Fee requested' }].slice(-20) },
+      claim: {
+        status: 'submitted', photos, t3, submittedAt: at, returnNote: '', ...(internal ? { internal: true } : {}),
+        history: [...(before?.history || []), { at, byName: by, action: before ? 'Sent again' : internal ? 'Photos and T3 sent' : 'Fee requested' }].slice(-20),
+      },
     }, { merge: true });
-    await addDealHistory(db, deal.id, '', by, `Trainer requested their fee (${claimFilesText(photos, t3)})`);
-    if (photos.length && t3.length) await tickDelivered(db, deal.id, by, `${claimFilesText(photos, t3)} from the trainer portal`);
+    await addDealHistory(db, deal.id, '', by, internal ? `Trainer sent ${claimFilesText(photos, t3)}` : `Trainer requested their fee (${claimFilesText(photos, t3)})`);
+    if (photos.length && t3.length) await tickDelivered(db, deal.id, by, `${claimFilesText(photos, t3)} from the trainer${internal ? '' : ' portal'}`);
     return {};
   }));
 
@@ -556,7 +590,7 @@ export function registerTrainerPortalRoutes(app: Express) {
   // team keeps seeing what was sent; sending again records the date, time and what changed (revisions), and a checked
   // report goes back to "submitted" (its "Training report" step unticked) for the team to check again.
   app.post('/api/portal/report/save', route(async req => {
-    const { db, trainerId, trainer: t } = await trainerFrom(req);
+    const { db, trainerId, trainer: t, account } = await trainerFrom(req);
     const { deal, task } = await assignedLive(db, trainerId, req.body?.dealId);
     if (isCoTrainer(task)) throw new UserError(403, 'not-yours', 'The lead trainer writes the training report for this training.');
     const start = String(deal.trainingDate || '').slice(0, 10);
@@ -571,7 +605,7 @@ export function registerTrainerPortalRoutes(app: Express) {
       if (gaps.length) throw new UserError(400, 'invalid', `Please fill in: ${gaps.join(', ')}.`);
     }
     const at = nowIso();
-    const by = (t.name || 'Trainer') + PORTAL;
+    const by = byName(t, account);
 
     if (before?.submittedAt && before.trainerId === trainerId) {
       // Process audit (2026-10-22): once the checked report has gone to HR, or the trainer's fee is paid, it is frozen
@@ -614,7 +648,7 @@ export function registerTrainerPortalRoutes(app: Express) {
       await addDealHistory(db, deal.id, '', by, 'Trainer sent the training report');
       // The report's photos plus the T3 sent with the fee request also count as "Training delivered".
       const t3 = (((await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data() as any)?.claim?.t3 || []) as unknown[];
-      if ((part.photos || []).length && t3.length) await tickDelivered(db, deal.id, by, `${claimFilesText(part.photos, t3)} from the trainer portal`);
+      if ((part.photos || []).length && t3.length) await tickDelivered(db, deal.id, by, `${claimFilesText(part.photos, t3)} from the trainer${account.internalTrainer ? '' : ' portal'}`);
     }
     return { status };
   }));

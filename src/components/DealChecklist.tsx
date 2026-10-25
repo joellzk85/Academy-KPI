@@ -22,7 +22,7 @@ import { useVendors } from './VendorsPage';
 import { useReceipts } from './PaymentReceipts';
 import { TrainerClash, TrainerJobBox } from './TrainerPortalAdmin';
 import { MakePoButton } from './TrainerPoDocument';
-import { hasAutoPo } from '../lib/trainerPortal';
+import { hasAutoPo, isInternalTrainer } from '../lib/trainerPortal';
 import { vendorForTrainer } from '../lib/vendors';
 import { askReason } from '../lib/moneyActions';
 
@@ -172,7 +172,9 @@ export default function DealChecklist({
     const trainer = t.kind === 'trainer' ? effectiveTrainer(t, quotes, trainers) : null;
     // The trainer's PO is made automatically once the trainer is picked from the list and has a fee line (2026-10-21).
     const autoPo = t.kind === 'trainer' && hasAutoPo({ id: t.id, trainerId: trainer?.id }, outs, deal.id) ? 1 : 0;
-    const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer, filesOf(t).length + autoPo);
+    // An internal trainer (on the team, 2026-10-25) needs no PO or fee line.
+    const internal = t.kind === 'trainer' && isInternalTrainer(trainers.find(x => x.id === trainer?.id)) ? 1 : 0;
+    const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer, filesOf(t).length + autoPo + internal);
     if (gate) return setError(gate);
     // HRDC deals: Grant approved needs the Employer code and the Approval code (Joel, 2026-10-23).
     if (t.kind === 'grant' && isHrdc(deal.fundingType)) {
@@ -376,7 +378,9 @@ export default function DealChecklist({
                 )}
                 {/* HRDC deals: HR's name list fills the T3 attendance form (T3Maker.tsx) */}
                 {t.id === 'attendance' && t3Shown && <T3Maker deal={deal} saved={t3} viewer={viewer} incoming={nameList} />}
-                {DOCS_WORD[t.kind] && ((t.kind === 'trainer' && !asksNeeded(t)) || t.needed === true) && (
+                {t.kind === 'trainer' && isInternalTrainer(trainers.find(x => x.id === effectiveTrainer(t, quotes, trainers)?.id)) ? (
+                  <p className="mt-2 text-sm text-ink-soft">Internal trainer: no PO or fee needed. They send the photos and T3 and write the training report in My trainings.</p>
+                ) : DOCS_WORD[t.kind] && ((t.kind === 'trainer' && !asksNeeded(t)) || t.needed === true) && (
                   <div className="mt-2">
                     <p className="text-sm font-semibold">{t.kind === 'trainer' ? 'PO' : 'Documents'}</p>
                     <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable} what={DOCS_WORD[t.kind]} ticks={false}
@@ -422,7 +426,7 @@ export default function DealChecklist({
                   const tr = effectiveTrainer(trainerTask, quotes, trainers);
                   const outputFiles = files.filter(f => f.taskId === 'output_assessment').map(f => f.name);
                   return (
-                    <TrainingReportBox deal={deal} viewer={viewer} trainerId={tr?.id || ''} trainerName={tr?.name || 'The trainer'}
+                    <TrainingReportBox deal={deal} viewer={viewer} trainerId={tr?.id || ''} trainerName={tr?.name || 'The trainer'} internalIds={trainers.filter(isInternalTrainer).map(x => x.id)}
                       header={{ programme: deal.courseName || '', client: deal.client || '', dates: trainingDateText(deal, true), venue: effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || '', trainer: tr?.name || '', grantNumber: approvalCodeOf(allTasks) }}
                       names={(t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
                       onChecked={() => { if (!t.done) patch(t.id, doneBy(), `${t.label}: checked, done`); }}
@@ -431,7 +435,8 @@ export default function DealChecklist({
                 })()}
                 {/* Trainer portal (2026-10-21): rating, PO accepted or declined, the trainer's fee request */}
                 {t.kind === 'trainer' && t.trainerId && (
-                  <TrainerJobBox deal={deal} task={t} trainerName={effectiveTrainer(t, quotes, trainers)?.name || 'The trainer'} viewer={viewer} outs={outs} />
+                  <TrainerJobBox deal={deal} task={t} trainerName={effectiveTrainer(t, quotes, trainers)?.name || 'The trainer'} viewer={viewer} outs={outs}
+                    internal={isInternalTrainer(trainers.find(x => x.id === t.trainerId))} />
                 )}
                 {editable && isCoTrainer(t) && t.needed === true && t.id === coTasks[coTasks.length - 1]?.id && (
                   <button type="button" disabled={busy} onClick={addCoTrainer} className={`${btnSecondary} mt-3 py-1.5`}><Plus className="h-3.5 w-3.5" /> Add another co-trainer</button>

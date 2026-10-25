@@ -25,6 +25,10 @@ export const PORTAL_PATH = '/trainer';
 export const portalUid = (trainerId: string) => `tr_${trainerId}`;
 export const trainerIdFromUid = (uid: string) => (uid.startsWith('tr_') ? uid.slice(3) : '');
 export const jobId = (dealId: string, trainerId: string) => `${dealId}_${trainerId}`;
+// Internal trainers (Joel, 2026-10-25): a trainer record Management linked to a team member in Team
+// (trainers_directory.memberId). They use the trainer screens inside the CRM: no PO, no fee, and only they write
+// their training report (Admin and Management upload photos and T3 and check the report, but never write it).
+export const isInternalTrainer = (t: { memberId?: string } | null | undefined) => !!t?.memberId;
 export const portalFolder = (trainerId: string) => `trainer_portal/${trainerId}/`;
 export const claimFolder = (trainerId: string, dealId: string) => `trainer_portal/${trainerId}/claims/${dealId}/`;
 
@@ -42,6 +46,7 @@ export interface TrainerClaim {
   returnedByName?: string;
   returnedAt?: string;
   history?: { at: string; byName: string; action: string }[];
+  internal?: boolean;          // sent by an internal trainer: photos and T3 only, no fee (2026-10-25)
 }
 
 export interface TrainerJob {
@@ -275,7 +280,7 @@ export function feeStatusText(o: { status?: string; paidDate?: string }): string
 
 // The red flag in Admin work: a trainer asked for their fee. Gone once every fee line is approved or paid.
 export function claimFlag(job: TrainerJob | undefined, feeLines: { status?: string }[], trainerName = 'The trainer'): string {
-  if (job?.claim?.status !== 'submitted') return '';
+  if (job?.claim?.status !== 'submitted' || job.claim.internal) return '';   // an internal trainer's photos and T3: no fee
   const live = feeLines.filter(o => o.status !== 'rejected');
   if (!live.length) return `${trainerName} asked for their fee, but there's no trainer fee line yet: add it on the Trainer step`;
   if (live.every(o => o.status === 'approved' || o.status === 'paid')) return '';

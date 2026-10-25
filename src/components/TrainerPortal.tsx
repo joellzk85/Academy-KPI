@@ -7,6 +7,7 @@ import {
   BadgeCheck, BookOpen, CalendarCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Menu, Wallet, Star, Upload, User as UserIcon, Users, X,
 } from 'lucide-react';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { auth as crmAuth, storage as crmStorage } from '../lib/firebase';
 import Logo from './Logo';
 import TrainerProfileFields from './TrainerProfileFields';
 import TrainerBiodataDocument from './TrainerBiodataDocument';
@@ -34,6 +35,9 @@ const portalApp = getApps().find(a => a.name === 'trainer-portal') || initialize
 const pAuth = getAuth(portalApp);
 const pStorage = getStorage(portalApp);
 pStorage.maxUploadRetryTime = 60_000;
+// Internal trainers (2026-10-25) use the same screens inside the CRM (InternalTrainerPortal below), with their CRM
+// login and storage instead of the portal's own. The two never show on the same page.
+let conn = { auth: pAuth, storage: pStorage };
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -48,7 +52,7 @@ const alertBox = 'rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger';
 class PortalError extends Error { code: string; constructor(code: string, m: string) { super(m); this.code = code; } }
 
 async function token() {
-  const u = pAuth.currentUser;
+  const u = conn.auth.currentUser;
   if (!u) throw new PortalError('not-logged-in', 'You are logged out. Log in again.');
   return u.getIdToken();
 }
@@ -77,7 +81,7 @@ function loginError(e: any): string {
 }
 
 async function uploadTo(path: string, data: Blob, type: string, onProgress: (p: number) => void): Promise<string> {
-  const r = ref(pStorage, path);
+  const r = ref(conn.storage, path);
   const task = uploadBytesResumable(r, data, { contentType: type });
   await new Promise<void>((resolve, reject) => task.on('state_changed', s => onProgress(s.totalBytes ? Math.round((s.bytesTransferred / s.totalBytes) * 100) : 0), reject, () => resolve()));
   return getDownloadURL(r);
@@ -269,7 +273,15 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'payment', label: 'Payment details', icon: <Landmark className="h-4 w-4" /> },
 ];
 
-function Portal({ user }: { user: User }) {
+// Internal trainers (Joel, 2026-10-25): "My trainings" in their own CRM workspace. The same screens without the
+// PO, the fee and the payment details; logging in and out is the CRM's.
+export function InternalTrainerPortal() {
+  conn = { auth: crmAuth, storage: crmStorage };
+  const uid = crmAuth.currentUser?.uid;
+  return uid ? <Portal user={crmAuth.currentUser!} internal /> : null;
+}
+
+function Portal({ user, internal = false }: { user: User; internal?: boolean }) {
   const [info, setInfo] = useState<any>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('home');
@@ -288,13 +300,15 @@ function Portal({ user }: { user: User }) {
       <button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}><LogOut className="h-4 w-4" /> Log out</button>
     </div>
   );
-  if (error) return shell(<div className={`${card} space-y-3`}><p className="text-[15px]">{error}</p><button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}>Log out</button></div>, right);
-  if (!info) return shell(<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading your portal…</p>, right);
+  const frame = (children: React.ReactNode) => (internal ? <div className="font-sans text-ink">{children}</div> : shell(children, right, true));
+  if (error) return internal ? <p className={alertBox}>{error}</p> : shell(<div className={`${card} space-y-3`}><p className="text-[15px]">{error}</p><button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}>Log out</button></div>, right);
+  if (!info) return frame(<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading {internal ? 'your trainings' : 'your portal'}…</p>);
+  const tabs = internal ? TABS.filter(t => t.id !== 'fees' && t.id !== 'payment') : TABS;
 
   // Side menu like the CRM's (Joel, 2026-10-21); on phones a Menu button opens the same list.
   const menu = (
     <ul className="space-y-0.5">
-      {TABS.map(t => (
+      {tabs.map(t => (
         <li key={t.id}>
           <button type="button" onClick={() => go(t.id)} aria-current={tab === t.id ? 'page' : undefined}
             className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[15px] font-semibold ${tab === t.id ? 'bg-accent-soft text-accent' : 'text-ink-soft hover:bg-surface'}`}>{t.icon} {t.label}</button>
@@ -304,7 +318,7 @@ function Portal({ user }: { user: User }) {
   );
   const here = TABS.find(t => t.id === tab);
 
-  return shell(
+  return frame(
     <div className="md:flex md:items-start md:gap-6">
       <nav className="mb-4 md:hidden" aria-label="Portal sections">
         <button type="button" onClick={() => setMenuOpen(o => !o)} aria-expanded={menuOpen}
@@ -317,7 +331,7 @@ function Portal({ user }: { user: User }) {
       <nav className="sticky top-4 hidden w-56 shrink-0 rounded-xl border border-line bg-white p-2 md:block" aria-label="Portal sections">{menu}</nav>
       <div className="min-w-0 flex-1 space-y-5">
       {note && <p className="flex items-start justify-between gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent">{note}<button type="button" onClick={() => setNote('')} aria-label="Close"><X className="h-4 w-4" /></button></p>}
-      {tab === 'home' && <HomeTab info={info} go={go} onPassword={passwordEmail} />}
+      {tab === 'home' && <HomeTab info={info} go={go} onPassword={internal ? undefined : passwordEmail} />}
       {tab === 'trainings' && <TrainingsTab info={info} reload={load} />}
       {tab === 'calendar' && <CalendarTab info={info} />}
       {(tab === 'outlines' || tab === 'teambuilding') && <DocsTab key={tab} kind={tab === 'outlines' ? 'outline' : 'teambuilding'} info={info} api={api} upload={uploadTo} />}
@@ -326,8 +340,6 @@ function Portal({ user }: { user: User }) {
       {tab === 'payment' && <PaymentTab info={info} reload={load} />}
       </div>
     </div>,
-    right,
-    true,
   );
 }
 
@@ -347,17 +359,23 @@ function todos(info: any) {
   const out: { text: string; tab: Tab }[] = [];
   info.trainings.forEach((t: any) => {
     if (t.cancelled) return;
+    if (info.internalTrainer) {
+      if (t.started && (!t.claim || t.claim.status === 'returned')) out.push({ text: `${t.claim ? 'Fix and resend' : 'Send'} the photos and T3 for ${t.programme} (${when(t)})`, tab: 'trainings' });
+      if (t.ended && !t.coTrainer && (!t.report || t.report.status === 'draft' || t.report.status === 'returned')) out.push({ text: `${t.report?.status === 'returned' ? 'Fix and resend' : 'Write'} the training report for ${t.programme} (${when(t)})`, tab: 'trainings' });
+      return;
+    }
     if ((t.po.length || t.poAuto) && !t.poAcceptedAt && !t.poDeclined && !t.ended) out.push({ text: `Accept the PO for ${t.programme} (${when(t)})`, tab: 'trainings' });
     const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
     if (t.started && !allPaid && (!t.claim || t.claim.status === 'returned')) out.push({ text: `${t.claim ? 'Fix and resend' : 'Request'} your fee for ${t.programme} (${when(t)})`, tab: 'trainings' });
     if (t.ended && !t.coTrainer && (!t.report || t.report.status === 'draft' || t.report.status === 'returned')) out.push({ text: `${t.report?.status === 'returned' ? 'Fix and resend' : 'Write'} the training report for ${t.programme} (${when(t)})`, tab: 'trainings' });
   });
+  if (info.internalTrainer) return out;
   if (!info.payment.accountNo && !info.payment.pending) out.push({ text: 'Add your bank details so we can pay you', tab: 'payment' });
   if (!info.payment.tin) out.push({ text: 'Add your tax identification number (TIN)', tab: 'payment' });
   return out;
 }
 
-function HomeTab({ info, go, onPassword }: { info: any; go: (t: Tab) => void; onPassword: () => void }) {
+function HomeTab({ info, go, onPassword }: { info: any; go: (t: Tab) => void; onPassword?: () => void }) {
   const p = info.profile;
   const pct = Math.round(((PROFILE_PARTS - profileGaps({ ...p, icOnFile: info.icOnFile }).length) / PROFILE_PARTS) * 100);
   const next = info.trainings.filter((t: any) => !t.ended && !t.cancelled)[0];
@@ -368,7 +386,7 @@ function HomeTab({ info, go, onPassword }: { info: any; go: (t: Tab) => void; on
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold">Hi {greetName(p.name) || 'there'}</h1>
-        <p className="text-[15px] text-ink-soft">Your trainings with NEXT Academy, your profile and your payments, in one place.</p>
+        <p className="text-[15px] text-ink-soft">{info.internalTrainer ? 'Your trainings, training reports and trainer profile, in one place.' : 'Your trainings with NEXT Academy, your profile and your payments, in one place.'}</p>
       </div>
       <section className={card}>
         <h2 className="font-bold">To do</h2>
@@ -393,10 +411,10 @@ function HomeTab({ info, go, onPassword }: { info: any; go: (t: Tab) => void; on
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface"><div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} /></div>
         </button>
       </div>
-      <section className={`${card} text-sm text-ink-soft`}>
+      {onPassword && <section className={`${card} text-sm text-ink-soft`}>
         <p>Logged in as <strong className="text-ink">{info.email}</strong>. <button type="button" className="font-semibold text-accent hover:underline" onClick={onPassword}>Change my password</button> (we email you a link).</p>
         <p className="mt-1">Questions? NEXT Academy: {COMPANY.phone} · {COMPANY.email}</p>
-      </section>
+      </section>}
     </div>
   );
 }
@@ -470,10 +488,23 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
           {t.cancelled ? 'Cancelled' : t.poDeclined ? 'You declined' : t.ended ? 'Training done' : t.confirmed ? 'Confirmed' : 'Being arranged'}
         </span>
       </div>
-      {t.cancelled && <p className={alertBox}>This training was cancelled, so its PO no longer applies. NEXT Academy will contact you about it.</p>}
+      {t.cancelled && <p className={alertBox}>{t.internalTrainer ? 'This training was cancelled.' : 'This training was cancelled, so its PO no longer applies. NEXT Academy will contact you about it.'}</p>}
+
+      {/* Internal trainer (2026-10-25): no PO or fee; they send the photos and the signed T3 here */}
+      {t.internalTrainer && !t.cancelled && (
+        <div className="rounded-xl border border-line p-3">
+          <p className="text-sm font-semibold">Training photos and T3</p>
+          {t.claim?.status === 'submitted' && <p className="mt-1 flex items-center gap-1.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4" /> Sent on {isoDay(t.claim.submittedAt)} ({claimFilesText(t.claim.photos, t.claim.t3)}).</p>}
+          {t.claim?.status === 'returned' && <p className="mt-2 rounded-lg bg-attention-soft px-3 py-2 text-sm"><strong>Please fix and send again:</strong> {t.claim.returnNote || 'Admin asked for changes.'}</p>}
+          {t.started
+            ? !claiming && <button type="button" className={`${t.claim?.status === 'submitted' ? btnSecondary : btnPrimary} mt-3`} onClick={() => setClaiming(true)}>{t.claim?.status === 'returned' ? 'Fix and send again' : t.claim ? 'Change what I sent' : 'Send photos and T3'}</button>
+            : <p className="mt-1 text-sm text-ink-soft">You can send them once the training has started. Admin can also upload them on the deal.</p>}
+          {claiming && <ClaimForm t={t} trainerId={trainerId} onCancel={() => setClaiming(false)} onDone={async () => { setClaiming(false); await reload(); }} />}
+        </div>
+      )}
 
       {/* PO */}
-      <div className="rounded-xl border border-line p-3">
+      {!t.internalTrainer && <div className="rounded-xl border border-line p-3">
         <p className="text-sm font-semibold">Purchase order (PO)</p>
         {hasPo ? (
           <div className="mt-2 space-y-2">
@@ -516,10 +547,10 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
             )}
           </div>
         ) : <p className="mt-1 text-sm text-ink-soft">Your PO will appear here once NEXT Academy sets up your fee for this training.</p>}
-      </div>
+      </div>}
 
       {/* Fee */}
-      <div className="rounded-xl border border-line p-3">
+      {!t.internalTrainer && <div className="rounded-xl border border-line p-3">
         <p className="text-sm font-semibold">Training fee</p>
         {t.fee.length ? (
           <ul className="mt-1 divide-y divide-line">
@@ -537,7 +568,7 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
           ? !claiming && <button type="button" className={`${t.claim?.status === 'submitted' ? btnSecondary : btnPrimary} mt-3`} onClick={() => setClaiming(true)}>{t.claim?.status === 'returned' ? 'Fix and send again' : t.claim ? 'Change my fee request' : 'Request training fee'}</button>
           : <p className="mt-2 text-sm text-ink-soft">You can request your fee once the training has started.</p>)}
         {claiming && <ClaimForm t={t} trainerId={trainerId} onCancel={() => setClaiming(false)} onDone={async () => { setClaiming(false); await reload(); }} />}
-      </div>
+      </div>}
 
       {/* Training report (2026-10-21); a co-trainer's lead trainer writes it (2026-10-22) */}
       {!t.cancelled && !t.coTrainer && (
@@ -696,13 +727,15 @@ function ClaimForm({ t, trainerId, onCancel, onDone }: { t: any; trainerId: stri
   const folder = claimFolder(trainerId, t.dealId);
   return (
     <div className="mt-3 space-y-4 rounded-xl bg-surface p-4">
-      <p className="text-[15px]">Ask for your fee. Training photos and the signed T3 attendance form help us, but they are optional. Your fee is then approved and paid by NEXT Academy as per your PO.</p>
-      <FileDrop title="Training photos (optional)" hint="Photos of the training (JPG or PNG)." photo folder={folder} kind="photo" files={photos} setFiles={setPhotos} />
-      <FileDrop title="T3 attendance form (optional)" hint="The signed T3 form (PDF, JPG or PNG; a clear phone photo is fine)." folder={folder} kind="t3" files={t3} setFiles={setT3} />
+      <p className="text-[15px]">{t.internalTrainer
+        ? 'Send the training photos and the signed T3 attendance form. Admin checks them; the photos also go on your training report.'
+        : 'Ask for your fee. Training photos and the signed T3 attendance form help us, but they are optional. Your fee is then approved and paid by NEXT Academy as per your PO.'}</p>
+      <FileDrop title={t.internalTrainer ? 'Training photos' : 'Training photos (optional)'} hint="Photos of the training (JPG or PNG)." photo folder={folder} kind="photo" files={photos} setFiles={setPhotos} />
+      <FileDrop title={t.internalTrainer ? 'T3 attendance form' : 'T3 attendance form (optional)'} hint="The signed T3 form (PDF, JPG or PNG; a clear phone photo is fine)." folder={folder} kind="t3" files={t3} setFiles={setT3} />
       {error && <p role="alert" className={alertBox}>{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         <button type="button" className={btnSecondary} onClick={onCancel}>Cancel</button>
-        <button type="button" className={btnPrimary} disabled={busy} onClick={send}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Send to NEXT Academy</button>
+        <button type="button" className={btnPrimary} disabled={busy} onClick={send}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} {t.internalTrainer ? 'Send to Admin' : 'Send to NEXT Academy'}</button>
       </div>
     </div>
   );
@@ -864,7 +897,7 @@ function ProfileTab({ info, reload }: { info: any; reload: () => Promise<any> })
   const extrasProps = {
     value: profile,
     onChange: (p: any) => setProfile(cur => ({ ...cur, ...(typeof p === 'function' ? p(cur) : p) })),
-    uploader: { prefix: portalFolder(info.trainerId), byName: profile.name.trim() || 'Trainer', store: pStorage },
+    uploader: { prefix: portalFolder(info.trainerId), byName: profile.name.trim() || 'Trainer', store: conn.storage },
     ic: {
       value: profile.icNumber || '',
       onChange: (v: string) => setProfile(p => ({ ...p, icNumber: v })),
