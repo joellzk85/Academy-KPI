@@ -59,16 +59,17 @@ export function useKpiSources(opts: { months?: string[]; people?: RepLike[] } = 
 
   // 1-to-1 sessions held (2026-10-25): dates only, from the server (the sessions themselves are private).
   const [oneToOnes, setOneToOnes] = useState<Record<string, string[]>>({});
-  const needOto = (opts.people || []).some(p => metricsFor(p).some(m => m.auto === 'one_to_ones'));
+  const [oneToOnesAsked, setOneToOnesAsked] = useState<Record<string, string[]>>({});
+  const needOto = (opts.people || []).some(p => metricsFor(p).some(m => m.auto === 'one_to_ones' || m.auto === 'one_to_ones_asked'));
   useEffect(() => {
     if (!needOto || !monthKey) return;
     let live = true;
-    callServer<{ held: Record<string, string[]> }>('/api/one-to-one/held', { months: monthKey.split(',') }, true)
-      .then(r => { if (live) setOneToOnes(r.held || {}); })
+    callServer<{ held: Record<string, string[]>; asked: Record<string, string[]> }>('/api/one-to-one/held', { months: monthKey.split(',') }, true)
+      .then(r => { if (live) { setOneToOnes(r.held || {}); setOneToOnesAsked(r.asked || {}); } })
       .catch(() => {});
     return () => { live = false; };
   }, [needOto, monthKey]);
 
-  return useMemo(() => ({ claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes }),
-    [claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes]);
+  return useMemo(() => ({ claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes, oneToOnesAsked }),
+    [claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes, oneToOnesAsked]);
 }

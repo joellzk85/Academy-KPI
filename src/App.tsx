@@ -760,6 +760,11 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
 
   const selectedRep = workspacePeople.find(r => r.id === selectedRepId);
   const myOneToOnes = useOneToOnes(currentMember.id);
+  // 1-to-1s need no setup (Joel, 2026-10-25): with nobody picked yet, the owner runs them (changeable in its Settings).
+  useEffect(() => {
+    if (!ownerOverride || !myOneToOnes.configLoaded || myOneToOnes.coachId) return;
+    setDoc(doc(db, 'config', 'one_to_one'), { coachId: currentMember.id, updatedAt: Date.now() }, { merge: true }).catch(() => { /* tried again next load */ });
+  }, [ownerOverride, myOneToOnes.configLoaded, myOneToOnes.coachId, currentMember.id]);
 
   // Team calendar = typed events + appointments booked on deals + won deals' training days (read from the deals, never copied)
   // + this person's own 1-to-1s (2026-10-25; nobody else's).

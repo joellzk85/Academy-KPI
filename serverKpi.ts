@@ -15,7 +15,6 @@ import { dealOwnerId } from './src/lib/deals';
 import { gpAlerts } from './src/lib/gpAlerts';
 import { readKpiLibrary } from './src/lib/kpiLibrary';
 import { itemStars, readRound, RatingRound, ratingOverall, summarise } from './src/lib/rating360';
-import { heldDatesByPerson } from './src/lib/oneToOne';
 
 const MONTH = /^\d{4}-\d{2}$/;
 
@@ -94,25 +93,6 @@ export function registerRatingRoutes(app: Express) {
 
 export function registerKpiRoutes(app: Express) {
   registerRatingRoutes(app);
-  // 1-to-1 sessions held (2026-10-25, src/lib/oneToOne.ts). Sessions are private to the two people in them, so the
-  // "1-to-1 sessions held" KPI gets only the dates of held sessions:
-  // POST /api/one-to-one/held { months } → { held: { [memberId]: ['YYYY-MM-DD', ...] } }. Management gets everyone,
-  // anyone else only their own.
-  app.post('/api/one-to-one/held', route(async req => {
-    const caller = await callerFrom(req);
-    const months: string[] = Array.isArray(req.body?.months) ? req.body.months.filter((m: any) => typeof m === 'string' && MONTH.test(m)).slice(0, 13) : [];
-    if (!months.length) throw new UserError(400, 'bad-months', 'Choose a month.');
-    const { db } = admin();
-    const snap = await db.collection('one_to_ones').where('status', '==', 'held').get();
-    const all = heldDatesByPerson(snap.docs.map(d => d.data() as any));
-    const held: Record<string, string[]> = {};
-    Object.entries(all).forEach(([id, dates]) => {
-      if (caller.role !== 'management' && id !== caller.memberId) return;
-      const inMonths = dates.filter(d => months.includes(d.slice(0, 7)));
-      if (inMonths.length) held[id] = inMonths;
-    });
-    return { held };
-  }));
   app.post('/api/kpi/gp', route(async req => {
     const caller = await callerFrom(req);
     const months: string[] = Array.isArray(req.body?.months) ? req.body.months.filter((m: any) => typeof m === 'string' && MONTH.test(m)).slice(0, 13) : [];

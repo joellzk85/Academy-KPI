@@ -18,6 +18,7 @@ import { registerPaymentLinkRoutes } from "./serverPaymentLinks";
 import { registerReferrerRoutes } from "./serverReferrers";
 import { registerBlueprintRoutes } from "./serverBlueprint";
 import { registerKpiRoutes } from "./serverKpi";
+import { registerOneToOneRoutes } from "./serverOneToOne";
 import { registerActivityRoutes } from "./serverActivity";
 
 // Load environment variables
@@ -79,6 +80,7 @@ async function startServer() {
 
   // Gross profit KPIs: the GP % only, worked out from the P&L (reps and Admin can't read costs)
   registerKpiRoutes(app);
+  registerOneToOneRoutes(app);
 
   // Logins and sensitive actions for Team → Login log (Management only; IP, place, device, warning flags)
   registerActivityRoutes(app);

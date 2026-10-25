@@ -5,17 +5,19 @@ import { OneToOne, OtoQuestions, readQuestions } from './oneToOne';
 
 // The 1-to-1 setting (who runs them, the questions) and the sessions this person is in: as the staff member, or
 // as the coach (then everyone's). The database lets nobody else read a session (lib/oneToOne.ts).
-export function useOneToOnes(meId: string): { coachId: string; questions: OtoQuestions; sessions: OneToOne[]; loaded: boolean } {
+export function useOneToOnes(meId: string): { coachId: string; questions: OtoQuestions; sessions: OneToOne[]; loaded: boolean; configLoaded: boolean } {
   const [coachId, setCoachId] = useState('');
   const [questions, setQuestions] = useState<OtoQuestions>(readQuestions(null));
   const [mine, setMine] = useState<OneToOne[]>([]);
   const [coached, setCoached] = useState<OneToOne[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [configLoaded, setConfigLoaded] = useState(false);
 
   useEffect(() => onSnapshot(doc(db, 'config', 'one_to_one'), s => {
     const d: any = s.data() || {};
     setCoachId(typeof d.coachId === 'string' ? d.coachId : '');
     setQuestions(readQuestions(d.questions));
+    setConfigLoaded(true);
   }, () => {}), []);
 
   useEffect(() => {
@@ -33,5 +35,5 @@ export function useOneToOnes(meId: string): { coachId: string; questions: OtoQue
     return [...mine, ...coached].filter(s => !seen.has(s.id) && !!seen.add(s.id));
   }, [mine, coached]);
 
-  return { coachId, questions, sessions, loaded };
+  return { coachId, questions, sessions, loaded, configLoaded };
 }

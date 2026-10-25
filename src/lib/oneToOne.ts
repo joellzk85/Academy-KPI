@@ -46,6 +46,7 @@ export interface OneToOne {
   time: string;             // HH:MM
   place: string;
   requestedById: string;    // who asked for this date and time (the other one accepts)
+  initiatedById?: string;   // who first asked for the 1-to-1 (never changes; the "1-to-1s asked for" KPI)
   requestedAt?: string;
   respondedAt?: string;
   declineNote?: string;
@@ -80,8 +81,9 @@ export const TYPE_LABELS: Record<OtoQType, string> = {
 export const STAGE_LABELS: Record<OtoStage, string> = {
   before: 'Before the meeting', during: 'During the meeting', after: 'After the meeting',
 };
+// Either of the two fills in any part (Joel, 2026-10-25); only the person running it has private notes.
 export const STAGE_WHO: Record<OtoStage, string> = {
-  before: 'Answered by the staff member', during: 'Answered by the person running the 1-to-1', after: 'Answered by the staff member',
+  before: 'Filled in before you meet, by either of you', during: 'Filled in during the meeting, by either of you', after: 'Filled in after the meeting, by either of you',
 };
 
 // The starting set: Joel's seven questions plus the ones agreed on 2026-10-25. Editable in Settings.
@@ -222,6 +224,116 @@ export function heldDatesByPerson(all: Pick<OneToOne, 'personId' | 'coachId' | '
   return out;
 }
 
+// Who first asked for the session (older sessions: whoever asked for the time).
+export const initiatorOf = (s: Pick<OneToOne, 'initiatedById' | 'requestedById'>) => s.initiatedById || s.requestedById || '';
+
+// Held sessions the staff member asked for themselves, by date, for the "1-to-1s asked for" KPI.
+export function askedDatesByPerson(all: Pick<OneToOne, 'personId' | 'status' | 'date' | 'initiatedById' | 'requestedById'>[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  all.forEach(s => {
+    if (s.status !== 'held' || !/^\d{4}-\d{2}-\d{2}/.test(s.date || '') || initiatorOf(s) !== s.personId) return;
+    (out[s.personId] = out[s.personId] || []).push(s.date.slice(0, 10));
+  });
+  return out;
+}
+
+// ---------- Calendar check when booking ----------
+// Anything already on either person's calendar that day: other 1-to-1s, deal appointments, CRM events they're tagged
+// in. `minutes` = how long it lasts (null = all day). Only a plain label goes back to the browser, never details.
+export interface BusyItem { who: string; label: string; date: string; time?: string; minutes: number | null }
+
+const toMin = (t?: string): number | null => {
+  const m = (t || '').trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  if (m[3] === 'pm' && h < 12) h += 12;
+  if (m[3] === 'am' && h === 12) h = 0;
+  return h > 23 ? null : h * 60 + Number(m[2] || 0);
+};
+const hhmm = (n: number) => `${((Math.floor(n / 60) + 11) % 12) + 1}:${String(n % 60).padStart(2, '0')} ${n < 720 || n >= 1440 ? 'AM' : 'PM'}`;
+
+export function clashesWith(date: string, time: string, items: BusyItem[], minutes = SESSION_MINUTES): { who: string; text: string }[] {
+  const start = toMin(time);
+  if (start === null) return [];
+  const end = start + minutes;
+  return items
+    .filter(i => i.date.slice(0, 10) === date)
+    .flatMap(i => {
+      const s = toMin(i.time);
+      if (i.minutes === null || s === null) return [{ who: i.who, text: `${i.label} (all day)` }];
+      const e = s + i.minutes;
+      return s < end && start < e ? [{ who: i.who, text: `${i.label}, ${hhmm(s)}–${hhmm(e)}` }] : [];
+    });
+}
+
+// ---------- Profile (get to know them; the staff member and the coach fill it in) ----------
+export interface ProfileField { id: string; label: string; type: 'short' | 'long' | 'date'; hint?: string }
+export const PROFILE_FIELDS: { title: string; fields: ProfileField[] }[] = [
+  { title: 'About', fields: [
+    { id: 'joined', label: 'Joined the company', type: 'date' },
+    { id: 'birthday', label: 'Birthday', type: 'date' },
+    { id: 'hometown', label: 'Hometown', type: 'short' },
+    { id: 'family', label: 'Family', type: 'long', hint: 'Partner, children’s names, parents…' },
+    { id: 'religion', label: 'Religion and holidays observed', type: 'short' },
+    { id: 'food', label: 'Food preferences', type: 'short' },
+  ] },
+  { title: 'Goals and drive', fields: [
+    { id: 'goals', label: 'Personal goals', type: 'long' },
+    { id: 'career', label: 'Career dream', type: 'long' },
+    { id: 'motivation', label: 'What motivates them', type: 'long' },
+    { id: 'strengths', label: 'Strengths', type: 'long' },
+    { id: 'stress', label: 'Signs they are stressed', type: 'long' },
+  ] },
+  { title: 'Rewards and feedback', fields: [
+    { id: 'reward', label: 'How they like to be rewarded', type: 'long', hint: 'e.g. time off, a meal, a gift, a bonus, a course' },
+    { id: 'recognition', label: 'How they like to be recognised', type: 'short', hint: 'Public praise, private thanks…' },
+    { id: 'feedback', label: 'How they like to get feedback', type: 'long' },
+  ] },
+  { title: 'Interests', fields: [
+    { id: 'hobbies', label: 'Hobbies and interests', type: 'long' },
+    { id: 'books', label: 'Books they like', type: 'long' },
+    { id: 'booksEncouraged', label: 'Books encouraged to read', type: 'long' },
+  ] },
+];
+
+export interface ImportantDate { id: string; label: string; date: string }   // date YYYY-MM-DD (the year is ignored for reminders)
+
+// Whole years and months from a date to today, e.g. "2 years 3 months".
+export function sinceText(iso: string, today: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(iso || '') || iso > today) return '';
+  const [y1, m1, d1] = iso.split('-').map(Number);
+  const [y2, m2, d2] = today.split('-').map(Number);
+  let months = (y2 - y1) * 12 + (m2 - m1) - (d2 < d1 ? 1 : 0);
+  const y = Math.floor(months / 12); months %= 12;
+  return [y ? `${y} year${y === 1 ? '' : 's'}` : '', months ? `${months} month${months === 1 ? '' : 's'}` : ''].filter(Boolean).join(' ') || 'less than a month';
+}
+export function ageOf(birthday: string, today: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(birthday || '')) return null;
+  const [y1, m1, d1] = birthday.split('-').map(Number);
+  const [y2, m2, d2] = today.split('-').map(Number);
+  const a = y2 - y1 - (m2 < m1 || (m2 === m1 && d2 < d1) ? 1 : 0);
+  return a >= 0 && a < 120 ? a : null;
+}
+
+// Birthdays, work anniversaries and other important dates in the next `days` days (each year).
+export function upcomingDates(profile: any, today: string, days = 7): { label: string; date: string; inDays: number }[] {
+  if (!profile) return [];
+  const list: { label: string; date: string }[] = [];
+  if (profile.birthday) list.push({ label: 'Birthday', date: profile.birthday });
+  if (profile.joined) list.push({ label: 'Work anniversary', date: profile.joined });
+  (Array.isArray(profile.dates) ? profile.dates : []).forEach((d: any) => { if (d?.date && d?.label) list.push({ label: String(d.label), date: String(d.date) }); });
+  const [ty, tm, td] = today.split('-').map(Number);
+  const t0 = Date.UTC(ty, tm - 1, td);
+  return list.flatMap(x => {
+    if (!/^\d{4}-\d{2}-\d{2}/.test(x.date)) return [];
+    const [, m, d] = x.date.split('-').map(Number);
+    let next = Date.UTC(ty, m - 1, d);
+    if (next < t0) next = Date.UTC(ty + 1, m - 1, d);
+    const inDays = Math.round((next - t0) / 864e5);
+    return inDays <= days ? [{ label: x.label, date: new Date(next).toISOString().slice(0, 10), inDays }] : [];
+  }).sort((a, b) => a.inDays - b.inDays);
+}
+
 // What a staff member may change on their own session (the rules check the same list).
-export const STAFF_KEYS = ['status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote', 'cancelledById', 'cancelledAt',
+export const STAFF_KEYS = ['during', 'actions', 'review', 'status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote', 'cancelledById', 'cancelledAt',
   'before', 'after', 'staffRating', 'staffComment', 'staffRatedAt', 'agreedAt', 'agreeComment', 'updatedAt'];

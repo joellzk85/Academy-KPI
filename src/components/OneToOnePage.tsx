@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { ArrowDown, ArrowLeft, ArrowUp, CalendarPlus, Check, CheckCircle2, Circle, Loader2, Lock, Plus, Settings, Star, Trash2, X } from 'lucide-react';
 import { Representative } from '../types';
-import { db, friendlyError } from '../lib/firebase';
+import { callServer, db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { kpiValueText, monthKpi } from '../lib/kpi';
@@ -15,7 +15,7 @@ import { usePaged, sortList, type ListSort } from '../lib/listPaging';
 import { useOneToOnes } from '../lib/useOneToOnes';
 import {
   ActionReview, OneToOne, OtoAction, OtoQType, OtoQuestion, OtoQuestions, OtoStage, STAGE_LABELS, STAGE_WHO, STATUS_LABELS, TYPE_LABELS,
-  dayName, hasAnswer, newQuestionId, previousHeld, questionsFor, sessionNumbers, time12, waitingOn,
+  ImportantDate, PROFILE_FIELDS, ageOf, dayName, hasAnswer, initiatorOf, newQuestionId, sinceText, upcomingDates, previousHeld, questionsFor, sessionNumbers, time12, waitingOn,
 } from '../lib/oneToOne';
 import DraftBar from './DraftBar';
 import ListPager, { SortSelect } from './ListPager';
@@ -57,6 +57,7 @@ export default function OneToOnePage({ me, reps, month }: { me: Viewer; reps: Re
   const [personId, setPersonId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [booking, setBooking] = useState<{ personId: string } | null>(null);
+  const [profileOf, setProfileOf] = useState<string | null>(null);
   const [toast, setToast] = useState('');
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(''), 3000); };
 
@@ -70,6 +71,9 @@ export default function OneToOnePage({ me, reps, month }: { me: Viewer; reps: Re
 
   if (showSettings && (isCoach || isOwner)) {
     return <SettingsView me={me} coachId={coachId} questions={questions} isOwner={isOwner} isCoach={isCoach} people={active} onBack={() => setShowSettings(false)} />;
+  }
+  if (profileOf) {
+    return <ProfileView memberId={profileOf} name={nameOf(profileOf)} me={me} isCoach={isCoach} onBack={() => setProfileOf(null)} />;
   }
   if (open) {
     return <SessionView key={open.id} s={open} me={me} all={sessions} number={numbers[open.id] || 0} current={questions} nameOf={nameOf} tasks={tasks}
@@ -86,7 +90,8 @@ export default function OneToOnePage({ me, reps, month }: { me: Viewer; reps: Re
       </div>
       <div className="flex flex-wrap gap-2">
         {(isCoach || isOwner) && <button type="button" className={btnSecondary} onClick={() => setShowSettings(true)}><Settings className="h-4 w-4" /> Settings</button>}
-        {coachId && !isCoach && <button type="button" className={btnPrimary} onClick={() => setBooking({ personId: me.id })}><CalendarPlus className="h-4 w-4" /> Book 1-to-1</button>}
+        {coachId && !isCoach && <button type="button" className={btnSecondary} onClick={() => setProfileOf(me.id)}>My profile</button>}
+        {coachId && <button type="button" className={btnPrimary} onClick={() => setBooking({ personId: isCoach ? (personId || '') : me.id })}><CalendarPlus className="h-4 w-4" /> Book 1-to-1</button>}
       </div>
     </div>
   );
@@ -98,13 +103,13 @@ export default function OneToOnePage({ me, reps, month }: { me: Viewer; reps: Re
 
       {!coachId && (
         <p className={`${card} text-[15px] text-ink-soft`}>
-          {isOwner ? 'Choose who runs the 1-to-1s in Settings to start.' : '1-to-1 sessions aren’t set up yet.'}
+          {isOwner ? 'Getting 1-to-1s ready…' : '1-to-1 sessions aren’t set up yet.'}
         </p>
       )}
 
       {booking && coachId && (
         <BookForm me={me} coachId={coachId} isCoach={isCoach} people={active.filter(p => p.id !== coachId)} startPerson={booking.personId}
-          sessions={sessions} onClose={() => setBooking(null)} onBooked={(s) => { setBooking(null); flash(`1-to-1 asked for ${formatDate(s.date)}. ${nameOf(s.requestedById === s.coachId ? s.personId : s.coachId)} will be asked to accept.`); }} />
+          sessions={sessions} current={questions} onClose={() => setBooking(null)} onBooked={(s) => { setBooking(null); flash(`1-to-1 asked for ${formatDate(s.date)}. ${nameOf(s.requestedById === s.coachId ? s.personId : s.coachId)} will be asked to accept.`); }} />
       )}
 
       {needsMe.length > 0 && (
@@ -127,6 +132,11 @@ export default function OneToOnePage({ me, reps, month }: { me: Viewer; reps: Re
         <Overview people={active.filter(p => p.id !== me.id)} sessions={sessions} tasks={tasks} onOpenPerson={setPersonId} onBook={(id) => setBooking({ personId: id })} />
       )}
 
+      {isCoach && personId && (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={btnSecondary} onClick={() => setProfileOf(personId)}>{nameOf(personId)}’s profile</button>
+        </div>
+      )}
       {coachId && (!isCoach || personId) && (
         <SessionList title={isCoach ? `${nameOf(personId!)}’s sessions` : 'Your sessions'}
           sessions={sessions.filter(s => s.personId === (isCoach ? personId : me.id))} numbers={numbers} me={me}
@@ -142,6 +152,10 @@ function Overview({ people, sessions, tasks, onOpenPerson, onBook }: {
   people: { id: string; name: string }[]; sessions: OneToOne[]; tasks: any[]; onOpenPerson: (id: string) => void; onBook: (id: string) => void;
 }) {
   const today = todayIso();
+  // Birthdays, work anniversaries and other important dates in the next 7 days, from the profiles.
+  const [profiles, setProfiles] = useState<Record<string, any>>({});
+  useEffect(() => onSnapshot(collection(db, 'staff_profiles'), s => setProfiles(Object.fromEntries(s.docs.map(d => [d.id, d.data()]))), () => setProfiles({})), []);
+  const coming = people.flatMap(p => upcomingDates(profiles[p.id], today, 7).map(c => ({ ...c, p })));
   const rows = people.map(p => {
     const mine = sessions.filter(s => s.personId === p.id);
     const held = mine.filter(s => s.status === 'held').sort((a, b) => b.date.localeCompare(a.date));
@@ -151,11 +165,23 @@ function Overview({ people, sessions, tasks, onOpenPerson, onBook }: {
     return {
       p, held: held.length, last: held[0]?.date || '', next,
       open: openActions.length, overdue,
+      asked: held.filter(s => initiatorOf(s) === p.id).length,
       rating: avg(held.map(s => Number(s.staffRating)).filter(n => n > 0)),
       mood: avg(held.map(s => Number(s.before?.mood)).filter(n => n > 0)),
     };
   });
   return (
+    <>
+    {coming.length > 0 && (
+      <section className={card}>
+        <h3 className="text-lg font-bold">Coming up this week</h3>
+        <ul className="mt-2 space-y-1 text-[15px]">
+          {coming.sort((a, b) => a.inDays - b.inDays).map((c, i) => (
+            <li key={i}><button type="button" className="font-semibold text-accent hover:underline" onClick={() => onOpenPerson(c.p.id)}>{c.p.name}</button>: {c.label}, {c.inDays === 0 ? 'today' : `${dayName(c.date)} ${formatDate(c.date)}`}</li>
+          ))}
+        </ul>
+      </section>
+    )}
     <section className={card}>
       <h3 className="text-lg font-bold">Everyone</h3>
       <div className="mt-3 overflow-x-auto">
@@ -163,7 +189,7 @@ function Overview({ people, sessions, tasks, onOpenPerson, onBook }: {
           <thead className="text-sm text-ink-soft">
             <tr className="border-b border-line">
               <th className="py-2 pr-3 font-semibold">Person</th>
-              <th className="py-2 pr-3 font-semibold">Held</th>
+              <th className="py-2 pr-3 font-semibold" title="Sessions held, and how many of them they asked for themselves">Held · asked for</th>
               <th className="py-2 pr-3 font-semibold">Last</th>
               <th className="py-2 pr-3 font-semibold">Next</th>
               <th className="py-2 pr-3 font-semibold">Open actions</th>
@@ -175,7 +201,7 @@ function Overview({ people, sessions, tasks, onOpenPerson, onBook }: {
             {rows.map(r => (
               <tr key={r.p.id} className="border-b border-line last:border-0">
                 <td className="py-2.5 pr-3"><button type="button" className="font-semibold text-accent hover:underline" onClick={() => onOpenPerson(r.p.id)}>{r.p.name}</button></td>
-                <td className="py-2.5 pr-3">{r.held}</td>
+                <td className="py-2.5 pr-3">{r.held} · {r.asked}</td>
                 <td className="py-2.5 pr-3">{r.last ? formatDate(r.last) : '–'}</td>
                 <td className="py-2.5 pr-3">{r.next ? <>{formatDate(r.next.date)}{r.next.status === 'requested' && <span className="ml-1 text-sm text-attention">(waiting)</span>}</> : <span className="text-ink-soft">None booked</span>}</td>
                 <td className="py-2.5 pr-3">{r.open}{r.overdue > 0 && <span className="ml-1 text-sm font-semibold text-danger">({r.overdue} overdue)</span>}</td>
@@ -187,6 +213,7 @@ function Overview({ people, sessions, tasks, onOpenPerson, onBook }: {
         </table>
       </div>
     </section>
+    </>
   );
 }
 
@@ -236,20 +263,40 @@ function SessionList({ title, sessions, numbers, me, onOpen, onBack, onBook, loa
   );
 }
 
-// ---------- Booking (a new session, or another time for one) ----------
-function BookForm({ me, coachId, isCoach, people, startPerson, sessions, onClose, onBooked, existing }: {
+// ---------- Booking: date and time (checked against both calendars), place, then the before-meeting questions ----------
+function BookForm({ me, coachId, isCoach, people, startPerson, sessions, current, onClose, onBooked, existing }: {
   me: Viewer; coachId: string; isCoach: boolean; people: { id: string; name: string }[]; startPerson: string; sessions: OneToOne[];
-  onClose: () => void; onBooked: (s: OneToOne) => void; existing?: OneToOne;
+  current?: OtoQuestions; onClose: () => void; onBooked: (s: OneToOne) => void; existing?: OneToOne;
 }) {
   const last = existing || [...sessions].filter(s => s.place).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
   const [personId, setPersonId] = useState(existing?.personId || (isCoach ? (startPerson === me.id ? '' : startPerson) : me.id));
   const [date, setDate] = useState(existing?.date || '');
   const [time, setTime] = useState(existing?.time || '10:00');
   const [place, setPlace] = useState(last?.place || '');
+  const [before, setBefore] = useState<Record<string, any>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const draft = useFormDraft(me.id, existing ? `oto:time:${existing.id}` : `oto:new:${isCoach ? personId || 'any' : me.id}`, { date, time, place },
-    v => { setDate(v.date); setTime(v.time); setPlace(v.place); });
+  const draft = useFormDraft(me.id, existing ? `oto:time:${existing.id}` : `oto:new:${isCoach ? personId || 'any' : me.id}`, { date, time, place, before },
+    v => { setDate(v.date); setTime(v.time); setPlace(v.place); setBefore(v.before || {}); });
+
+  // Calendar check: what's already on the staff member's and the coach's calendars in those 90 minutes.
+  const [check, setCheck] = useState<{ state: 'idle' | 'checking' | 'done' | 'error'; clashes: { who: string; text: string }[] }>({ state: 'idle', clashes: [] });
+  useEffect(() => {
+    if (!personId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) { setCheck({ state: 'idle', clashes: [] }); return; }
+    let live = true;
+    setCheck(c => ({ ...c, state: 'checking' }));
+    const t = window.setTimeout(() => {
+      callServer<{ clashes: { who: string; text: string }[] }>('/api/one-to-one/availability', { date, time, personId, sessionId: existing?.id || '' }, true)
+        .then(r => { if (live) setCheck({ state: 'done', clashes: r.clashes || [] }); })
+        .catch(() => { if (live) setCheck({ state: 'error', clashes: [] }); });
+    }, 400);
+    return () => { live = false; window.clearTimeout(t); };
+  }, [personId, date, time, existing?.id]);
+
+  // Carried answers (e.g. the goals) start from the person's last held session.
+  const prevHeld = [...sessions].filter(s => s.personId === personId && s.status === 'held').sort((a, b) => b.date.localeCompare(a.date))[0];
+  const questions = (current?.before || []).filter(q => q.type !== 'actions');
+  const valueOf = (q: OtoQuestion) => (q.id in before ? before[q.id] : q.carry ? prevHeld?.before?.[q.id] ?? '' : '');
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -259,6 +306,7 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, onClose
     if (!/^\d{2}:\d{2}$/.test(time)) return setError('Pick a time.');
     if (!place.trim()) return setError('Write where you will meet.');
     if (!existing && date < todayIso()) return setError('Pick today or a later date.');
+    if (check.clashes.length && !window.confirm(`The calendar shows something at that time:\n\n${check.clashes.map(c => `${c.who}: ${c.text}`).join('\n')}\n\nBook it anyway?`)) return;
     setBusy(true);
     try {
       const now = new Date().toISOString();
@@ -268,8 +316,11 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, onClose
         draft.clear();
         onBooked({ ...existing, ...patch } as OneToOne);
       } else {
+        const answers: Record<string, any> = {};
+        questions.forEach(q => { const v = valueOf(q); if (hasAnswer(v)) answers[q.id] = v; });
         const id = `oto_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-        const s: OneToOne = { id, personId, coachId, status: 'requested', date, time, place: place.trim(), requestedById: me.id, requestedAt: now, createdAt: Date.now(), updatedAt: Date.now() };
+        const s: OneToOne = { id, personId, coachId, status: 'requested', date, time, place: place.trim(), requestedById: me.id, initiatedById: me.id,
+          requestedAt: now, before: answers, createdAt: Date.now(), updatedAt: Date.now() };
         await setDoc(doc(db, 'one_to_ones', id), s);
         draft.clear();
         onBooked(s);
@@ -284,7 +335,7 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, onClose
   return (
     <form onSubmit={save} className={`${card} space-y-4`}>
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold">{existing ? (existing.status === 'booked' ? 'Change the time' : 'Suggest another time') : 'Book a 1-to-1'}</h3>
+        <h3 className="text-lg font-bold">{existing ? (existing.status === 'booked' ? 'Change the time' : 'Suggest another time') : 'Book 1-to-1'}</h3>
         <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
       </div>
       <DraftBar draft={draft} what="1-to-1 booking" />
@@ -308,11 +359,40 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, onClose
           <input id="oto-time" type="time" className={input} value={time} onChange={e => setTime(e.target.value)} />
           <p className="mt-1 text-sm text-ink-soft">90 minutes</p>
         </div>
+        <div className="sm:col-span-2" aria-live="polite">
+          {check.state === 'checking' && <p className="text-sm text-ink-soft"><Loader2 className="mr-1 inline h-4 w-4 animate-spin" />Checking both calendars…</p>}
+          {check.state === 'done' && !check.clashes.length && <p className="rounded-lg bg-accent-soft px-3 py-2 text-sm font-semibold text-accent"><Check className="mr-1 inline h-4 w-4" />Free on both calendars</p>}
+          {check.state === 'done' && check.clashes.length > 0 && (
+            <div className="rounded-lg bg-attention/10 px-3 py-2 text-sm text-ink">
+              <p className="font-semibold text-attention">Busy at that time:</p>
+              <ul className="mt-1 list-disc pl-5">{check.clashes.map((c, i) => <li key={i}>{c.who}: {c.text}</li>)}</ul>
+            </div>
+          )}
+          {check.state === 'error' && <p className="text-sm text-ink-soft">Couldn’t check the calendars just now. You can still book.</p>}
+        </div>
         <div className="sm:col-span-2">
           <label className={label} htmlFor="oto-place">Place of meeting</label>
           <input id="oto-place" className={input} value={place} onChange={e => setPlace(e.target.value)} placeholder="e.g. Office meeting room, a café, Google Meet" />
         </div>
       </div>
+
+      {!existing && questions.length > 0 && personId && (
+        <div className="space-y-4 border-t border-line pt-4">
+          <div>
+            <h4 className="text-base font-bold">Before the meeting</h4>
+            <p className="text-sm text-ink-soft">Fill in what you can now; either of you can add to it until you meet.</p>
+          </div>
+          {questions.map(q => (
+            <div key={q.id}>
+              <label className={label} htmlFor={`bq-${q.id}`}>{q.text}</label>
+              {q.hint && <p className="-mt-1 mb-1.5 text-sm text-ink-soft">{q.hint}</p>}
+              <Answer id={`bq-${q.id}`} type={q.type} value={valueOf(q)} editable onChange={v => setBefore(b => ({ ...b, [q.id]: v }))} />
+              {q.carry && !(q.id in before) && hasAnswer(prevHeld?.before?.[q.id]) && <p className="mt-1 text-sm text-ink-soft">From the last session. Change it if it has moved on.</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
       {error && <p className="text-sm font-semibold text-danger" role="alert">{error}</p>}
       <div className="flex flex-wrap gap-2">
         <button type="submit" className={btnPrimary} disabled={busy}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{existing ? 'Send new time' : 'Send booking'}</button>
@@ -331,6 +411,9 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
   const isCoach = me.id === s.coachId;
   const isPerson = me.id === s.personId;
   const other = isCoach ? s.personId : s.coachId;
+  // The person running it can switch to "Staff view": exactly what the staff member sees, read only.
+  const [asStaff, setAsStaff] = useState(false);
+  const preview = isCoach && asStaff;
   const qs = questionsFor(s, current);
   const prev = previousHeld(all, s);
   const [error, setError] = useState('');
@@ -360,11 +443,12 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
   // Carried answers (e.g. the 1-year goal) start from the last session until changed.
   const carried = (q: OtoQuestion) => (q.carry && prev ? prev.before?.[q.id] : undefined);
 
+  // Either of the two fills in any part (Joel, 2026-10-25): Before at any time, During once booked, After once held.
   const canEdit = (stage: OtoStage) => {
-    if (s.status === 'declined' || s.status === 'cancelled') return false;
-    if (stage === 'during') return isCoach && (s.status === 'booked' || s.status === 'held');
-    if (stage === 'before') return (isPerson && s.status !== 'held') || (isCoach && s.status !== 'requested');
-    return isPerson && s.status === 'held';
+    if (preview || s.status === 'declined' || s.status === 'cancelled') return false;
+    if (stage === 'during') return s.status === 'booked' || s.status === 'held';
+    if (stage === 'before') return true;
+    return s.status === 'held';
   };
 
   const run = async (patch: Record<string, any>, done?: string) => {
@@ -406,18 +490,26 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
             <p className="mt-1 text-[15px] text-ink-soft">
               {dayName(s.date)}, {formatDate(s.date)} · {time12(s.time)} (90 minutes) · {s.place || 'place not set'}
             </p>
+            <p className="text-sm text-ink-soft">Session {number ? `#${number}` : '–'} · asked for by {initiatorOf(s) === me.id && !preview ? 'you' : nameOf(initiatorOf(s))}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {isCoach && (
+            <span className="inline-flex rounded-lg border border-line p-0.5 text-sm font-semibold" role="group" aria-label="View">
+              <button type="button" onClick={() => setAsStaff(false)} className={`rounded-md px-2.5 py-1 ${!asStaff ? 'bg-accent-soft text-accent' : 'text-ink-soft'}`}>My view</button>
+              <button type="button" onClick={async () => { await auto.flush(); setAsStaff(true); }} className={`rounded-md px-2.5 py-1 ${asStaff ? 'bg-accent-soft text-accent' : 'text-ink-soft'}`}>Staff view</button>
+            </span>
+          )}
           <SaveState state={auto.state} />
           <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_TONE[s.status]}`}>{STATUS_LABELS[s.status]}</span>
         </div>
       </div>
 
       {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm font-semibold text-danger" role="alert">{error}</p>}
+      {preview && <p className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold text-ink-soft">Staff view: what {nameOf(s.personId)} sees. Read only.</p>}
 
       {/* Booking */}
-      {pending && (
+      {pending && !preview && (
         <section className={`${card} border-attention/40`}>
           {askedByMe ? (
             <p className="text-[15px]">Waiting for {nameOf(other)} to accept this time.</p>
@@ -445,7 +537,7 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
       )}
       {s.status === 'declined' && <p className={`${card} text-[15px] text-ink-soft`}>Declined{s.declineNote ? `: ${s.declineNote}` : '.'}</p>}
       {s.status === 'cancelled' && <p className={`${card} text-[15px] text-ink-soft`}>Cancelled by {nameOf(s.cancelledById || '')}.</p>}
-      {s.status === 'booked' && (
+      {s.status === 'booked' && !preview && (
         <div className="flex flex-wrap gap-2">
           <button type="button" className={btnSecondary} onClick={() => setChanging(true)}>Change the time</button>
           <button type="button" className={btnSecondary} disabled={busy} onClick={() => window.confirm('Cancel this 1-to-1? It comes off both calendars.') && run({ status: 'cancelled', cancelledById: me.id, cancelledAt: now() }, 'Cancelled.')}>Cancel 1-to-1</button>
@@ -469,7 +561,7 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
           {prev && (prev.actions || []).length > 0 && (
             <section className={card}>
               <h3 className="text-lg font-bold">Last session’s actions</h3>
-              <p className="mt-1 text-sm text-ink-soft">From 1-to-1 on {formatDate(prev.date)}. {isCoach ? 'Mark how each one went.' : ''}</p>
+              <p className="mt-1 text-sm text-ink-soft">From 1-to-1 on {formatDate(prev.date)}. Mark how each one went.</p>
               <ul className="mt-3 space-y-2">
                 {(prev.actions || []).map(a => {
                   const task = tasks.find(t => t.id === a.taskId);
@@ -481,7 +573,7 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
                       </span>
                       <span className="flex gap-1">
                         {(['done', 'progress', 'dropped'] as ActionReview[]).map(k => (
-                          <button key={k} type="button" disabled={!isCoach || s.status === 'requested'}
+                          <button key={k} type="button" disabled={preview || s.status === 'declined' || s.status === 'cancelled'}
                             onClick={() => setEdits(e => ({ ...e, review: { ...(s.review || {}), ...(e.review || {}), [a.id]: k } }))}
                             className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold disabled:cursor-default ${rv === k ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-soft'}`}>
                             {k === 'done' ? 'Done' : k === 'progress' ? 'In progress' : 'Dropped'}
@@ -502,9 +594,9 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
               actions={actions} onActions={(list) => setEdits(e => ({ ...e, actions: list }))} sessionId={s.id} tasks={tasks} flash={flash} sessionDate={s.date} />
           )}
 
-          {isCoach && (s.status === 'booked' || s.status === 'held') && <PrivateNotes sessionId={s.id} />}
+          {isCoach && !preview && (s.status === 'booked' || s.status === 'held') && <PrivateNotes sessionId={s.id} />}
 
-          {isCoach && s.status === 'booked' && (
+          {isCoach && !preview && s.status === 'booked' && (
             <div className="flex flex-wrap items-center gap-3">
               <button type="button" className={btnPrimary} disabled={busy} onClick={markHeld}><CheckCircle2 className="h-4 w-4" /> Meeting done</button>
               <span className="text-sm text-ink-soft">Then {nameOf(s.personId)} rates the session and ticks “I agree”.</span>
@@ -516,7 +608,7 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
             <>
               <StageCard stage="after" qs={qs.after} editable={canEdit('after')} valueAt={id => valueAt('after', id)} carried={() => undefined}
                 onChange={(id, v) => setAt(`after.${id}`, v)} me={me} nameOf={nameOf} personId={s.personId} coachId={s.coachId} />
-              <Ratings s={s} me={me} nameOf={nameOf} run={run} busy={busy} />
+              <Ratings key={String(preview)} s={s} me={me} nameOf={nameOf} run={run} busy={busy} preview={preview} />
             </>
           )}
         </>
@@ -691,11 +783,12 @@ function PrivateNotes({ sessionId }: { sessionId: string }) {
 }
 
 // ---------- Ratings and "I agree" ----------
-function Ratings({ s, me, nameOf, run, busy }: {
+function Ratings({ s, me, nameOf, run, busy, preview }: {
   s: OneToOne; me: Viewer; nameOf: (id: string) => string; run: (patch: Record<string, any>, done?: string) => Promise<void>; busy: boolean;
+  preview?: boolean;   // the coach's "Staff view": the staff member's side, read only
 }) {
-  const isCoach = me.id === s.coachId;
-  const isPerson = me.id === s.personId;
+  const isCoach = me.id === s.coachId && !preview;
+  const isPerson = me.id === s.personId || !!preview;
   const [stars, setStars] = useState(0);
   const [comment, setComment] = useState('');
   const [agreeNote, setAgreeNote] = useState('');
@@ -704,7 +797,7 @@ function Ratings({ s, me, nameOf, run, busy }: {
   const [coachComment, setCoachComment] = useState('');
   const [error, setError] = useState('');
   // The coach's rating: the coach always; the staff member only once they have rated (the rules check it too).
-  const canSeeCoach = isCoach || (isPerson && !!s.staffRating);
+  const canSeeCoach = me.id === s.coachId || (isPerson && !!s.staffRating);
   useEffect(() => {
     if (!canSeeCoach) return;
     return onSnapshot(doc(db, 'one_to_one_ratings', s.id), d => {
@@ -733,7 +826,7 @@ function Ratings({ s, me, nameOf, run, busy }: {
               <Stars value={s.staffRating} />
               {s.staffComment && <p className="mt-1 whitespace-pre-line text-[15px]">{s.staffComment}</p>}
             </>
-          ) : isPerson ? (
+          ) : isPerson && !preview ? (
             <div className="space-y-2">
               <Stars value={stars} onChange={setStars} />
               <textarea className={`${input} min-h-[4rem]`} value={comment} onChange={e => setComment(e.target.value)} placeholder="Anything to add? (optional)" aria-label="Your comment" />
@@ -765,7 +858,7 @@ function Ratings({ s, me, nameOf, run, busy }: {
       <div className="mt-5 border-t border-line pt-4">
         {s.agreedAt ? (
           <p className="text-[15px]"><CheckCircle2 className="mr-1 inline h-4 w-4 text-accent" />{isPerson ? 'You' : nameOf(s.personId)} agreed this is a fair record ({formatDate(s.agreedAt.slice(0, 10))}).{s.agreeComment ? ` Comment: ${s.agreeComment}` : ''}</p>
-        ) : isPerson ? (
+        ) : isPerson && !preview ? (
           <div className="space-y-2">
             <textarea className={`${input} min-h-[3.5rem]`} value={agreeNote} onChange={e => setAgreeNote(e.target.value)} placeholder="Anything you don't agree with? (optional)" aria-label="Comment on the record" />
             <button type="button" className={btnPrimary} disabled={busy} onClick={() => run({ agreedAt: new Date().toISOString(), agreeComment: agreeNote.trim() }, 'Thanks.')}>
@@ -903,5 +996,115 @@ function QuestionEditor({ stage, list, onChange }: { stage: OtoStage; list: OtoQ
       </ul>
       <button type="button" className={`${btnSecondary} mt-3`} onClick={() => onChange([...list, { id: newQuestionId(), text: '', type: 'long' }])}><Plus className="h-4 w-4" /> Add question</button>
     </section>
+  );
+}
+
+// ---------- Profile: getting to know the person (they and the person running 1-to-1s fill it in) ----------
+function ProfileView({ memberId, name, me, isCoach, onBack }: { memberId: string; name: string; me: Viewer; isCoach: boolean; onBack: () => void }) {
+  const today = todayIso();
+  const [p, setP] = useState<Record<string, any>>({});
+  const [savedJson, setSavedJson] = useState<string | null>(null);
+  const [notes, setNotes] = useState('');
+  const [savedNotes, setSavedNotes] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const firstLoad = useRef({ profile: false, notes: false });   // fill the boxes once; later saves don't overwrite typing
+  useEffect(() => onSnapshot(doc(db, 'staff_profiles', memberId), d => {
+    const v = (d.data() || {}) as Record<string, any>;
+    delete v.updatedAt; delete v.updatedById;
+    if (!firstLoad.current.profile) { firstLoad.current.profile = true; setP(v); }
+    setSavedJson(JSON.stringify(v));
+  }, e => setError(friendlyError(e))), [memberId]);
+  useEffect(() => {
+    if (!isCoach) return;
+    return onSnapshot(doc(db, 'staff_profile_notes', memberId), d => {
+      const v = String(d.data()?.notes || '');
+      if (!firstLoad.current.notes) { firstLoad.current.notes = true; setNotes(v); }
+      setSavedNotes(v);
+    }, () => {});
+  }, [memberId, isCoach]);
+  const auto = useAutoSave({
+    value: p, dirty: savedJson !== null && JSON.stringify(p) !== savedJson, enabled: savedJson !== null,
+    write: async (v) => { await setDoc(doc(db, 'staff_profiles', memberId), { ...clean(v), updatedAt: Date.now(), updatedById: me.id }); },
+    onSaved: setSavedJson,
+  });
+  const notesAuto = useAutoSave({
+    value: notes, dirty: isCoach && savedNotes !== null && notes !== savedNotes, enabled: isCoach && savedNotes !== null,
+    write: async (v) => { await setDoc(doc(db, 'staff_profile_notes', memberId), { notes: v, updatedAt: Date.now() }); },
+    onSaved: (json) => setSavedNotes(JSON.parse(json)),
+  });
+  const set = (id: string, v: any) => setP(cur => ({ ...cur, [id]: v }));
+  const dates: ImportantDate[] = Array.isArray(p.dates) ? p.dates : [];
+  const age = ageOf(p.birthday, today);
+  const since = sinceText(p.joined, today);
+  const coming = upcomingDates(p, today, 30);
+  const mine = me.id === memberId;
+
+  return (
+    <div className="space-y-5 font-sans text-ink">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={async () => { await auto.flush(); await notesAuto.flush(); onBack(); }} className="rounded-lg p-1.5 text-ink-soft hover:bg-surface" aria-label="Back"><ArrowLeft className="h-5 w-5" /></button>
+          <div>
+            <h2 className="text-2xl font-bold">{mine ? 'My profile' : `${name}’s profile`}</h2>
+            <p className="text-sm text-ink-soft">{mine ? 'Helps your 1-to-1s. Only you and the person running them see it.' : `${name} can see and add to this. Your notes at the bottom are only for you.`}</p>
+          </div>
+        </div>
+        <SaveState state={auto.state} />
+      </div>
+      {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm font-semibold text-danger" role="alert">{error}</p>}
+
+      {(age !== null || since || coming.length > 0) && (
+        <section className={`${card} flex flex-wrap gap-x-8 gap-y-2 text-[15px]`}>
+          {age !== null && <span><b>Age</b> {age}</span>}
+          {since && <span><b>With the company</b> {since}</span>}
+          {coming.length > 0 && <span><b>Coming up</b> {coming.map(c => `${c.label} ${c.inDays === 0 ? 'today' : `in ${c.inDays} day${c.inDays === 1 ? '' : 's'}`}`).join(' · ')}</span>}
+        </section>
+      )}
+
+      {PROFILE_FIELDS.map(group => (
+        <section key={group.title} className={card}>
+          <h3 className="text-lg font-bold">{group.title}</h3>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {group.fields.map(f => (
+              <div key={f.id} className={f.type === 'long' ? 'md:col-span-2' : ''}>
+                <label className={label} htmlFor={`pf-${f.id}`}>{f.label}</label>
+                {f.hint && <p className="-mt-1 mb-1.5 text-sm text-ink-soft">{f.hint}</p>}
+                {f.type === 'date'
+                  ? <input id={`pf-${f.id}`} type="date" className={input} value={p[f.id] || ''} onChange={e => set(f.id, e.target.value)} />
+                  : f.type === 'short'
+                    ? <input id={`pf-${f.id}`} className={input} value={p[f.id] || ''} onChange={e => set(f.id, e.target.value)} />
+                    : <textarea id={`pf-${f.id}`} className={`${input} min-h-[4.5rem]`} value={p[f.id] || ''} onChange={e => set(f.id, e.target.value)} />}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <section className={card}>
+        <h3 className="text-lg font-bold">Important dates</h3>
+        <p className="mt-1 text-sm text-ink-soft">Children’s birthdays, wedding anniversary… A reminder shows a week before. Birthday and joining date remind too.</p>
+        <ul className="mt-3 space-y-2">
+          {dates.map(d => (
+            <li key={d.id} className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
+              <input className={input} value={d.label} placeholder="What" aria-label="What" onChange={e => set('dates', dates.map(x => (x.id === d.id ? { ...x, label: e.target.value } : x)))} />
+              <input type="date" className={input} value={d.date} aria-label="Date" onChange={e => set('dates', dates.map(x => (x.id === d.id ? { ...x, date: e.target.value } : x)))} />
+              <button type="button" onClick={() => set('dates', dates.filter(x => x.id !== d.id))} className="rounded-lg p-2 text-ink-soft hover:bg-surface hover:text-danger" aria-label="Remove date"><Trash2 className="h-4 w-4" /></button>
+            </li>
+          ))}
+        </ul>
+        <button type="button" className={`${btnSecondary} mt-3`} onClick={() => set('dates', [...dates, { id: `d_${Date.now().toString(36)}`, label: '', date: '' }])}><Plus className="h-4 w-4" /> Add date</button>
+      </section>
+
+      {isCoach && !mine && (
+        <section className={`${card} border-dashed`}>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="flex items-center gap-2 text-lg font-bold"><Lock className="h-4 w-4" /> Your notes</h3>
+            <SaveState state={notesAuto.state} />
+          </div>
+          <p className="mt-1 text-sm text-ink-soft">Only you can see these.</p>
+          <textarea className={`${input} mt-3 min-h-[8rem]`} value={notes} onChange={e => setNotes(e.target.value)} aria-label="Your notes" />
+        </section>
+      )}
+    </div>
   );
 }

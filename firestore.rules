@@ -622,8 +622,9 @@ service cloud.firestore {
     // 1-to-1 sessions (2026-10-25, src/lib/oneToOne.ts). config/one_to_one names the person who runs them (coachId).
     // A session is read only by the two people in it (not Management). Either one asks for a time ('requested');
     // only the other one accepts or declines. A new date, time or place always goes back to 'requested', asked by
-    // whoever changed it. Only the person running them marks a session held. The staff member changes only their
-    // own answers (before, after), their rating, "I agree" and the booking; the rating and "I agree" once it is held.
+    // whoever changed it. Only the person running them marks a session held. Who first asked (initiatedById) never
+    // changes. Both fill in the questions and actions; the staff member never touches the coach's fields, and gives
+    // their rating and "I agree" only once it is held.
     function otoCoachId() {
       return get(/databases/$(database)/documents/config/one_to_one).data.get('coachId', '');
     }
@@ -656,13 +657,15 @@ service cloud.firestore {
         && request.resource.data.personId != request.resource.data.coachId
         && inIt(request.resource.data)
         && request.resource.data.requestedById == request.auth.uid
+        && request.resource.data.get('initiatedById', request.auth.uid) == request.auth.uid
         && request.resource.data.status == 'requested';
       allow update: if isMember() && inIt(resource.data)
         && request.resource.data.personId == resource.data.personId
         && request.resource.data.coachId == resource.data.coachId
+        && request.resource.data.get('initiatedById', '') == resource.data.get('initiatedById', '')
         && statusOk()
         && (request.auth.uid == resource.data.coachId
-            || (changed().hasOnly(['status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote',
+            || (changed().hasOnly(['during', 'actions', 'review', 'status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote',
                                    'cancelledById', 'cancelledAt', 'before', 'after', 'staffRating', 'staffComment', 'staffRatedAt',
                                    'agreedAt', 'agreeComment', 'updatedAt'])
                 && (!changed().hasAny(['after', 'staffRating', 'staffComment', 'staffRatedAt', 'agreedAt', 'agreeComment'])
@@ -670,6 +673,14 @@ service cloud.firestore {
                 && (!('staffRating' in changed())
                     || (request.resource.data.staffRating is int && request.resource.data.staffRating >= 1 && request.resource.data.staffRating <= 5))));
       allow delete: if false;
+    }
+    // Profile (getting to know them): the person themselves and the person running 1-to-1s read and write it.
+    // The coach's own notes about the person: the coach only.
+    match /staff_profiles/{memberId} {
+      allow read, write: if isMember() && (request.auth.uid == memberId || request.auth.uid == otoCoachId());
+    }
+    match /staff_profile_notes/{memberId} {
+      allow read, write: if isMember() && request.auth.uid == otoCoachId();
     }
     // The coach's private notes on a session: the person running it only, ever.
     match /one_to_one_private/{sessionId} {

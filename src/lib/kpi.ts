@@ -32,6 +32,7 @@ export interface KpiSources {
   activities?: any[];                      // tb_activities (Design new activity)
   rating360?: Record<string, Record<string, { avg: number; count: number }>>;   // 'YYYY-MM' → person → 360 rating (server)
   oneToOnes?: Record<string, string[]>;    // person → dates of 1-to-1 sessions held (server, lib/oneToOne.ts)
+  oneToOnesAsked?: Record<string, string[]>;   // person → dates of held 1-to-1s they asked for themselves
 }
 
 // The old templates, kept for screens that list them (they are now the ready-made sets in lib/kpiLibrary.ts).
@@ -395,6 +396,10 @@ const MEASURES: Record<string, (c: Ctx) => Measured> = {
   },
   one_to_ones: c => {
     const weeks = byWeek(c.sources.oneToOnes?.[c.rep.id] || [], c.prefix);
+    return { value: weeks.reduce((a, b) => a + b, 0), weeks };
+  },
+  one_to_ones_asked: c => {
+    const weeks = byWeek(c.sources.oneToOnesAsked?.[c.rep.id] || [], c.prefix);
     return { value: weeks.reduce((a, b) => a + b, 0), weeks };
   },
   rating_360: c => {
