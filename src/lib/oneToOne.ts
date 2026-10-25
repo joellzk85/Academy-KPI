@@ -1,7 +1,11 @@
 // 1-to-1 sessions (Joel, 2026-10-25). Everyone has a 90-minute 1-to-1 with the person who runs them (one coach,
 // picked in the 1-to-1 tab's Settings by the owner; no names in code) about their work or personal life.
 // Collections:
-//   config/one_to_one             { coachId, questions: { before, during, after } }: the coach edits the questions.
+//   config/one_to_one             { coachId, questions: { before, during, after }, templates, topics, revisitMonths }: the
+//                                 coach edits them. `questions` is the Standard template; `templates` are more sets.
+//   one_to_one_questions/{memberId} { templateId?, questions? }: which set this person is asked (Standard when none),
+//                                 or their own set. Only the coach writes it; the person reads it (Joel, 2026-10-25).
+//   staff_profile_history/{id}    who changed which profile answers, from what to what (one entry per visit).
 //   one_to_ones/{id}              the session: booking (date, time, place, status, who asked), answers to the Before
 //                                 (staff), During (coach) and After (staff) questions, actions, the staff member's
 //                                 rating and "I agree". Only the two people in it read it.
@@ -35,6 +39,16 @@ export interface OtoAction {
   taskId?: string;          // sent to the To-do list
 }
 
+export interface OtoTopic { id: string; text: string; byId: string }
+
+export interface OtoTemplate { id: string; name: string; questions: OtoQuestions }
+
+// Topics offered when booking; the coach edits the list in Settings. Anyone can also type their own.
+export const DEFAULT_TOPICS = ['Work and tasks', 'KPIs and results', 'Career and growth', 'Skills and learning', 'Wellbeing', 'Personal life', 'Team and colleagues', 'Feedback (both ways)'];
+
+// A profile not updated for this many months is flagged "Time to revisit" (editable in Settings).
+export const DEFAULT_REVISIT_MONTHS = 6;
+
 export type ActionReview = 'done' | 'progress' | 'dropped';
 
 export interface OneToOne {
@@ -58,6 +72,8 @@ export interface OneToOne {
   actions?: OtoAction[];
   review?: Record<string, ActionReview>;   // last session's actions, by action id
   questions?: OtoQuestions;  // kept when the meeting is marked done, so editing the questions later never changes it
+  extra?: OtoQuestions;      // questions the coach added to this session only
+  topics?: OtoTopic[];       // what each of them wants to talk about, picked when booking (either can add later)
   heldAt?: string;
   staffRating?: number;
   staffComment?: string;
@@ -123,21 +139,40 @@ export function readQuestions(v: any): OtoQuestions {
   return out;
 }
 
+export function readTemplates(v: any): OtoTemplate[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(t => t && typeof t.id === 'string' && t.id).map(t => ({ id: t.id, name: String(t.name || 'Untitled'), questions: readQuestions(t.questions) }));
+}
+
+export function readTopics(v: any): string[] {
+  return Array.isArray(v) ? v.filter(x => typeof x === 'string' && x.trim()) : DEFAULT_TOPICS;
+}
+
+// The question set a person is asked: their own set, else the template picked for them, else Standard.
+export interface PersonQuestions { templateId?: string; questions?: OtoQuestions }
+export function personQuestions(p: PersonQuestions | undefined, standard: OtoQuestions, templates: OtoTemplate[]): OtoQuestions {
+  if (p?.questions) return readQuestions(p.questions);
+  return templates.find(t => t.id === p?.templateId)?.questions || standard;
+}
+
 export function newQuestionId(): string {
   return `q_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
 // The questions a session shows: kept on it once held; before that the current ones, plus any already answered
 // that were since removed (so an answer is never lost).
+// The coach's questions for this session only are added at the end of each part.
 export function questionsFor(s: OneToOne, current: OtoQuestions): OtoQuestions {
   if (s.questions) return readQuestions(s.questions);
+  const extra = s.extra ? readQuestions(s.extra) : null;
   const out = {} as OtoQuestions;
   STAGES.forEach(st => {
     const answers = (s as any)[st] || {};
+    const asked = [...current[st], ...(extra && Array.isArray((s.extra as any)?.[st]) ? extra[st] : [])];
     const gone = Object.keys(answers)
-      .filter(k => !current[st].some(q => q.id === k) && hasAnswer(answers[k]))
+      .filter(k => !asked.some(q => q.id === k) && hasAnswer(answers[k]))
       .map(k => ({ id: k, text: 'An earlier question (since removed)', type: (typeof answers[k] === 'number' ? 'rating' : 'long') as OtoQType }));
-    out[st] = [...current[st], ...gone];
+    out[st] = [...asked, ...gone];
   });
   return out;
 }
@@ -266,6 +301,16 @@ export function clashesWith(date: string, time: string, items: BusyItem[], minut
     });
 }
 
+// All the words in a session (topics, answers, actions), for searching past 1-to-1s.
+export function sessionText(s: OneToOne): string {
+  const parts: string[] = (s.topics || []).map(t => t.text);
+  (['before', 'during', 'after'] as OtoStage[]).forEach(st => Object.values((s as any)[st] || {}).forEach(v => { if (typeof v === 'string') parts.push(v); }));
+  (s.actions || []).forEach(a => parts.push(a.text));
+  if (s.staffComment) parts.push(s.staffComment);
+  if (s.agreeComment) parts.push(s.agreeComment);
+  return parts.join('\n').toLowerCase();
+}
+
 // ---------- Profile (get to know them; the staff member and the coach fill it in) ----------
 export interface ProfileField { id: string; label: string; type: 'short' | 'long' | 'date'; hint?: string }
 export const PROFILE_FIELDS: { title: string; fields: ProfileField[] }[] = [
@@ -295,6 +340,25 @@ export const PROFILE_FIELDS: { title: string; fields: ProfileField[] }[] = [
     { id: 'booksEncouraged', label: 'Books encouraged to read', type: 'long' },
   ] },
 ];
+
+// What changed between two versions of a profile, by field, for the profile's history.
+export interface ProfileChange { field: string; label: string; from: string; to: string }
+const datesText = (v: any) => (Array.isArray(v) ? v.filter((d: any) => d?.label || d?.date).map((d: any) => `${d.label || '?'} ${d.date || ''}`.trim()).join('; ') : '');
+export function profileChanges(before: Record<string, any>, after: Record<string, any>): ProfileChange[] {
+  const out: ProfileChange[] = [];
+  PROFILE_FIELDS.forEach(g => g.fields.forEach(f => {
+    const a = String(before?.[f.id] ?? ''), b = String(after?.[f.id] ?? '');
+    if (a.trim() !== b.trim()) out.push({ field: f.id, label: f.label, from: a, to: b });
+  }));
+  const a = datesText(before?.dates), b = datesText(after?.dates);
+  if (a !== b) out.push({ field: 'dates', label: 'Important dates', from: a, to: b });
+  return out;
+}
+
+// Months since a time (ms), whole months.
+export function monthsSince(ms: number | undefined, now = Date.now()): number | null {
+  return ms ? Math.floor((now - ms) / (30.44 * 864e5)) : null;
+}
 
 export interface ImportantDate { id: string; label: string; date: string }   // date YYYY-MM-DD (the year is ignored for reminders)
 
@@ -335,5 +399,5 @@ export function upcomingDates(profile: any, today: string, days = 7): { label: s
 }
 
 // What a staff member may change on their own session (the rules check the same list).
-export const STAFF_KEYS = ['during', 'actions', 'review', 'status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote', 'cancelledById', 'cancelledAt',
+export const STAFF_KEYS = ['topics', 'during', 'actions', 'review', 'status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote', 'cancelledById', 'cancelledAt',
   'before', 'after', 'staffRating', 'staffComment', 'staffRatedAt', 'agreedAt', 'agreeComment', 'updatedAt'];

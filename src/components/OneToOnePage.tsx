@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
-import { ArrowDown, ArrowLeft, ArrowUp, CalendarPlus, Check, CheckCircle2, Circle, Loader2, Lock, Plus, Settings, Star, Trash2, X } from 'lucide-react';
+import { collection, deleteField, doc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { ArrowDown, ArrowLeft, ArrowUp, CalendarPlus, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, History, Loader2, Lock, Plus, Search, Settings, Star, Trash2, UserRound, X } from 'lucide-react';
 import { Representative } from '../types';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM, todayIso } from '../lib/deals';
@@ -14,10 +14,12 @@ import { isSuperManager } from '../lib/superManager';
 import { usePaged, sortList, type ListSort } from '../lib/listPaging';
 import { useOneToOnes } from '../lib/useOneToOnes';
 import {
-  ActionReview, OneToOne, OtoAction, OtoQType, OtoQuestion, OtoQuestions, OtoStage, STAGE_LABELS, STAGE_WHO, STATUS_LABELS, TYPE_LABELS,
-  ImportantDate, PROFILE_FIELDS, ageOf, dayName, hasAnswer, initiatorOf, newQuestionId, sinceText, upcomingDates, previousHeld, questionsFor, sessionNumbers, time12, waitingOn,
+  ActionReview, OneToOne, OtoAction, OtoQType, OtoQuestion, OtoQuestions, OtoStage, OtoTemplate, OtoTopic, PersonQuestions, STAGE_LABELS, STAGE_WHO, STATUS_LABELS, TYPE_LABELS,
+  ImportantDate, PROFILE_FIELDS, ProfileChange, ageOf, dayName, hasAnswer, initiatorOf, monthsSince, newQuestionId, profileChanges, sessionText, sinceText, upcomingDates,
+  previousHeld, questionsFor, sessionNumbers, time12, waitingOn,
 } from '../lib/oneToOne';
 import DraftBar from './DraftBar';
+import PanelResizer from './PanelResizer';
 import ListPager, { SortSelect } from './ListPager';
 
 // The 1-to-1 tab (Joel, 2026-10-25), on everyone's menu. Staff see only their own sessions; the person who runs
@@ -46,7 +48,7 @@ const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const one = (n: number | null) => (n === null ? '–' : (Math.round(n * 10) / 10).toString());
 
 export default function OneToOnePage({ me, reps, month, startPersonId }: { me: Viewer; reps: Representative[]; month: string; startPersonId?: string }) {
-  const { coachId, questions, sessions, loaded } = useOneToOnes(me.id);
+  const { coachId, questions, templates, topics, revisitMonths, people, questionsOf, sessions, loaded } = useOneToOnes(me.id);
   const team = useTeamList();
   const active = team.filter(p => p.active);
   const nameOf = (id: string) => team.find(p => p.id === id)?.name || 'Someone';
@@ -71,14 +73,15 @@ export default function OneToOnePage({ me, reps, month, startPersonId }: { me: V
   const needsMe = sessions.filter(s => waitingOn(s, me.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   if (showSettings && (isCoach || isOwner)) {
-    return <SettingsView coachId={coachId} questions={questions} isOwner={isOwner} isCoach={isCoach} onBack={() => setShowSettings(false)} />;
+    return <SettingsView coachId={coachId} questions={questions} templates={templates} topics={topics} revisitMonths={revisitMonths} people={people}
+      staff={active.filter(p => p.id !== coachId)} isOwner={isOwner} isCoach={isCoach} onBack={() => setShowSettings(false)} />;
   }
   if (profileOf) {
-    return <ProfileView memberId={profileOf} name={nameOf(profileOf)} me={me} isCoach={isCoach} onBack={() => setProfileOf(null)} />;
+    return <ProfileView memberId={profileOf} name={nameOf(profileOf)} me={me} isCoach={isCoach} nameOf={nameOf} revisitMonths={revisitMonths} onBack={() => setProfileOf(null)} />;
   }
   if (open) {
-    return <SessionView key={open.id} s={open} me={me} all={sessions} number={numbers[open.id] || 0} current={questions} nameOf={nameOf} tasks={tasks}
-      rep={reps.find(r => r.id === open.personId)} month={month} onBack={() => setOpenId(null)} flash={flash} />;
+    return <SessionView key={open.id} s={open} me={me} all={sessions} numbers={numbers} questionsOf={questionsOf} topicList={topics} nameOf={nameOf} tasks={tasks}
+      revisitMonths={revisitMonths} rep={reps.find(r => r.id === open.personId)} month={month} onBack={() => setOpenId(null)} onOpenProfile={setProfileOf} flash={flash} />;
   }
 
   const header = (
@@ -110,7 +113,7 @@ export default function OneToOnePage({ me, reps, month, startPersonId }: { me: V
 
       {booking && coachId && (
         <BookForm me={me} coachId={coachId} isCoach={isCoach} people={active.filter(p => p.id !== coachId)} startPerson={booking.personId}
-          sessions={sessions} current={questions} onClose={() => setBooking(null)} onBooked={(s) => { setBooking(null); flash(`1-to-1 asked for ${formatDate(s.date)}. ${nameOf(s.requestedById === s.coachId ? s.personId : s.coachId)} will be asked to accept.`); }} />
+          sessions={sessions} questionsOf={questionsOf} topicList={topics} onClose={() => setBooking(null)} onBooked={(s) => { setBooking(null); flash(`1-to-1 asked for ${formatDate(s.date)}. ${nameOf(s.requestedById === s.coachId ? s.personId : s.coachId)} will be asked to accept.`); }} />
       )}
 
       {needsMe.length > 0 && (
@@ -130,7 +133,7 @@ export default function OneToOnePage({ me, reps, month, startPersonId }: { me: V
       )}
 
       {isCoach && !personId && (
-        <Overview people={active.filter(p => p.id !== me.id)} sessions={sessions} tasks={tasks} onOpenPerson={setPersonId} onBook={(id) => setBooking({ personId: id })} />
+        <Overview people={active.filter(p => p.id !== me.id)} sessions={sessions} tasks={tasks} revisitMonths={revisitMonths} onOpenPerson={setPersonId} onBook={(id) => setBooking({ personId: id })} />
       )}
 
       {isCoach && personId && (
@@ -149,14 +152,16 @@ export default function OneToOnePage({ me, reps, month, startPersonId }: { me: V
 }
 
 // ---------- The coach's overview: one row per person ----------
-function Overview({ people, sessions, tasks, onOpenPerson, onBook }: {
-  people: { id: string; name: string }[]; sessions: OneToOne[]; tasks: any[]; onOpenPerson: (id: string) => void; onBook: (id: string) => void;
+function Overview({ people, sessions, tasks, revisitMonths, onOpenPerson, onBook }: {
+  people: { id: string; name: string }[]; sessions: OneToOne[]; tasks: any[]; revisitMonths: number; onOpenPerson: (id: string) => void; onBook: (id: string) => void;
 }) {
   const today = todayIso();
   // Birthdays, work anniversaries and other important dates in the next 7 days, from the profiles.
   const [profiles, setProfiles] = useState<Record<string, any>>({});
   useEffect(() => onSnapshot(collection(db, 'staff_profiles'), s => setProfiles(Object.fromEntries(s.docs.map(d => [d.id, d.data()]))), () => setProfiles({})), []);
   const coming = people.flatMap(p => upcomingDates(profiles[p.id], today, 7).map(c => ({ ...c, p })));
+  // Profiles never filled in, or not updated for the revisit period (Settings).
+  const revisit = people.filter(p => { const m = monthsSince(profiles[p.id]?.updatedAt); return m === null || m >= revisitMonths; });
   const rows = people.map(p => {
     const mine = sessions.filter(s => s.personId === p.id);
     const held = mine.filter(s => s.status === 'held').sort((a, b) => b.date.localeCompare(a.date));
@@ -181,6 +186,18 @@ function Overview({ people, sessions, tasks, onOpenPerson, onBook }: {
             <li key={i}><button type="button" className="font-semibold text-accent hover:underline" onClick={() => onOpenPerson(c.p.id)}>{c.p.name}</button>: {c.label}, {c.inDays === 0 ? 'today' : `${dayName(c.date)} ${formatDate(c.date)}`}</li>
           ))}
         </ul>
+      </section>
+    )}
+    {revisit.length > 0 && (
+      <section className={card}>
+        <h3 className="text-lg font-bold">Profiles to revisit</h3>
+        <p className="mt-1 text-sm text-ink-soft">Not filled in yet, or not updated for {revisitMonths} months or more. Go through them together at the next 1-to-1.</p>
+        <p className="mt-2 text-[15px]">
+          {revisit.map((p, i) => (
+            <React.Fragment key={p.id}>{i > 0 && ', '}<button type="button" className="font-semibold text-accent hover:underline" onClick={() => onOpenPerson(p.id)}>{p.name}</button>
+              <span className="text-sm text-ink-soft"> ({profiles[p.id]?.updatedAt ? `${monthsSince(profiles[p.id].updatedAt)} months` : 'empty'})</span></React.Fragment>
+          ))}
+        </p>
       </section>
     )}
     <section className={card}>
@@ -224,8 +241,14 @@ function SessionList({ title, sessions, numbers, me, onOpen, onBack, onBook, loa
   onOpen: (id: string) => void; onBack?: () => void; onBook?: () => void;
 }) {
   const [sortBy, setSortBy] = useState<ListSort>('newest');
-  const sorted = useMemo(() => sortList(sessions, sortBy, s => `${s.date}${s.time}`, s => `${s.date}T${s.time || '00:00'}`), [sessions, sortBy]);
-  const paged = usePaged(sorted, [sortBy]);
+  // Search past 1-to-1s by any word in their topics, answers or actions.
+  const [find, setFind] = useState('');
+  const found = useMemo(() => {
+    const words = find.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return words.length ? sessions.filter(s => { const t = sessionText(s); return words.every(w => t.includes(w)); }) : sessions;
+  }, [sessions, find]);
+  const sorted = useMemo(() => sortList(found, sortBy, s => `${s.date}${s.time}`, s => `${s.date}T${s.time || '00:00'}`), [found, sortBy]);
+  const paged = usePaged(sorted, [sortBy, find]);
   return (
     <section className={card}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -234,12 +257,17 @@ function SessionList({ title, sessions, numbers, me, onOpen, onBack, onBook, loa
           <h3 className="text-lg font-bold">{title}</h3>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <span className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+            <input className={`${input} w-56 pl-8`} value={find} onChange={e => setFind(e.target.value)} placeholder="Search what was said" aria-label="Search sessions" />
+          </span>
           <SortSelect value={sortBy} onChange={setSortBy} label="Sort sessions" />
           {onBook && <button type="button" className={btnPrimary} onClick={onBook}><CalendarPlus className="h-4 w-4" /> Book 1-to-1</button>}
         </div>
       </div>
       {!loaded ? <p className="mt-3 text-[15px] text-ink-soft"><Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> Loading…</p>
         : sessions.length === 0 ? <p className="mt-3 text-[15px] text-ink-soft">No sessions yet. Press Book 1-to-1 to ask for one.</p>
+        : found.length === 0 ? <p className="mt-3 text-[15px] text-ink-soft">No session mentions that.</p>
         : (
           <>
             <ul className="mt-3 divide-y divide-line">
@@ -248,6 +276,7 @@ function SessionList({ title, sessions, numbers, me, onOpen, onBack, onBook, loa
                   <button type="button" onClick={() => onOpen(s.id)} className="flex w-full flex-wrap items-center justify-between gap-2 py-3 text-left hover:bg-surface">
                     <span className="text-[15px]">
                       <b>{numbers[s.id] ? `#${numbers[s.id]}` : '–'}</b> · {dayName(s.date)}, {formatDate(s.date)}{s.time ? `, ${time12(s.time)}` : ''}{s.place ? ` · ${s.place}` : ''}
+                      {(s.topics || []).length > 0 && <span className="block text-sm text-ink-soft">{(s.topics || []).map(t => t.text).join(' · ')}</span>}
                     </span>
                     <span className="flex items-center gap-2">
                       {waitingOn(s, me.id) && <span className="text-sm font-semibold text-attention">{waitingOn(s, me.id)}</span>}
@@ -264,10 +293,10 @@ function SessionList({ title, sessions, numbers, me, onOpen, onBack, onBook, loa
   );
 }
 
-// ---------- Booking: date and time (checked against both calendars), place, then the before-meeting questions ----------
-function BookForm({ me, coachId, isCoach, people, startPerson, sessions, current, onClose, onBooked, existing }: {
+// ---------- Booking: date and time (checked against both calendars), place, topics, then the before-meeting questions ----------
+function BookForm({ me, coachId, isCoach, people, startPerson, sessions, questionsOf, topicList, onClose, onBooked, existing }: {
   me: Viewer; coachId: string; isCoach: boolean; people: { id: string; name: string }[]; startPerson: string; sessions: OneToOne[];
-  current?: OtoQuestions; onClose: () => void; onBooked: (s: OneToOne) => void; existing?: OneToOne;
+  questionsOf?: (personId: string) => OtoQuestions; topicList?: string[]; onClose: () => void; onBooked: (s: OneToOne) => void; existing?: OneToOne;
 }) {
   const last = existing || [...sessions].filter(s => s.place).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
   const [personId, setPersonId] = useState(existing?.personId || (isCoach ? (startPerson === me.id ? '' : startPerson) : me.id));
@@ -275,10 +304,11 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, current
   const [time, setTime] = useState(existing?.time || '10:00');
   const [place, setPlace] = useState(last?.place || '');
   const [before, setBefore] = useState<Record<string, any>>({});
+  const [topics, setTopics] = useState<OtoTopic[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const draft = useFormDraft(me.id, existing ? `oto:time:${existing.id}` : `oto:new:${isCoach ? personId || 'any' : me.id}`, { date, time, place, before },
-    v => { setDate(v.date); setTime(v.time); setPlace(v.place); setBefore(v.before || {}); });
+  const draft = useFormDraft(me.id, existing ? `oto:time:${existing.id}` : `oto:new:${isCoach ? personId || 'any' : me.id}`, { date, time, place, before, topics },
+    v => { setDate(v.date); setTime(v.time); setPlace(v.place); setBefore(v.before || {}); setTopics(Array.isArray(v.topics) ? v.topics : []); });
 
   // Calendar check: what's already on the staff member's and the coach's calendars in those 90 minutes.
   const [check, setCheck] = useState<{ state: 'idle' | 'checking' | 'done' | 'error'; clashes: { who: string; text: string }[] }>({ state: 'idle', clashes: [] });
@@ -296,7 +326,7 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, current
 
   // Carried answers (e.g. the goals) start from the person's last held session.
   const prevHeld = [...sessions].filter(s => s.personId === personId && s.status === 'held').sort((a, b) => b.date.localeCompare(a.date))[0];
-  const questions = (current?.before || []).filter(q => q.type !== 'actions');
+  const questions = (personId && questionsOf ? questionsOf(personId).before : []).filter(q => q.type !== 'actions');
   const valueOf = (q: OtoQuestion) => (q.id in before ? before[q.id] : q.carry ? prevHeld?.before?.[q.id] ?? '' : '');
 
   const save = async (e: React.FormEvent) => {
@@ -321,7 +351,7 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, current
         questions.forEach(q => { const v = valueOf(q); if (hasAnswer(v)) answers[q.id] = v; });
         const id = `oto_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
         const s: OneToOne = { id, personId, coachId, status: 'requested', date, time, place: place.trim(), requestedById: me.id, initiatedById: me.id,
-          requestedAt: now, before: answers, createdAt: Date.now(), updatedAt: Date.now() };
+          requestedAt: now, before: answers, topics, createdAt: Date.now(), updatedAt: Date.now() };
         await setDoc(doc(db, 'one_to_ones', id), s);
         draft.clear();
         onBooked(s);
@@ -377,6 +407,14 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, current
         </div>
       </div>
 
+      {!existing && personId && (
+        <div className="border-t border-line pt-4">
+          <h4 className="text-base font-bold">What do you want to talk about?</h4>
+          <p className="mb-2 text-sm text-ink-soft">Pick topics so you both come prepared. The other person can add theirs too.</p>
+          <TopicPicker list={topics} options={topicList || []} me={me} editable onChange={setTopics} />
+        </div>
+      )}
+
       {!existing && questions.length > 0 && personId && (
         <div className="space-y-4 border-t border-line pt-4">
           <div>
@@ -404,18 +442,56 @@ function BookForm({ me, coachId, isCoach, people, startPerson, sessions, current
   );
 }
 
-// ---------- One session ----------
-function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, onBack, flash }: {
-  s: OneToOne; me: Viewer; all: OneToOne[]; number: number; current: OtoQuestions; nameOf: (id: string) => string; tasks: any[];
-  rep?: Representative; month: string; onBack: () => void; flash: (t: string) => void;
+// ---------- Topics: what each of them wants to talk about. Tick from the list or type your own. ----------
+function TopicPicker({ list, options, me, editable, onChange, whoName }: {
+  list: OtoTopic[]; options: string[]; me: Viewer; editable: boolean; onChange: (l: OtoTopic[]) => void; whoName?: (id: string) => string;
 }) {
+  const [own, setOwn] = useState('');
+  const has = (t: string) => list.some(x => x.text.toLowerCase() === t.toLowerCase());
+  const add = (text: string) => { const t = text.trim(); if (t && !has(t)) onChange([...list, { id: `t_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, text: t, byId: me.id }]); };
+  const remove = (text: string) => onChange(list.filter(x => x.text.toLowerCase() !== text.toLowerCase()));
+  const extra = list.filter(x => !options.some(o => o.toLowerCase() === x.text.toLowerCase()));
+  if (!editable) {
+    return list.length
+      ? <ul className="flex flex-wrap gap-2">{list.map(t => <li key={t.id} className="rounded-full bg-accent-soft px-3 py-1 text-sm font-semibold text-accent">{t.text}{whoName && <span className="font-normal text-ink-soft"> · {whoName(t.byId)}</span>}</li>)}</ul>
+      : <p className="text-[15px] text-ink-soft">No topics picked.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        {[...options, ...extra.map(x => x.text)].map(o => {
+          const on = has(o);
+          const t = list.find(x => x.text.toLowerCase() === o.toLowerCase());
+          return (
+            <button key={o} type="button" onClick={() => (on ? remove(o) : add(o))} aria-pressed={on}
+              className={`rounded-full border px-3 py-1 text-sm font-semibold ${on ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-soft hover:bg-surface'}`}>
+              {on && <Check className="mr-1 inline h-3.5 w-3.5" />}{o}{on && t && whoName && <span className="font-normal text-ink-soft"> · {whoName(t.byId)}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex max-w-md gap-2">
+        <input className={input} value={own} onChange={e => setOwn(e.target.value)} placeholder="Something else? Type it" aria-label="Your own topic"
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(own); setOwn(''); } }} />
+        <button type="button" className={btnSecondary} onClick={() => { add(own); setOwn(''); }} disabled={!own.trim()}><Plus className="h-4 w-4" /> Add</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- One session ----------
+function SessionView({ s, me, all, numbers, questionsOf, topicList, nameOf, tasks, revisitMonths, rep, month, onBack, onOpenProfile, flash }: {
+  s: OneToOne; me: Viewer; all: OneToOne[]; numbers: Record<string, number>; questionsOf: (personId: string) => OtoQuestions; topicList: string[];
+  nameOf: (id: string) => string; tasks: any[]; revisitMonths: number; rep?: Representative; month: string;
+  onBack: () => void; onOpenProfile: (memberId: string) => void; flash: (t: string) => void;
+}) {
+  const number = numbers[s.id] || 0;
   const isCoach = me.id === s.coachId;
   const isPerson = me.id === s.personId;
   const other = isCoach ? s.personId : s.coachId;
   // The person running it can switch to "Staff view": exactly what the staff member sees, read only.
   const [asStaff, setAsStaff] = useState(false);
   const preview = isCoach && asStaff;
-  const qs = questionsFor(s, current);
   const prev = previousHeld(all, s);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -440,6 +516,19 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
   };
   const setAt = (path: string, v: any) => setEdits(e => ({ ...e, [path]: v }));
   const actions: OtoAction[] = 'actions' in edits ? edits.actions : (s.actions || []);
+  const topics: OtoTopic[] = 'topics' in edits ? edits.topics : (s.topics || []);
+  // The person's question set, plus the coach's questions for this session only (kept on the session once held).
+  const extra: OtoQuestions | undefined = 'extra' in edits ? edits.extra : s.extra;
+  const qs = questionsFor({ ...s, extra }, questionsOf(s.personId));
+  const canAddExtra = isCoach && !asStaff && !s.questions && (s.status === 'requested' || s.status === 'booked');
+  const extraOf = (st: OtoStage): OtoQuestion[] => (extra as any)?.[st] || [];
+  const setExtra = (st: OtoStage, list: OtoQuestion[]) => setEdits(e => ({ ...e, extra: { ...('extra' in e ? e.extra : s.extra || {}), [st]: list } }));
+  const extraProps = (st: OtoStage) => (s.questions ? {} : {
+    extraIds: new Set(extraOf(st).map(q => q.id)),
+    onAddExtra: canAddExtra ? (q: OtoQuestion) => setExtra(st, [...extraOf(st), q]) : undefined,
+    onRemoveExtra: canAddExtra ? (id: string) => setExtra(st, extraOf(st).filter(q => q.id !== id)) : undefined,
+  });
+  const [panel, setPanel] = useState<'profile' | 'past' | null>(null);
 
   // Carried answers (e.g. the 1-year goal) start from the last session until changed.
   const carried = (q: OtoQuestion) => (q.carry && prev ? prev.before?.[q.id] : undefined);
@@ -495,6 +584,8 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className={btnSecondary} onClick={() => setPanel('profile')}><UserRound className="h-4 w-4" /> {isPerson ? 'My profile' : 'Profile'}</button>
+          <button type="button" className={btnSecondary} onClick={() => setPanel('past')}><History className="h-4 w-4" /> Past 1-to-1s</button>
           {isCoach && (
             <span className="inline-flex rounded-lg border border-line p-0.5 text-sm font-semibold" role="group" aria-label="View">
               <button type="button" onClick={() => setAsStaff(false)} className={`rounded-md px-2.5 py-1 ${!asStaff ? 'bg-accent-soft text-accent' : 'text-ink-soft'}`}>My view</button>
@@ -549,10 +640,34 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
           onClose={() => setChanging(false)} onBooked={() => { setChanging(false); flash(`New time sent. ${nameOf(other)} will be asked to accept.`); }} />
       )}
 
+      {panel && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setPanel(null)}>
+          <PanelResizer />
+          <div className="h-full w-full overflow-y-auto bg-white p-6 shadow-xl md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw]" onClick={e => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <h3 className="text-lg font-bold">{panel === 'profile' ? (isPerson ? 'My profile' : `${nameOf(s.personId)}’s profile`) : 'Past 1-to-1s'}</h3>
+              <button type="button" onClick={() => setPanel(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
+            </div>
+            {panel === 'profile'
+              ? <ProfileSummary memberId={s.personId} nameOf={nameOf} revisitMonths={revisitMonths}
+                  onOpen={async () => { await auto.flush(); onOpenProfile(s.personId); }} />
+              : <PastSessions all={all} s={s} numbers={numbers} questionsOf={questionsOf} nameOf={nameOf} isCoach={isCoach && !preview} />}
+          </div>
+        </div>
+      )}
+
       {s.status !== 'declined' && s.status !== 'cancelled' && (
         <>
+          {/* What we'll talk about: picked when booking, either can add */}
+          <section className={card}>
+            <h3 className="text-lg font-bold">What we’ll talk about</h3>
+            <p className="mb-3 mt-1 text-sm text-ink-soft">Both of you can add topics before you meet.</p>
+            <TopicPicker list={topics} options={topicList} me={me} editable={!preview && s.status !== 'held'} whoName={id => (id === me.id && !preview ? 'you' : nameOf(id))}
+              onChange={l => setEdits(e => ({ ...e, topics: l }))} />
+          </section>
+
           {/* Before */}
-          <StageCard stage="before" qs={qs.before} editable={canEdit('before')} valueAt={id => valueAt('before', id)} carried={carried}
+          <StageCard stage="before" qs={qs.before} editable={canEdit('before')} valueAt={id => valueAt('before', id)} carried={carried} {...extraProps('before')}
             onChange={(id, v) => setAt(`before.${id}`, v)} me={me} nameOf={nameOf} personId={s.personId} coachId={s.coachId}
             note={pending ? 'You can start answering now; the questions are fully open once the time is accepted.' : undefined} />
 
@@ -590,7 +705,7 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
 
           {/* During */}
           {(s.status === 'booked' || s.status === 'held') && (
-            <StageCard stage="during" qs={qs.during} editable={canEdit('during')} valueAt={id => valueAt('during', id)} carried={() => undefined}
+            <StageCard stage="during" qs={qs.during} editable={canEdit('during')} valueAt={id => valueAt('during', id)} carried={() => undefined} {...extraProps('during')}
               onChange={(id, v) => setAt(`during.${id}`, v)} me={me} nameOf={nameOf} personId={s.personId} coachId={s.coachId}
               actions={actions} onActions={(list) => setEdits(e => ({ ...e, actions: list }))} sessionId={s.id} tasks={tasks} flash={flash} sessionDate={s.date} />
           )}
@@ -607,12 +722,134 @@ function SessionView({ s, me, all, number, current, nameOf, tasks, rep, month, o
           {/* After */}
           {s.status === 'held' && (
             <>
-              <StageCard stage="after" qs={qs.after} editable={canEdit('after')} valueAt={id => valueAt('after', id)} carried={() => undefined}
+              <StageCard stage="after" qs={qs.after} editable={canEdit('after')} valueAt={id => valueAt('after', id)} carried={() => undefined} {...extraProps('after')}
                 onChange={(id, v) => setAt(`after.${id}`, v)} me={me} nameOf={nameOf} personId={s.personId} coachId={s.coachId} />
               <Ratings key={String(preview)} s={s} me={me} nameOf={nameOf} run={run} busy={busy} preview={preview} />
             </>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// ---------- Side panel: the person's profile, to refer to during the meeting ----------
+function ProfileSummary({ memberId, nameOf, revisitMonths, onOpen }: { memberId: string; nameOf: (id: string) => string; revisitMonths: number; onOpen: () => void }) {
+  const today = todayIso();
+  const [p, setP] = useState<Record<string, any> | null>(null);
+  useEffect(() => onSnapshot(doc(db, 'staff_profiles', memberId), d => setP(d.data() || {}), () => setP({})), [memberId]);
+  if (!p) return <p className="text-[15px] text-ink-soft"><Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> Loading…</p>;
+  const age = ageOf(p.birthday, today);
+  const since = sinceText(p.joined, today);
+  const months = monthsSince(p.updatedAt);
+  const dates: ImportantDate[] = Array.isArray(p.dates) ? p.dates.filter((d: any) => d?.label) : [];
+  const groups = PROFILE_FIELDS.map(g => ({ ...g, fields: g.fields.filter(f => f.type !== 'date' && hasAnswer(p[f.id])) })).filter(g => g.fields.length);
+  return (
+    <div className="space-y-4 text-[15px]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-ink-soft">{p.updatedAt ? `Last updated by ${nameOf(p.updatedById)} on ${formatDate(new Date(p.updatedAt).toISOString().slice(0, 10))}` : 'Not filled in yet.'}</p>
+        <button type="button" className={btnSecondary} onClick={onOpen}>Open full profile</button>
+      </div>
+      {(months === null || months >= revisitMonths) && (
+        <p className="rounded-lg bg-attention/10 px-3 py-2 text-sm font-semibold text-attention">{months === null ? 'Fill it in together.' : `Not updated for ${months} months. Time to revisit it together.`}</p>
+      )}
+      {(age !== null || since) && <p>{age !== null && <><b>Age</b> {age}</>}{age !== null && since && ' · '}{since && <><b>With the company</b> {since}</>}</p>}
+      {groups.map(g => (
+        <div key={g.title}>
+          <h4 className="font-bold">{g.title}</h4>
+          <dl className="mt-1 space-y-1.5">
+            {g.fields.map(f => (
+              <div key={f.id}><dt className="text-sm text-ink-soft">{f.label}</dt><dd className="whitespace-pre-line">{String(p[f.id])}</dd></div>
+            ))}
+          </dl>
+        </div>
+      ))}
+      {dates.length > 0 && (
+        <div>
+          <h4 className="font-bold">Important dates</h4>
+          <ul className="mt-1 space-y-0.5">{dates.map(d => <li key={d.id}>{d.label}{d.date ? `: ${formatDate(d.date)}` : ''}</li>)}</ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Side panel: earlier held 1-to-1s with the same person, searchable, to pick up the conversation ----------
+function PastSessions({ all, s, numbers, questionsOf, nameOf, isCoach }: {
+  all: OneToOne[]; s: OneToOne; numbers: Record<string, number>; questionsOf: (personId: string) => OtoQuestions; nameOf: (id: string) => string; isCoach: boolean;
+}) {
+  const [find, setFind] = useState('');
+  const [openIds, setOpenIds] = useState<string[]>([]);
+  const words = find.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const list = all
+    .filter(x => x.personId === s.personId && x.id !== s.id && x.status === 'held')
+    .filter(x => { const t = sessionText(x); return words.every(w => t.includes(w)); })
+    .sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
+  const toggle = (id: string) => setOpenIds(ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]));
+  return (
+    <div className="space-y-3">
+      <span className="relative block">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+        <input className={`${input} pl-8`} value={find} onChange={e => setFind(e.target.value)} placeholder="Search what was said, e.g. promotion" aria-label="Search past sessions" />
+      </span>
+      {list.length === 0 && <p className="text-[15px] text-ink-soft">{words.length ? 'No earlier session mentions that.' : 'No earlier sessions held yet.'}</p>}
+      <ul className="space-y-2">
+        {list.map(x => {
+          const isOpen = openIds.includes(x.id) || (words.length > 0 && list.length <= 3);
+          return (
+            <li key={x.id} className="rounded-lg border border-line">
+              <button type="button" onClick={() => toggle(x.id)} className="flex w-full items-start gap-2 px-3 py-2.5 text-left hover:bg-surface" aria-expanded={isOpen}>
+                {isOpen ? <ChevronDown className="mt-0.5 h-4 w-4 shrink-0" /> : <ChevronRight className="mt-0.5 h-4 w-4 shrink-0" />}
+                <span className="text-[15px]">
+                  <b>#{numbers[x.id] || '–'}</b> · {dayName(x.date)}, {formatDate(x.date)}
+                  {(x.topics || []).length > 0 && <span className="block text-sm text-ink-soft">{(x.topics || []).map(t => t.text).join(' · ')}</span>}
+                </span>
+              </button>
+              {isOpen && <PastDetail x={x} questionsOf={questionsOf} nameOf={nameOf} isCoach={isCoach} />}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function PastDetail({ x, questionsOf, nameOf, isCoach }: { x: OneToOne; questionsOf: (personId: string) => OtoQuestions; nameOf: (id: string) => string; isCoach: boolean }) {
+  const qs = questionsFor(x, questionsOf(x.personId));
+  const [notes, setNotes] = useState('');
+  useEffect(() => {
+    if (!isCoach) return;
+    return onSnapshot(doc(db, 'one_to_one_private', x.id), d => setNotes(String(d.data()?.notes || '')), () => setNotes(''));
+  }, [x.id, isCoach]);
+  const show = (v: any, type: OtoQType) => (type === 'rating' ? `${v} of 5` : String(v));
+  return (
+    <div className="space-y-3 border-t border-line px-3 py-3 text-[15px]">
+      {(['before', 'during', 'after'] as OtoStage[]).map(st => {
+        const answered = qs[st].filter(q => q.type !== 'actions' && hasAnswer((x as any)[st]?.[q.id]));
+        if (!answered.length) return null;
+        return (
+          <div key={st}>
+            <h5 className="text-sm font-bold text-ink-soft">{STAGE_LABELS[st]}</h5>
+            <dl className="mt-1 space-y-1.5">
+              {answered.map(q => <div key={q.id}><dt className="text-sm text-ink-soft">{q.text}</dt><dd className="whitespace-pre-line">{show((x as any)[st][q.id], q.type)}</dd></div>)}
+            </dl>
+          </div>
+        );
+      })}
+      {(x.actions || []).length > 0 && (
+        <div>
+          <h5 className="text-sm font-bold text-ink-soft">Actions</h5>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">{(x.actions || []).map(a => <li key={a.id}>{a.text} <span className="text-sm text-ink-soft">· {nameOf(a.ownerId)}{a.due ? ` · due ${formatDate(a.due)}` : ''}</span></li>)}</ul>
+        </div>
+      )}
+      {(x.staffRating || x.agreeComment) && (
+        <p className="text-sm text-ink-soft">{x.staffRating ? `${nameOf(x.personId)} rated it ${x.staffRating} of 5${x.staffComment ? `: ${x.staffComment}` : ''}. ` : ''}{x.agreeComment ? `Comment on the record: ${x.agreeComment}` : ''}</p>
+      )}
+      {isCoach && notes && (
+        <div className="rounded-lg border border-dashed border-line px-3 py-2">
+          <h5 className="flex items-center gap-1 text-sm font-bold text-ink-soft"><Lock className="h-3.5 w-3.5" /> Your private notes</h5>
+          <p className="mt-1 whitespace-pre-line">{notes}</p>
+        </div>
       )}
     </div>
   );
@@ -626,12 +863,22 @@ function SaveState({ state }: { state: { status: string; error?: string } }) {
 }
 
 // ---------- One stage's questions ----------
-function StageCard({ stage, qs, editable, valueAt, carried, onChange, me, nameOf, personId, coachId, note, actions, onActions, sessionId, tasks, flash, sessionDate }: {
+function StageCard({ stage, qs, editable, valueAt, carried, onChange, me, nameOf, personId, coachId, note, actions, onActions, sessionId, tasks, flash, sessionDate,
+  extraIds, onAddExtra, onRemoveExtra }: {
   stage: OtoStage; qs: OtoQuestion[]; editable: boolean; valueAt: (id: string) => any; carried: (q: OtoQuestion) => any;
   onChange: (id: string, v: any) => void; me: Viewer; nameOf: (id: string) => string; personId: string; coachId: string; note?: string;
   actions?: OtoAction[]; onActions?: (list: OtoAction[]) => void; sessionId?: string; tasks?: any[]; flash?: (t: string) => void; sessionDate?: string;
+  extraIds?: Set<string>; onAddExtra?: (q: OtoQuestion) => void; onRemoveExtra?: (id: string) => void;   // the coach's questions for this session only
 }) {
-  if (!qs.length) return null;
+  const [adding, setAdding] = useState<{ text: string; type: OtoQType } | null>(null);
+  if (!qs.length && !onAddExtra) return null;
+  const types = (Object.keys(TYPE_LABELS) as OtoQType[]).filter(t => t !== 'actions');
+  const thisOnly = (q: OtoQuestion) => extraIds?.has(q.id) && (
+    <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-xs font-semibold text-ink-soft">
+      This session only
+      {onRemoveExtra && <button type="button" onClick={() => window.confirm('Remove this question from this session?') && onRemoveExtra(q.id)} className="hover:text-danger" aria-label="Remove question"><X className="h-3 w-3" /></button>}
+    </span>
+  );
   return (
     <section className={card}>
       <h3 className="text-lg font-bold">{STAGE_LABELS[stage]}</h3>
@@ -649,7 +896,7 @@ function StageCard({ stage, qs, editable, valueAt, carried, onChange, me, nameOf
           const c = !hasAnswer(v) ? carried(q) : undefined;
           return (
             <div key={q.id}>
-              <label className={label} htmlFor={`q-${stage}-${q.id}`}>{q.text}</label>
+              <label className={label} htmlFor={`q-${stage}-${q.id}`}>{q.text}{thisOnly(q)}</label>
               {q.hint && <p className="-mt-1 mb-1.5 text-sm text-ink-soft">{q.hint}</p>}
               <Answer id={`q-${stage}-${q.id}`} type={q.type} value={v ?? c ?? ''} editable={editable} onChange={x => onChange(q.id, x)} />
               {hasAnswer(c) && <p className="mt-1 text-sm text-ink-soft">From your last session. Change it if it has moved on.</p>}
@@ -657,6 +904,20 @@ function StageCard({ stage, qs, editable, valueAt, carried, onChange, me, nameOf
           );
         })}
       </div>
+      {onAddExtra && (adding ? (
+        <div className="mt-4 grid gap-2 rounded-lg border border-dashed border-line p-3 sm:grid-cols-[1fr_12rem_auto_auto]">
+          <input className={input} value={adding.text} onChange={e => setAdding({ ...adding, text: e.target.value })} placeholder="Your question for this session" aria-label="Question" autoFocus />
+          <select className={input} value={adding.type} onChange={e => setAdding({ ...adding, type: e.target.value as OtoQType })} aria-label="Answer type">
+            {types.map(t => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+          </select>
+          <button type="button" className={btnPrimary} disabled={!adding.text.trim()} onClick={() => { onAddExtra({ id: newQuestionId(), text: adding.text.trim(), type: adding.type }); setAdding(null); }}>Add</button>
+          <button type="button" className={btnSecondary} onClick={() => setAdding(null)}>Cancel</button>
+        </div>
+      ) : (
+        <button type="button" className="mt-4 text-sm font-semibold text-accent hover:underline" onClick={() => setAdding({ text: '', type: 'long' })}>
+          <Plus className="mr-1 inline h-4 w-4" />Question for this session only
+        </button>
+      ))}
     </section>
   );
 }
@@ -898,20 +1159,75 @@ function KpiSnapshot({ rep, month }: { rep: Representative; month: string }) {
   );
 }
 
-// ---------- Settings: the questions (the owner always runs 1-to-1s) ----------
-function SettingsView({ coachId, questions, isOwner, isCoach, onBack }: {
-  coachId: string; questions: OtoQuestions; isOwner: boolean; isCoach: boolean; onBack: () => void;
+// ---------- Settings: question sets (Standard and templates), each person's set, topics, profile revisit ----------
+// Only the person running 1-to-1s sets the questions (Joel, 2026-10-25).
+function SettingsView({ coachId, questions, templates, topics, revisitMonths, people, staff, isOwner, isCoach, onBack }: {
+  coachId: string; questions: OtoQuestions; templates: OtoTemplate[]; topics: string[]; revisitMonths: number; people: Record<string, PersonQuestions>;
+  staff: { id: string; name: string }[]; isOwner: boolean; isCoach: boolean; onBack: () => void;
 }) {
-  const [qs, setQs] = useState<OtoQuestions>(questions);
-  const [savedJson, setSavedJson] = useState(JSON.stringify(questions));
+  const start = { questions, templates, topics, revisitMonths };
+  const [cfg, setCfg] = useState(start);
+  const [savedJson, setSavedJson] = useState(JSON.stringify(start));
   const canEditQs = isCoach || isOwner;
   const auto = useAutoSave({
-    value: qs, dirty: JSON.stringify(qs) !== savedJson, enabled: canEditQs && !!coachId,
-    write: async (v) => { await setDoc(doc(db, 'config', 'one_to_one'), { questions: clean(v), updatedAt: Date.now() }, { merge: true }); },
+    value: cfg, dirty: JSON.stringify(cfg) !== savedJson, enabled: canEditQs && !!coachId,
+    write: async (v) => { await setDoc(doc(db, 'config', 'one_to_one'), { ...clean(v), updatedAt: Date.now() }, { merge: true }); },
     onSaved: setSavedJson,
   });
-  const setStage = (st: OtoStage, list: OtoQuestion[]) => setQs(q => ({ ...q, [st]: list }));
+  // Which set is being edited: 'standard', a template's id, or 'person:<memberId>' (that person's own set).
+  const [which, setWhich] = useState('standard');
+  const [error, setError] = useState('');
+  const personEditing = which.startsWith('person:') ? which.slice(7) : '';
+  const tpl = cfg.templates.find(t => t.id === which);
+  const setTemplates = (list: OtoTemplate[]) => setCfg(c => ({ ...c, templates: list }));
+  const shown: OtoQuestions = tpl ? tpl.questions : cfg.questions;
+  const setStage = (st: OtoStage, list: OtoQuestion[]) => {
+    if (tpl) setTemplates(cfg.templates.map(t => (t.id === tpl.id ? { ...t, questions: { ...t.questions, [st]: list } } : t)));
+    else setCfg(c => ({ ...c, questions: { ...c.questions, [st]: list } }));
+  };
+  const newTemplate = () => {
+    const name = window.prompt('Name of the new template (e.g. New joiner, Sales rep). It starts as a copy of the set shown.');
+    if (!name?.trim()) return;
+    const t: OtoTemplate = { id: `tpl_${Date.now().toString(36)}`, name: name.trim(), questions: JSON.parse(JSON.stringify(shown)) };
+    setTemplates([...cfg.templates, t]);
+    setWhich(t.id);
+  };
+  const renameTemplate = () => {
+    if (!tpl) return;
+    const name = window.prompt('New name', tpl.name);
+    if (name?.trim()) setTemplates(cfg.templates.map(t => (t.id === tpl.id ? { ...t, name: name.trim() } : t)));
+  };
+  const deleteTemplate = () => {
+    if (!tpl) return;
+    const using = staff.filter(p => people[p.id]?.templateId === tpl.id && !people[p.id]?.questions).length;
+    if (!window.confirm(`Delete the template "${tpl.name}"?${using ? ` ${using} ${using === 1 ? 'person uses' : 'people use'} it and will be asked the Standard set.` : ''} Sessions already held keep their questions.`)) return;
+    setTemplates(cfg.templates.filter(t => t.id !== tpl.id));
+    setWhich('standard');
+  };
 
+  // A person's set: a template (or Standard), or their own copy to change just for them.
+  const writePerson = async (memberId: string, v: Record<string, any>) => {
+    setError('');
+    try {
+      await setDoc(doc(db, 'one_to_one_questions', memberId), { ...v, updatedAt: Date.now() }, { merge: true });
+    } catch (err) { setError(friendlyError(err)); }
+  };
+  const pickFor = (memberId: string, value: string) => {
+    if (value === 'own') return;
+    if (people[memberId]?.questions && !window.confirm('Go back to a template? Their own set of questions is removed (sessions already held keep theirs).')) return;
+    writePerson(memberId, { templateId: value === 'standard' ? deleteField() : value, questions: deleteField() });
+    if (personEditing === memberId) setWhich('standard');
+  };
+  const customise = async (memberId: string) => {
+    const from = cfg.templates.find(t => t.id === people[memberId]?.templateId)?.questions || cfg.questions;
+    await writePerson(memberId, { questions: clean(from) });
+    setWhich(`person:${memberId}`);
+  };
+
+  const [newTopic, setNewTopic] = useState('');
+  const addTopic = () => { const t = newTopic.trim(); if (t && !cfg.topics.some(x => x.toLowerCase() === t.toLowerCase())) setCfg(c => ({ ...c, topics: [...c.topics, t] })); setNewTopic(''); };
+
+  if (!canEditQs || !coachId) return null;
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex items-center justify-between gap-2">
@@ -921,12 +1237,116 @@ function SettingsView({ coachId, questions, isOwner, isCoach, onBack }: {
         </div>
         <SaveState state={auto.state} />
       </div>
+      {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm font-semibold text-danger" role="alert">{error}</p>}
 
-      {canEditQs && coachId && (['before', 'during', 'after'] as OtoStage[]).map(st => (
-        <QuestionEditor key={st} stage={st} list={qs[st]} onChange={l => setStage(st, l)} />
-      ))}
-      {canEditQs && coachId && <p className="text-sm text-ink-soft">Changes save themselves. Sessions already held keep the questions they were asked with.</p>}
+      {/* Each person's question set */}
+      <section className={card}>
+        <h3 className="text-lg font-bold">Each person’s questions</h3>
+        <p className="mt-1 text-sm text-ink-soft">Pick a template for each person, or make them their own set. Only you can change questions. You can also add a question to one session only, inside that session.</p>
+        <ul className="mt-3 divide-y divide-line">
+          {staff.map(p => {
+            const pq = people[p.id];
+            return (
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                <span className="text-[15px] font-semibold">{p.name}</span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <select className={`${input} w-52`} value={pq?.questions ? 'own' : pq?.templateId && cfg.templates.some(t => t.id === pq.templateId) ? pq.templateId : 'standard'}
+                    onChange={e => pickFor(p.id, e.target.value)} aria-label={`Questions for ${p.name}`}>
+                    <option value="standard">Standard</option>
+                    {cfg.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {pq?.questions && <option value="own">Own set</option>}
+                  </select>
+                  {pq?.questions
+                    ? <button type="button" className={btnSecondary} onClick={() => setWhich(`person:${p.id}`)}>Edit their set</button>
+                    : <button type="button" className={btnSecondary} onClick={() => customise(p.id)}>Change just for them</button>}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      {/* The question set being edited */}
+      {personEditing ? (
+        <PersonSetEditor key={personEditing} memberId={personEditing} name={staff.find(p => p.id === personEditing)?.name || 'Someone'}
+          from={people[personEditing]?.questions} onDone={() => setWhich('standard')} />
+      ) : (
+        <>
+          <section className={card}>
+            <h3 className="text-lg font-bold">Question templates</h3>
+            <p className="mt-1 text-sm text-ink-soft">Standard is the starting set. Make more for different people or needs; changes save themselves.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <select className={`${input} w-60`} value={which} onChange={e => setWhich(e.target.value)} aria-label="Template to edit">
+                <option value="standard">Standard</option>
+                {cfg.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <button type="button" className={btnSecondary} onClick={newTemplate}><Plus className="h-4 w-4" /> New template</button>
+              {tpl && <button type="button" className={btnSecondary} onClick={renameTemplate}>Rename</button>}
+              {tpl && <button type="button" className={btnSecondary} onClick={deleteTemplate}><Trash2 className="h-4 w-4" /> Delete</button>}
+            </div>
+          </section>
+          {(['before', 'during', 'after'] as OtoStage[]).map(st => (
+            <QuestionEditor key={`${which}-${st}`} stage={st} list={shown[st]} onChange={l => setStage(st, l)} />
+          ))}
+          <p className="text-sm text-ink-soft">Sessions already held keep the questions they were asked with.</p>
+        </>
+      )}
+
+      {/* Topics */}
+      <section className={card}>
+        <h3 className="text-lg font-bold">Topics to pick from when booking</h3>
+        <p className="mt-1 text-sm text-ink-soft">Both of you tick these when booking, and can type your own.</p>
+        <ul className="mt-3 flex flex-wrap gap-2">
+          {cfg.topics.map(t => (
+            <li key={t} className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1 text-sm font-semibold">
+              {t}
+              <button type="button" onClick={() => setCfg(c => ({ ...c, topics: c.topics.filter(x => x !== t) }))} className="text-ink-soft hover:text-danger" aria-label={`Remove ${t}`}><X className="h-3.5 w-3.5" /></button>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-3 flex max-w-md gap-2">
+          <input className={input} value={newTopic} onChange={e => setNewTopic(e.target.value)} placeholder="New topic" aria-label="New topic"
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTopic(); } }} />
+          <button type="button" className={btnSecondary} onClick={addTopic} disabled={!newTopic.trim()}><Plus className="h-4 w-4" /> Add</button>
+        </div>
+      </section>
+
+      {/* Profile revisit */}
+      <section className={card}>
+        <h3 className="text-lg font-bold">Revisiting profiles</h3>
+        <label className="mt-2 flex flex-wrap items-center gap-2 text-[15px]">
+          Remind me to go through a profile again when it hasn’t been updated for
+          <input type="number" min={1} max={36} className={`${input} w-20`} value={cfg.revisitMonths}
+            onChange={e => setCfg(c => ({ ...c, revisitMonths: Math.max(1, Math.min(36, Number(e.target.value) || 1)) }))} aria-label="Months" />
+          months
+        </label>
+      </section>
     </div>
+  );
+}
+
+// One person's own question set (only the person running 1-to-1s changes it).
+function PersonSetEditor({ memberId, name, from, onDone }: { memberId: string; name: string; from?: OtoQuestions; onDone: () => void }) {
+  const [qs, setQs] = useState<OtoQuestions>(from || { before: [], during: [], after: [] });
+  const [savedJson, setSavedJson] = useState(JSON.stringify(qs));
+  const auto = useAutoSave({
+    value: qs, dirty: JSON.stringify(qs) !== savedJson, enabled: true,
+    write: async (v) => { await setDoc(doc(db, 'one_to_one_questions', memberId), { questions: clean(v), updatedAt: Date.now() }, { merge: true }); },
+    onSaved: setSavedJson,
+  });
+  return (
+    <>
+      <section className={`${card} flex flex-wrap items-center justify-between gap-2`}>
+        <div>
+          <h3 className="text-lg font-bold">{name}’s own questions</h3>
+          <p className="mt-1 text-sm text-ink-soft">Only {name} is asked these. Changes save themselves.</p>
+        </div>
+        <span className="flex items-center gap-2"><SaveState state={auto.state} /><button type="button" className={btnSecondary} onClick={async () => { await auto.flush(); onDone(); }}>Done</button></span>
+      </section>
+      {(['before', 'during', 'after'] as OtoStage[]).map(st => (
+        <QuestionEditor key={st} stage={st} list={qs[st]} onChange={l => setQs(q => ({ ...q, [st]: l }))} />
+      ))}
+    </>
   );
 }
 
@@ -977,9 +1397,21 @@ function QuestionEditor({ stage, list, onChange }: { stage: OtoStage; list: OtoQ
 }
 
 // ---------- Profile: getting to know the person (they and the person running 1-to-1s fill it in) ----------
-function ProfileView({ memberId, name, me, isCoach, onBack }: { memberId: string; name: string; me: Viewer; isCoach: boolean; onBack: () => void }) {
+// Every change is kept in its history (who, when, from what to what; Joel, 2026-10-25): one entry per visit, added to
+// as you type, so it reads as "what changed this time".
+function ProfileView({ memberId, name, me, isCoach, nameOf, revisitMonths, onBack }: {
+  memberId: string; name: string; me: Viewer; isCoach: boolean; nameOf: (id: string) => string; revisitMonths: number; onBack: () => void;
+}) {
   const today = todayIso();
   const [p, setP] = useState<Record<string, any>>({});
+  const [meta, setMeta] = useState<{ updatedAt?: number; updatedById?: string }>({});
+  const baseline = useRef<Record<string, any> | null>(null);   // the profile as it was when opened
+  const histId = useRef('');
+  const [history, setHistory] = useState<{ id: string; byId: string; at: number; changes: ProfileChange[] }[]>([]);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => onSnapshot(query(collection(db, 'staff_profile_history'), where('memberId', '==', memberId)),
+    s => setHistory(s.docs.map(d => ({ ...(d.data() as any), id: d.id })).filter(h => Array.isArray(h.changes) && h.changes.length).sort((a, b) => (b.at || 0) - (a.at || 0))),
+    () => setHistory([])), [memberId]);
   const [savedJson, setSavedJson] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [savedNotes, setSavedNotes] = useState<string | null>(null);
@@ -987,8 +1419,9 @@ function ProfileView({ memberId, name, me, isCoach, onBack }: { memberId: string
   const firstLoad = useRef({ profile: false, notes: false });   // fill the boxes once; later saves don't overwrite typing
   useEffect(() => onSnapshot(doc(db, 'staff_profiles', memberId), d => {
     const v = (d.data() || {}) as Record<string, any>;
+    setMeta({ updatedAt: v.updatedAt, updatedById: v.updatedById });
     delete v.updatedAt; delete v.updatedById;
-    if (!firstLoad.current.profile) { firstLoad.current.profile = true; setP(v); }
+    if (!firstLoad.current.profile) { firstLoad.current.profile = true; setP(v); baseline.current = v; }
     setSavedJson(JSON.stringify(v));
   }, e => setError(friendlyError(e))), [memberId]);
   useEffect(() => {
@@ -1001,9 +1434,23 @@ function ProfileView({ memberId, name, me, isCoach, onBack }: { memberId: string
   }, [memberId, isCoach]);
   const auto = useAutoSave({
     value: p, dirty: savedJson !== null && JSON.stringify(p) !== savedJson, enabled: savedJson !== null,
-    write: async (v) => { await setDoc(doc(db, 'staff_profiles', memberId), { ...clean(v), updatedAt: Date.now(), updatedById: me.id }); },
+    write: async (v) => {
+      await setDoc(doc(db, 'staff_profiles', memberId), { ...clean(v), updatedAt: Date.now(), updatedById: me.id });
+      // The history entry of this visit: what is different from when it was opened.
+      const changes = profileChanges(baseline.current || {}, v);
+      if (!histId.current && !changes.length) return;
+      const entry = { changes: clean(changes), at: Date.now() };
+      try {
+        if (histId.current) { await updateDoc(doc(db, 'staff_profile_history', histId.current), entry); return; }
+      } catch { /* this visit's entry is too old to add to: start a new one */ }
+      const id = `${memberId}_${Date.now().toString(36)}`;
+      await setDoc(doc(db, 'staff_profile_history', id), { ...entry, memberId, byId: me.id, startedAt: serverTimestamp() });
+      histId.current = id;
+    },
     onSaved: setSavedJson,
   });
+  const months = monthsSince(meta.updatedAt);
+  const short = (t: string) => (t.length > 140 ? `${t.slice(0, 140)}…` : t) || '(empty)';
   const notesAuto = useAutoSave({
     value: notes, dirty: isCoach && savedNotes !== null && notes !== savedNotes, enabled: isCoach && savedNotes !== null,
     write: async (v) => { await setDoc(doc(db, 'staff_profile_notes', memberId), { notes: v, updatedAt: Date.now() }); },
@@ -1029,6 +1476,11 @@ function ProfileView({ memberId, name, me, isCoach, onBack }: { memberId: string
         <SaveState state={auto.state} />
       </div>
       {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm font-semibold text-danger" role="alert">{error}</p>}
+
+      <p className="text-sm text-ink-soft">{meta.updatedAt ? `Last updated by ${meta.updatedById === me.id ? 'you' : nameOf(meta.updatedById || '')} on ${formatDate(new Date(meta.updatedAt).toISOString().slice(0, 10))}.` : 'Not filled in yet.'} Fill it in once; update it whenever something changes.</p>
+      {isCoach && !mine && (months === null || months >= revisitMonths) && (
+        <p className="rounded-lg bg-attention/10 px-3 py-2 text-sm font-semibold text-attention">{months === null ? 'Fill it in together at the next 1-to-1.' : `Not updated for ${months} months. Time to revisit it together.`}</p>
+      )}
 
       {(age !== null || since || coming.length > 0) && (
         <section className={`${card} flex flex-wrap gap-x-8 gap-y-2 text-[15px]`}>
@@ -1070,6 +1522,26 @@ function ProfileView({ memberId, name, me, isCoach, onBack }: { memberId: string
           ))}
         </ul>
         <button type="button" className={`${btnSecondary} mt-3`} onClick={() => set('dates', [...dates, { id: `d_${Date.now().toString(36)}`, label: '', date: '' }])}><Plus className="h-4 w-4" /> Add date</button>
+      </section>
+
+      <section className={card}>
+        <h3 className="flex items-center gap-2 text-lg font-bold"><History className="h-4 w-4" /> History</h3>
+        <p className="mt-1 text-sm text-ink-soft">Every change: who made it, when, and what it was before.</p>
+        {history.length === 0 ? <p className="mt-3 text-[15px] text-ink-soft">No changes yet.</p> : (
+          <ul className="mt-3 space-y-3">
+            {(showAll ? history : history.slice(0, 10)).map(h => (
+              <li key={h.id} className="rounded-lg border border-line px-3 py-2">
+                <p className="text-sm font-semibold">{h.byId === me.id ? 'You' : nameOf(h.byId)} · {new Date(h.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
+                <ul className="mt-1 space-y-1 text-[15px]">
+                  {h.changes.map(c => (
+                    <li key={c.field}><b>{c.label}:</b> <span className="text-ink-soft line-through">{short(c.from)}</span> → <span className="whitespace-pre-line">{short(c.to)}</span></li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+        {history.length > 10 && <button type="button" className="mt-2 text-sm font-semibold text-accent hover:underline" onClick={() => setShowAll(v => !v)}>{showAll ? 'Show fewer' : `Show all ${history.length}`}</button>}
       </section>
 
       {isCoach && !mine && (

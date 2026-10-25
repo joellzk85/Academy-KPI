@@ -665,13 +665,35 @@ service cloud.firestore {
         && request.resource.data.get('initiatedById', '') == resource.data.get('initiatedById', '')
         && statusOk()
         && (request.auth.uid == resource.data.coachId
-            || (changed().hasOnly(['during', 'actions', 'review', 'status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote',
+            || (changed().hasOnly(['topics', 'during', 'actions', 'review', 'status', 'date', 'time', 'place', 'requestedById', 'requestedAt', 'respondedAt', 'declineNote',
                                    'cancelledById', 'cancelledAt', 'before', 'after', 'staffRating', 'staffComment', 'staffRatedAt',
                                    'agreedAt', 'agreeComment', 'updatedAt'])
                 && (!changed().hasAny(['after', 'staffRating', 'staffComment', 'staffRatedAt', 'agreedAt', 'agreeComment'])
                     || resource.data.status == 'held')
                 && (!('staffRating' in changed())
                     || (request.resource.data.staffRating is int && request.resource.data.staffRating >= 1 && request.resource.data.staffRating <= 5))));
+      allow delete: if false;
+    }
+    // Each person's question set (template picked, or their own set): only the person running 1-to-1s sets it
+    // (Joel, 2026-10-25); the person reads their own. The coach's questions for one session (`extra`) are on the
+    // session and, like every coach-only field, can't be changed by the staff member (list above).
+    match /one_to_one_questions/{memberId} {
+      allow read: if isMember() && (request.auth.uid == memberId || request.auth.uid == otoCoachId());
+      allow write: if isMember() && request.auth.uid == otoCoachId();
+    }
+    // Profile history: who changed which answers, from what to what. Add-only: one entry per visit, which only its
+    // writer may add to for 3 hours; never deleted.
+    match /staff_profile_history/{entryId} {
+      allow read: if isMember() && (request.auth.uid == resource.data.memberId || request.auth.uid == otoCoachId());
+      allow create: if isMember()
+        && (request.auth.uid == request.resource.data.memberId || request.auth.uid == otoCoachId())
+        && request.resource.data.byId == request.auth.uid
+        && request.resource.data.startedAt == request.time
+        && request.resource.data.changes is list;
+      allow update: if isMember() && resource.data.byId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['changes', 'at'])
+        && request.resource.data.changes is list
+        && request.time < resource.data.startedAt + duration.value(3, 'h');
       allow delete: if false;
     }
     // Profile (getting to know them): the person themselves and the person running 1-to-1s read and write it.
