@@ -90,9 +90,10 @@ export async function writeTrainerParts(db: Firestore, kind: TrainerDocKind, id:
 }
 
 /** A new record written by a trainer (the portal's "New", and moving their old trainer_docs over). General: no deal,
- *  no client. An internal trainer owns it; an outside trainer's has no owner (lib/linked.ts keeps it visible). */
-async function newRecord(db: Firestore, kind: TrainerDocKind, programmeId: string, who: { trainerId: string; trainerName: string; memberId?: string },
-  content?: TrainerDocContent, editedAt?: number) {
+ *  no client. An internal trainer owns it; an outside trainer's has no owner (lib/linked.ts keeps it visible).
+ *  `owner`: a team member owns it instead (an old outline invite switched over: whoever invited). Built, not saved. */
+export async function buildRecord(db: Firestore, kind: TrainerDocKind, programmeId: string, who: { trainerId: string; trainerName: string; memberId?: string },
+  content?: TrainerDocContent, editedAt?: number, owner?: { id: string; name: string }) {
   const progs = await programmes(db);
   const prog = progs.find(p => p.id === programmeId);
   const progId = prog ? prog.id : '';
@@ -100,9 +101,10 @@ async function newRecord(db: Firestore, kind: TrainerDocKind, programmeId: strin
   const all = (await db.collection(place).select('refNumber').get()).docs.map(d => d.data() as { refNumber?: string });
   const date = myDate();
   const now = Date.now();
-  const owner = who.memberId || '';
+  const ownerId = owner ? owner.id : who.memberId || '';
+  const ownerName = owner ? owner.name : ownerId ? who.trainerName : '';
   const common = {
-    refAuto: true, date, preparedBy: who.trainerName, creatorId: owner, ownerId: owner, ownerName: owner ? who.trainerName : '',
+    refAuto: true, date, preparedBy: owner ? owner.name : who.trainerName, creatorId: ownerId, ownerId, ownerName,
     clientId: '', pipelineId: '', preparedForCompany: '', status: 'draft', sharedWithIds: [], isHidden: false,
     writerTrainerId: who.trainerId, writerTrainerName: who.trainerName, trainerEditedAt: editedAt || now,
   };
@@ -133,8 +135,14 @@ async function newRecord(db: Firestore, kind: TrainerDocKind, programmeId: strin
     Object.assign(rec, recordUpdate(kind, c, prog?.name || '', false));
   }
   rec = JSON.parse(JSON.stringify(kind === 'teambuilding' ? cleanForSave(rec) : rec));
-  await db.collection(place).doc(rec.id).set(rec);
   return { rec, row: rowFor(kind, rec.id, rec, progId, progs) };
+}
+
+async function newRecord(db: Firestore, kind: TrainerDocKind, programmeId: string, who: { trainerId: string; trainerName: string; memberId?: string },
+  content?: TrainerDocContent, editedAt?: number) {
+  const made = await buildRecord(db, kind, programmeId, who, content, editedAt);
+  await db.collection(RECORD_PLACE[kind]).doc(made.rec.id).set(made.rec);
+  return made;
 }
 
 // Before 2026-10-26 the trainer's own copies were in trainer_docs: the first time their list opens, each one becomes a

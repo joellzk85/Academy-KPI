@@ -3,7 +3,7 @@ import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, UserPlus, X, Zap,
 } from 'lucide-react';
-import { db, friendlyError } from '../lib/firebase';
+import { callServer, db, friendlyError } from '../lib/firebase';
 import { CourseOutline, CourseOutlineItem, OutlineAgendaRow, QuoteSendEntry, Representative } from '../types';
 import { BLOOM_LEVELS, DEFAULT_OUTLINE_TERMS, DIFFICULTIES, durationText } from '../lib/outlineContent';
 import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso, trainingDays } from '../lib/deals';
@@ -23,7 +23,7 @@ import { linkedOnly } from '../lib/linked';
 import ShareWithBox, { NewCount } from './ShareWithBox';
 import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
-import { OutlineSubmission, TrainerLink, isLive, outlineFieldsFrom, outlineSummary, previewOutline } from '../lib/trainerLinks';
+import { OutlineSubmission, TrainerLink, isLive, isOldOutlineLink, outlineFieldsFrom, outlineSummary, previewOutline } from '../lib/trainerLinks';
 import { trainerOptions } from './PickOrType';
 import CustomerCodeBox, { needsCustomerCode, nudgeCustomerCode } from './CustomerCodeBox';
 import { clientCode, refWithCode } from '../lib/docRefs';
@@ -91,6 +91,14 @@ export default function CourseOutlinesPage({ rep, reps, viewer, startDeal, onSta
   const [deals, setDeals] = useState<any[]>([]);
   const [trainers, setTrainers] = useState<any[]>([]);
   const links = useTrainerLinks();
+  // Outline links from before 2026-10-26 are switched to the one-record way by the server, once per visit.
+  const upgradeAsked = useRef(false);
+  const hasOldLinks = links.some(l => isOldOutlineLink(l));
+  useEffect(() => {
+    if (!hasOldLinks || upgradeAsked.current) return;
+    upgradeAsked.current = true;
+    callServer('/api/trainer-link/upgrade-old', {}, true).catch(() => {});   // if it fails, the old boxes still work
+  }, [hasOldLinks]);
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<{ o: CourseOutline; isNew: boolean } | null>(null);
   const [choosing, setChoosing] = useState<null | { step: 'deal'; invite?: TrainerLink; forTitle?: ForTitle } | { step: 'start'; deal: any | null; forTitle?: ForTitle }>(null);
@@ -622,7 +630,8 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 
 // ---------- Inviting a trainer to write an outline (Joel, 2026-10-20: "same as invite trainer") ----------
 // Since 2026-10-26 the outline is made first (general, owned by whoever invites) and the link belongs to it: what the
-// trainer submits goes straight into it. Invites made before then (no outlineId) still wait in TrainerInvites.
+// trainer submits goes straight into it. Invites made before then (no outlineId) are switched over by the server
+// (upgradeOldOutlineLink); TrainerInvites shows any it couldn't switch.
 /** A drop-down's titles under Soft skill / Team building / Technical skill (the outline's own type first). */
 function ProgrammeOptions({ programmes, outlines, first }: { programmes: any[]; outlines: any[]; first?: OutlineType }) {
   const order = (['soft', 'teambuilding', 'technical'] as OutlineType[]).sort((a, b) => Number(b === first) - Number(a === first));

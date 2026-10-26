@@ -44,6 +44,7 @@ export interface TrainerLink {
   createdAt: number; expiresAt: number; requestedById: string; requestedByName: string;
   outlineId?: string; proposalId?: string; programmeId?: string; trainerId?: string; trainerName?: string; title?: string;
   applied?: boolean;   // what the trainer sent went straight into the outline or proposal (2026-10-26)
+  keptForReview?: boolean;   // an old submission left for Accept: its outline was already sent to a client
   submission?: OutlineSubmission | ProfileSubmission; submittedAt?: number;
   decidedById?: string; decidedByName?: string; decidedAt?: number;
 }
@@ -58,6 +59,10 @@ export function newToken(): string {
 export const linkPath = (token: string) => `/t/${token}`;
 export const isExpired = (l: { expiresAt?: number }, now = Date.now()) => !!l.expiresAt && now > l.expiresAt;
 export const isLive = (l: TrainerLink, now = Date.now()) => (l.status === 'open' || l.status === 'submitted') && !isExpired(l, now);
+/** An outline link from before 2026-10-26 still working the old way: an invite with no outline, or a submission
+ *  waiting for Accept. The server switches it to the one-record way (serverTrainerLinks.ts upgradeOldOutlineLink). */
+export const isOldOutlineLink = (l: TrainerLink, now = Date.now()) => l.kind === 'outline' && isLive(l, now)
+  && (!l.outlineId || (l.status === 'submitted' && !l.applied && !l.keptForReview && !!l.submission));
 
 // ---------- Cleaning what a trainer sends (the server uses these; nothing else is stored) ----------
 const str = (v: any, max: number) => String(v ?? '').replace(/\u0000/g, '').trim().slice(0, max);
