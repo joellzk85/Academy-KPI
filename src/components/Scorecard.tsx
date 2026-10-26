@@ -208,7 +208,7 @@ export function WeightsForm({ viewer, people, settings }: { viewer: Viewer; peop
         <div>
           <label htmlFor="sc-photo" className={label}>Accountability and Trustworthiness from meeting photos %</label>
           <input id="sc-photo" type="number" min={0} max={100} className={input} value={s.photoShare} onChange={e => set({ photoShare: Number(e.target.value) })} />
-          <p className="mt-1 text-sm text-ink-soft">The % of face-to-face meetings with a photo; the rest, {Math.max(0, 100 - (s.photoShare || 0))}%, from the ratings. 0 turns it off.</p>
+          <p className="mt-1 text-sm text-ink-soft">The % of face-to-face and online meetings with a photo or screenshot; the rest, {Math.max(0, 100 - (s.photoShare || 0))}%, from the ratings. 0 turns it off.</p>
         </div>
       </div>
       <p className="text-sm text-ink-soft">Self reviews are shown next to the manager's and teammates' ratings but never count in the score.</p>

@@ -56,7 +56,7 @@ export const MEASURE_INFO: Record<string, MeasureInfo> = {
   appointments: { label: 'appointments logged, from deals', unit: 'count', weekly: true },
   new_followups: { label: 'new customers followed up each week, no earlier won deal', unit: 'count', perWeek: true, weekly: true },
   win_rate: { label: 'deals won ÷ proposals sent this month', unit: 'pct' },
-  meeting_photos: { label: 'face-to-face appointments and visits this month with a meeting photo', unit: 'pct' },
+  meeting_photos: { label: 'face-to-face and online appointments and visits this month with a meeting photo or screenshot', unit: 'pct' },
   new_clients: { label: 'deals won from clients with no earlier won deal', unit: 'count', weekly: true },
   quote_speed: { label: 'days from client approved to quotation sent', unit: 'days' },
   collect_days: { label: 'days from invoice to payment, client payments received this month', unit: 'days' },
@@ -105,7 +105,7 @@ export const BUILT_IN_KPIS: KpiDef[] = [
   { id: 'collect_days', name: 'Days to get paid', group: 'sales', description: 'Average days from invoice to client payment, on own deals.', measure: 'collect_days', unit: 'days', ...LO(30, 60, null) },
   { id: 'overdue_followups', name: 'Overdue follow-ups', group: 'sales', description: 'Open deals with a follow-up overdue, as of today.', measure: 'overdue_followups', unit: 'count', ...LO(0, 3, null) },
   { id: 'pipeline_cover', name: 'Pipeline cover', group: 'sales', description: 'Expected sales for the month (won + open deals × their chance) ÷ Closing RM target.', measure: 'pipeline_cover', unit: 'pct', ...HI(100, 70, 40) },
-  { id: 'meeting_photos', name: 'Meeting photos', group: 'sales', description: 'Face-to-face appointments and visit follow-ups this month that have a meeting photo, as % (appointments count for the deal owner, visits for whoever logged them).', measure: 'meeting_photos', unit: 'pct', ...HI(90, 70, 50) },
+  { id: 'meeting_photos', name: 'Meeting photos', group: 'sales', description: 'Face-to-face and online appointments and visit follow-ups this month that have a meeting photo (or screenshot for online), as % (appointments count for the deal owner, visits for whoever logged them).', measure: 'meeting_photos', unit: 'pct', ...HI(90, 70, 50) },
   { id: 'public_pax', name: 'Public programme', group: 'sales', description: 'Public programme pax, typed in weekly.', measure: 'typed', typedAgg: 'sum', unit: 'count', ...T(6) },
   { id: 'trainer_day', name: 'Trainer opportunity day', group: 'sales', description: 'Events, typed in weekly.', measure: 'typed', typedAgg: 'sum', unit: 'count', ...T(1) },
   // Admin and operations

@@ -12,6 +12,7 @@ import DraftBar from './DraftBar';
 import { lockedDateProblem, minOpenDate } from '../lib/monthLock';
 import { valueLocked } from '../lib/trainingChange';
 import MeetingPhotos, { useDealMeetingPhotos } from './MeetingPhotos';
+import { MeetingPhoto } from '../lib/meetingPhotos';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -43,10 +44,11 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const photos = useDealMeetingPhotos(deal.id);
-  // Meeting photos (2026-10-26): face-to-face only, from the meeting day on.
-  const photoBox = a && !a.legacy && a.mode === 'face' && a.date.slice(0, 10) <= todayIso()
-    ? <MeetingPhotos photos={photos} deal={deal} kind="appointment" meetingDate={a.date.slice(0, 10)} viewer={viewer} canAdd={canLog} />
-    : null;
+  // Meeting photos (2026-10-26): face-to-face (photo) and online (screenshot), from the meeting day on.
+  const proof = !!a && !a.legacy && (a.mode === 'face' || a.mode === 'online');
+  const photoBox = !proof ? null : a.date.slice(0, 10) <= todayIso()
+    ? <MeetingPhotos photos={photos} deal={deal} kind="appointment" meetingDate={a.date.slice(0, 10)} viewer={viewer} canAdd={canLog} online={a.mode === 'online'} />
+    : <p className="mt-1 text-sm text-ink-soft">{a.mode === 'online' ? 'Meeting screenshot' : 'Meeting photo'}: from the meeting day.</p>;
 
   const write = async (changes: any, msg: string) => {
     setBusy(true);
@@ -74,7 +76,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
       history: history(deal, viewer, `Appointment booked for ${formatDate(v.date)}`),
     }, 'Appointment booked and added to the calendar')} />;
 
-  if (mode === 'log') return <LogForm deal={deal} a={a} client={client} programmes={programmes} viewer={viewer} busy={busy} error={error} onCancel={() => setMode(null)}
+  if (mode === 'log') return <LogForm deal={deal} a={a} client={client} programmes={programmes} viewer={viewer} busy={busy} error={error} photos={photos} onCancel={() => setMode(null)}
     onSave={(v) => {
       const stage = st === 'lead' ? 'appointment' : st;
       // A won deal's programme, value, pax and funding type are locked (2026-10-22): the log doesn't change them.
@@ -192,8 +194,8 @@ function BookForm({ a, busy, error, onCancel, onSave }: {
   );
 }
 
-function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, onSave }: {
-  deal: any; a: DealAppointment | null; client: any; programmes: any[]; viewer: Viewer; busy: boolean; error: string; onCancel: () => void;
+function LogForm({ deal, a, client, programmes, viewer, busy, error, photos, onCancel, onSave }: {
+  deal: any; a: DealAppointment | null; client: any; programmes: any[]; viewer: Viewer; busy: boolean; error: string; photos: MeetingPhoto[]; onCancel: () => void;
   onSave: (v: any) => void;
 }) {
   const held = a?.status === 'held' && !a.legacy ? a : null;
@@ -244,6 +246,9 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, onCancel, o
         <div className="sm:col-span-2"><label className={label} htmlFor="lg-m">Met with</label><input id="lg-m" value={v.metWith} onChange={e => set({ metWith: e.target.value })} className={input} placeholder="Contact person" /></div>
       </div>
       <ModePick value={v.mode} onChange={m => set({ mode: m })} />
+      {(v.mode === 'face' || v.mode === 'online') && v.date && v.date <= todayIso() && (
+        <MeetingPhotos photos={photos} deal={deal} kind="appointment" meetingDate={v.date} viewer={viewer} canAdd online={v.mode === 'online'} />
+      )}
 
       {!valueLocked(deal) && <div className="rounded-xl bg-white p-3.5">
         <p className="mb-2 text-sm font-semibold text-ink-soft">What the client wants (saved on the deal)</p>

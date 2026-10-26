@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
-import { Camera, ImagePlus, Loader2, MapPin, X } from 'lucide-react';
+import { Camera, ClipboardPaste, ImagePlus, Loader2, MapPin, X } from 'lucide-react';
 import { db, friendlyError, storage } from '../lib/firebase';
 import { MAX_PER_MEETING, MeetingKind, MeetingPhoto, PhotoPlace, mapLink, meetingKey, photoKey, readExif, readMeetingPhoto, readPhotoPlace } from '../lib/meetingPhotos';
 import { isSuperManager } from '../lib/superManager';
@@ -9,7 +9,8 @@ import { formatDate } from '../lib/deals';
 import { shrink } from './PhotoPicker';
 import { storageError } from './ProposalFiles';
 
-// Meeting photos on a face-to-face appointment or a "Visit" follow-up (lib/meetingPhotos.ts has the rules).
+// Meeting photos on a face-to-face appointment or a "Visit" follow-up, and screenshots of an online appointment
+// (lib/meetingPhotos.ts has the rules). Photos and screenshots can also be dropped on the box or pasted (Ctrl+V).
 
 type Viewer = { id: string; name: string; role: string };
 
@@ -38,7 +39,9 @@ function whereNow(): Promise<{ lat?: number; lng?: number; accuracy?: number; lo
   ));
 }
 
-async function submitPhoto(file: File, source: 'camera' | 'gallery', deal: any, kind: MeetingKind, noteId: string, meetingDate: string, me: Viewer, onProgress: (pct: number) => void) {
+type Source = MeetingPhoto['source'];
+
+async function submitPhoto(file: File, source: Source, deal: any, kind: MeetingKind, noteId: string, meetingDate: string, me: Viewer, onProgress: (pct: number) => void) {
   if (!/^image\//.test(file.type) && !/\.(jpe?g|png|webp|heic|heif)$/i.test(file.name)) throw new Error(`"${file.name}" isn't a photo.`);
   if (file.size > 25 * 1024 * 1024) throw new Error(`"${file.name}" is too big (over 25 MB).`);
   const place = whereNow();
@@ -64,6 +67,7 @@ async function submitPhoto(file: File, source: 'camera' | 'gallery', deal: any, 
   await b.commit();
 }
 
+const addBtn = 'inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface';
 const myt = (ms: number) => new Date(ms).toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 const exifText = (t: string) => { const d = t.slice(0, 10); const [h, m] = t.slice(11, 16).split(':').map(Number); return `${formatDate(d)}, ${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`; };
 
@@ -81,7 +85,7 @@ function PlaceBox({ photo, onClose }: { photo: MeetingPhoto; onClose: () => void
       </div>
       {error ? <p className="text-danger">{error}</p> : !p ? <p className="flex items-center gap-1.5 text-ink-soft"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…</p> : (
         <div className="mt-1 space-y-1">
-          <p className={row}><span className="text-ink-soft">Submitted:</span>{p.at ? myt(p.at) : '–'}<span className="text-ink-soft">({photo.source === 'camera' ? 'Take photo' : 'from gallery'})</span></p>
+          <p className={row}><span className="text-ink-soft">Submitted:</span>{p.at ? myt(p.at) : '–'}<span className="text-ink-soft">({SOURCE_TEXT[photo.source]})</span></p>
           <p className={row}><span className="text-ink-soft">Phone was at:</span>
             {p.lat !== undefined && p.lng !== undefined
               ? <a href={mapLink(p.lat, p.lng)} target="_blank" rel="noreferrer" className="font-semibold text-accent hover:underline">Open map{p.accuracy ? ` (within ${p.accuracy} m)` : ''}</a>
@@ -99,10 +103,21 @@ function PlaceBox({ photo, onClose }: { photo: MeetingPhoto; onClose: () => void
   );
 }
 
-// The photos of one meeting, with Take photo / From gallery for people who can add.
-export default function MeetingPhotos({ photos, deal, kind, noteId = '', meetingDate, viewer, canAdd }: {
-  photos: MeetingPhoto[]; deal: any; kind: MeetingKind; noteId?: string; meetingDate: string; viewer: Viewer; canAdd: boolean;
+const SOURCE_TEXT: Record<Source, string> = { camera: 'Take photo', gallery: 'from gallery', screenshot: 'screenshot' };
+const imageIn = (list: DataTransferItemList | FileList | null | undefined): File | null => {
+  for (const it of Array.from((list || []) as ArrayLike<DataTransferItem | File>)) {
+    const f = it instanceof File ? it : it.kind === 'file' ? it.getAsFile() : null;
+    if (f && f.type.startsWith('image/')) return f;
+  }
+  return null;
+};
+
+// The photos of one meeting, with Take photo / From gallery (face-to-face) or Upload screenshot (online), plus drop
+// and paste, for people who can add.
+export default function MeetingPhotos({ photos, deal, kind, noteId = '', meetingDate, viewer, canAdd, online = false }: {
+  photos: MeetingPhoto[]; deal: any; kind: MeetingKind; noteId?: string; meetingDate: string; viewer: Viewer; canAdd: boolean; online?: boolean;
 }) {
+  const [over, setOver] = useState(false);
   const camRef = useRef<HTMLInputElement>(null);
   const galRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<number | null>(null);
@@ -114,11 +129,12 @@ export default function MeetingPhotos({ photos, deal, kind, noteId = '', meeting
   const room = canAdd && mine.length < MAX_PER_MEETING;
   if (!mine.length && !room) return null;
 
-  const add = async (files: FileList | null, source: 'camera' | 'gallery') => {
-    const f = files?.[0];
+  const add = async (files: FileList | DataTransferItemList | null, source: Source) => {
+    const f = imageIn(files);
     if (camRef.current) camRef.current.value = '';
     if (galRef.current) galRef.current.value = '';
-    if (!f || busy !== null) return;
+    if (!f) { if (files?.length) setError("That isn't a photo or screenshot."); return; }
+    if (busy !== null) return;
     setError('');
     setBusy(0);
     try { await submitPhoto(f, source, deal, kind, noteId, meetingDate, viewer, setBusy); }
@@ -133,9 +149,26 @@ export default function MeetingPhotos({ photos, deal, kind, noteId = '', meeting
     try { await deleteDoc(doc(db, 'meeting_photos', p.id)); } catch (e) { setError(friendlyError(e)); }
   };
 
+  const pasteButton = async () => {
+    setError('');
+    const clip: any = navigator.clipboard;
+    if (!clip?.read) { setError("This browser can't read the clipboard from a button. Click the box, then press Ctrl+V."); return; }
+    try {
+      for (const it of await clip.read()) {
+        const type = (it.types as string[]).find(t => t.startsWith('image/'));
+        if (type) { const dt = new DataTransfer(); dt.items.add(new File([await it.getType(type)], 'Screenshot.png', { type })); return add(dt.files, 'screenshot'); }
+      }
+      setError("There's no picture on the clipboard. Take a screenshot first (Windows: Win+Shift+S; Mac: Cmd+Ctrl+Shift+4).");
+    } catch { setError("The browser didn't allow reading the clipboard. Click the box, then press Ctrl+V."); }
+  };
+
   return (
-    <div className="mt-2">
-      <p className="mb-1 text-sm font-semibold text-ink">Meeting photo{mine.length ? ` (${mine.length})` : ''}</p>
+    <div className={`mt-2 rounded-lg ${over ? 'bg-accent-soft outline-2 outline-offset-4 outline-dashed outline-accent' : ''}`} tabIndex={room ? 0 : undefined}
+      onPaste={e => { if (!room) return; const f = imageIn(e.clipboardData?.items); if (f) { e.preventDefault(); const dt = new DataTransfer(); dt.items.add(f); add(dt.files, 'screenshot'); } }}
+      onDragOver={e => { if (!room || busy !== null) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!over) setOver(true); }}
+      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false); }}
+      onDrop={e => { if (!room) return; e.preventDefault(); setOver(false); add(e.dataTransfer.files, online ? 'screenshot' : 'gallery'); }}>
+      <p className="mb-1 text-sm font-semibold text-ink">{online ? 'Meeting screenshot' : 'Meeting photo'}{mine.length ? ` (${mine.length})` : ''}</p>
       {mine.length > 0 && (
         <ul className="flex flex-wrap gap-2">
           {mine.map(p => (
@@ -168,15 +201,16 @@ export default function MeetingPhotos({ photos, deal, kind, noteId = '', meeting
             <span className="inline-flex items-center gap-1.5 text-sm text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" />Sending photo… {busy}%</span>
           ) : (
             <>
-              <button type="button" onClick={() => camRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface"><Camera className="h-4 w-4" />Take photo</button>
-              <button type="button" onClick={() => galRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface"><ImagePlus className="h-4 w-4" />From gallery</button>
-              {!mine.length && <span className="text-sm text-ink-soft">Proof of the meeting; counts in your KPI.</span>}
+              {!online && <button type="button" onClick={() => camRef.current?.click()} className={addBtn}><Camera className="h-4 w-4" />Take photo</button>}
+              <button type="button" onClick={() => galRef.current?.click()} className={addBtn}><ImagePlus className="h-4 w-4" />{online ? 'Upload screenshot' : 'From gallery'}</button>
+              {online && <button type="button" onClick={pasteButton} className={addBtn}><ClipboardPaste className="h-4 w-4" />Paste screenshot</button>}
+              <span className="text-sm text-ink-soft">{over ? 'Drop here' : `${!mine.length ? 'Proof of the meeting; counts in your KPI. ' : ''}Or drop ${online ? 'a screenshot' : 'a photo'} here, or click here and press Ctrl+V.`}</span>
             </>
           )}
         </div>
       )}
       <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => add(e.target.files, 'camera')} />
-      <input ref={galRef} type="file" accept="image/*" className="hidden" onChange={e => add(e.target.files, 'gallery')} />
+      <input ref={galRef} type="file" accept="image/*" className="hidden" onChange={e => add(e.target.files, online ? 'screenshot' : 'gallery')} />
       {error && <p role="alert" className="mt-1 text-sm text-danger">{error}</p>}
     </div>
   );

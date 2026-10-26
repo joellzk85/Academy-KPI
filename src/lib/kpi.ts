@@ -404,7 +404,7 @@ const MEASURES: Record<string, (c: Ctx) => Measured> = {
     const weeks = byWeek(c.sources.oneToOnesAsked?.[c.rep.id] || [], c.prefix);
     return { value: weeks.reduce((a, b) => a + b, 0), weeks };
   },
-  // Face-to-face meetings this month with a meeting photo, % (2026-10-26); nothing to count without meetings.
+  // Face-to-face and online meetings this month with a meeting photo or screenshot, % (2026-10-26); nothing to count without meetings.
   meeting_photos: c => ({ value: photoShare(c.deals, c.sources.meetingPhotos || [], c.rep.id, `${c.prefix}-01`, `${c.prefix}-31`).pct }),
   rating_360: c => {
     const r = c.sources.rating360?.[c.prefix]?.[c.rep.id];

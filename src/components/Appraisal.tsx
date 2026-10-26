@@ -393,7 +393,7 @@ function BehaviouralCard({ person, sc, peerShare, photoShare: photoPart, canRevi
       </div>
       {photoPart > 0 && photos.meetings > 0 && (
         <p className="mb-3 rounded-lg bg-surface px-3 py-2 text-[15px]">
-          Meeting photos: <strong className="tabular-nums">{photos.withPhoto} of {photos.meetings}</strong> face-to-face meetings ({photos.pct}%) · {photoPart}% of Accountability and Trustworthiness
+          Meeting photos: <strong className="tabular-nums">{photos.withPhoto} of {photos.meetings}</strong> meetings ({photos.pct}%) · {photoPart}% of Accountability and Trustworthiness
         </p>
       )}
       <ScoreTable peers rows={valueRows.filter(r => r.self !== null || r.manager !== null || (r.peers ?? null) !== null)} />

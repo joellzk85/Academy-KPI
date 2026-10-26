@@ -1,12 +1,14 @@
 // Meeting photos (Joel, 2026-10-26): proof that a face-to-face meeting with a client really happened.
 // - Taken on a face-to-face appointment (booked from its day on, or held) or a follow-up logged as "Visit", with
-//   "Take photo" (the phone camera) or "From gallery".
+//   "Take photo" (the phone camera) or "From gallery"; an online appointment takes a screenshot (2026-10-26, Joel):
+//   Upload screenshot, Paste screenshot, drop or Ctrl+V. The box also shows in the Log appointment form.
 // - meeting_photos/{id}: the photo itself (dealId, which meeting, the link, who, camera or gallery, "Show in
 //   presentation"). Every team member can see it. Files: Storage meeting_photos/{id}.jpg.
 // - meeting_photo_places/{id} (same id): when it was submitted (the database's own clock, not the phone's), where the
 //   phone was, and the time and place stored inside the photo when it has them. Nobody can read these from a browser
 //   except through the owner override (firestore.rules); the screen shows them only to that login.
-// - KPI "Meeting photos" (lib/kpi.ts): the % of a person's face-to-face meetings this month that have a photo. The
+// - KPI "Meeting photos" (lib/kpi.ts): the % of a person's face-to-face and online meetings this month that have a
+//   photo or screenshot. The
 //   appointment counts for the deal owner (like the Appointments KPI), a visit for whoever logged it.
 // - Appraisal (lib/scorecard.ts photoShare): the same % counts for part of the Accountability and Trustworthiness values.
 // - The person who took a photo can tick "Show in presentation"; the weekly presentation's Meeting photos slide shows it.
@@ -28,7 +30,7 @@ export interface MeetingPhoto {
   url: string;
   path: string;
   byId: string; byName: string;
-  source: 'camera' | 'gallery';
+  source: 'camera' | 'gallery' | 'screenshot';
   present: boolean;
   createdAt: number;         // ms
 }
@@ -39,7 +41,7 @@ export interface PhotoPlace {
   locNote?: string;                    // why there is no location
   exifTime?: string;                   // the photo's own time, 'YYYY-MM-DD HH:MM:SS'
   exifLat?: number; exifLng?: number;  // the photo's own place
-  source?: 'camera' | 'gallery';
+  source?: 'camera' | 'gallery' | 'screenshot';
 }
 
 export const MAX_PER_MEETING = 5;
@@ -52,7 +54,7 @@ export function readMeetingPhoto(id: string, d: any): MeetingPhoto {
   return {
     id, dealId: String(d?.dealId || ''), clientId: String(d?.clientId || ''), kind: d?.kind === 'visit' ? 'visit' : 'appointment',
     noteId: String(d?.noteId || ''), meetingDate: String(d?.meetingDate || '').slice(0, 10), url: String(d?.url || ''), path: String(d?.path || ''),
-    byId: String(d?.byId || ''), byName: String(d?.byName || ''), source: d?.source === 'gallery' ? 'gallery' : 'camera',
+    byId: String(d?.byId || ''), byName: String(d?.byName || ''), source: d?.source === 'gallery' || d?.source === 'screenshot' ? d.source : 'camera',
     present: d?.present === true, createdAt: msOf(d?.createdAt),
   };
 }
@@ -67,13 +69,13 @@ export function readPhotoPlace(d: any): PhotoPlace {
 // ---------- Which meetings need a photo ----------
 export interface FaceMeeting { key: string; dealId: string; kind: MeetingKind; noteId: string; date: string; personId: string }
 
-// Every face-to-face meeting on these deals: held face-to-face appointments (not the old ones without details) and
-// follow-ups logged as "Visit".
+// Every meeting that needs proof on these deals: held face-to-face and online appointments (not phone calls, not the
+// old ones without details) and follow-ups logged as "Visit".
 export function faceMeetings(deals: any[]): FaceMeeting[] {
   const out: FaceMeeting[] = [];
   (deals || []).forEach(d => {
     const a = apptOf(d);
-    if (a && a.status === 'held' && !a.legacy && a.mode === 'face') {
+    if (a && a.status === 'held' && !a.legacy && (a.mode === 'face' || a.mode === 'online')) {
       out.push({ key: meetingKey(d.id, 'appointment'), dealId: d.id, kind: 'appointment', noteId: '', date: a.date.slice(0, 10), personId: dealOwnerId(d) });
     }
     followUpNotes(d).filter(n => n.how === 'visit').forEach(n => {
@@ -83,7 +85,7 @@ export function faceMeetings(deals: any[]): FaceMeeting[] {
   return out;
 }
 
-// A person's face-to-face meetings dated from..to (YYYY-MM-DD) and how many have a photo. pct is null with no meetings.
+// A person's meetings needing proof, dated from..to (YYYY-MM-DD) and how many have a photo. pct is null with no meetings.
 export function photoShare(deals: any[], photos: MeetingPhoto[], personId: string, from: string, to: string): { meetings: number; withPhoto: number; pct: number | null } {
   const have = new Set((photos || []).map(photoKey));
   const mine = faceMeetings(deals).filter(m => m.personId === personId && m.date >= from && m.date <= to);

@@ -290,7 +290,8 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 
 ## Meeting photos (Joel, 2026-10-26)
 
-Proof that a face-to-face client meeting really happened (accountability).
+Proof that a client meeting really happened (accountability).
+- **Online meetings and where the box shows (Joel, 2026-10-26, same day):** an **Online** appointment gets **Upload screenshot** and **Paste screenshot**; any photo box also takes a dropped file or Ctrl+V (click the box first). The box shows on a face-to-face or online appointment from its meeting day (before that: "Meeting photo: from the meeting day") and inside the **Log appointment** form. Phone calls have none. Online meetings count in the KPI and appraisal % like face-to-face ones.
 - **Where:** a face-to-face appointment (booked, from its day on, or held) and each follow-up logged as **Visit** have **Take photo** (phone camera) and **From gallery**, up to 5 photos per meeting. Whoever can log the appointment or follow-up can add one. `components/MeetingPhotos.tsx`, `lib/meetingPhotos.ts`.
 - **Who sees what:** everyone sees the photo. Only the owner override sees **Time & place** beside it: when it was sent (the database's clock, not the phone's), where the phone was (map link, or why there's no location), and the time and place stored inside the photo itself when it has them, flagged when the photo's own day isn't the meeting day. Stored apart in `meeting_photo_places`, which no browser can read except with the override; written once, never changed.
 - **Removing:** the person who sent it or Management removes the photo (the file and its time and place are kept); the meeting then counts as having no photo. Only the sender ticks **Show in presentation**.
