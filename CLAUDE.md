@@ -188,6 +188,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Same outline form everywhere (2026-10-26):** trainer portal, My trainings and the outline link show the CRM editor's own outline parts (`OutlineSections.tsx`) with the type; nothing to publish. See `trainer-portal.md`.
 - **Payments out board (2026-10-26):** Admin work → Money → Payments out: four lanes (Waiting approval → Ready for accounts → With accounts → Paid, receipt needed), Approve on the card, one-click Send to accounts (copies the message), receipt dropped on the card; Company payments, Owed by clients, Settings are sub-tabs; nothing to publish; go-live checklist item 74. See `money.md`.
 - **By title row menu and Categories (2026-10-26):** ⋯ Duplicate / Delete on each outline / proposal row in By title; Categories button to add and delete categories (titles moved first); nothing to publish. See `hrdc-programmes-trainers.md`.
+- **Several files, vendor invoices, pay in parts (2026-10-26):** every upload takes several files (T3 name lists too); vendor invoices on each cost (checked against it); a cost can be paid in parts (50/50 or own split, due dates, one approval, each part to accounts on its due date, balance default in Money settings); nothing to publish; go-live checklist item 75. See `money.md`.
 - **Not built yet:** Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

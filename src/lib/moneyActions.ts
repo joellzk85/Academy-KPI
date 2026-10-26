@@ -5,14 +5,23 @@
 //   are marked deleted with a reason, and Management restores them in Management → Lost and deleted;
 // - only Management undoes a payment, stamped with who, when and what it was (lastUndo).
 
-import { doc, getDoc, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
 import { formatDate, formatRM } from './deals';
-import { deletedStamp, undoStamp } from './money';
+import { MoneyOut, deletedStamp, partsOf, undoStamp } from './money';
 import { isSuperManager, superConfirm } from './superManager';
 
 type Viewer = { id: string; name: string; role?: string };
 export type MoneyColl = 'money_in' | 'money_out' | 'claim_backs';
+
+/** Approve or reject a cost: one decision for all its parts still waiting (paid in parts, 2026-10-26). */
+export async function decideCost(o: MoneyOut, outs: MoneyOut[], viewer: Viewer, status: 'approved' | 'rejected', reason = '') {
+  const list = partsOf(o, outs).filter(x => x.status === 'pending' && x.id !== o.id);
+  const batch = writeBatch(db);
+  const at = new Date().toISOString();
+  [o, ...list].forEach(x => batch.update(doc(db, 'money_out', x.id), { status, decidedById: viewer.id, decidedByName: viewer.name, decidedAt: at, decidedTs: serverTimestamp(), rejectReason: reason }));
+  await batch.commit();
+}
 
 /** Save a change together with a line in its deal's History. */
 export async function withDealHistory(dealId: string, viewer: Viewer, action: string, change: (batch: ReturnType<typeof writeBatch>) => void) {

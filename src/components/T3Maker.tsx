@@ -116,13 +116,27 @@ export default function T3Maker({ deal, saved, viewer, incoming }: {
   const tidyTrainee = (i: number) => setTrainee(i, completeTrainee(data.trainees[i]));
   const withEmployer = (list: Trainee[]) => list.map(t => ({ ...t, employer: t.employer || employer }));
 
-  const read = async (file: File) => {
+  // One or more name lists (Joel, 2026-10-26: HR may send a list per department): read together, the same person
+  // (same IC, or same name with no IC) kept once.
+  const read = async (files: File[]) => {
+    if (!files.length) return;
     setError('');
     setReading(true);
     try {
-      const list = withEmployer(await readNameList(file));
-      if (named.length) setFound({ list, file: file.name });
-      else change({ trainees: list, fileName: file.name });
+      const seenKey = new Set<string>();
+      const all: Trainee[] = [];
+      for (const f of files) {
+        for (const t of await readNameList(f)) {
+          const key = t.ic.replace(/\D/g, '') || t.name.trim().toLowerCase();
+          if (key && seenKey.has(key)) continue;
+          if (key) seenKey.add(key);
+          all.push(t);
+        }
+      }
+      const list = withEmployer(all);
+      const fileName = files.map(f => f.name).join(', ');
+      if (named.length) setFound({ list, file: fileName });
+      else change({ trainees: list, fileName });
       setOpen(true);
     } catch (e: any) {
       setError(e?.message || String(e));
@@ -137,8 +151,7 @@ export default function T3Maker({ deal, saved, viewer, incoming }: {
   useEffect(() => {
     if (!incoming || incoming.at === seen.current) return;
     seen.current = incoming.at;
-    const list = incoming.files.find(f => /\.(xlsx|csv|docx|pdf)$/i.test(f.name));
-    if (list) read(list);
+    read(incoming.files.filter(f => /\.(xlsx|csv|docx|pdf)$/i.test(f.name)));
   }, [incoming?.at]);
 
   const download = async () => {
@@ -183,9 +196,9 @@ export default function T3Maker({ deal, saved, viewer, incoming }: {
             {named.length ? `${named.length} name${named.length === 1 ? '' : 's'}${data.fileName ? ` from ${data.fileName}` : ''}` : "Drop HR's name list above, or choose it here, and the form fills itself."}
           </p>
         </div>
-        <input ref={pick} type="file" accept={NAME_LIST_ACCEPT} className="hidden" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) read(f); }} />
+        <input ref={pick} type="file" accept={NAME_LIST_ACCEPT} multiple className="hidden" onChange={e => { const f = Array.from(e.target.files || []); e.target.value = ''; read(f); }} />
         <button type="button" className={btnSecondary} disabled={reading} onClick={() => pick.current?.click()}>
-          {reading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />} {reading ? 'Reading…' : 'Read a name list'}
+          {reading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />} {reading ? 'Reading…' : 'Read name lists'}
         </button>
         <button type="button" className={btnPrimary} disabled={making || !named.length} onClick={download}>
           {making ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download T3 form

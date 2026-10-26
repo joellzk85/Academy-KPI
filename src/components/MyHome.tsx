@@ -20,7 +20,7 @@ import { useSalesTarget } from '../lib/useSalesTarget';
 import SalesProjection from './SalesProjection';
 import { checklistFlags, daysUntil, grantNotAppliedFlag, isCoTrainer, progress, Flag } from '../lib/checklist';
 import { HrdcQuery, isQueryOpen, isQueryOverdue, isTbTitle, programmeStatus } from '../lib/programmes';
-import { MoneyIn, MoneyOut, canDecide, dateTimeMY, isCompanyPayment, isPaid, isPayable, moneyFlags, prePaymentFlags, recentlyApproved } from '../lib/money';
+import { MoneyIn, MoneyOut, canDecide, dateTimeMY, isCompanyPayment, isPaid, isPayable, moneyFlags, partDueFlags, prePaymentFlags, recentlyApproved } from '../lib/money';
 import { TrainerJob, claimFlag, jobId } from '../lib/trainerPortal';
 import { KIND_TEXT, canDecideChange, changeFlagText, changeSummary, pendingChange } from '../lib/trainingChange';
 import { projectRow } from '../lib/projectPL';
@@ -1184,7 +1184,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         }));
       });
       // Pre-training payments still unpaid as the training gets close (2026-10-21).
-      c.wonDeals.forEach(p => prePaymentFlags(p, c.moneyOut, c.checklistSettings.flagDays, c.today).forEach((f, i) => items.push({
+      c.wonDeals.forEach(p => [...prePaymentFlags(p, c.moneyOut, c.checklistSettings.flagDays, c.today), ...partDueFlags(p, c.moneyOut, c.checklistSettings.flagDays, c.today)].forEach((f, i) => items.push({
         key: `${p.id}_pp${i}`, title: deal(p), level: f.level, sub: f.text, onClick: () => c.nav.openAdminWork('queue', p.id),
       })));
       // Approved and payable, not on a payment summary yet: one line (accounts are sent a summary, 2026-10-21).

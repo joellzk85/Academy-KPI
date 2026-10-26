@@ -5,7 +5,7 @@
 // accounts as a PDF or a link (/pay/<token>, payment_links kind 'batch', serverPaymentLinks.ts), where accounts click
 // "Payment made" per vendor. Pure code, shared by the screen, the PDF and the server.
 
-import { MoneyOut, OutTiming, OutStatus, payableFrom } from './money';
+import { MoneyOut, OutTiming, OutStatus, outWhat, payableFrom } from './money';
 import { formatDate, todayIso } from './deals';
 
 /** Why this request can't go on a new summary ('' = it can). One summary per payment, so accounts never pay twice
@@ -17,11 +17,12 @@ export function summaryProblem(o: MoneyOut, deal: any, vendor: Vendor | null | u
   if (o.status !== 'approved') return o.status === 'paid' ? 'Already paid' : 'Not approved';
   if (o.summaryToken) return 'Already on a summary sent to accounts';
   if (o.accountsLink?.token) return 'Has its own accounts link: stop that link first';
-  if (waitsForTraining(o, deal, today)) return `Post-training: payable from ${formatDate(payableFrom(o, deal))}`;
+  if (waitsForTraining(o, deal, today)) return o.partGroup && o.dueDate
+    ? `${o.partLabel || `Part ${o.partNo}`}: due ${formatDate(payableFrom(o, deal))}` : `Post-training: payable from ${formatDate(payableFrom(o, deal))}`;
   return payToProblem(o, vendor);
 }
 
-/** A post-training payment before the day after the training. */
+/** A post-training payment before the day after the training, or a part before its due date (2026-10-26). */
 export const waitsForTraining = (o: MoneyOut, deal: any, today = todayIso()) => { const from = payableFrom(o, deal); return !!from && from > today; };
 
 /** What's missing for accounts to know where to pay ('' = nothing). */
@@ -81,7 +82,7 @@ export function buildSummary(outs: MoneyOut[], vendors: Vendor[], forTextOf: (o:
     };
     if (o.paymentDetails && !g.paymentDetails) g.paymentDetails = o.paymentDetails;
     g.lines.push({
-      id: o.id, forText: forTextOf(o), category: o.category, description: o.description || (o.items || []).map(i => i.description).join(', '),
+      id: o.id, forText: forTextOf(o), category: o.category, description: outWhat(o) || (o.items || []).map(i => i.description).join(', '),
       amount: Number(o.amount) || 0, timing: o.timing, company: !o.dealId, status: o.status,
       paidDate: o.paidDate, paidAt: o.paidAt, paidRef: o.paidRef, paidByName: o.paidByName,
     });

@@ -179,9 +179,10 @@ export function feeIsAgreed(o: { status?: string; amount?: number; feeAgreeNeede
   return !!o.feeAgreed && Math.abs(Number(o.feeAgreed.amount) - Number(o.amount)) < 0.005;
 }
 
-export const poLines = (outs: { dealId?: string; checklistTaskId?: string; status?: string; description?: string; amount?: number; feeAgreeNeeded?: boolean; feeAgreed?: any }[], dealId: string, taskId: string) =>
+// A fee paid in parts (2026-10-26) lists each part with its label, e.g. "Trainer fee · Deposit 50%".
+export const poLines = (outs: { dealId?: string; checklistTaskId?: string; status?: string; description?: string; amount?: number; feeAgreeNeeded?: boolean; feeAgreed?: any; partGroup?: string; partLabel?: string }[], dealId: string, taskId: string) =>
   outs.filter(o => o.dealId === dealId && o.checklistTaskId === taskId && o.status !== 'rejected' && feeIsAgreed(o))
-    .map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 }));
+    .map(o => ({ description: [String(o.description || '').trim() || 'Trainer fee', o.partGroup ? o.partLabel || '' : ''].filter(Boolean).join(' · '), amount: Number(o.amount) || 0 }));
 
 export interface PoInput {
   number: string;

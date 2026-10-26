@@ -15,7 +15,7 @@ import MoneyPanel, { MoneyOverview, useMoneySettings } from './Money';
 import VendorsPage from './VendorsPage';
 import ReferrersPage from './Referrers';
 import DaysOut from './DaysOut';
-import { MoneyIn, MoneyOut, moneyFlags, prePaymentFlags } from '../lib/money';
+import { MoneyIn, MoneyOut, moneyFlags, partDueFlags, prePaymentFlags } from '../lib/money';
 import AfterTraining from './AfterTraining';
 import { useReceipts } from './PaymentReceipts';
 import { useClaimBacks } from './ClaimBacks';
@@ -184,6 +184,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, claims, moneySettings, today, queries));
     flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
     flags.push(...prePaymentFlags(p, mOut, settings.flagDays, today));
+    flags.push(...partDueFlags(p, mOut, settings.flagDays, today));
     // A trainer asked for their fee in the trainer portal (2026-10-21) and it isn't approved yet.
     // Co-trainers (2026-10-22) the same, on their own steps.
     (cl.tasks || []).filter((t: any) => t.kind === 'trainer' && t.trainerId).forEach((tt: any) => {

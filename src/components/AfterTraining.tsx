@@ -117,9 +117,8 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
                   <span className="text-ink-soft"> · {m.source === 'hrdc' ? 'submitted' : 'invoiced'} {formatDate(m.invoiceDate)}</span>
                   {staff && m.copyNeeded && !copies.length && <p className="text-sm font-semibold text-attention">{word} not uploaded yet: the case closes once it's in.</p>}
                   {staff && <ReceiptList receipts={copies} viewer={viewer} copyLabel={word} />}
-                  {staff && !copies.length && (
-                    <ReceiptDrop target={{ dealId: deal.id, moneyInId: m.id, recordId: '', kind: 'copy' }} viewer={viewer} small prompt={`Upload the ${word.toLowerCase()}`} />
-                  )}
+                  {staff && <ReceiptDrop target={{ dealId: deal.id, moneyInId: m.id, recordId: '', kind: 'copy' }} viewer={viewer} small
+                    prompt={copies.length ? `Add another ${word.toLowerCase()}` : `Upload the ${word.toLowerCase()}`} />}
                 </li>
               );
             })}

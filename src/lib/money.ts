@@ -143,6 +143,14 @@ export interface MoneyOut {
   // Referral fee (2026-10-24, lib/referrers.ts): raised by the server when the deal is won (id ref_<dealId>).
   referrerId?: string;
   autoRaised?: boolean;
+  // Paid in parts (Joel, 2026-10-26: "some venue require 50% then 50% before event"): one cost is several requests,
+  // one per part, sharing partGroup (the first part's id). Each part has its own due date, goes to accounts on it,
+  // and gets its own receipt; a manager approves the whole cost at once. The P&L adds the parts, so the cost counts once.
+  partGroup?: string;
+  partNo?: number;         // 1, 2, ...
+  partCount?: number;
+  partLabel?: string;      // e.g. "Deposit 50%", "Balance 50%"
+  dueDate?: string;        // YYYY-MM-DD; goes on the accounts summary from this day ('' = once approved)
 }
 
 // ---------- When a payment can be paid (Joel, 2026-10-21: the payment-out flowchart) ----------
@@ -151,9 +159,12 @@ export interface MoneyOut {
 
 /** The first day this request can be paid ('' = now). */
 export function payableFrom(o: MoneyOut, deal: any): string {
-  if (!o.dealId || o.timing !== 'after' || !deal || deal.trainingCancelled) return '';
+  // A part paid in parts waits for its own due date (2026-10-26); a cancelled training's are payable at once.
+  const due = isDate(o.dueDate) && !deal?.trainingCancelled ? String(o.dueDate).slice(0, 10) : '';
+  if (!o.dealId || o.timing !== 'after' || !deal || deal.trainingCancelled) return due;
   const end = trainingEndDate(deal);
-  return end ? addDays(end, 1) : '';
+  const after = end ? addDays(end, 1) : '';
+  return due > after ? due : after;
 }
 export const isPayable = (o: MoneyOut, deal: any, today = todayIso()) => { const from = payableFrom(o, deal); return !from || from <= today; };
 
@@ -162,11 +173,53 @@ export function prePaymentFlags(deal: any, outs: MoneyOut[], flagDays: number, t
   if (!deal || deal.trainingCancelled) return [];
   const start = daysUntil(deal.trainingDate, today);
   if (start === null || start < 0 || start > flagDays) return [];
-  const open = outs.filter(o => o.dealId === deal.id && o.timing === 'before' && (o.status === 'pending' || o.status === 'approved'));
+  // Parts with their own due date are flagged by partDueFlags instead.
+  const open = outs.filter(o => o.dealId === deal.id && o.timing === 'before' && !(o.partGroup && isDate(o.dueDate)) && !o.deleted && (o.status === 'pending' || o.status === 'approved'));
   if (!open.length) return [];
   const total = open.reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const when = start === 0 ? 'training is today' : `training in ${start} day${start === 1 ? '' : 's'}`;
   return [{ level: 'danger', text: `Pre-training payment not paid yet: ${open.map(o => `${o.category} ${o.payee}`).join(', ')} (${formatRM(total)}, ${when})` }];
+}
+
+// ---------- Paid in parts (2026-10-26) ----------
+
+/** The group a cost line belongs to: its parts, or just itself. */
+export const groupKey = (o: Pick<MoneyOut, 'id' | 'partGroup'>) => o.partGroup || o.id;
+/** All the parts of this line's cost (itself when not paid in parts), part 1 first. */
+export const partsOf = (o: MoneyOut, outs: MoneyOut[]) => (o.partGroup
+  ? outs.filter(x => x.partGroup === o.partGroup && !x.deleted).sort((a, b) => (a.partNo || 0) - (b.partNo || 0))
+  : [o]);
+
+/** Ready-made splits for the cost form. Each part: its label, % of the cost and when it's due. */
+export type PartPlan = { label: string; pct: string; due: string };
+/** Amounts for each %, rounded to sen; the last part takes the rounding so they always add up to the total. */
+export function splitAmounts(total: number, pcts: number[]): number[] {
+  const out: number[] = [];
+  let left = Math.round(total * 100);
+  pcts.forEach((p, i) => {
+    const sen = i === pcts.length - 1 ? left : Math.round(total * p);
+    out.push(sen / 100);
+    left -= sen;
+  });
+  return out;
+}
+
+/** What a request is for, with its part when paid in parts: "Booking · Deposit 50% (part 1 of 2)". */
+export const outWhat = (o: Pick<MoneyOut, 'description' | 'partGroup' | 'partLabel' | 'partNo' | 'partCount'>) =>
+  [o.description || '', o.partGroup ? `${o.partLabel || `Part ${o.partNo}`} (part ${o.partNo} of ${o.partCount})` : ''].filter(Boolean).join(' · ');
+
+/** A part's due date is near or past and it isn't paid: amber within flagDays, red on the day and after. */
+export function partDueFlags(deal: any, outs: MoneyOut[], flagDays: number, today = todayIso()): Flag[] {
+  if (!deal || deal.trainingCancelled) return [];
+  const flags: Flag[] = [];
+  outs.filter(o => o.dealId === deal.id && o.partGroup && isDate(o.dueDate) && !o.deleted && (o.status === 'pending' || o.status === 'approved'))
+    .forEach(o => {
+      const left = daysUntil(o.dueDate, today);
+      if (left === null || left > flagDays) return;
+      const when = left < 0 ? `was due ${-left} day${left === -1 ? '' : 's'} ago` : left === 0 ? 'due today' : `due in ${left} day${left === 1 ? '' : 's'}`;
+      flags.push({ level: left <= 0 ? 'danger' : 'attention', text: `${o.partLabel || `Part ${o.partNo}`} of ${o.category} ${o.payee} not paid yet: ${formatRM(o.amount)}, ${when}${o.status === 'pending' ? ' (still waiting for approval)' : ''}` });
+    });
+  return flags;
 }
 
 /** Counted in the training's P&L? Missing = yes (requests made before the tick existed). Company payments never are,
@@ -209,6 +262,7 @@ export interface MoneySettings {
   claimReminderDays: number;           // claim still not submitted this many days after training = red
   commissionPct: number;               // sales person's commission: % of the selling price before SST and HRDC's % (Joel, 2026-10-20: 3)
   behalfReminderDays: number;          // paid on behalf of the client, not claimed back this many days after training = red
+  balanceDaysBefore: number;           // a cost paid in parts: the balance is due this many days before the training (2026-10-26)
   // Earlier HRDC % and commission % (process audit, 2026-10-22): each applied up to and including 'until', so changing
   // a rate never changes past P&Ls, commissions or HRDC amounts. Oldest first.
   rates?: RatePeriod[];
@@ -226,7 +280,7 @@ export function settingsAt(s: MoneySettings, date?: string): MoneySettings {
 }
 
 // HRD Corp allows 6 months to claim (Joel, 2026-10-16); he wants a red reminder after 14 days.
-export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14, commissionPct: 3, behalfReminderDays: 14 };
+export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14, commissionPct: 3, behalfReminderDays: 14, balanceDaysBefore: 7 };
 
 export function readMoneySettings(data: any): MoneySettings {
   const num = (v: any, d: number) => (Number.isFinite(Number(v)) && Number(v) >= 0 && v !== '' && v !== null ? Number(v) : d);
@@ -239,6 +293,7 @@ export function readMoneySettings(data: any): MoneySettings {
     claimReminderDays: num(data?.claimReminderDays, DEFAULT_MONEY_SETTINGS.claimReminderDays),
     commissionPct: num(data?.commissionPct, DEFAULT_MONEY_SETTINGS.commissionPct),
     behalfReminderDays: num(data?.behalfReminderDays, DEFAULT_MONEY_SETTINGS.behalfReminderDays) || DEFAULT_MONEY_SETTINGS.behalfReminderDays,
+    balanceDaysBefore: num(data?.balanceDaysBefore, DEFAULT_MONEY_SETTINGS.balanceDaysBefore),
     rates: (Array.isArray(data?.rates) ? data.rates : [])
       .filter((r: any) => isDate(r?.until))
       .map((r: any) => ({ until: String(r.until).slice(0, 10), hrdcDeductionPct: num(r.hrdcDeductionPct, DEFAULT_MONEY_SETTINGS.hrdcDeductionPct), commissionPct: num(r.commissionPct, DEFAULT_MONEY_SETTINGS.commissionPct) }))

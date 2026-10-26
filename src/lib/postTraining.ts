@@ -43,7 +43,11 @@ export interface Receipt {
   recordId: string;        // the imported Payment tracking line (payment_records) it's for ('' for a deal's)
   moneyOutId?: string;     // a payment we made (money_out), e.g. a venue booking raised from the checklist (2026-10-20)
   claimBackId?: string;    // the client paying back what we paid on their behalf (claim_backs, 2026-10-22)
-  kind?: 'copy';           // the copy of the claim or invoice we sent (2026-10-24); none = the payment receipt
+  kind?: 'copy' | 'invoice'; // the copy of the claim or invoice we sent (2026-10-24); 'invoice' = a vendor's invoice to us
+                           // for a cost (2026-10-26); none = the payment receipt
+  vendorInvoiceFor?: string; // the cost a vendor invoice is for: its part group, or the cost line's id (lib/money.ts groupKey)
+  invoiceNo?: string;
+  invoiceAmount?: number;
   name: string;
   size: number;
   type: string;

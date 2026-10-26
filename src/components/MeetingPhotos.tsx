@@ -104,13 +104,15 @@ function PlaceBox({ photo, onClose }: { photo: MeetingPhoto; onClose: () => void
 }
 
 const SOURCE_TEXT: Record<Source, string> = { camera: 'Take photo', gallery: 'from gallery', screenshot: 'screenshot' };
-const imageIn = (list: DataTransferItemList | FileList | null | undefined): File | null => {
+const imagesIn = (list: DataTransferItemList | FileList | null | undefined): File[] => {
+  const out: File[] = [];
   for (const it of Array.from((list || []) as ArrayLike<DataTransferItem | File>)) {
     const f = it instanceof File ? it : it.kind === 'file' ? it.getAsFile() : null;
-    if (f && f.type.startsWith('image/')) return f;
+    if (f && f.type.startsWith('image/')) out.push(f);
   }
-  return null;
+  return out;
 };
+const imageIn = (list: DataTransferItemList | FileList | null | undefined): File | null => imagesIn(list)[0] || null;
 
 // The photos of one meeting, with Take photo / From gallery (face-to-face) or Upload screenshot (online), plus drop
 // and paste, for people who can add.
@@ -130,14 +132,16 @@ export default function MeetingPhotos({ photos, deal, kind, noteId = '', meeting
   if (!mine.length && !room) return null;
 
   const add = async (files: FileList | DataTransferItemList | null, source: Source) => {
-    const f = imageIn(files);
+    // Several at once (2026-10-26), up to the meeting's limit.
+    const all = imagesIn(files);
     if (camRef.current) camRef.current.value = '';
     if (galRef.current) galRef.current.value = '';
-    if (!f) { if (files?.length) setError("That isn't a photo or screenshot."); return; }
+    if (!all.length) { if (files?.length) setError("That isn't a photo or screenshot."); return; }
     if (busy !== null) return;
-    setError('');
+    const list = all.slice(0, Math.max(0, MAX_PER_MEETING - mine.length));
+    setError(list.length < all.length ? `Only ${MAX_PER_MEETING} per meeting: the first ${list.length} were sent.` : '');
     setBusy(0);
-    try { await submitPhoto(f, source, deal, kind, noteId, meetingDate, viewer, setBusy); }
+    try { for (const f of list) await submitPhoto(f, source, deal, kind, noteId, meetingDate, viewer, setBusy); }
     catch (e: any) { setError(e?.code?.startsWith?.('storage/') ? storageError(e) : e?.code ? friendlyError(e) : String(e?.message || e)); }
     finally { setBusy(null); }
   };
@@ -210,7 +214,7 @@ export default function MeetingPhotos({ photos, deal, kind, noteId = '', meeting
         </div>
       )}
       <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => add(e.target.files, 'camera')} />
-      <input ref={galRef} type="file" accept="image/*" className="hidden" onChange={e => add(e.target.files, online ? 'screenshot' : 'gallery')} />
+      <input ref={galRef} type="file" accept="image/*" multiple className="hidden" onChange={e => add(e.target.files, online ? 'screenshot' : 'gallery')} />
       {error && <p role="alert" className="mt-1 text-sm text-danger">{error}</p>}
     </div>
   );

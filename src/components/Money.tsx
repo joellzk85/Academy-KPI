@@ -13,11 +13,11 @@ import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { Receipt, needsReceipt } from '../lib/postTraining';
-import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, removeReceipt, uploadReceipt } from './PaymentReceipts';
+import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, removeReceipt, uploadReceipts } from './PaymentReceipts';
 import PaymentsBoard from './PaymentsBoard';
 import { BankRequestsBox, TrainerFeeRequests } from './TrainerPortalAdmin';
 import { FixRequest, PLTick, resubmitRequest } from './StepCosts';
-import { askReason, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
+import { askReason, decideCost, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
 import { superConfirm } from '../lib/superManager';
 import { isTrainerFee } from '../lib/feeChecks';
 import { feeIsAgreed } from '../lib/trainerPortal';
@@ -49,7 +49,6 @@ const OUT_TONE: Record<OutStatus, string> = {
 const isHrdcDeal = (d: any) => d?.fundingType === 'hrdc' || d?.fundingType === 'hrdc_topup';
 const billsClient = (d: any) => d?.fundingType === 'direct' || d?.fundingType === 'hrdc_topup';
 const num = (s: string) => Number(String(s).replace(/[^0-9.]/g, ''));
-const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 // Company payments are often small, so they show sen (formatRM rounds to whole ringgit).
 const formatSen = (n: number) => 'RM ' + (Number(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -176,8 +175,11 @@ function useTypedSst(dealId: string): Record<string, { sstAmount?: number | null
 
 /** Approve several requests at once (the same check as one by one: a manager, never their own).
  *  Trainer fees are left out: each is approved by itself, after its checks (lib/feeChecks.ts). */
-export async function approveMany(list: MoneyOut[], viewer: Viewer) {
-  let ok = list.filter(o => canDecide(o, viewer) && !isTrainerFee(o) && feeIsAgreed(o));
+export async function approveMany(list: MoneyOut[], viewer: Viewer, all: MoneyOut[] = list) {
+  // A cost paid in parts is approved as a whole (2026-10-26): its other parts waiting come too.
+  const ids = new Set(list.map(o => o.id));
+  const withParts = [...list, ...all.filter(o => !ids.has(o.id) && o.partGroup && list.some(x => x.partGroup === o.partGroup))];
+  let ok = withParts.filter(o => canDecide(o, viewer) && !isTrainerFee(o) && feeIsAgreed(o));
   // Own requests (owner override) stay in the list only after the second confirmation.
   const own = ok.filter(o => o.requestedById === viewer.id);
   if (own.length && !superConfirm(`approve ${own.length} of your own payment request${own.length === 1 ? '' : 's'} with the others.`,
@@ -215,8 +217,8 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
   // Kept in this browser until it's saved (lib/useFormDraft.ts).
   const draft = useFormDraft(viewer.id, `money-in:${source}:${deal.id}${topUp ? `:topup:${topUp.claimId}` : ''}`, f, setF);
   // The copy of the claim or invoice we sent (2026-10-24): uploaded with the record, or later on its line.
-  const [file, setFile] = useState<File | null>(null);
-  const [progress, setProgress] = useState<number | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [progress, setProgress] = useState<string | null>(null);
   const { busy, error, setError, run } = useRun();
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,10 +227,10 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
     if (!(amount > 0)) return setError('Enter the amount, for example 15000.');
     const id = `in_${Date.now()}`;
     return run(async () => {
-      let copy: Receipt | null = null;
-      if (file) {
-        setProgress(0);
-        try { copy = await uploadReceipt(file, { dealId: deal.id, moneyInId: id, recordId: '', kind: 'copy' }, viewer, setProgress); }
+      let copies: Receipt[] = [];
+      if (files.length) {
+        setProgress('0%');
+        try { copies = await uploadReceipts(files, { dealId: deal.id, moneyInId: id, recordId: '', kind: 'copy' }, viewer, setProgress); }
         catch (e) { setProgress(null); throw new Error(receiptError(e)); }
         setProgress(null);
       }
@@ -240,10 +242,10 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
           copyNeeded: true, createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
         }));
       } catch (e) {
-        if (copy) await removeReceipt(copy).catch(() => {});   // don't leave a copy without its record
+        await Promise.all(copies.map(c => removeReceipt(c).catch(() => {})));   // don't leave a copy without its record
         throw e;
       }
-      setFile(null);
+      setFiles([]);
       draft.clear();
       onDone();
     });
@@ -260,13 +262,13 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
       </div>
       {source === 'hrdc' && amt > 0 && <p className="text-sm text-ink-soft">HRDC keeps {settings.hrdcDeductionPct}%, so we expect {formatRM(amt * (1 - settings.hrdcDeductionPct / 100))}.</p>}
       <input value={f.note} onChange={e => setF(x => ({ ...x, note: e.target.value }))} className={input} placeholder="Note (optional)" aria-label="Note" />
-      <ReceiptPick file={file} onFile={setFile} what="copy"
+      <ReceiptPick files={files} onFiles={setFiles} what="copy"
         label={source === 'hrdc' ? 'Copy of the HRDC claim (PDF or screenshot of the submission)' : 'Copy of the invoice sent'} />
-      {!file && <p className="text-sm text-ink-soft">No copy at hand? Save now and add it later on the line; the case closes once it's in.</p>}
+      {!files.length && <p className="text-sm text-ink-soft">No copy at hand? Save now and add it later on the line; the case closes once it's in.</p>}
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
         <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
-        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{progress !== null ? `Uploading… ${progress}%` : 'Save'}</button>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{progress !== null ? `Uploading… ${progress}` : 'Save'}</button>
       </div>
     </form>
   );
@@ -279,8 +281,8 @@ export function InRow({ m, viewer, settings, context, receipts = [], readOnly }:
 }) {
   const [paying, setPaying] = useState(false);
   const [pay, setPay] = useState({ date: todayIso(), amount: String(Math.round(expectedFor(m, settings) * 100) / 100) });
-  const [file, setFile] = useState<File | null>(null);
-  const [progress, setProgress] = useState<number | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [progress, setProgress] = useState<string | null>(null);
   const { busy, error, setError, run } = useRun();
   const paid = isPaid(m);
   const gap = shortfall(m, settings);
@@ -293,14 +295,14 @@ export function InRow({ m, viewer, settings, context, receipts = [], readOnly }:
     if (!(amount > 0)) return setError('Enter the amount received.');
     return run(async () => {
       // The receipt goes up first, so a payment is never marked received with a half-uploaded receipt.
-      if (file) {
-        setProgress(0);
-        try { await uploadReceipt(file, { dealId: m.dealId, moneyInId: m.id, recordId: '' }, viewer, setProgress); }
+      if (files.length) {
+        setProgress('0%');
+        try { await uploadReceipts(files, { dealId: m.dealId, moneyInId: m.id, recordId: '' }, viewer, setProgress); }
         catch (e) { setProgress(null); throw new Error(receiptError(e)); }
         setProgress(null);
       }
       await updateDoc(doc(db, 'money_in', m.id), { paidDate: pay.date, paidAmount: amount, paidAt: new Date().toISOString(), paidById: viewer.id, paidByName: viewer.name, updatedAt: Date.now() });
-      setFile(null);
+      setFiles([]);
       setPaying(false);
     });
   };
@@ -348,14 +350,14 @@ export function InRow({ m, viewer, settings, context, receipts = [], readOnly }:
       </div>
       {paying && !readOnly && (
         <div className="mt-3 space-y-3 rounded-lg border border-line bg-white p-3">
-          <ReceiptPick file={file} onFile={setFile} />
+          <ReceiptPick files={files} onFiles={setFiles} />
           <div className="flex flex-wrap items-end gap-2">
             <div><label className={small} htmlFor={`pd-${m.id}`}>Received on</label><input id={`pd-${m.id}`} type="date" value={pay.date} onChange={e => setPay(p => ({ ...p, date: e.target.value }))} className={input} /></div>
             <div><label className={small} htmlFor={`pa-${m.id}`}>Amount received (RM)</label><input id={`pa-${m.id}`} inputMode="decimal" value={pay.amount} onChange={e => setPay(p => ({ ...p, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
-            <button type="button" className={btnSecondary} onClick={() => { setPaying(false); setFile(null); }}>Cancel</button>
-            <button type="button" disabled={busy} className={btnPrimary} onClick={recordPay}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{progress !== null ? `Uploading… ${progress}%` : 'Save'}</button>
+            <button type="button" className={btnSecondary} onClick={() => { setPaying(false); setFiles([]); }}>Cancel</button>
+            <button type="button" disabled={busy} className={btnPrimary} onClick={recordPay}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{progress !== null ? `Uploading… ${progress}` : 'Save'}</button>
           </div>
-          {!file && <p className="text-sm text-ink-soft">No receipt yet? You can save now and upload it later; the case closes once it's in.</p>}
+          {!files.length && <p className="text-sm text-ink-soft">No receipt yet? You can save now and upload it later; the case closes once it's in.</p>}
         </div>
       )}
       {!readOnly && <ReceiptList receipts={receipts} viewer={viewer} />}
@@ -391,7 +393,7 @@ function OldAccountsLink({ o }: { o: MoneyOut }) {
   );
 }
 
-export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Viewer; context?: string; docFor?: string; key?: string }) {
+export function OutRow({ o, viewer, context, docFor, outs = [o] }: { o: MoneyOut; viewer: Viewer; context?: string; docFor?: string; outs?: MoneyOut[]; key?: string }) {
   const [mode, setMode] = useState<null | 'reject' | 'fix' | 'approve'>(null);
   const [reason, setReason] = useState('');
   const { busy, error, setError, run } = useRun();
@@ -406,13 +408,14 @@ export function OutRow({ o, viewer, context, docFor }: { o: MoneyOut; viewer: Vi
     if (!ownApprovalOk(o, viewer)) return;
     await approveWrite();
   };
-  const approveWrite = () => updateDoc(doc(db, 'money_out', o.id), { ...clean({ status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), rejectReason: '' }), decidedTs: serverTimestamp() });
+  // A cost paid in parts is approved or rejected as a whole (2026-10-26).
+  const approveWrite = () => decideCost(o, outs, viewer, 'approved');
   // A trainer fee first shows "Are you sure?" with the T3, photos and report checks (lib/feeChecks.ts).
   const approve = () => (isTrainerFee(o) ? setMode('approve') : run(approveNow));
   const reject = () => {
     if (!reason.trim()) return setError('Say briefly why it is rejected.');
     return run(async () => {
-      await updateDoc(doc(db, 'money_out', o.id), { status: 'rejected', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), decidedTs: serverTimestamp(), rejectReason: reason.trim() });
+      await decideCost(o, outs, viewer, 'rejected', reason.trim());
       setMode(null);
     });
   };
@@ -735,11 +738,11 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
 }
 
 function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; viewer: Viewer }) {
-  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string; commission: string; behalf: string } | null>(null);
+  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string; commission: string; behalf: string; balance: string } | null>(null);
   const { busy, error, setError, run } = useRun();
   const [saved, setSaved] = useState(false);
-  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays), commission: String(settings.commissionPct), behalf: String(settings.behalfReminderDays) };
-  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder' | 'commission' | 'behalf', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
+  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays), commission: String(settings.commissionPct), behalf: String(settings.behalfReminderDays), balance: String(settings.balanceDaysBefore) };
+  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder' | 'commission' | 'behalf' | 'balance', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
   const save = () => {
     const pct = Number(v.pct);
     const overdue = Number(v.overdue);
@@ -752,6 +755,8 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
     if (!(commission >= 0 && commission < 100)) return setError('The commission must be a percentage, for example 3.');
     const behalf = Number(v.behalf);
     if (!(behalf >= 1)) return setError('The claim-back reminder must be at least 1 day.');
+    const balance = Number(v.balance);
+    if (!(balance >= 0) || v.balance === '') return setError('Enter how many days before the training a balance is due, for example 7.');
     // A changed HRDC % or commission % applies from today: the old rates are kept up to yesterday, so past P&Ls,
     // commissions and HRDC amounts don't change (process audit, 2026-10-22).
     const rateChanged = pct !== settings.hrdcDeductionPct || commission !== settings.commissionPct;
@@ -759,7 +764,7 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
     if (rateChanged) rates.push({ until: addDays(todayIso(), -1), hrdcDeductionPct: settings.hrdcDeductionPct, commissionPct: settings.commissionPct });
     return run(async () => {
       await setDoc(doc(db, 'config', 'money_settings'), {
-        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder, commissionPct: commission, behalfReminderDays: behalf,
+        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder, commissionPct: commission, behalfReminderDays: behalf, balanceDaysBefore: balance,
         rates: rateChanged ? rates : settings.rates || [],
         updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name,
       });
@@ -777,6 +782,7 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
         <div><label className={small} htmlFor="ms-rm">Claim reminder turns red after (days after training)</label><input id="ms-rm" inputMode="numeric" value={v.reminder} onChange={e => set('reminder', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="ms-cm">Sales commission (% of the price before SST and HRDC's %)</label><input id="ms-cm" inputMode="decimal" value={v.commission} onChange={e => set('commission', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="ms-bh">Paid on behalf of client, not claimed back: red after (days after training)</label><input id="ms-bh" inputMode="numeric" value={v.behalf} onChange={e => set('behalf', e.target.value)} className={input} /></div>
+        <div><label className={small} htmlFor="ms-bal">Cost paid in parts: balance due (days before training)</label><input id="ms-bal" inputMode="numeric" value={v.balance} onChange={e => set('balance', e.target.value)} className={input} /></div>
       </div>
       <p className="text-sm text-ink-soft">HRD Corp allows 6 months (180 days) after training to submit a claim. The work queue shows an amber reminder straight after training and turns it red after the reminder days, well before the deadline.</p>
       <p className="text-sm text-ink-soft">A new HRDC % or commission % applies to trainings from today; earlier trainings keep the rate of their time.</p>

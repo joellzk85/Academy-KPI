@@ -4,7 +4,7 @@ import { ArrowRight, Check, ChevronDown, Download, ExternalLink, Link2, Loader2,
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
 import { formatDate, todayIso } from '../lib/deals';
-import { ACCOUNTS_PAID_BY, MoneyOut, TIMING_LABELS, canDecide, isCompanyPayment, paidViaLink, paymentRef } from '../lib/money';
+import { ACCOUNTS_PAID_BY, MoneyOut, TIMING_LABELS, canDecide, isCompanyPayment, outWhat, paidViaLink, paymentRef } from '../lib/money';
 import { ListSort, sortList, usePaged } from '../lib/listPaging';
 import ListPager, { SortSelect, listSelect } from './ListPager';
 import { buildSummary, payToProblem, PaymentSummary, summaryProblem, summaryRef } from '../lib/paymentSummary';
@@ -87,7 +87,9 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
   const forText = (o: MoneyOut) => dealLabel(o.dealId);
 
   const pending = outs.filter(o => o.status === 'pending').sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
-  const mineInBulk = pending.filter(o => canDecide(o, viewer) && !isTrainerFee(o) && feeIsAgreed(o));
+  // A cost paid in parts waits as one card (its first part waiting); approving it approves every part (2026-10-26).
+  const pendingCards = pending.filter(o => !o.partGroup || pending.find(x => x.partGroup === o.partGroup) === o);
+  const mineInBulk = pendingCards.filter(o => canDecide(o, viewer) && !isTrainerFee(o) && feeIsAgreed(o));
   const approved = outs.filter(o => o.status === 'approved');
   const withAccounts = approved.filter(o => o.summaryToken || o.accountsLink?.token);
   const toSend = approved.filter(o => !o.summaryToken && !o.accountsLink?.token);
@@ -111,7 +113,7 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
 
   const approveAll = async () => {
     setBusy('approve'); setError('');
-    try { await approveMany(mineInBulk, viewer); } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
+    try { await approveMany(mineInBulk, viewer, outs); } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
   };
   // One click: the summary is saved on the server (one summary per payment, checked again there), its link made, and
   // the message for accounts copied.
@@ -155,7 +157,7 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
             </button>
           )}
           empty="Nothing waiting for approval.">
-          {pending.map(o => <PendingCard key={o.id} o={o} viewer={viewer} forText={forText(o)} onOpen={() => openPay(o)} />)}
+          {pendingCards.map(o => <PendingCard key={o.id} o={o} parts={o.partGroup ? pending.filter(x => x.partGroup === o.partGroup) : [o]} viewer={viewer} forText={forText(o)} onOpen={() => openPay(o)} />)}
         </Lane>
 
         <Lane n={2} title="Ready for accounts" list={toSend}
@@ -220,7 +222,7 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
               <h3 className="text-lg font-bold">{openOut ? `${openOut.payee} · ${sen(openOut.amount)}` : `Payment summary ${refOf(openSummary!.first)}`}</h3>
               <button type="button" className="ml-auto rounded-md p-1.5 text-ink-soft hover:bg-surface" aria-label="Close" onClick={() => setOpen(null)}><X className="h-5 w-5" /></button>
             </div>
-            {openOut && <PaymentDetail o={openOut} viewer={viewer} forText={forText(openOut)} problem={openOut.status === 'approved' ? problemOf(openOut) : ''}
+            {openOut && <PaymentDetail o={openOut} viewer={viewer} outs={outs} forText={forText(openOut)} problem={openOut.status === 'approved' ? problemOf(openOut) : ''}
               receipts={receiptsOf(openOut)} onOpenDeal={onOpenDeal && openOut.dealId ? () => { setOpen(null); onOpenDeal(openOut.dealId); } : undefined}
               onOpenSummary={openOut.summaryToken ? () => setOpen({ kind: 'summary', token: openOut.summaryToken! }) : undefined} />}
             {openSummary && <SummaryDetail s={openSummary} vendors={vendors} forText={forText} viewer={viewer} onOpenPay={openPay} onGone={() => setOpen(null)} />}
@@ -300,7 +302,7 @@ function Card({ o, forText, onOpen, lead, note, extra, muted }: {
 }) {
   return (
     <FoldCard name={o.payee || 'Not named'} amount={o.amount} onOpen={onOpen} lead={lead} muted={muted}>
-      <p className="truncate text-sm text-ink-soft">{o.category}{o.description ? `: ${o.description}` : ''}</p>
+      <p className="truncate text-sm text-ink-soft">{o.category}{outWhat(o) ? `: ${outWhat(o)}` : ''}</p>
       <p className="truncate text-sm text-ink-soft">{isCompanyPayment(o) ? 'Company payment' : `${forText} · ${TIMING_LABELS[o.timing] || TIMING_LABELS.after}`}</p>
       {note && <p className="mt-0.5 text-sm">{note}</p>}
       {extra && <div className="mt-2">{extra}</div>}
@@ -309,7 +311,7 @@ function Card({ o, forText, onOpen, lead, note, extra, muted }: {
 }
 
 // Lane 1: a manager approves right on the card (the same check as Approve all); trainer fees open their checks first.
-function PendingCard({ o, viewer, forText, onOpen }: { o: MoneyOut; viewer: Viewer; forText: string; onOpen: () => void; key?: string }) {
+function PendingCard({ o, parts, viewer, forText, onOpen }: { o: MoneyOut; parts: MoneyOut[]; viewer: Viewer; forText: string; onOpen: () => void; key?: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const decide = canDecide(o, viewer);
@@ -317,13 +319,16 @@ function PendingCard({ o, viewer, forText, onOpen }: { o: MoneyOut; viewer: View
   const quick = decide && !toAgree && !isTrainerFee(o);
   const approve = async () => {
     setBusy(true); setError('');
-    try { await approveMany([o], viewer); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+    try { await approveMany(parts, viewer); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
   const note = toAgree ? <span className="font-semibold text-attention">Fee to agree on the deal's Trainer step</span>
     : !decide ? <span className="text-ink-soft">Raised by {o.requestedByName}{viewer.role === 'management' ? ' · waiting for the other manager' : ' · waiting for a manager'}</span>
     : <span className="text-ink-soft">Raised by {o.requestedByName}, {formatDate(o.requestDate || o.requestedAt)}</span>;
+  const split = parts.length > 1 && (
+    <span className="block text-ink-soft">Paid in {parts.length} parts, {sen(sum(parts))} in all: {parts.map(p => `${p.partLabel || `Part ${p.partNo}`} ${sen(p.amount)}${p.dueDate ? ` due ${formatDate(p.dueDate)}` : ''}`).join(' · ')}. Approve covers every part.</span>
+  );
   return (
-    <Card o={o} forText={forText} onOpen={onOpen} note={note}
+    <Card o={o} forText={forText} onOpen={onOpen} note={<>{note}{split}</>}
       extra={decide && !toAgree ? (
         <div className="flex flex-wrap items-center gap-1" onClick={e => e.stopPropagation()}>
           {quick
@@ -371,8 +376,8 @@ function SummaryButtons({ s, vendors, forText, viewer, compact }: {
 
 // The side panel for one payment: the full request (approve, reject, fix, trainer fee checks, delete, undo paid), then
 // what to do next by its lane: bank details, mark paid or take off the summary, the receipt.
-function PaymentDetail({ o, viewer, forText, problem, receipts, onOpenDeal, onOpenSummary }: {
-  o: MoneyOut; viewer: Viewer; forText: string; problem: string; receipts: Receipt[]; onOpenDeal?: () => void; onOpenSummary?: () => void;
+function PaymentDetail({ o, viewer, forText, problem, receipts, onOpenDeal, onOpenSummary, outs }: {
+  o: MoneyOut; viewer: Viewer; forText: string; problem: string; receipts: Receipt[]; onOpenDeal?: () => void; onOpenSummary?: () => void; outs: MoneyOut[];
 }) {
   const vendors = useVendors(true);
   const { trainers, venues } = useTrainersVenues();
@@ -381,7 +386,7 @@ function PaymentDetail({ o, viewer, forText, problem, receipts, onOpenDeal, onOp
   const payTo = o.status === 'approved' && !o.summaryToken ? payToProblem(o, v) : '';
   return (
     <div className="space-y-4">
-      <ul><OutRow o={o} viewer={viewer} context={isCompanyPayment(o) ? 'Company payment' : forText} /></ul>
+      <ul><OutRow o={o} viewer={viewer} outs={outs} context={isCompanyPayment(o) ? 'Company payment' : forText} /></ul>
       <div className="flex flex-wrap gap-2">
         {onOpenDeal && <button type="button" className={btnSecondary} onClick={onOpenDeal}>Open the deal <ArrowRight className="h-4 w-4" /></button>}
         {onOpenSummary && <button type="button" className={btnSecondary} onClick={onOpenSummary}>Open its payment summary <ArrowRight className="h-4 w-4" /></button>}
@@ -604,7 +609,7 @@ function HistoryRow({ o, forText, flag, showStatus, onOpen }: {
         {flag && <span className={`${chip} bg-attention-soft text-attention`}>No receipt</span>}
         <span className="ml-auto shrink-0 font-semibold tabular-nums">{sen(o.amount)}</span>
       </p>
-      <p className="truncate text-sm text-ink-soft">{paymentRef(o)} · {o.category}{o.description ? `: ${o.description}` : ''} · {isCompanyPayment(o) ? 'Company payment' : forText}</p>
+      <p className="truncate text-sm text-ink-soft">{paymentRef(o)} · {o.category}{outWhat(o) ? `: ${outWhat(o)}` : ''} · {isCompanyPayment(o) ? 'Company payment' : forText}</p>
       <p className="text-sm text-ink-soft">{steps.join(' · ')}</p>
     </>
   );

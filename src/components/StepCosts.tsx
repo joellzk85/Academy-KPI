@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { doc, serverTimestamp, setDoc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
-import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { doc, onSnapshot, setDoc, writeBatch, getDoc } from 'firebase/firestore';
+import { AlertTriangle, Check, FileText, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { formatDate, todayIso } from '../lib/deals';
-import { MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, TIMING_LABELS, canDecide, inPL, ownApprovalOk, paidViaLink, raisedText } from '../lib/money';
+import { addDays, formatDate, todayIso, trainingEndDate } from '../lib/deals';
+import {
+  DEFAULT_MONEY_SETTINGS, MoneyOut, OUT_STATUS_LABELS, OutStatus, OutTiming, PartPlan, TIMING_LABELS, canDecide, groupKey, inPL, ownApprovalOk,
+  raisedText, readMoneySettings, splitAmounts,
+} from '../lib/money';
 import { ChecklistTask, costCategory, isCoTrainer, materialItems } from '../lib/checklist';
 import { STEP_VENDOR_TYPE, Vendor, bankText, hasBank, vendorName } from '../lib/vendors';
 import { Receipt } from '../lib/postTraining';
@@ -11,10 +14,10 @@ import { ON_BEHALF_LABEL } from '../lib/onBehalf';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { VendorForm } from './VendorsPage';
-import { ReceiptDrop, ReceiptList } from './PaymentReceipts';
+import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, removeReceipt, uploadReceipts } from './PaymentReceipts';
 import { isTrainerFee } from '../lib/feeChecks';
 import { ApproveFeeDialog } from './FeeChecks';
-import { askReason, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
+import { askReason, decideCost, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
 import { feeIsAgreed } from '../lib/trainerPortal';
 import { isSuperManager, superConfirm } from '../lib/superManager';
 
@@ -75,6 +78,10 @@ export default function StepCosts({ deal, task, viewer, outs, receipts, vendors,
   const waiting = lines.filter(o => o.status === 'pending' && inPL(o)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const leftOut = lines.filter(o => !inPL(o) && !o.onBehalf && o.status !== 'rejected').reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const behalf = lines.filter(o => o.onBehalf && o.status !== 'rejected').reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  // A cost paid in parts shows as one cost with its parts (2026-10-26).
+  const groups: MoneyOut[][] = [];
+  lines.forEach(o => { const g = groups.find(x => groupKey(x[0]) === groupKey(o)); if (g) g.push(o); else groups.push([o]); });
+  groups.forEach(g => g.sort((a, b) => (a.partNo || 0) - (b.partNo || 0)));
 
   return (
     <div className="mt-3 space-y-2">
@@ -86,7 +93,7 @@ export default function StepCosts({ deal, task, viewer, outs, receipts, vendors,
       </div>
       {lines.length > 0 && (
         <ul className="space-y-1.5">
-          {lines.map(o => <CostLine key={o.id} o={o} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} receipts={receipts.filter(r => r.moneyOutId === o.id)} />)}
+          {groups.map(g => <CostGroup key={groupKey(g[0])} parts={g} deal={deal} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} receipts={receipts} />)}
         </ul>
       )}
       {adding ? (
@@ -98,8 +105,94 @@ export default function StepCosts({ deal, task, viewer, outs, receipts, vendors,
   );
 }
 
-function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
-  o: MoneyOut; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; receipts: Receipt[]; key?: string;
+// One cost: a single line, or its parts (deposit, balance, ...) under one heading, with the vendor's invoices.
+function CostGroup({ parts, deal, viewer, vendors, trainers, venues, receipts }: {
+  parts: MoneyOut[]; deal: any; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; receipts: Receipt[]; key?: string;
+}) {
+  const first = parts[0];
+  const live = parts.filter(o => o.status !== 'rejected');
+  const total = live.reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  const paid = live.filter(o => o.status === 'paid').reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  const split = !!first.partGroup;
+  const vendor = vendors.find(v => v.id === first.vendorId);
+  return (
+    <li className="rounded-lg border border-line bg-white px-3 py-2">
+      {split && (
+        <p className="mb-1 flex flex-wrap items-center gap-1.5 text-[15px]">
+          <span className="font-semibold">{first.description || first.category}</span>
+          <span className="text-ink-soft">· {vendor ? vendorName(vendor, trainers, venues) : first.payee}</span>
+          <span className="font-semibold tabular-nums">· {sen(total)}</span>
+          <span className="text-sm text-ink-soft">in {parts.length} parts{paid > 0 ? `, ${sen(paid)} paid, ${sen(total - paid)} to go` : ''}</span>
+        </p>
+      )}
+      <div className={split ? 'divide-y divide-line border-l-2 border-accent/30 pl-3' : ''}>
+        {parts.map(o => <CostLine key={o.id} o={o} group={parts} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} receipts={receipts.filter(r => r.moneyOutId === o.id)} />)}
+      </div>
+      <VendorInvoices costKey={groupKey(first)} dealId={deal.id} total={total} viewer={viewer} invoices={receipts.filter(r => r.kind === 'invoice' && r.vendorInvoiceFor === groupKey(first))} />
+    </li>
+  );
+}
+
+/** The vendor's invoices for one cost (Joel, 2026-10-26: "some venue / trainers have multiple invoice for the same deal"):
+ *  one or more, each with its number and amount, checked against the cost. Stored with the receipts (kind 'invoice'),
+ *  never counted as a payment receipt. */
+function VendorInvoices({ costKey, dealId, total, viewer, invoices }: { costKey: string; dealId: string; total: number; viewer: Viewer; invoices: Receipt[] }) {
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState({ no: '', amount: '' });
+  const [files, setFiles] = useState<File[]>([]);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const invoiced = invoices.reduce((t, r) => t + (Number(r.invoiceAmount) || 0), 0);
+  const over = invoiced > total + 0.005;
+  const save = async () => {
+    if (!files.length) return setError('Choose the invoice file (one or more).');
+    // Blank amount = what is still to be invoiced on this cost.
+    const amount = f.amount === '' ? Math.max(0, total - invoiced) : num(f.amount);
+    setError(''); setProgress('0%');
+    try {
+      // The amount goes on the first file only, so an invoice in several files is counted once; all files or none.
+      const [one, ...rest] = files;
+      const target = { dealId, moneyInId: '', recordId: '', kind: 'invoice' as const, vendorInvoiceFor: costKey, invoiceNo: f.no.trim() };
+      const [firstRec] = await uploadReceipts([one], { ...target, invoiceAmount: Math.round(amount * 100) / 100 }, viewer, setProgress);
+      if (rest.length) {
+        try { await uploadReceipts(rest, { ...target, invoiceAmount: 0 }, viewer, setProgress); }
+        catch (e) { await removeReceipt(firstRec).catch(() => {}); throw e; }
+      }
+      setFiles([]); setF({ no: '', amount: '' }); setAdding(false);
+    } catch (e) { setError(receiptError(e)); } finally { setProgress(null); }
+  };
+  return (
+    <div className="mt-2">
+      {invoices.length > 0 && (
+        <p className={`flex flex-wrap items-center gap-1 text-sm ${over ? 'font-semibold text-danger' : 'text-ink-soft'}`}>
+          {over ? <AlertTriangle className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5 text-accent" />}
+          Vendor invoices: {sen(invoiced)} of {sen(total)}
+          {over ? ': more than the cost, check before it is paid' : invoiced > 0 && invoiced < total - 0.005 ? ` · ${sen(total - invoiced)} not invoiced yet` : invoiced > 0 ? ' · all invoiced' : ''}
+        </p>
+      )}
+      <ReceiptList receipts={invoices} viewer={viewer} />
+      {adding ? (
+        <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface p-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div><label className={small} htmlFor={`vi-no-${costKey}`}>Vendor's invoice no.</label><input id={`vi-no-${costKey}`} value={f.no} onChange={e => setF(x => ({ ...x, no: e.target.value }))} className={input} /></div>
+            <div><label className={small} htmlFor={`vi-amt-${costKey}`}>Invoice amount (RM)</label><input id={`vi-amt-${costKey}`} inputMode="decimal" value={f.amount} onChange={e => setF(x => ({ ...x, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} placeholder={String(Math.max(0, Math.round((total - invoiced) * 100) / 100))} /></div>
+          </div>
+          <ReceiptPick files={files} onFiles={setFiles} label="The invoice (a file, photo or screenshot)" what="invoice" />
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          <div className="flex gap-2">
+            <button type="button" className={btnSecondary} onClick={() => { setAdding(false); setFiles([]); setError(''); }}>Cancel</button>
+            <button type="button" disabled={progress !== null} className={btnPrimary} onClick={save}>{progress !== null ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading… {progress}</> : 'Save invoice'}</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className={`${btnSmall} mt-1`} onClick={() => setAdding(true)}><FileText className="h-3.5 w-3.5 text-accent" /> {invoices.length ? "Add another vendor invoice" : "Add the vendor's invoice"}</button>
+      )}
+    </div>
+  );
+}
+
+function CostLine({ o, group, viewer, vendors, trainers, venues, receipts }: {
+  o: MoneyOut; group: MoneyOut[]; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; receipts: Receipt[]; key?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -113,13 +206,17 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
   const decide = canDecide(o, viewer);
   const mine = o.requestedById === viewer.id;
   const approveNow = async () => { if (ownApprovalOk(o, viewer)) await approveWrite(); };
-  const approveWrite = () => updateDoc(doc(db, 'money_out', o.id), { status: 'approved', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), decidedTs: serverTimestamp(), rejectReason: '' });
+  // Paid in parts: one approval or rejection for the whole cost, shown on its first part waiting (2026-10-26).
+  const split = !!o.partGroup;
+  const lead = !split || group.find(x => x.status === 'pending') === o;
+  const waitingParts = group.filter(x => x.status === 'pending');
+  const approveWrite = () => decideCost(o, group, viewer, 'approved');
   // A trainer fee first shows "Are you sure?" with the T3, photos and report checks (lib/feeChecks.ts).
   const approve = () => (isTrainerFee(o) ? setConfirming(true) : run(approveNow));
   const reject = () => {
     const reason = window.prompt('Why is it rejected?');
     if (!reason?.trim()) return;
-    return run(() => updateDoc(doc(db, 'money_out', o.id), { status: 'rejected', decidedById: viewer.id, decidedByName: viewer.name, decidedAt: new Date().toISOString(), decidedTs: serverTimestamp(), rejectReason: reason.trim() }));
+    return run(() => decideCost(o, group, viewer, 'rejected', reason.trim()));
   };
   // Approved or paid costs are kept, marked deleted with a reason (process audit, 2026-10-22).
   const remove = () => {
@@ -144,19 +241,30 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
   const canAgree = toAgree && viewer.role === 'management' && (!mine || isSuperManager(viewer));
   const agree = () => {
     if (mine && !superConfirm('agree a trainer fee you raised yourself.', 'Nobody else checks the amount before the PO goes to the trainer.')) return;
-    return run(() => withDealHistory(o.dealId, viewer, `Agreed the trainer fee ${sen(o.amount)} for ${o.payee}: the PO goes to the trainer`,
-      batch => batch.update(doc(db, 'money_out', o.id), { feeAgreed: { byId: viewer.id, byName: viewer.name, at: new Date().toISOString(), amount: o.amount } })));
+    // Every part of the fee still to agree, each for its own amount (firestore.rules).
+    const toDo = group.filter(x => x.status === 'pending' && !feeIsAgreed(x));
+    const fee = toDo.reduce((t, x) => t + (Number(x.amount) || 0), 0);
+    return run(() => withDealHistory(o.dealId, viewer, `Agreed the trainer fee ${sen(fee)} for ${o.payee}: the PO goes to the trainer`,
+      batch => toDo.forEach(x => batch.update(doc(db, 'money_out', x.id), { feeAgreed: { byId: viewer.id, byName: viewer.name, at: new Date().toISOString(), amount: x.amount } }))));
   };
 
   return (
-    <li className="rounded-lg border border-line bg-white px-3 py-2">
+    <div className={split ? 'py-1.5' : ''}>
       <div className="flex flex-wrap items-start gap-2">
         <div className="min-w-[12rem] flex-1">
-          <p className="flex flex-wrap items-center gap-1.5 text-[15px]">
-            <span className="font-semibold">{o.description || o.category}</span>
-            <span className="text-ink-soft">· {vendor ? vendorName(vendor, trainers, venues) : o.payee}</span>
-            <span className="font-semibold tabular-nums">· {sen(o.amount)}</span>
-          </p>
+          {split ? (
+            <p className="flex flex-wrap items-center gap-1.5 text-[15px]">
+              <span className="font-semibold">{o.partLabel || `Part ${o.partNo}`}</span>
+              <span className="font-semibold tabular-nums">· {sen(o.amount)}</span>
+              {o.dueDate && <span className="text-ink-soft">· due {formatDate(o.dueDate)}</span>}
+            </p>
+          ) : (
+            <p className="flex flex-wrap items-center gap-1.5 text-[15px]">
+              <span className="font-semibold">{o.description || o.category}</span>
+              <span className="text-ink-soft">· {vendor ? vendorName(vendor, trainers, venues) : o.payee}</span>
+              <span className="font-semibold tabular-nums">· {sen(o.amount)}</span>
+            </p>
+          )}
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
             <span className="rounded border border-line px-1.5 py-0.5 font-medium text-ink-soft">{TIMING_LABELS[o.timing] || TIMING_LABELS.after}</span>
             <span className={`rounded px-1.5 py-0.5 font-semibold ${TONE[o.status]}`}>{OUT_STATUS_LABELS[o.status]}</span>
@@ -171,17 +279,17 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
             {!inPL(o) && !o.onBehalf && o.notInPLReason && <span className="text-ink-soft">not in the P&L: {o.notInPLReason}</span>}
             {o.lastUndo && <span className="text-ink-soft">"paid" undone by {o.lastUndo.byName} {formatDate(o.lastUndo.at)}</span>}
           </p>
-          {o.status !== 'rejected' && o.status !== 'paid' && (!vendor || !hasBank(vendor)) && (
+          {o.status !== 'rejected' && o.status !== 'paid' && (!vendor || !hasBank(vendor)) && (!split || o === group[0]) && (
             <p className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-attention"><AlertTriangle className="h-3.5 w-3.5" /> No bank details for this vendor yet (Admin work → Vendors)</p>
           )}
-          {vendor && hasBank(vendor) && o.status !== 'paid' && <p className="mt-0.5 text-xs text-ink-soft">{bankText(vendor)}</p>}
+          {vendor && hasBank(vendor) && o.status !== 'paid' && (!split || o === group[0]) && <p className="mt-0.5 text-xs text-ink-soft">{bankText(vendor)}</p>}
         </div>
         <span className="flex shrink-0 flex-wrap items-center gap-1">
           {o.status !== 'rejected' && <BehalfTick o={o} viewer={viewer} />}
           {o.status !== 'rejected' && !o.onBehalf && <PLTick o={o} viewer={viewer} />}
-          {canAgree && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={agree}><Check className="h-3.5 w-3.5" /> Agree fee</button>}
-          {decide && !toAgree && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={approve}><Check className="h-3.5 w-3.5" /> Approve</button>}
-          {decide && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={reject}><X className="h-3.5 w-3.5" /> Reject</button>}
+          {canAgree && lead && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={agree}><Check className="h-3.5 w-3.5" /> Agree fee</button>}
+          {decide && !toAgree && lead && <button type="button" disabled={busy} className={`${btnPrimary} px-2.5 py-1`} onClick={approve}><Check className="h-3.5 w-3.5" /> {waitingParts.length > 1 ? `Approve all ${waitingParts.length} parts` : 'Approve'}</button>}
+          {decide && lead && <button type="button" disabled={busy} className={`${btnSmall} text-danger hover:bg-danger-soft`} onClick={reject}><X className="h-3.5 w-3.5" /> Reject</button>}
           {o.status === 'rejected' && mine && !o.trainingCancelled && !fixing && <button type="button" disabled={busy} className={btnSmall} onClick={() => setFixing(true)}><Pencil className="h-3.5 w-3.5" /> Fix and send again</button>}
           {o.status === 'paid' && viewer.role === 'management' && <button type="button" disabled={busy} className={btnSmall} onClick={undoPaid}><Undo2 className="h-3.5 w-3.5" /> Undo paid</button>}
           {canDelete && <button type="button" disabled={busy} onClick={remove} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label="Delete this cost">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button>}
@@ -197,9 +305,18 @@ function CostLine({ o, viewer, vendors, trainers, venues, receipts }: {
         </>
       )}
       {error && <p role="alert" className="mt-1 text-sm text-danger">{error}</p>}
-    </li>
+    </div>
   );
 }
+
+/** The money settings, live (the balance due days for costs paid in parts). */
+function useBalanceDays(): number {
+  const [n, setN] = useState(DEFAULT_MONEY_SETTINGS.balanceDaysBefore);
+  useEffect(() => onSnapshot(doc(db, 'config', 'money_settings'), d => setN(readMoneySettings(d.data()).balanceDaysBefore), () => {}), []);
+  return n;
+}
+
+type SplitKind = 'full' | 'half' | 'custom';
 
 function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines = [], prefill, onDone }: {
   deal: any; task: ChecklistTask; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint; lines?: MoneyOut[]; prefill?: CostPrefill | null; onDone: () => void; key?: number;
@@ -210,7 +327,20 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
   const [f, setF] = useState({
     description: prefill?.description || '', amount: prefill?.amount ? String(prefill.amount) : '', timing: prefill?.timing || defaultTiming(task),
     vendorId: (prefill?.vendorId && vendors.some(v => v.id === prefill.vendorId) ? prefill.vendorId : '') || hinted?.id || '', inPL: true, notInPLReason: '', onBehalf: false,
+    split: 'full' as SplitKind, parts: [] as PartPlan[],
   });
+  // Paid in parts (2026-10-26): the deposit is due now, the balance a set number of days before the training.
+  const balanceDays = useBalanceDays();
+  const today = todayIso();
+  const balanceDue = () => {
+    const d = deal?.trainingDate ? addDays(String(deal.trainingDate).slice(0, 10), -balanceDays) : '';
+    return d && d > today ? d : today;
+  };
+  const halfPlan = (): PartPlan[] => [{ label: 'Deposit', pct: '50', due: today }, { label: 'Balance', pct: '50', due: balanceDue() }];
+  const chooseSplit = (k: SplitKind) => setF(x => ({ ...x, split: k, parts: k === 'full' ? [] : k === 'half' || x.parts.length < 2 ? halfPlan() : x.parts }));
+  const setPart = (i: number, patch: Partial<PartPlan>) => setF(x => ({ ...x, split: 'custom', parts: x.parts.map((p, n) => (n === i ? { ...p, ...patch } : p)) }));
+  const pctSum = Math.round(f.parts.reduce((t, p) => t + (Number(p.pct) || 0), 0) * 100) / 100;
+  const partAmounts = f.split === 'full' ? [] : splitAmounts(num(f.amount) || 0, f.parts.map(p => (Number(p.pct) || 0) / 100));
   const draft = useFormDraft(viewer.id, `cost:${deal.id}:${task.id}`, f, setF);
   const [newVendor, setNewVendor] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -230,21 +360,44 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
     if (!(amount > 0)) return setError('Enter the amount, for example 5000.');
     if (!vendor) return setError('Pick who is paid, or add a new vendor.');
     if (!f.onBehalf && !f.inPL && f.notInPLReason.trim().length < 3) return setError('Say briefly why this cost is not in the P&L.');
+    const split = f.split !== 'full' && f.parts.length > 1;
+    if (split) {
+      if (f.parts.some(p => !(Number(p.pct) > 0))) return setError('Give every part a %, for example 50.');
+      if (Math.abs(pctSum - 100) > 0.01) return setError(`The parts add up to ${pctSum}%; they must add up to 100%.`);
+      if (f.parts.some(p => !/^\d{4}-\d{2}-\d{2}$/.test(p.due))) return setError('Give every part its due date.');
+      if (f.parts.some(p => !p.label.trim())) return setError('Name every part, e.g. Deposit or Balance.');
+    }
     // No double payment by mistake (2026-10-21): this vendor already has a cost on this step?
     const same = lines.filter(o => o.vendorId === vendor.id && o.status !== 'rejected');
-    if (same.length && !window.confirm(`${vendorName(vendor, trainers, venues)} already has ${same.length} cost line${same.length === 1 ? '' : 's'} on this step (${same.map(o => `${o.description || o.category} RM ${Number(o.amount).toFixed(2)}`).join(', ')}).\n\nAdd another one anyway (e.g. a balance payment)?`)) return;
+    if (same.length && !window.confirm(`${vendorName(vendor, trainers, venues)} already has ${same.length} cost line${same.length === 1 ? '' : 's'} on this step (${same.map(o => `${o.description || o.category} RM ${Number(o.amount).toFixed(2)}`).join(', ')}).\n\nAdd another one anyway (e.g. a second invoice)? For a deposit and balance on the same cost, use "How it's paid" instead.`)) return;
     const id =`out_${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
+    const base = {
+      dealId: deal.id, kind: 'deal', category: costCategory(task), payee: vendorName(vendor, trainers, venues), vendorId: vendor.id,
+      description: f.description.trim(), inPL: !f.onBehalf && !!f.inPL, onBehalf: !!f.onBehalf, checklistTaskId: task.id, requestDate: todayIso(),
+      notInPLReason: !f.onBehalf && !f.inPL ? f.notInPLReason.trim() : '',
+      status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
+      decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
+      // A trainer fee is agreed by a manager before the PO goes to the trainer (2026-10-23).
+      ...(task.kind === 'trainer' ? { feeAgreeNeeded: true } : {}),
+    };
     setBusy(true); setError('');
     try {
-      await setDoc(doc(db, 'money_out', id), {
-        id, dealId: deal.id, kind: 'deal', category: costCategory(task), payee: vendorName(vendor, trainers, venues), vendorId: vendor.id,
-        description: f.description.trim(), amount: Math.round(amount * 100) / 100, timing: f.timing, inPL: !f.onBehalf && !!f.inPL, onBehalf: !!f.onBehalf, checklistTaskId: task.id, requestDate: todayIso(),
-        notInPLReason: !f.onBehalf && !f.inPL ? f.notInPLReason.trim() : '',
-        status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
-        decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
-        // A trainer fee is agreed by a manager before the PO goes to the trainer (2026-10-23).
-        ...(task.kind === 'trainer' ? { feeAgreeNeeded: true } : {}),
-      });
+      if (!split) {
+        await setDoc(doc(db, 'money_out', id), { ...base, id, amount: Math.round(amount * 100) / 100, timing: f.timing });
+      } else {
+        // One request per part, sharing the first part's id; a part due after the training is a post-training payment.
+        const end = trainingEndDate(deal);
+        const amounts = splitAmounts(amount, f.parts.map(p => Number(p.pct) / 100));
+        const batch = writeBatch(db);
+        f.parts.forEach((p, i) => {
+          const pid = i === 0 ? id : `${id}_p${i + 1}`;
+          batch.set(doc(db, 'money_out', pid), {
+            ...base, id: pid, amount: amounts[i], timing: end ? (p.due > end ? 'after' : 'before') : f.timing,
+            partGroup: id, partNo: i + 1, partCount: f.parts.length, partLabel: `${p.label.trim()} ${Number(p.pct)}%`, dueDate: p.due,
+          });
+        });
+        await batch.commit();
+      }
       draft.clear();
       onDone();
     } catch (err) {
@@ -295,7 +448,7 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
           </select>
           {vendor && <span className={`mt-0.5 block text-xs ${hasBank(vendor) ? 'text-ink-soft' : 'font-semibold text-attention'}`}>{hasBank(vendor) ? bankText(vendor) : 'No bank details yet: add them in Admin work → Vendors.'}</span>}
         </div>
-        <div>
+        {f.split === 'full' && <div>
           <span className={small}>When it's paid</span>
           <div className="flex gap-2">
             {(['before', 'after'] as OutTiming[]).map(k => (
@@ -303,7 +456,36 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
                 className={`flex-1 rounded-lg border px-2 py-2 text-sm font-semibold ${f.timing === k ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{TIMING_LABELS[k]}</button>
             ))}
           </div>
+        </div>}
+      </div>
+      <div>
+        <span className={small}>How it's paid</span>
+        <div className="flex flex-wrap gap-2">
+          {([['full', 'In full'], ['half', '50% now, 50% before training'], ['custom', 'Split my way']] as [SplitKind, string][]).map(([k, label]) => (
+            <button key={k} type="button" aria-pressed={f.split === k} onClick={() => chooseSplit(k)}
+              className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${f.split === k ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{label}</button>
+          ))}
         </div>
+        {f.split !== 'full' && (
+          <div className="mt-2 space-y-2 rounded-lg border border-line bg-white p-2.5">
+            {f.parts.map((p, i) => (
+              <div key={i} className="grid grid-cols-[minmax(0,1fr)_4.5rem] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_5rem_9.5rem_auto]">
+                <div><label className={small} htmlFor={`pp-l-${task.id}-${i}`}>Part {i + 1}</label><input id={`pp-l-${task.id}-${i}`} value={p.label} onChange={e => setPart(i, { label: e.target.value })} className={input} /></div>
+                <div><label className={small} htmlFor={`pp-p-${task.id}-${i}`}>%</label><input id={`pp-p-${task.id}-${i}`} inputMode="decimal" value={p.pct} onChange={e => setPart(i, { pct: e.target.value.replace(/[^0-9.]/g, '') })} className={input} /></div>
+                <div><label className={small} htmlFor={`pp-d-${task.id}-${i}`}>Due on</label><input id={`pp-d-${task.id}-${i}`} type="date" value={p.due} onChange={e => setPart(i, { due: e.target.value })} className={input} /></div>
+                <span className="flex items-center gap-1 pb-2 text-sm tabular-nums text-ink-soft">
+                  {num(f.amount) > 0 ? sen(partAmounts[i] || 0) : ''}
+                  {f.parts.length > 2 && <button type="button" onClick={() => setF(x => ({ ...x, split: 'custom', parts: x.parts.filter((_, n) => n !== i) }))} className="rounded-md p-1 hover:bg-surface" aria-label={`Remove part ${i + 1}`}><X className="h-4 w-4" /></button>}
+                </span>
+              </div>
+            ))}
+            <div className="flex flex-wrap items-center gap-2">
+              {f.parts.length < 6 && <button type="button" className={btnSmall} onClick={() => setF(x => ({ ...x, split: 'custom', parts: [...x.parts, { label: 'Part', pct: String(Math.max(0, 100 - pctSum)), due: balanceDue() }] }))}><Plus className="h-3.5 w-3.5" /> Add a part</button>}
+              <span className={`text-sm ${Math.abs(pctSum - 100) > 0.01 ? 'font-semibold text-danger' : 'text-ink-soft'}`}>{pctSum}% of 100%</span>
+            </div>
+            <p className="text-sm text-ink-soft">A manager approves the whole cost once. Each part goes to accounts on its due date and gets its own receipt; the P&L counts the cost once. The balance date comes from Money settings ({balanceDays} days before training).</p>
+          </div>
+        )}
       </div>
       <label className="flex items-center gap-2 text-[15px]">
         <input type="checkbox" checked={!!f.onBehalf} onChange={e => setF(x => ({ ...x, onBehalf: e.target.checked }))} className="h-4 w-4 accent-[#0E6E62]" />

@@ -15,7 +15,7 @@ import {
 import { InRow, useMoneySettings } from './Money';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
-import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipt, useReceipts } from './PaymentReceipts';
+import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, uploadReceipts, useReceipts } from './PaymentReceipts';
 import { needsReceipt } from '../lib/postTraining';
 import PanelResizer from './PanelResizer';
 
@@ -78,7 +78,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
   const receipts = useReceipts(true);
   const receiptsOf = (l: TrackLine) => receipts.filter(r => r.kind !== 'copy' && (l.dealId ? r.moneyInId === l.id.slice(5) : r.recordId === l.id));
   const moneyInOf = (l: TrackLine) => (l.dealId ? ins.find(m => m.id === l.id.slice(5)) : undefined);
-  const [payFile, setPayFile] = useState<File | null>(null);
+  const [payFiles, setPayFiles] = useState<File[]>([]);
   const [records, setRecords] = useState<TrackLine[] | null>(null);
   const [ins, setIns] = useState<MoneyIn[]>([]);
   const [outs, setOuts] = useState<MoneyOut[]>([]);
@@ -202,9 +202,9 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
     if (paid && !isIsoDay(payDate)) return setErr('Enter the date it was paid.');
     setBusy(true); setErr('');
     try {
-      if (paid && payFile) {
-        try { await uploadReceipt(payFile, { dealId: '', moneyInId: '', recordId: l.id }, viewer); } catch (e) { throw new Error(receiptError(e)); }
-        setPayFile(null);
+      if (paid && payFiles.length) {
+        try { await uploadReceipts(payFiles, { dealId: '', moneyInId: '', recordId: l.id }, viewer); } catch (e) { throw new Error(receiptError(e)); }
+        setPayFiles([]);
       }
       await setDoc(doc(db, 'payment_records', l.id), paid
         ? { paidDate: payDate, paidNote: '', paidAmount: numOrNull(payAmount), updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name }
@@ -327,7 +327,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
                 {paged.pageItems.map(l => {
                   const paid = linePaid(l);
                   return (
-                    <tr key={l.id} onClick={() => { setOpenId(l.id); setErr(''); setPayDate(today); setPayAmount(''); setPayFile(null); }} className="cursor-pointer align-top hover:bg-surface">
+                    <tr key={l.id} onClick={() => { setOpenId(l.id); setErr(''); setPayDate(today); setPayAmount(''); setPayFiles([]); }} className="cursor-pointer align-top hover:bg-surface">
                       <td className="whitespace-nowrap px-5 py-2.5">{l.dateText && !isIsoDay(l.dateText) ? l.dateText : formatDate(l.date) || monthName(l.month)}</td>
                       <td className="max-w-[22rem] py-2.5 pr-3">
                         <span className="block truncate font-semibold">{l.programme}</span>
@@ -387,7 +387,7 @@ export default function PaymentTracking({ pipelinesSync, people, viewer, onOpenD
                   viewer.role === 'management' && <button type="button" disabled={busy} onClick={() => markPaid(open, false)} className="mt-1 text-sm font-semibold text-ink-soft hover:underline">Undo paid</button>
                 ) : (
                   <div className="mt-2 space-y-2">
-                    <ReceiptPick file={payFile} onFile={setPayFile} />
+                    <ReceiptPick files={payFiles} onFiles={setPayFiles} />
                     <div className="flex flex-wrap items-end gap-2">
                       <label className="text-sm">Paid on<input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} className={`${input} mt-1 w-44`} /></label>
                       <label className="text-sm">Amount received (optional)<input value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder={String(lineNet(open))} inputMode="decimal" className={`${input} mt-1 w-44`} /></label>
