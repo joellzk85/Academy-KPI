@@ -187,6 +187,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Trainers write the CRM record (2026-10-26):** trainer portal, My trainings and trainer links (outline and the new teambuilding link) write straight into the CRM's course outline / proposal, locked once sent to a client; no more trainer copies; publish **both** rules files; go-live checklist item 73. See `trainer-portal.md`.
 - **Same outline form everywhere (2026-10-26):** trainer portal, My trainings and the outline link show the CRM editor's own outline parts (`OutlineSections.tsx`) with the type; nothing to publish. See `trainer-portal.md`.
 - **Payments out board (2026-10-26):** Admin work → Money → Payments out: four lanes (Waiting approval → Ready for accounts → With accounts → Paid, receipt needed), Approve on the card, one-click Send to accounts (copies the message), receipt dropped on the card; Company payments, Owed by clients, Settings are sub-tabs; nothing to publish; go-live checklist item 74. See `money.md`.
+- **By title row menu and Categories (2026-10-26):** ⋯ Duplicate / Delete on each outline / proposal row in By title; Categories button to add and delete categories (titles moved first); nothing to publish. See `hrdc-programmes-trainers.md`.
 - **Not built yet:** Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

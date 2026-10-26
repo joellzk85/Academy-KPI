@@ -514,7 +514,8 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
       </div>
       {view === 'titles' ? (
         <TitlesView kind="teambuilding" programmes={programmes} docs={titleDocs} deals={sources.deals} trainers={sources.trainers} outlines={tbOutlines}
-          viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle} />
+          viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle}
+          onDuplicateDoc={d => onDuplicate(d.raw)} canDeleteDoc={d => canDelete(d.raw)} onDeleteDoc={d => deleteDoc(doc(db, 'teambuilding_proposals', d.id))} />
       ) : <>
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">

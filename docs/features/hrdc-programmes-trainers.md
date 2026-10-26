@@ -89,3 +89,10 @@ Joel: "program and course outline and teambuilding titles are the same; having a
 - Course outlines: the buttons sit above By title and All outlines (remembered per browser); Team building → By title lists the "(TB)" titles with their teambuilding outlines. New outline → Start from copies only outlines of the chosen type, and a title's own type is picked to start.
 - Outline editor "Title from the list" and "Invite a trainer" drop-downs group titles under the three types.
 - No rules change (Admin and Management may already write any title field; anyone creating a title may set it). Go-live checklist item 64.
+
+## By title: row menu and Categories (Joel, 2026-10-26)
+
+- Each outline / proposal row under a title (Course outlines and Teambuilding proposal → By title) ends with a ⋯ menu: **Duplicate** and **Delete** (Delete for staff, the creator or the deal owner, as in All outlines; asks first).
+- **Categories** button (Admin and Management) next to the filters: every category with how many titles use it, **+ Add**, and **Delete**. Deleting one that titles use first asks where they go (another category or No category), then moves them. The list lives in `config/title_categories` (`useTitleCategories` in `TitleList.tsx`; `categoryList(programmes, own)`), shared by course outlines and teambuilding; until first changed it is the standard four. Categories typed on a title still show while any title uses them.
+- Why: a typo "Customer Servoce" had been typed as a new category with no way to remove it.
+- Nothing to publish (any member may already write `config/title_categories` and a title's category).

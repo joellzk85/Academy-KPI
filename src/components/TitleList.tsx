@@ -1,13 +1,13 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { deleteDoc, doc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { ChevronDown, ChevronRight, Hash, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { deleteDoc, doc, onSnapshot, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { ChevronDown, ChevronRight, Copy, Hash, Loader2, MoreHorizontal, Plus, Search, Tags, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { useFormDraft } from '../lib/useFormDraft';
 import { deleteProgrammeEverywhere } from '../lib/detach';
 import { formatDate, todayIso } from '../lib/deals';
 import {
-  HRDC_STATUS_LABELS, HrdcStatus, Programme, categoryList, isTbProgramme, normTag, programmeStatus, programmeTags, titleCaps, titleKey, typingCaps,
+  HRDC_STATUS_LABELS, HrdcStatus, Programme, STANDARD_CATEGORIES, categoryList, isTbProgramme, normTag, programmeStatus, programmeTags, titleCaps, titleKey, typingCaps,
 } from '../lib/programmes';
 import DraftBar from './DraftBar';
 import PanelResizer from './PanelResizer';
@@ -78,7 +78,15 @@ export function groupByTitle(kind: TitleKind, programmes: Programme[], docs: Tit
 export const groupTypeOf = (g: TitleGroup, outlines: any[]): OutlineType =>
   g.programme ? programmeTypeOf(g.programme, outlines) : g.docs.length ? outlineTypeOf(g.docs[0].raw) : 'soft';
 
-export default function TitlesView({ kind, programmes, docs, deals, trainers, outlines, viewer, onOpenDoc, onWrite, loaded, onlyType, docType }: {
+/** The company's own category list (config/title_categories), or null while it's still the standard one. */
+export function useTitleCategories(): string[] | null {
+  const [own, setOwn] = useState<string[] | null>(null);
+  useEffect(() => onSnapshot(doc(db, 'config', 'title_categories'),
+    s => { const l = s.data()?.list; setOwn(Array.isArray(l) ? l : null); }, () => setOwn(null)), []);
+  return own;
+}
+
+export default function TitlesView({ kind, programmes, docs, deals, trainers, outlines, viewer, onOpenDoc, onWrite, loaded, onlyType, docType, onDuplicateDoc, onDeleteDoc, canDeleteDoc }: {
   kind: TitleKind; programmes: Programme[]; docs: TitleDoc[]; deals: any[]; trainers: any[];
   outlines: any[];                      // course outlines (for linking on a training title)
   onlyType?: OutlineType;               // training titles: show only Soft skill or Technical skill ones
@@ -86,9 +94,20 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
   viewer: Viewer; loaded: boolean;
   onOpenDoc: (d: TitleDoc) => void;
   onWrite: (g: TitleGroup) => void;     // "Write outline" / "Write proposal" for this title
+  // The ⋯ menu at the end of each row (Joel, 2026-10-26): Duplicate / Delete.
+  onDuplicateDoc?: (d: TitleDoc) => Promise<void>;
+  onDeleteDoc?: (d: TitleDoc) => Promise<void>;
+  canDeleteDoc?: (d: TitleDoc) => boolean;
 }) {
   const staff = viewer.role !== 'rep';
   const docWord = docType || (kind === 'teambuilding' ? 'proposal' : 'outline');
+  const ownCats = useTitleCategories();
+  const [docMenu, setDocMenu] = useState<string | null>(null);
+  const menuBox = useRef<HTMLDivElement>(null);
+  useCloseOnOutside(menuBox, !!docMenu, () => setDocMenu(null));
+  const [docError, setDocError] = useState('');
+  const docAct = async (fn: () => Promise<void>) => { setDocMenu(null); setDocError(''); try { await fn(); } catch (e) { setDocError(friendlyError(e)); } };
+  const [managing, setManaging] = useState(false);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');   // '' = all, '-' = no category
   const [hrdc, setHrdc] = useState<'' | HrdcStatus>('');
@@ -103,7 +122,7 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
     return m;
   }, [deals]);
   const teachers = (id?: string) => (id ? trainers.filter(t => (t.programmeIds || []).includes(id)).length : 0);
-  const categories = useMemo(() => categoryList(programmesFor(programmes, kind, outlines)), [programmes, kind, outlines]);
+  const categories = useMemo(() => categoryList(programmesFor(programmes, kind, outlines), ownCats), [programmes, kind, outlines, ownCats]);
   // "customer service" typed before shows under the standard "Customer service".
   const catOf = (g: TitleGroup) => { const c = String(g.programme?.category || '').trim(); return categories.find(x => x.toLowerCase() === c.toLowerCase()) || c; };
 
@@ -175,7 +194,9 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
           <option value="">Grouped by category</option>
           {(Object.keys(LIST_SORT_LABELS) as ListSort[]).map(k => <option key={k} value={k}>{k === 'az' ? 'Title A to Z' : k === 'za' ? 'Title Z to A' : LIST_SORT_LABELS[k]}</option>)}
         </select>
+        {staff && <button type="button" className={btnSecondary} onClick={() => setManaging(true)}><Tags className="h-4 w-4" /> Categories</button>}
       </div>
+      {docError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{docError}</p>}
 
       {loaded && notCaps.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-attention-soft px-4 py-2.5 text-sm">
@@ -233,8 +254,8 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
                         {g.docs.length > 0 && (
                           <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-white">
                             {g.docs.map(d => (
-                              <li key={d.id}>
-                                <button type="button" onClick={() => onOpenDoc(d)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface">
+                              <li key={d.id} className="relative flex items-center hover:bg-surface">
+                                <button type="button" onClick={() => onOpenDoc(d)} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left">
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-[15px] font-semibold">{d.company || 'General'}</span>
                                     <span className="flex items-center gap-1.5 truncate text-sm text-ink-soft">
@@ -245,6 +266,29 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
                                   </span>
                                   <span className="shrink-0 text-sm text-ink-soft">{formatDate(d.date) || ''}</span>
                                 </button>
+                                {(onDuplicateDoc || onDeleteDoc) && (
+                                  <div ref={docMenu === d.id ? menuBox : undefined} className="shrink-0 pr-2">
+                                    <button type="button" onClick={() => setDocMenu(m => (m === d.id ? null : d.id))} className="rounded-md p-2 text-ink-soft hover:bg-white hover:text-ink"
+                                      aria-label={`More for ${d.ref}`} aria-expanded={docMenu === d.id}>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </button>
+                                    {docMenu === d.id && (
+                                      <div role="menu" className="absolute right-2 top-11 z-20 w-44 overflow-hidden rounded-xl border border-line bg-white py-1 shadow-lg">
+                                        {onDuplicateDoc && (
+                                          <button type="button" role="menuitem" onClick={() => docAct(() => onDuplicateDoc(d))} className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-ink hover:bg-surface">
+                                            <Copy className="h-4 w-4" /> Duplicate
+                                          </button>
+                                        )}
+                                        {onDeleteDoc && (!canDeleteDoc || canDeleteDoc(d)) && (
+                                          <button type="button" role="menuitem" className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-danger hover:bg-danger-soft"
+                                            onClick={() => { if (window.confirm(`Delete ${docWord} ${d.ref}? This can't be undone.`)) docAct(() => onDeleteDoc(d)); else setDocMenu(null); }}>
+                                            <Trash2 className="h-4 w-4" /> Delete
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </li>
                             ))}
                           </ul>
@@ -268,6 +312,100 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
         <TitlePanel kind={kind} docWord={docWord} group={livePanel} programmes={programmes} deals={deals} trainers={trainers} outlines={outlines} viewer={viewer}
           docs={docs} onClose={() => setPanel(null)} />
       )}
+      {managing && <CategoryManager programmes={programmes} own={ownCats} viewer={viewer} onClose={() => setManaging(false)} />}
+    </div>
+  );
+}
+
+// ---------- Categories: add and delete (Joel, 2026-10-26) ----------
+// Admin and Management keep the company's category list (config/title_categories, shared by course outlines and
+// teambuilding). Deleting one that titles use moves those titles to another category, or to No category, so a typo
+// such as "Customer Servoce" goes for good.
+function CategoryManager({ programmes, own, viewer, onClose }: { programmes: Programme[]; own: string[] | null; viewer: Viewer; onClose: () => void }) {
+  const all = categoryList(programmes, own);
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const usedBy = (c: string) => programmes.filter(p => same(String(p.category || ''), c));
+  const [adding, setAdding] = useState('');
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [moveTo, setMoveTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  useCloseOnOutside(box, !busy, onClose);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError('');
+    try { await fn(); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  const saveList = (list: string[]) => setDoc(doc(db, 'config', 'title_categories'), { list, updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name });
+
+  const add = () => {
+    const name = adding.trim().replace(/\s+/g, ' ');
+    if (!name) return;
+    if (all.some(c => same(c, name))) return setError(`"${name}" is already in the list.`);
+    run(async () => { await saveList([...(own || STANDARD_CATEGORIES), name]); setAdding(''); });
+  };
+  const remove = (c: string) => run(async () => {
+    const titles = usedBy(c);
+    for (let i = 0; i < titles.length; i += 400) {
+      const b = writeBatch(db);
+      titles.slice(i, i + 400).forEach(p => b.update(doc(db, 'programmes', p.id), { category: moveTo, updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name }));
+      await b.commit();
+    }
+    await saveList((own || STANDARD_CATEGORIES).filter(x => !same(x, c)));
+    setRemoving(null);
+    setMoveTo('');
+  });
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-start justify-center bg-ink/30 p-4 pt-[10vh]">
+      <div ref={box} role="dialog" aria-label="Categories" className="w-full max-w-lg space-y-3 rounded-2xl bg-white p-5 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold">Categories</h3>
+          <button type="button" onClick={onClose} className="rounded-md p-1.5 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="text-sm text-ink-soft">Used by course outlines and teambuilding titles.</p>
+        <ul className="max-h-[50vh] divide-y divide-line overflow-y-auto rounded-xl border border-line">
+          {all.map(c => {
+            const n = usedBy(c).length;
+            return (
+              <li key={c} className="px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">{c}</span>
+                  <span className="text-sm text-ink-soft">{plural(n, 'title')}</span>
+                  <button type="button" disabled={busy} onClick={() => { setRemoving(removing === c ? null : c); setMoveTo(''); setError(''); }}
+                    className="rounded-md p-1.5 text-danger hover:bg-danger-soft disabled:opacity-60" aria-label={`Delete ${c}`}><Trash2 className="h-4 w-4" /></button>
+                </div>
+                {removing === c && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-danger-soft/50 p-2 text-sm">
+                    {n > 0 && (
+                      <>
+                        <span>Move its {plural(n, 'title')} to</span>
+                        <select value={moveTo} onChange={e => setMoveTo(e.target.value)} className={select} aria-label="Move titles to">
+                          <option value="">No category</option>
+                          {all.filter(x => x !== c).map(x => <option key={x} value={x}>{x}</option>)}
+                        </select>
+                      </>
+                    )}
+                    <button type="button" disabled={busy} onClick={() => remove(c)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-danger px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">
+                      {busy && <Loader2 className="h-4 w-4 animate-spin" />} Delete "{c}"
+                    </button>
+                    <button type="button" className={btnSecondary} disabled={busy} onClick={() => setRemoving(null)}>Cancel</button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+          {all.length === 0 && <li className="px-3 py-3 text-sm text-ink-soft">No categories yet.</li>}
+        </ul>
+        <form className="flex gap-2" onSubmit={e => { e.preventDefault(); add(); }}>
+          <input value={adding} onChange={e => setAdding(e.target.value)} className={input} placeholder="New category" aria-label="New category" />
+          <button type="submit" className={btnPrimary} disabled={busy || !adding.trim()}><Plus className="h-4 w-4" /> Add</button>
+        </form>
+        {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      </div>
     </div>
   );
 }
@@ -377,7 +515,7 @@ function TitlePanel({ kind, docWord, group, programmes, deals, trainers, outline
   const formDraft = useFormDraft(viewer.id, `title:${p?.id || group.key}`, form, setForm);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const categories = categoryList(programmesFor(programmes, kind, outlines));
+  const categories = categoryList(programmesFor(programmes, kind, outlines), useTitleCategories());
   const tagList = allTagsOf(programmes);
   const usedOn = p ? deals.filter(d => d.programmeId === p.id).length : 0;
 

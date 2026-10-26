@@ -45,11 +45,13 @@ export interface Programme {
 // so there's no separate Programmes tab. Each title has one category and any number of #tags.
 export const STANDARD_CATEGORIES = ['Sales', 'HR', 'Communication', 'Customer service'];
 
-/** The categories to pick from: the standard ones first, then every other one already used (Blueprint ones included). */
-export function categoryList(programmes: { category?: string }[]): string[] {
-  const isStd = (c: string) => STANDARD_CATEGORIES.some(s => s.toLowerCase() === c.toLowerCase());
+/** The categories to pick from: the company's list first (Categories button, config/title_categories; the standard
+ *  ones until it's first changed), then every other one already used (Blueprint ones included). */
+export function categoryList(programmes: { category?: string }[], own?: string[] | null): string[] {
+  const base = own || STANDARD_CATEGORIES;
+  const isStd = (c: string) => base.some(s => s.toLowerCase() === c.toLowerCase());
   const used = [...new Set(programmes.map(p => String(p.category || '').trim()).filter(Boolean))];
-  return [...STANDARD_CATEGORIES, ...used.filter(u => !isStd(u)).sort((a, b) => a.localeCompare(b))];
+  return [...base, ...used.filter(u => !isStd(u)).sort((a, b) => a.localeCompare(b))];
 }
 
 /** "#Customer Service" → "customer-service". */

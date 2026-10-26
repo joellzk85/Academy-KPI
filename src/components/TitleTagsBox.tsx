@@ -3,7 +3,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { db, friendlyError } from '../lib/firebase';
 import { Programme, categoryList, programmeTags, titleKey } from '../lib/programmes';
 import { programmesFor } from '../lib/outlineTb';
-import { CategoryPicker, TagInput, TitleKind, allTagsOf, createTitle } from './TitleList';
+import { CategoryPicker, TagInput, TitleKind, allTagsOf, createTitle, useTitleCategories } from './TitleList';
 
 // The title's category and #tags, inside the outline (or proposal) editor (Joel, 2026-10-24: "a #tag tab in course
 // outline"). They belong to the title, so every outline with the same title shares them. Saved straight away; a
@@ -17,6 +17,7 @@ export default function TitleTagsBox({ kind, programmeId, title, programmes, vie
 }) {
   const [error, setError] = useState('');
   const [newCat, setNewCat] = useState('');   // a new category being typed, saved on leaving the box
+  const ownCats = useTitleCategories();
   const made = useRef<string>('');            // the record just made here, before the list shows it (no doubles)
   const list = programmesFor(programmes, kind);
   // The same title of this kind first, else the same title of any type (titles no longer differ by a "(TB)").
@@ -40,8 +41,8 @@ export default function TitleTagsBox({ kind, programmeId, title, programmes, vie
     <div className="grid gap-3 rounded-xl border border-line bg-surface/50 p-3 sm:grid-cols-[minmax(0,14rem)_1fr]">
       <div onBlur={() => { if (newCat.trim()) { write({ category: newCat.trim() }); setNewCat(''); } }}>
         <label className={label} htmlFor="tt-box-cat">Category</label>
-        <CategoryPicker id="tt-box-cat" value={category} categories={categoryList(list)}
-          onChange={v => (categoryList(list).includes(v) || !v ? (setNewCat(''), write({ category: v })) : setNewCat(v))} />
+        <CategoryPicker id="tt-box-cat" value={category} categories={categoryList(list, ownCats)}
+          onChange={v => (categoryList(list, ownCats).includes(v) || !v ? (setNewCat(''), write({ category: v })) : setNewCat(v))} />
       </div>
       <div>
         <label className={label} htmlFor="tt-box-tags">#Tags <span className="font-normal text-ink-soft">(shared by every outline with this title)</span></label>

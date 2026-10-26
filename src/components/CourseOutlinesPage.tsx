@@ -516,7 +516,8 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
         <TitlesView key={typeTab === 'teambuilding' ? 'tb' : 'training'} kind={typeTab === 'teambuilding' ? 'teambuilding' : 'training'} docType="outline" onlyType={typeTab}
           programmes={sources.programmes as Programme[]} docs={titleDocs} deals={sources.deals} trainers={trainers}
           outlines={outlines.filter(o => (outlineTypeOf(o) === 'teambuilding') === (typeTab === 'teambuilding'))}
-          viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle} />
+          viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle}
+          onDuplicateDoc={d => onDuplicate(d.raw)} canDeleteDoc={d => canDelete(d.raw)} onDeleteDoc={d => deleteDoc(doc(db, 'course_outlines', d.id))} />
       ) : <>
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
