@@ -11,6 +11,7 @@ import { forgetDraft, useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { lockedDateProblem, minOpenDate } from '../lib/monthLock';
 import { valueLocked } from '../lib/trainingChange';
+import MeetingPhotos, { useDealMeetingPhotos } from './MeetingPhotos';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -41,6 +42,11 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
   const [mode, setMode] = useState<null | 'book' | 'log'>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const photos = useDealMeetingPhotos(deal.id);
+  // Meeting photos (2026-10-26): face-to-face only, from the meeting day on.
+  const photoBox = a && !a.legacy && a.mode === 'face' && a.date.slice(0, 10) <= todayIso()
+    ? <MeetingPhotos photos={photos} deal={deal} kind="appointment" meetingDate={a.date.slice(0, 10)} viewer={viewer} canAdd={canLog} />
+    : null;
 
   const write = async (changes: any, msg: string) => {
     setBusy(true);
@@ -123,6 +129,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
             {canChangeBooking && <button type="button" className={btnSecondary} disabled={busy} onClick={cancelBooking}><X className="h-4 w-4" /> Cancel</button>}
           </div>
         )}
+        {photoBox}
         {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
       </div>
     );
@@ -145,6 +152,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
           <p className="mt-1 text-sm text-ink-soft">Logged by {a.loggedByName}{late > 3 ? <span className="font-semibold text-attention"> · logged {late} days late</span> : ''}</p>
         </>
       )}
+      {photoBox}
     </div>
   );
 }

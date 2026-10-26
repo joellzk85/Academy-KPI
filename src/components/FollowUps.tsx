@@ -6,6 +6,7 @@ import { dealOwnerId, dealStage, formatDate, todayIso, STAGE_LABELS } from '../l
 import { useTeamList } from '../lib/useClientHistory';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
+import MeetingPhotos, { useDealMeetingPhotos } from './MeetingPhotos';
 import { lockedDateProblem, minOpenDate } from '../lib/monthLock';
 import { FollowUpAlert, FollowUpHow, FollowUpNote, HOW_LABELS, alertText, followUpNotes, newNoteId } from '../lib/followUps';
 
@@ -148,8 +149,10 @@ export function followUpCountText(n: number): string {
   return n === 0 ? 'Not followed up yet' : `Followed up ${n} time${n === 1 ? '' : 's'}`;
 }
 
-export function FollowUpList({ deal, limit }: { deal: any; limit?: number }) {
+// With a viewer, "Visit" notes show their meeting photos (2026-10-26); canAdd lets the viewer add one.
+export function FollowUpList({ deal, limit, viewer, canAdd = false }: { deal: any; limit?: number; viewer?: { id: string; name: string; role: string }; canAdd?: boolean }) {
   const notes = followUpNotes(deal);
+  const photos = useDealMeetingPhotos(deal.id);
   if (!notes.length) return <p className="text-sm text-ink-soft">No follow-up notes yet.</p>;
   const shown = limit ? notes.slice(0, limit) : notes;
   return (
@@ -167,6 +170,7 @@ export function FollowUpList({ deal, limit }: { deal: any; limit?: number }) {
             <p className="mt-0.5 whitespace-pre-line text-ink">{n.text}</p>
             {n.reason && <p className="mt-0.5 text-ink-soft">Why keep open: {n.reason}</p>}
             {n.nextDate && <p className="mt-0.5 text-ink-soft">Next follow-up {formatDate(n.nextDate)}{n.followUpByName ? ` by ${n.followUpByName}` : ''}</p>}
+            {viewer && n.how === 'visit' && <MeetingPhotos photos={photos} deal={deal} kind="visit" noteId={n.id} meetingDate={n.date.slice(0, 10)} viewer={viewer} canAdd={canAdd} />}
           </li>
         ))}
       </ul>

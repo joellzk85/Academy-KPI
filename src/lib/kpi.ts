@@ -10,6 +10,7 @@ import { dealOwnerId, dealWonDate, dealProposalDate, dealAppointmentDate, dealVa
 import { followUpAlert, followUpNotes } from './followUps';
 import { buildForecast, DEFAULT_FORECAST, ForecastSettings } from './forecast';
 import { DEFAULT_MONEY_SETTINGS, expectedFor, MoneySettings, shortfall } from './money';
+import { MeetingPhoto, photoShare } from './meetingPhotos';
 import { activeKpiLibrary, bandLight, Bands, isGpMeasure, kpiDef, KpiDef, KpiSetItem, KpiUnit, Light, MEASURE_INFO, presetById, Scoring, KPI_PRESETS } from './kpiLibrary';
 
 export type MetricKey = 'salesFigure' | 'proposals' | 'preview' | 'extraMetric';
@@ -33,6 +34,7 @@ export interface KpiSources {
   rating360?: Record<string, Record<string, { avg: number; count: number }>>;   // 'YYYY-MM' → person → 360 rating (server)
   oneToOnes?: Record<string, string[]>;    // person → dates of 1-to-1 sessions held (server, lib/oneToOne.ts)
   oneToOnesAsked?: Record<string, string[]>;   // person → dates of held 1-to-1s they asked for themselves
+  meetingPhotos?: MeetingPhoto[];          // meeting_photos (lib/meetingPhotos.ts)
 }
 
 // The old templates, kept for screens that list them (they are now the ready-made sets in lib/kpiLibrary.ts).
@@ -402,6 +404,8 @@ const MEASURES: Record<string, (c: Ctx) => Measured> = {
     const weeks = byWeek(c.sources.oneToOnesAsked?.[c.rep.id] || [], c.prefix);
     return { value: weeks.reduce((a, b) => a + b, 0), weeks };
   },
+  // Face-to-face meetings this month with a meeting photo, % (2026-10-26); nothing to count without meetings.
+  meeting_photos: c => ({ value: photoShare(c.deals, c.sources.meetingPhotos || [], c.rep.id, `${c.prefix}-01`, `${c.prefix}-31`).pct }),
   rating_360: c => {
     const r = c.sources.rating360?.[c.prefix]?.[c.rep.id];
     return { value: r && r.count > 0 ? r.avg : null };

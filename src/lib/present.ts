@@ -81,7 +81,7 @@ export function trendBuckets(p: Period, today: string, earliest = ''): Bucket[] 
 }
 
 // ---------- Slide lists ----------
-export type PersonSlide = 'scorecard' | 'numbers' | 'checkin' | 'won' | 'pipeline' | 'next' | 'touch' | 'heatmap' | 'lost' | 'admin' | 'actions' | 'projection';
+export type PersonSlide = 'scorecard' | 'numbers' | 'checkin' | 'won' | 'pipeline' | 'next' | 'touch' | 'heatmap' | 'lost' | 'admin' | 'actions' | 'projection' | 'photos';
 export type CompanySlide = 'headline' | 'trend' | 'team' | 'funnel' | 'clients' | 'funding' | 'programmes' | 'collect' | 'profit' | 'touch' | 'lost' | 'trainings' | 'actions' | 'projection' | 'logins';
 
 export interface SlideInfo<K> { key: K; label: string; hint: string; admin?: boolean; manager?: boolean }
@@ -95,6 +95,7 @@ export const PERSON_SLIDES: SlideInfo<PersonSlide>[] = [
   { key: 'projection', label: 'Sales projection', hint: 'Won plus open deals by Hot / Warm / Cold, up to 6 months ahead' },
   { key: 'next', label: 'Coming up', hint: 'Appointments, follow-ups, trainings and To-dos in the next 7 days' },
   { key: 'touch', label: 'Client touch points', hint: 'Who I contacted and how (call, WhatsApp, visit…)' },
+  { key: 'photos', label: 'Meeting photos', hint: 'Photos of my face-to-face meetings that I ticked "Show in presentation", with what happened' },
   { key: 'heatmap', label: 'Activity heatmap', hint: 'Every day of the last 12 weeks, darker = busier' },
   { key: 'lost', label: 'Deals lost', hint: 'Deals lost and why' },
   { key: 'admin', label: 'Operations', hint: 'HRDC claims submitted, venues added, trainings delivered and coming up', admin: true },
@@ -122,7 +123,7 @@ export const COMPANY_SLIDES: SlideInfo<CompanySlide>[] = [
 export function defaultPersonSlides(role?: string): PersonSlide[] {
   return role === 'admin'
     ? ['scorecard', 'checkin', 'admin', 'heatmap', 'next', 'actions']
-    : ['scorecard', 'numbers', 'checkin', 'won', 'pipeline', 'next', 'actions'];
+    : ['scorecard', 'numbers', 'checkin', 'won', 'pipeline', 'photos', 'next', 'actions'];
 }
 export const DEFAULT_COMPANY_SLIDES: CompanySlide[] = ['headline', 'trend', 'team', 'funnel', 'clients', 'collect', 'touch', 'actions'];
 

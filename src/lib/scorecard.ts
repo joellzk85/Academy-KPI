@@ -5,6 +5,8 @@
 //   quarterly review. Groups: role skills, growth, and leadership (Manager and Senior management only).
 // - Behavioural ("how do you show up?"): the HEART values (the 360 rating items, lib/rating360.ts). `peerShare` %
 //   comes from teammates' 360 ratings in closed rounds, the rest from the manager's rating in the quarterly review.
+//   Meeting photos (Joel, 2026-10-26): the % of the person's face-to-face meetings with a photo (lib/meetingPhotos.ts)
+//   counts `photoShare` % of the Accountability and Trustworthiness values (as stars, % ÷ 20); see withMeetingPhotos.
 // - Each person has a level (Executive, Manager, Senior management); each level has its own weights for the three
 //   parts, adding up to 100. A part with nothing to score in the period is left out, and the others count for more
 //   (the KPI rule for "nothing to count").
@@ -35,6 +37,7 @@ export interface ScorecardSettings {
   levelOf: Record<string, Level>;   // memberId → level; people not listed use defaultLevel(role)
   peerShare: number;                // % of Behavioural from teammates (360); the rest from the manager
   reliabilityShare: number;         // % of Performance from reliability; the rest from the KPI score
+  photoShare: number;               // % of Accountability and Trustworthiness from meeting photos (2026-10-26)
   skills: Skill[];
 }
 
@@ -60,7 +63,7 @@ export const DEFAULT_SKILLS: Skill[] = [
   S('planning', 'Planning and decisions', 'leadership', 12, 'Reacts to problems as they come', 'Plans ahead, decides well, and turns plans into results'),
 ];
 
-export const DEFAULT_SCORECARD: ScorecardSettings = { weights: DEFAULT_WEIGHTS, levelOf: {}, peerShare: 50, reliabilityShare: 10, skills: DEFAULT_SKILLS };
+export const DEFAULT_SCORECARD: ScorecardSettings = { weights: DEFAULT_WEIGHTS, levelOf: {}, peerShare: 50, reliabilityShare: 10, photoShare: 20, skills: DEFAULT_SKILLS };
 
 export const defaultLevel = (role?: string): Level => (role === 'management' ? 'manager' : 'executive');
 export const levelFor = (s: ScorecardSettings, memberId: string, role?: string): Level => s.levelOf[memberId] || defaultLevel(role);
@@ -89,6 +92,7 @@ export function readScorecard(d: any): ScorecardSettings {
     weights, levelOf,
     peerShare: pctNum(d?.peerShare, DEFAULT_SCORECARD.peerShare),
     reliabilityShare: pctNum(d?.reliabilityShare, DEFAULT_SCORECARD.reliabilityShare),
+    photoShare: pctNum(d?.photoShare, DEFAULT_SCORECARD.photoShare),
     skills: (skills.length ? skills : DEFAULT_SKILLS).slice().sort((a, b) => a.order - b.order),
   };
 }
@@ -105,6 +109,7 @@ export function scorecardProblem(s: ScorecardSettings): string {
   }
   if (!(s.peerShare >= 0 && s.peerShare <= 100)) return 'The teammates share must be from 0 to 100%.';
   if (!(s.reliabilityShare >= 0 && s.reliabilityShare <= 100)) return 'The reliability share must be from 0 to 100%.';
+  if (!(s.photoShare >= 0 && s.photoShare <= 100)) return 'The meeting photos share must be from 0 to 100%.';
   if (s.skills.some(k => !k.name.trim())) return 'Give every skill a name.';
   if (!s.skills.some(k => k.active)) return 'Keep at least one skill turned on.';
   return '';
@@ -220,6 +225,20 @@ export function competencyScore(quarterAvgs: (number | null)[]): number | null {
 export function behaviouralScore(peerAvg: number | null, managerAvg: number | null, peerShare: number): { score: number | null; stars: number | null } {
   const s = mix(managerAvg, peerAvg, peerShare);
   return { score: s === null ? null : starsPct(s), stars: s === null ? null : round2(s) };
+}
+
+// Meeting photos (2026-10-26): each of these values' stars become (100 - photoShare)% their rating and photoShare% the
+// photo % as stars (% ÷ 20). Behavioural is the values' average, so its stars move by that change ÷ the number of values.
+// No ratings yet, or no face-to-face meetings in the period: unchanged.
+export const PHOTO_VALUES = ['accountability', 'trustworthiness'];
+export function withMeetingPhotos(base: { score: number | null; stars: number | null }, itemStars: Record<string, number | null>, values: number, photoPct: number | null, photoShare: number): { score: number | null; stars: number | null } {
+  if (base.stars === null || photoPct === null || !photoShare || values < 1) return base;
+  const photoStars = photoPct / 20;
+  const ids = PHOTO_VALUES.filter(id => id in itemStars);
+  if (!ids.length) return base;
+  const change = ids.reduce((t, id) => t + (photoShare / 100) * (photoStars - (itemStars[id] ?? (base.stars as number))), 0);
+  const stars = Math.max(0, Math.min(5, base.stars + change / values));
+  return { score: starsPct(stars), stars: round2(stars) };
 }
 
 // Overall: the parts' weighted average, over the parts that have a score.

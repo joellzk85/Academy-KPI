@@ -4,7 +4,8 @@ import { Representative } from '../types';
 import { KPI_LIGHT_BADGE, ringTarget, kpiLight, kpiValueText, LIGHT_BADGE, monthKpi, monthLabel, monthPrefix, rowBarClass, weekIndexOf } from '../lib/kpi';
 import { LIGHT_LABELS } from '../lib/kpiLibrary';
 import { addDays, dealAppointmentDate, dealNeedsAttention, dealOwnerId, dealStage, dealValue, dealWonDate, formatDate, formatRM, trainingDateText } from '../lib/deals';
-import { HOW_LABELS } from '../lib/followUps';
+import { HOW_LABELS, followUpNotes } from '../lib/followUps';
+import { MEETING_KIND_LABELS } from '../lib/meetingPhotos';
 import { MoneySettings } from '../lib/money';
 import { ProjectRow, projectTotals } from '../lib/projectPL';
 import {
@@ -216,6 +217,34 @@ export function personSlides(args: {
             {col(<PhoneCall className="h-5 w-5 text-accent" />, 'Follow-ups due', follow.map(p => ({ key: p.id, tone: ymd(p.followUpDate) < today ? 'danger' as const : undefined, main: clientNameOf(p, data.clients), side: formatDate(p.followUpDate) })))}
             {col(<GraduationCap className="h-5 w-5 text-accent" />, 'Trainings', trainings.map(p => ({ key: p.id, main: <>{clientNameOf(p, data.clients)}<span className="block text-sm text-ink-soft">{programmeNameOf(p, data.programmes)}</span></>, side: trainingDateText(p) })))}
             {col(<ListTodo className="h-5 w-5 text-accent" />, 'To-dos due', todos.map(t => ({ key: t.id, tone: ymd(t.dateline) < today ? 'danger' as const : undefined, main: t.detail, side: formatDate(t.dateline) })))}
+          </div>
+        ),
+      });
+    } else if (key === 'photos') {
+      // Meeting photos (2026-10-26): only the ones this person ticked "Show in presentation", meetings in the period.
+      const shown = (data.kpi?.meetingPhotos || []).filter(ph => ph.present && ph.byId === rep.id && inRange(ph.meetingDate, period))
+        .sort((a, b) => b.meetingDate.localeCompare(a.meetingDate)).slice(0, 6);
+      const what = (ph: typeof shown[number]) => {
+        const deal = data.deals.find(p => p.id === ph.dealId);
+        if (!deal) return { client: 'Deal no longer open', text: '' };
+        const text = ph.kind === 'visit' ? followUpNotes(deal).find(n => n.id === ph.noteId)?.text || '' : deal.appointment?.outcome || '';
+        return { client: clientNameOf(deal, data.clients), text };
+      };
+      out.push({
+        key, title: 'Meeting photos', subtitle: `${period.label} · face-to-face meetings`,
+        body: !shown.length ? <Empty text={'No meeting photos ticked "Show in presentation" in this period.'} /> : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {shown.map(ph => {
+              const w = what(ph);
+              return (
+                <Panel key={ph.id}>
+                  <img src={ph.url} alt={`Meeting with ${w.client}`} className="mb-2 h-48 w-full rounded-lg object-cover" />
+                  <p className="font-bold">{w.client}</p>
+                  <p className="text-sm text-ink-soft">{MEETING_KIND_LABELS[ph.kind]} · {formatDate(ph.meetingDate)}</p>
+                  {w.text && <p className="mt-1 line-clamp-3 text-[15px]">{w.text}</p>}
+                </Panel>
+              );
+            })}
           </div>
         ),
       });

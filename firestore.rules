@@ -1185,6 +1185,34 @@ service cloud.firestore {
     // Logins and sensitive actions (2026-10-24, serverActivity.ts): written only by the CRM server. Since the private
     // room (2026-10-24) only the owner reads them (the owner override rule below); nobody else.
     // login_devices (devices and places seen before) and restore_log (Restore history) have no rule: server and owner only.
+    // Meeting photos (2026-10-26, src/lib/meetingPhotos.ts): proof of a face-to-face meeting. Every member sees the
+    // photo; the person adds it under their own name with the database's clock; they can only tick "Show in
+    // presentation" afterwards; they or Management remove it.
+    match /meeting_photos/{photoId} {
+      allow read: if isMember();
+      allow create: if isMember()
+        && request.resource.data.byId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.kind in ['appointment', 'visit']
+        && request.resource.data.dealId is string
+        && request.resource.data.url is string
+        && request.resource.data.present == false
+        && existsAfter(/databases/$(database)/documents/meeting_photo_places/$(photoId));
+      allow update: if isMember() && resource.data.byId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['present'])
+        && request.resource.data.present is bool;
+      allow delete: if isMember() && (resource.data.byId == request.auth.uid || isManagement());
+    }
+    // When and where each meeting photo was submitted: written once with the photo, never changed, and not
+    // readable by members (only the override at the end).
+    match /meeting_photo_places/{photoId} {
+      allow create: if isMember()
+        && request.resource.data.byId == request.auth.uid
+        && request.resource.data.at == request.time
+        && getAfter(/databases/$(database)/documents/meeting_photos/$(photoId)).data.byId == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+
     match /login_sessions/{sessionId} {
       allow read, write: if false;
     }

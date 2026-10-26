@@ -19,8 +19,11 @@ import {
 } from '../lib/reliability';
 import {
   behaviouralScore, competencyScore, Level, LEVEL_LABELS, levelFor, overallScore, Part, PART_LABELS, PART_QUESTIONS, PARTS, perItemAvg,
-  performanceScore, quarterMonths, quartersIn, quarterText, reviewSkillAvg, reviewValuesAvg, ScorecardSettings, skillsFor, Weights,
+  performanceScore, PHOTO_VALUES, quarterMonths, quartersIn, quarterText, reviewSkillAvg, reviewValuesAvg, ScorecardSettings, skillsFor, Weights,
+  withMeetingPhotos,
 } from '../lib/scorecard';
+import { photoShare } from '../lib/meetingPhotos';
+import { useMeetingPhotos } from './MeetingPhotos';
 import { useAutoSave } from '../lib/useAutoSave';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
@@ -143,11 +146,21 @@ export function usePersonScorecard(person: Person, months: string[], src: Scorec
   const reviews = allReviews.filter(r => quarters.includes(r.quarter)).sort((a, b) => a.quarter.localeCompare(b.quarter));
   const selfs = useSelfReviews(person.id).filter(s => quarters.includes(s.quarter));
   const skills = skillsFor(settings, level);
+  const meetingPhotos = useMeetingPhotos();
+  const photos = photoShare(deals, meetingPhotos, person.id, from, to);
 
   // Every value rated in the review counts, as with the 360 ratings (older reviews keep items now turned off).
   const managerValues = reviews.map(r => reviewValuesAvg(r, Object.keys(r.values))).filter((x): x is number => x !== null);
   const managerAvg = managerValues.length ? managerValues.reduce((a, b) => a + b, 0) / managerValues.length : null;
-  const behaviour = behaviouralScore(peers.sum.overall?.avg ?? null, managerAvg, settings.peerShare);
+  const ratedBehaviour = behaviouralScore(peers.sum.overall?.avg ?? null, managerAvg, settings.peerShare);
+  const mValues = perItemAvg(reviews.map(r => r.values));
+  // Meeting photos (2026-10-26) count for part of Accountability and Trustworthiness (lib/scorecard.ts withMeetingPhotos).
+  const ratedValues = activeItems(ratingItems).map(i => i.id);
+  const itemStars = Object.fromEntries(ratedValues.filter(id => PHOTO_VALUES.includes(id)).map(id => {
+    const m = mValues[id]?.avg ?? null, pr = peers.sum.items[id]?.avg ?? null;
+    return [id, m === null ? pr : pr === null ? m : (m * (100 - settings.peerShare) + pr * settings.peerShare) / 100];
+  }));
+  const behaviour = withMeetingPhotos(ratedBehaviour, itemStars, ratedValues.length, photos.pct, settings.photoShare);
   const parts: Record<Part, number | null> = {
     performance: performanceScore(kpi.avg, rel.r.score, settings.reliabilityShare),
     competency: competencyScore(reviews.map(r => reviewSkillAvg(r, skills))),
@@ -160,7 +173,6 @@ export function usePersonScorecard(person: Person, months: string[], src: Scorec
   const valueName = (id: string) => ratingItems.find(i => i.id === id)?.name || 'Item no longer used';
   const mSkills = perItemAvg(reviews.map(r => r.skills), (id, i) => reviews[i].na.includes(id));
   const sSkills = perItemAvg(selfs.map(s => s.skills), (id, i) => selfs[i].na.includes(id));
-  const mValues = perItemAvg(reviews.map(r => r.values));
   const sValues = perItemAvg(selfs.map(s => s.values));
   const ids = (base: string[], ...maps: Record<string, unknown>[]) => Array.from(new Set([...base, ...maps.flatMap(m => Object.keys(m))]));
   const skillRows: ResultRow[] = ids(skills.map(k => k.id), mSkills, sSkills).map(id => ({
@@ -174,7 +186,7 @@ export function usePersonScorecard(person: Person, months: string[], src: Scorec
   });
   return {
     from, to, level, weights, quarters, kpi, rel, ratingItems, peers, allReviews, reviews, selfs, managerAvg, behaviour, parts, overall,
-    skillRows, valueRows, comments, ready: !rel.loading,
+    skillRows, valueRows, comments, photos, ready: !rel.loading,
   };
 }
 export type PersonScorecardData = ReturnType<typeof usePersonScorecard>;
@@ -195,7 +207,7 @@ function PersonScorecard({ viewer, person, months, periodText, src }: {
         <KpiCard person={person} kpi={sc.kpi} comments={sc.comments.kpi} />
         <ReliabilityCard viewer={viewer} person={person} people={src.people} from={sc.from} rel={sc.rel} comments={sc.comments.reliability} />
         <CompetencyCard person={person} sc={sc} canReview={canReview} onReview={review} />
-        <BehaviouralCard person={person} sc={sc} peerShare={src.settings.peerShare} canReview={canReview} onReview={review} />
+        <BehaviouralCard person={person} sc={sc} peerShare={src.settings.peerShare} photoShare={src.settings.photoShare} canReview={canReview} onReview={review} />
       </div>
       {sc.comments.overall.length > 0 && (
         <section className={card}>
@@ -364,8 +376,8 @@ function usePeerPart(memberId: string, months: string[]) {
   return { mine, sum: summarise(mine), stillOpen };
 }
 
-function BehaviouralCard({ person, sc, peerShare, canReview, onReview }: { person: Person; sc: PersonScorecardData; peerShare: number; canReview: boolean; onReview: () => void }) {
-  const { peers, managerAvg, behaviour, valueRows, comments } = sc;
+function BehaviouralCard({ person, sc, peerShare, photoShare: photoPart, canReview, onReview }: { person: Person; sc: PersonScorecardData; peerShare: number; photoShare: number; canReview: boolean; onReview: () => void }) {
+  const { peers, managerAvg, behaviour, valueRows, comments, photos } = sc;
   const { sum, stillOpen } = peers;
   return (
     <section className={card}>
@@ -379,6 +391,11 @@ function BehaviouralCard({ person, sc, peerShare, canReview, onReview }: { perso
         <p className="flex justify-between rounded-lg bg-surface px-3 py-2 text-[15px]">Teammates (360) <strong className="tabular-nums">{sum.overall ? `${one(sum.overall.avg)} / 5` : '–'}</strong></p>
         <p className="flex justify-between rounded-lg bg-surface px-3 py-2 text-[15px]">Manager <strong className="tabular-nums">{managerAvg === null ? '–' : `${one(managerAvg)} / 5`}</strong></p>
       </div>
+      {photoPart > 0 && photos.meetings > 0 && (
+        <p className="mb-3 rounded-lg bg-surface px-3 py-2 text-[15px]">
+          Meeting photos: <strong className="tabular-nums">{photos.withPhoto} of {photos.meetings}</strong> face-to-face meetings ({photos.pct}%) · {photoPart}% of Accountability and Trustworthiness
+        </p>
+      )}
       <ScoreTable peers rows={valueRows.filter(r => r.self !== null || r.manager !== null || (r.peers ?? null) !== null)} />
       {sum.overall && <p className="mt-1 text-sm text-ink-soft">From {sum.overall.count} teammate rating{sum.overall.count === 1 ? '' : 's'}.</p>}
       <CardComments list={comments.values} />

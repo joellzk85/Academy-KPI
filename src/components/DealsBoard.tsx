@@ -1455,7 +1455,7 @@ function DealPanel(props: {
 
         {/* Follow-up notes (Joel, 2026-10-18) */}
         <Fold title="Follow-ups" hint={followUpCountText(nNotes)} defaultOpen={def === 'followups'} id={p.id}>
-          <FollowUpList deal={p} />
+          <FollowUpList deal={p} viewer={props.viewer} canAdd={props.editable} />
         </Fold>
 
         {/* Potential and expected closing month, open deals only (2026-10-21) */}

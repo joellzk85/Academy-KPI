@@ -6,6 +6,7 @@ import { withoutDeleted } from './linked';
 import { DEFAULT_MONEY_SETTINGS, MoneySettings, readMoneySettings } from './money';
 import { DEFAULT_FORECAST, ForecastSettings, readForecastSettings } from './forecast';
 import { isGpMeasure } from './kpiLibrary';
+import { MeetingPhoto, readMeetingPhoto } from './meetingPhotos';
 
 // Live lists for the KPIs that aren't counted from deals (lib/kpi.ts): money_in (HRDC claims, client invoices and
 // payments), the venue list, the admin checklists, the money and forecast settings, training reports and teambuilding
@@ -21,6 +22,7 @@ export function useKpiSources(opts: { months?: string[]; people?: RepLike[] } = 
   const [trainingReports, setTrainingReports] = useState<Record<string, any>>({});
   const [activities, setActivities] = useState<any[]>([]);
   const [rating360, setRating360] = useState<Record<string, Record<string, { avg: number; count: number }>>>({});
+  const [meetingPhotos, setMeetingPhotos] = useState<MeetingPhoto[]>([]);
   useEffect(() => {
     const subs = [
       onSnapshot(query(collection(db, 'money_in')), s => setClaims(withoutDeleted(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => setClaims([])),
@@ -31,6 +33,8 @@ export function useKpiSources(opts: { months?: string[]; people?: RepLike[] } = 
       // Trainer KPIs: training reports (by deal) and teambuilding activities (approval).
       onSnapshot(query(collection(db, 'training_reports')), s => setTrainingReports(Object.fromEntries(s.docs.map(d => [d.id, d.data()]))), () => setTrainingReports({})),
       onSnapshot(query(collection(db, 'tb_activities')), s => setActivities(s.docs.map(d => ({ ...d.data(), id: d.id }))), () => setActivities([])),
+      // Meeting photos KPI and the presentation's Meeting photos slide (2026-10-26).
+      onSnapshot(query(collection(db, 'meeting_photos')), s => setMeetingPhotos(s.docs.map(d => readMeetingPhoto(d.id, d.data()))), () => setMeetingPhotos([])),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -70,6 +74,6 @@ export function useKpiSources(opts: { months?: string[]; people?: RepLike[] } = 
     return () => { live = false; };
   }, [needOto, monthKey]);
 
-  return useMemo(() => ({ claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes, oneToOnesAsked }),
-    [claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes, oneToOnesAsked]);
+  return useMemo(() => ({ claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes, oneToOnesAsked, meetingPhotos }),
+    [claims, venues, checklists, moneySettings, forecast, gp, trainingReports, activities, rating360, oneToOnes, oneToOnesAsked, meetingPhotos]);
 }

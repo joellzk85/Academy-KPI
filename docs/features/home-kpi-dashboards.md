@@ -287,3 +287,13 @@ The defaults are `sales_standard` for reps and `admin_ops` for admins until Mana
 - **Names (Joel, keep quiet):** every comment carries who wrote it in the released result (transparent), but the rating screens don't say so; the old "your name is / isn't shown" lines are removed.
 - **Rules:** `appraisal_cycles` (everyone reads, Management writes), `self_reviews`, `appraisal_results`. Publish `firestore.rules`.
 - Checked: build; logic checks (self review must be complete, blank comments dropped, section comments kept, result reading with names). Screens not tried on a pretend database; check them on the live site (go-live item 68).
+
+## Meeting photos (Joel, 2026-10-26)
+
+Proof that a face-to-face client meeting really happened (accountability).
+- **Where:** a face-to-face appointment (booked, from its day on, or held) and each follow-up logged as **Visit** have **Take photo** (phone camera) and **From gallery**, up to 5 photos per meeting. Whoever can log the appointment or follow-up can add one. `components/MeetingPhotos.tsx`, `lib/meetingPhotos.ts`.
+- **Who sees what:** everyone sees the photo. Only the owner override sees **Time & place** beside it: when it was sent (the database's clock, not the phone's), where the phone was (map link, or why there's no location), and the time and place stored inside the photo itself when it has them, flagged when the photo's own day isn't the meeting day. Stored apart in `meeting_photo_places`, which no browser can read except with the override; written once, never changed.
+- **Removing:** the person who sent it or Management removes the photo (the file and its time and place are kept); the meeting then counts as having no photo. Only the sender ticks **Show in presentation**.
+- **KPI "Meeting photos"** (library, Sales group, colour bands 90 / 70 / 50%): % of the person's face-to-face meetings this month with a photo. A face-to-face appointment counts for the deal owner (like Appointments), a Visit for whoever logged it. No meetings: nothing to count.
+- **Appraisal:** the same % (over the appraisal period) counts **20%** (Scorecard settings, "Accountability and Trustworthiness from meeting photos", 0 turns it off; Joel to confirm the real %) of the Accountability and Trustworthiness values, as stars (% ÷ 20). Behavioural is the average of the values, so it moves by that change ÷ the number of values. No ratings yet, or no face-to-face meetings: unchanged. The Behavioural card shows "Meeting photos: x of y".
+- **Weekly presentation:** person slide **Meeting photos** (on by default for reps who haven't chosen their slides): the photos they ticked, meeting in the period, with client, Appointment / Visit, date and what happened (appointment outcome or follow-up note), up to 6.

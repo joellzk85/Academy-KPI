@@ -147,7 +147,7 @@ export function WeightsForm({ viewer, people, settings }: { viewer: Viewer; peop
       await setDoc(doc(db, 'config', 'scorecard'), {
         weights: s.weights,
         levelOf: Object.fromEntries(people.map(m => [m.id, levelFor(s, m.id, m.role)])),
-        peerShare: s.peerShare, reliabilityShare: s.reliabilityShare,
+        peerShare: s.peerShare, reliabilityShare: s.reliabilityShare, photoShare: s.photoShare,
         updatedAt: new Date().toISOString(), updatedById: viewer.id, updatedByName: viewer.name,
       }, { merge: true });
       draft.clear();
@@ -205,12 +205,17 @@ export function WeightsForm({ viewer, people, settings }: { viewer: Viewer; peop
           <input id="sc-rel" type="number" min={0} max={100} className={input} value={s.reliabilityShare} onChange={e => set({ reliabilityShare: Number(e.target.value) })} />
           <p className="mt-1 text-sm text-ink-soft">The rest, {Math.max(0, 100 - (s.reliabilityShare || 0))}%, from the KPI score.</p>
         </div>
+        <div>
+          <label htmlFor="sc-photo" className={label}>Accountability and Trustworthiness from meeting photos %</label>
+          <input id="sc-photo" type="number" min={0} max={100} className={input} value={s.photoShare} onChange={e => set({ photoShare: Number(e.target.value) })} />
+          <p className="mt-1 text-sm text-ink-soft">The % of face-to-face meetings with a photo; the rest, {Math.max(0, 100 - (s.photoShare || 0))}%, from the ratings. 0 turns it off.</p>
+        </div>
       </div>
       <p className="text-sm text-ink-soft">Self reviews are shown next to the manager's and teammates' ratings but never count in the score.</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
       {note && <p role="status" className="rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">{note}</p>}
       <div className="flex justify-between gap-2">
-        <button type="button" className={secondaryBtn} onClick={() => set({ weights: DEFAULT_SCORECARD.weights, peerShare: DEFAULT_SCORECARD.peerShare, reliabilityShare: DEFAULT_SCORECARD.reliabilityShare })}>Default weights</button>
+        <button type="button" className={secondaryBtn} onClick={() => set({ weights: DEFAULT_SCORECARD.weights, peerShare: DEFAULT_SCORECARD.peerShare, reliabilityShare: DEFAULT_SCORECARD.reliabilityShare, photoShare: DEFAULT_SCORECARD.photoShare })}>Default weights</button>
         <button type="button" className={primaryBtn} disabled={busy} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save weights and levels</button>
       </div>
     </div>
