@@ -252,9 +252,9 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
                           </p>
                         )}
                         {g.docs.length > 0 && (
-                          <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-white">
+                          <ul className="divide-y divide-line rounded-xl border border-line bg-white">
                             {g.docs.map(d => (
-                              <li key={d.id} className="relative flex items-center hover:bg-surface">
+                              <li key={d.id} className="relative flex items-center first:rounded-t-xl last:rounded-b-xl hover:bg-surface">
                                 <button type="button" onClick={() => onOpenDoc(d)} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left">
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-[15px] font-semibold">{d.company || 'General'}</span>
