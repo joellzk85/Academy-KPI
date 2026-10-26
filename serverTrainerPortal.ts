@@ -375,7 +375,7 @@ export function registerTrainerPortalRoutes(app: Express) {
     const trainings = await trainingDetails(db, trainerId, t, { progs, venues, clients, vendor });
     return {
       trainerId, email: account.email, internalTrainer: !!account.internalTrainer,
-      programmes: progs.docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name)),
+      programmes: progs.docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim(), ...(d.data().skillType ? { skillType: d.data().skillType } : {}) })).filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name)),
       icOnFile: !!priv.data()?.icNumber || !!t.icOnFile,
       profile: {
         name: t.name || '', contact: t.contact || '', email: t.email || '', bio: t.bio || '', experienceYears: t.experienceYears || 0,

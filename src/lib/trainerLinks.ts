@@ -12,6 +12,8 @@
 
 import { TrainerExtras, cleanExtras, cleanIc } from './trainerProfile';
 import type { CourseOutline } from '../types';
+import { OUTLINE_TYPES, OutlineType, outlineTypeFields, outlineTypeOf } from './outlineTb';
+import { AGENDA_TAGS, AgendaTag } from './teambuilding';
 
 export type LinkKind = 'outline' | 'profile' | 'teambuilding';
 export type LinkStatus = 'open' | 'submitted' | 'accepted' | 'cancelled';
@@ -26,7 +28,8 @@ export interface OutlineSubmission {
   methods?: string[];
   items: { moduleTitle: string; topics: string; day?: number; duration?: string; methodology?: string }[];
   dayTitles?: string[];
-  agenda?: { time: string; text: string; isDay?: boolean }[];
+  agenda?: { time: string; text: string; isDay?: boolean; tag?: AgendaTag }[];
+  type?: OutlineType;   // Teambuilding / Soft skill / Technical skill (2026-10-26), as the CRM's outline editor
   difficulty?: string; evaluation?: string[]; bloomLevel?: number; nextTraining?: string[]; designedBy?: string;
 }
 
@@ -90,7 +93,8 @@ export function cleanOutline(d: any): OutlineSubmission {
     })
     .filter((m: any) => m.moduleTitle || m.topics);
   const agenda = (Array.isArray(d?.agenda) ? d.agenda : []).slice(0, 80)
-    .map((r: any) => (r?.isDay ? { time: '', text: str(r?.text, 300), isDay: true } : { time: str(r?.time, 60), text: str(r?.text, 300) }))
+    .map((r: any) => (r?.isDay ? { time: '', text: str(r?.text, 300), isDay: true }
+      : { time: str(r?.time, 60), text: str(r?.text, 300), ...(r?.tag && AGENDA_TAGS.some(t => t.key === r.tag) ? { tag: r.tag as AgendaTag } : {}) }))
     .filter((r: any) => r.time || r.text);
   const out: OutlineSubmission = {
     courseTitle: str(d?.courseTitle, 200),
@@ -99,6 +103,8 @@ export function cleanOutline(d: any): OutlineSubmission {
     outcomes: list(d?.outcomes, 300, 20), methods: list(d?.methods, 200, 20), items,
     dayTitles: dayCount > 1 ? Array.from({ length: dayCount }, (_, k) => str(Array.isArray(d?.dayTitles) ? d.dayTitles[k] : '', 200)) : [],
     agenda,
+    // The type as typed, else the record's own (kind / skillType); none on older submissions.
+    ...(OUTLINE_TYPES.some(t => t.key === d?.type) ? { type: d.type as OutlineType } : d?.kind ? { type: outlineTypeOf(d) } : {}),
     difficulty: LEVELS.includes(d?.difficulty) ? d.difficulty : '',
     evaluation: list(d?.evaluation, 200, 20), bloomLevel: Math.round(num(d?.bloomLevel, 0, 6)),
     nextTraining: list(d?.nextTraining, 200, 20), designedBy: str(d?.designedBy, 120),
@@ -125,7 +131,8 @@ export function outlineFieldsFrom(s: OutlineSubmission): Partial<CourseOutline> 
       ...(m.day ? { day: m.day } : {}),
     })),
     dayTitles: s.dayTitles || [],
-    agenda: (s.agenda || []).map(r => ({ id: uid('a'), time: r.time, text: r.text, ...(r.isDay ? { isDay: true } : {}) })),
+    agenda: (s.agenda || []).map(r => ({ id: uid('a'), time: r.time, text: r.text, ...(r.isDay ? { isDay: true } : {}), ...(r.tag ? { tag: r.tag } : {}) })),
+    ...(s.type ? outlineTypeFields(s.type) : {}),
     difficulty: s.difficulty || '', evaluation: s.evaluation || [], bloomLevel: s.bloomLevel || 0,
     nextTraining: s.nextTraining || [], designedBy: s.designedBy || '',
     ...(s.level ? { level: s.level } : {}),

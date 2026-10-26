@@ -185,6 +185,7 @@ Open (full steps in `docs/features/go-live-checklist.md`; check with Joel which 
 - **Trainer portal links and View portal as them (2026-10-26):** portal link on each trainer with access; owner views a portal as the trainer, view only; nothing to publish. See `trainer-portal.md`.
 - **Meeting photos (2026-10-26):** Take photo / From gallery on face-to-face appointments and Visit follow-ups, screenshots (upload, paste, drop) on online ones, also in the Log appointment form; everyone sees the photo, only the owner sees its time and place; Meeting photos KPI (%) and 20% of Accountability and Trustworthiness in the appraisal (Joel to confirm the %); Show in presentation; publish **both** rules files; go-live checklist item 72. See `home-kpi-dashboards.md`.
 - **Trainers write the CRM record (2026-10-26):** trainer portal, My trainings and trainer links (outline and the new teambuilding link) write straight into the CRM's course outline / proposal, locked once sent to a client; no more trainer copies; publish **both** rules files; go-live checklist item 73. See `trainer-portal.md`.
+- **Same outline form everywhere (2026-10-26):** trainer portal, My trainings and the outline link show the CRM editor's own outline parts (`OutlineSections.tsx`) with the type; nothing to publish. See `trainer-portal.md`.
 - **Not built yet:** Google Drive copy of files; stacked quotation lines on phones; Phase 4B My home cards.
 
 ## 7. How to start each session

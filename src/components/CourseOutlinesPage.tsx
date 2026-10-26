@@ -1,17 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, UserPlus, X, Zap,
+  AlertTriangle, ArrowLeft, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, UserPlus, X, Zap,
 } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { CourseOutline, CourseOutlineItem, OutlineAgendaRow, QuoteSendEntry, Representative } from '../types';
-import { BLOOM_LEVELS, DEFAULT_OUTLINE_TERMS, DIFFICULTIES, durationText } from '../lib/outlineContent';
+import { DEFAULT_OUTLINE_TERMS, durationText } from '../lib/outlineContent';
 import { DealField, STAGE_LABELS, canMoveDeal, dealGaps, dealOwnerId, dealStage, formatDate, statusForStage, todayIso, trainingDays } from '../lib/deals';
 import { GapsBox } from './DealGates';
-import { Programme, isTbDeal, titleKey, typingCaps } from '../lib/programmes';
-import { TYPE_TAB_LABELS, TypeTabs, useOutlinesForTypes } from './Programmes';
-import { OUTLINE_TYPES, OutlineType, agendaToDays, daysToAgenda, outlineFromProposal, outlineTypeFields, outlineTypeLabel, outlineTypeOf, programmeTypeOf, programmesFor } from '../lib/outlineTb';
-import { Agenda as DayAgenda } from './TeambuildingParts';
+import { Programme, isTbDeal, titleKey } from '../lib/programmes';
+import { TypeTabs, useOutlinesForTypes } from './Programmes';
+import { OUTLINE_TYPES, OutlineType, outlineFromProposal, outlineTypeFields, outlineTypeLabel, outlineTypeOf, programmeTypeOf } from '../lib/outlineTb';
 import { TbProposal, blankProposalContent } from '../lib/teambuilding';
 import { OutlineSources, dealProgrammeName, nextOutlineRef, outlineSent, resolveOutline } from '../lib/outlineResolve';
 import CourseOutlineDocument from './CourseOutlineDocument';
@@ -30,6 +29,7 @@ import { clientCode, refWithCode } from '../lib/docRefs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import TitlesView, { TitleDoc, TitleGroup } from './TitleList';
 import TitleTagsBox from './TitleTagsBox';
+import OutlineSections, { Card, ProgrammeOptions } from './OutlineSections';
 import ListPager, { SortSelect, listSelect } from './ListPager';
 import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 
@@ -50,7 +50,6 @@ const btnPrimary =
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 const linkBtn = 'text-sm font-semibold text-accent hover:underline';
-const iconBtn = 'rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-ink disabled:opacity-30';
 
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const newId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -632,16 +631,6 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 // Since 2026-10-26 the outline is made first (general, owned by whoever invites) and the link belongs to it: what the
 // trainer submits goes straight into it. Invites made before then (no outlineId) are switched over by the server
 // (upgradeOldOutlineLink); TrainerInvites shows any it couldn't switch.
-/** A drop-down's titles under Soft skill / Team building / Technical skill (the outline's own type first). */
-function ProgrammeOptions({ programmes, outlines, first }: { programmes: any[]; outlines: any[]; first?: OutlineType }) {
-  const order = (['soft', 'teambuilding', 'technical'] as OutlineType[]).sort((a, b) => Number(b === first) - Number(a === first));
-  const sorted = [...programmes].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  return <>{order.map(t => {
-    const list = sorted.filter(p => programmeTypeOf(p, outlines) === t);
-    return list.length ? <optgroup key={t} label={TYPE_TAB_LABELS[t]}>{list.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup> : null;
-  })}</>;
-}
-
 function InviteModal({ me, trainers, programmes, outlines, onMake, onClose }: {
   me: Viewer; trainers: any[]; programmes: any[]; outlines: any[]; onMake: (programmeId: string, trainer: any) => Promise<CourseOutline>; onClose: () => void;
 }) {
@@ -820,13 +809,6 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
   const type = outlineTypeOf(o);
   const isTb = type === 'teambuilding';
   const typeOutlines = useOutlinesForTypes();
-  // A different type keeps the title only when it's of the same kind (a title set as Team building is for teambuilding
-  // outlines); a title that just follows its outlines follows this one.
-  const setType = (t: OutlineType) => {
-    const prog = o.programmeId ? sources.programmes.find(p => p.id === o.programmeId) : null;
-    const keep = !prog || !prog.skillType || (prog.skillType === 'teambuilding') === (t === 'teambuilding');
-    set({ ...outlineTypeFields(t), ...(keep ? {} : { programmeId: '', useProgrammeName: false, courseTitle: o.courseTitle || '' }) });
-  };
   // "Speed build proposal": saved first, then the proposal made from it (or the one already made) opens.
   const speedBuild = () => {
     if (!onSpeedBuild) return;
@@ -950,51 +932,6 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
     setRelinking(false);
   };
 
-  // Modules
-  const setItem = (i: number, c: Partial<CourseOutlineItem>) => setO(x => ({ ...x, items: (x.items || []).map((m, k) => (k === i ? { ...m, ...c } : m)) }));
-  const addItem = () => setO(x => ({ ...x, items: [...(x.items || []), newModule()] }));
-  const removeItem = (i: number) => setO(x => ({ ...x, items: (x.items || []).filter((_, k) => k !== i) }));
-  const moveItem = (i: number, dir: -1 | 1) => setO(x => {
-    const list = [...(x.items || [])];
-    const j = i + dir;
-    if (j < 0 || j >= list.length) return x;
-    [list[i], list[j]] = [list[j], list[i]];
-    return { ...x, items: list };
-  });
-  // Training days (multi-day outlines): each module can be put on a day; "Day N: title" prints above them.
-  const dayCount = Math.max(1, Math.ceil(o.durationDays || 0));
-  const setDayTitle = (d: number, v: string) => setO(x => {
-    const t = [...(x.dayTitles || [])];
-    while (t.length < d) t.push('');
-    t[d - 1] = v;
-    return { ...x, dayTitles: t };
-  });
-
-  // Agenda rows
-  const agenda = o.agenda || [];
-  const setRow = (i: number, c: Partial<OutlineAgendaRow>) => setO(x => ({ ...x, agenda: (x.agenda || []).map((r, k) => (k === i ? { ...r, ...c } : r)) }));
-  const addRow = (isDay = false) => setO(x => ({ ...x, agenda: [...(x.agenda || []), newRow(isDay)] }));
-  const removeRow = (i: number) => setO(x => ({ ...x, agenda: (x.agenda || []).filter((_, k) => k !== i) }));
-  const moveRow = (i: number, dir: -1 | 1) => setO(x => {
-    const list = [...(x.agenda || [])];
-    const j = i + dir;
-    if (j < 0 || j >= list.length) return x;
-    [list[i], list[j]] = [list[j], list[i]];
-    return { ...x, agenda: list };
-  });
-  // A start: one row per module (and day headings), times left for the person to type.
-  const agendaFromModules = () => setO(x => {
-    const mods = (x.items || []).filter(m => (m.moduleTitle || '').trim());
-    const byDay = dayCount > 1 && mods.some(m => m.day);
-    const rows: OutlineAgendaRow[] = [];
-    let last = 0;
-    mods.forEach((m, i) => {
-      const d = m.day || 1;
-      if (byDay && d !== last) { rows.push({ ...newRow(true), text: `Day ${d}` }); last = d; }
-      rows.push({ ...newRow(), text: `Module ${i + 1}: ${m.moduleTitle.trim()}` });
-    });
-    return { ...x, agenda: rows };
-  });
   const termsText = o.terms === undefined ? DEFAULT_OUTLINE_TERMS : o.terms;
 
   const sendLabel = locked ? 'Send again' : dealAtNew ? 'Send proposal' : 'Send';
@@ -1145,216 +1082,11 @@ function Editor({ initial, isNew, me, staff, reps, sources, dealsForPicker, onOp
           )}
         </Card>
 
-        {/* 2. Course details */}
-        <Card title="2. Course details">
-          <div className="space-y-3">
-            <div>
-              <p className={label}>Type of outline</p>
-              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Type of outline">
-                {OUTLINE_TYPES.map(t => (
-                  <button key={t.key} type="button" role="radio" aria-checked={type === t.key} onClick={() => setType(t.key)}
-                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${type === t.key ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink hover:bg-surface'}`}>
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-              {isTb && <p className="mt-1 text-sm text-ink-soft">For registering the teambuilding programme with HRDC. The client is pitched with the teambuilding proposal ("Speed build proposal" at the top makes one from this).</p>}
-            </div>
-            <div>
-              <label className={label} htmlFor="o-prog">Title from the list <span className="font-normal text-ink-soft">(optional; outlines with the same title are one programme)</span></label>
-              <select id="o-prog" value={r.programmeId} onChange={e => set({ programmeId: e.target.value, useProgrammeName: !!e.target.value })} className={input}>
-                <option value="">{r.deal?.programmeId ? 'Use the deal\'s title' : 'None: type the title below'}</option>
-                <ProgrammeOptions programmes={programmesFor(sources.programmes, isTb ? 'teambuilding' : 'training', typeOutlines)} outlines={typeOutlines} first={type} />
-              </select>
-              {!o.programmeId && r.deal?.programmeId && <p className="mt-0.5 text-xs text-ink-soft">From the deal.</p>}
-            </div>
-            <div>
-              <label className={label} htmlFor="o-title">Course title</label>
-              {o.useProgrammeName && r.programmeName ? (
-                <div className="rounded-lg bg-surface px-3 py-2">
-                  <p className="font-semibold">{r.programmeName}</p>
-                  <p className="text-sm text-ink-soft">The title from the list. {!locked && <button type="button" className={linkBtn} onClick={() => set({ useProgrammeName: false, courseTitle: r.programmeName })}>Type a different title</button>}</p>
-                </div>
-              ) : (
-                <>
-                  <input id="o-title" value={o.courseTitle || ''} onChange={e => set({ courseTitle: typingCaps(e.target.value) })} className={input} placeholder="e.g. LEADERSHIP ESSENTIALS FOR NEW MANAGERS" />
-                  {r.programmeName && !locked && <button type="button" className={`${linkBtn} mt-1`} onClick={() => set({ useProgrammeName: true })}>Use the title from the list ({r.programmeName})</button>}
-                </>
-              )}
-            </div>
-            <TitleTagsBox kind={isTb ? 'teambuilding' : 'training'} programmeId={r.programmeId} title={shownO.courseTitle || ''} programmes={sources.programmes as Programme[]} viewer={me} />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className={label} htmlFor="o-days">Course duration (days)</label>
-                <DecimalInput id="o-days" value={o.durationDays} onChange={v => set({ durationDays: v })} placeholder="e.g. 0.5 for half a day" />
-              </div>
-              <div>
-                <label className={label} htmlFor="o-hours">Total hours <span className="font-normal text-ink-soft">(optional)</span></label>
-                <DecimalInput id="o-hours" value={o.totalHours} onChange={v => set({ totalHours: v })} placeholder="e.g. 4" />
-              </div>
-            </div>
-            <p className="-mt-1 text-sm text-ink-soft">Prints as "{durationText(o.durationDays, o.totalHours) || '…'}".</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className={label} htmlFor="o-aud">Target audience <span className="font-normal text-ink-soft">(one per line)</span></label>
-                <textarea id="o-aud" value={o.audience || ''} onChange={e => set({ audience: e.target.value })} className={`${input} min-h-[76px]`} placeholder="e.g. All employees across departments and levels" />
-              </div>
-              <div>
-                <label className={label} htmlFor="o-pre">Pre-requisites</label>
-                <textarea id="o-pre" value={o.prerequisites || ''} onChange={e => set({ prerequisites: e.target.value })} className={`${input} min-h-[76px]`} placeholder="e.g. None" />
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        {/* 3. Overview and outcomes */}
-        <Card title="3. Overview and learning outcomes">
-          <div className="space-y-3">
-            <div>
-              <label className={label} htmlFor="o-over">Overview</label>
-              <textarea id="o-over" value={o.overview || ''} onChange={e => set({ overview: e.target.value })} className={`${input} min-h-[110px]`} placeholder="A short summary of what the course covers and why it matters." />
-            </div>
-            <div>
-              <label className={label} htmlFor="o-out">Learning outcomes (one per line)</label>
-              <p className="mb-1 text-sm text-ink-soft">Printed under "Upon completion of this program, the participants should be able to:"</p>
-              <textarea id="o-out" value={(o.outcomes || []).join('\n')} onChange={e => set({ outcomes: e.target.value.split('\n') })} className={`${input} min-h-[110px]`} placeholder={'Understand their own and others\' personality styles\nCommunicate more effectively across differences'} />
-            </div>
-            <div>
-              <label className={label} htmlFor="o-methods">Learning methods (one per line)</label>
-              <textarea id="o-methods" value={(o.methods || []).join('\n')} onChange={e => set({ methods: e.target.value.split('\n') })} className={`${input} min-h-[90px]`} placeholder={'Interactive lecture & guided discussion\nRole-play simulations\nCase studies'} />
-            </div>
-          </div>
-        </Card>
-
-        {/* 4. Modules */}
-        <Card title={`4. Modules (${items.length})`}>
-          {dayCount > 1 && (
-            <div className="mb-3 space-y-2 rounded-xl bg-surface p-3">
-              <p className="text-sm text-ink-soft">This is a {dayCount}-day course: pick each module's day below. Day titles are optional (e.g. "Sales Planning Foundations").</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {Array.from({ length: dayCount }, (_, k) => (
-                  <div key={k}>
-                    <label className={label} htmlFor={`o-day-${k}`}>Day {k + 1} title</label>
-                    <input id={`o-day-${k}`} value={o.dayTitles?.[k] || ''} onChange={e => setDayTitle(k + 1, e.target.value)} className={input} placeholder="Optional" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <ol className="space-y-3">
-            {items.map((m, i) => (
-              <li key={m.id} className="rounded-xl border border-line p-3.5">
-                <div className="flex items-start gap-3">
-                  <span className="mt-2 w-6 shrink-0 text-center font-bold text-ink-soft">{i + 1}</span>
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className={dayCount > 1 ? 'grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem]' : ''}>
-                      <input value={m.moduleTitle} onChange={e => setItem(i, { moduleTitle: e.target.value })} className={input} placeholder="Module title" aria-label={`Module ${i + 1} title`} />
-                      {dayCount > 1 && (
-                        <select value={m.day || 1} onChange={e => setItem(i, { day: Number(e.target.value) })} className={input} aria-label={`Module ${i + 1} day`}>
-                          {Array.from({ length: dayCount }, (_, k) => <option key={k} value={k + 1}>Day {k + 1}</option>)}
-                        </select>
-                      )}
-                    </div>
-                    <textarea value={m.topics} onChange={e => setItem(i, { topics: e.target.value })} className={`${input} min-h-[80px]`} placeholder={'Topics, one per line\nIcebreakers to create engagement and trust\nSetting the tone for collaboration'} aria-label={`Module ${i + 1} topics`} />
-                  </div>
-                  {!locked && (
-                    <span className="flex shrink-0 flex-col">
-                      <button type="button" className={iconBtn} disabled={i === 0} onClick={() => moveItem(i, -1)} aria-label={`Move module ${i + 1} up`}><ArrowUp className="h-4 w-4" /></button>
-                      <button type="button" className={iconBtn} disabled={i === items.length - 1} onClick={() => moveItem(i, 1)} aria-label={`Move module ${i + 1} down`}><ArrowDown className="h-4 w-4" /></button>
-                      <button type="button" className={`${iconBtn} hover:text-danger`} onClick={() => removeItem(i)} aria-label={`Remove module ${i + 1}`}><X className="h-4 w-4" /></button>
-                    </span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ol>
-          {!locked && <button type="button" className={`${btnSecondary} mt-3`} onClick={addItem}><Plus className="h-4 w-4" /> Add module</button>}
-        </Card>
-
-        {/* 5. Agenda: teambuilding outlines use the proposal's day-by-day builder (each day folds) */}
-        {isTb ? (
-          <Card title={`5. Agenda (optional${agenda.length ? `, ${agenda.filter(r => !r.isDay).length} time slots` : ''})`}>
-            <p className="mb-3 text-[15px] text-ink-soft">Day by day, like the teambuilding proposal. Click a day's arrow to fold it. Leave it empty and the outline has no agenda page.</p>
-            {locked ? (
-              <p className="text-[15px] text-ink-soft">{agenda.length ? 'See Preview.' : 'No agenda.'}</p>
-            ) : (
-              <DayAgenda collapsible days={agendaToDays(agenda)} onChange={d => set({ agenda: daysToAgenda(d) })} />
-            )}
-          </Card>
-        ) : (
-        <Card title={`5. Course agenda (optional${agenda.length ? `, ${agenda.filter(r => !r.isDay).length} time slots` : ''})`}>
-          <p className="mb-3 text-[15px] text-ink-soft">Only some courses need an agenda. Leave this empty and the outline has no agenda page, just the modules. If you add time slots, they print as a table on their own page. "Module 1" at the start prints in bold.</p>
-          {agenda.length > 0 && (
-            <ol className="space-y-2">
-              {agenda.map((row, i) => (
-                <li key={row.id} className={`flex items-start gap-2 rounded-xl border border-line p-2.5 ${row.isDay ? 'bg-surface' : ''}`}>
-                  <div className={`min-w-0 flex-1 ${row.isDay ? '' : 'grid gap-2 sm:grid-cols-[13rem_minmax(0,1fr)]'}`}>
-                    {!row.isDay && <input value={row.time} onChange={e => setRow(i, { time: e.target.value })} className={input} placeholder="9:00 AM – 9:35 AM" aria-label={`Agenda row ${i + 1} time`} />}
-                    <input value={row.text} onChange={e => setRow(i, { text: e.target.value })} className={`${input} ${row.isDay ? 'font-semibold' : ''}`}
-                      placeholder={row.isDay ? 'Day 1' : 'Module 1: Ice breaker & team warm-up'} aria-label={row.isDay ? `Day heading ${i + 1}` : `Agenda row ${i + 1}`} />
-                  </div>
-                  {!locked && (
-                    <span className="flex shrink-0 items-center">
-                      <button type="button" className={iconBtn} disabled={i === 0} onClick={() => moveRow(i, -1)} aria-label={`Move agenda row ${i + 1} up`}><ArrowUp className="h-4 w-4" /></button>
-                      <button type="button" className={iconBtn} disabled={i === agenda.length - 1} onClick={() => moveRow(i, 1)} aria-label={`Move agenda row ${i + 1} down`}><ArrowDown className="h-4 w-4" /></button>
-                      <button type="button" className={`${iconBtn} hover:text-danger`} onClick={() => removeRow(i)} aria-label={`Remove agenda row ${i + 1}`}><X className="h-4 w-4" /></button>
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
-          {!locked && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" className={btnSecondary} onClick={() => addRow()}><Plus className="h-4 w-4" /> Add time slot</button>
-              {dayCount > 1 && <button type="button" className={btnSecondary} onClick={() => addRow(true)}><Plus className="h-4 w-4" /> Add day heading</button>}
-              {items.some(m => (m.moduleTitle || '').trim()) && (
-                <button type="button" className={btnSecondary}
-                  onClick={() => { if (!agenda.length || window.confirm('Replace the agenda with one row per module?')) agendaFromModules(); }}>
-                  Fill in from the modules
-                </button>
-              )}
-            </div>
-          )}
-        </Card>
-        )}
-
-        {/* 6. Optional extras */}
-        <Card title="6. Optional extras">
-          <p className="mb-3 text-[15px] text-ink-soft">Printed on the overview page only when filled in.</p>
-          <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div>
-                <label className={label} htmlFor="o-diff">Difficulty</label>
-                <select id="o-diff" value={o.difficulty || ''} onChange={e => set({ difficulty: e.target.value })} className={input}>
-                  <option value="">Don't show</option>
-                  {DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={label} htmlFor="o-bloom">Bloom's taxonomy level</label>
-                <select id="o-bloom" value={o.bloomLevel || 0} onChange={e => set({ bloomLevel: Number(e.target.value) })} className={input}>
-                  <option value={0}>Don't show</option>
-                  {BLOOM_LEVELS.map((b, k) => <option key={b} value={k + 1}>Level {k + 1}: {b}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={label} htmlFor="o-by">Designed by</label>
-                <input id="o-by" value={o.designedBy || ''} onChange={e => set({ designedBy: e.target.value })} className={input} placeholder="e.g. the trainer's name" />
-              </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className={label} htmlFor="o-eval">Evaluation method (one per line)</label>
-                <textarea id="o-eval" value={(o.evaluation || []).join('\n')} onChange={e => set({ evaluation: e.target.value.split('\n') })} className={`${input} min-h-[76px]`} placeholder={'Quiz\nGroup presentation'} />
-              </div>
-              <div>
-                <label className={label} htmlFor="o-next">Recommended next training (one per line)</label>
-                <textarea id="o-next" value={(o.nextTraining || []).join('\n')} onChange={e => set({ nextTraining: e.target.value.split('\n') })} className={`${input} min-h-[76px]`} placeholder={'Emotional Quotient - Level 1'} />
-              </div>
-            </div>
-          </div>
-        </Card>
+        {/* 2 to 6: the outline's content, the same parts the trainer portal and outline link show (OutlineSections.tsx) */}
+        <OutlineSections o={o} setO={setO} locked={locked} programmes={sources.programmes} typeOutlines={typeOutlines}
+          programmeId={r.programmeId} programmeName={r.programmeName} dealProgrammeId={r.deal?.programmeId}
+          tbHint={'For registering the teambuilding programme with HRDC. The client is pitched with the teambuilding proposal ("Speed build proposal" at the top makes one from this).'}
+          titleExtra={<TitleTagsBox kind={isTb ? 'teambuilding' : 'training'} programmeId={r.programmeId} title={shownO.courseTitle || ''} programmes={sources.programmes as Programme[]} viewer={me} />} />
 
         {/* 7. Terms */}
         <Card title="7. Terms and conditions"
@@ -1495,24 +1227,4 @@ function SubmissionPreview({ sub, title, forCompany, who, onClose, actions, note
   );
 }
 
-// A number box that lets "0." be typed on the way to "0.5".
-function DecimalInput({ id, value, onChange, placeholder }: { id: string; value?: number; onChange: (v: number) => void; placeholder?: string }) {
-  const [text, setText] = useState(value ? String(value) : '');
-  useEffect(() => { if ((Number(text) || 0) !== (value || 0)) setText(value ? String(value) : ''); }, [value]);
-  return (
-    <input id={id} inputMode="decimal" value={text} placeholder={placeholder} className={input}
-      onChange={e => { const t = e.target.value.replace(/[^0-9.]/g, ''); setText(t); onChange(Number(t) || 0); }} />
-  );
-}
 
-function Card({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-line bg-white p-5">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="font-bold">{title}</h3>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}

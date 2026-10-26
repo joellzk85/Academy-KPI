@@ -209,18 +209,20 @@ function DocEditor({ start, info, api, upload, onClose }: { start: Row; info: an
                 {row.forClient ? ' It is being prepared for a client; once they send it, it locks.' : ''}
               </p>
             )}
-            <section className={card}>
+            {kind === 'teambuilding' && <section className={card}>
               <label className={label} htmlFor="e-prog">Programme</label>
               <select id="e-prog" value={draft.programmeId} onChange={e => setDraft(d => ({ ...d, programmeId: e.target.value }))} className={input}>
                 <option value="">Not in the list</option>
                 {progs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
-            </section>
+            </section>}
             {kind === 'outline' ? (
+              // The CRM outline editor's own parts (OutlineSections.tsx), the title picked inside it (2026-10-26).
               <OutlineLinkForm key={row.stamp} info={{ prefill: draft.outline, title: progName, trainerName: info.profile.name }}
-                onData={(o: OutlineSubmission) => {
-                  if (first.current) { first.current = false; setDraft(d => { const n = { ...d, outline: o }; setSavedJson(JSON.stringify(n)); return n; }); return; }
-                  setDraft(d => (JSON.stringify(d.outline) === JSON.stringify(o) ? d : { ...d, outline: o }));
+                programmes={progs} programmeId={draft.programmeId}
+                onData={(o: OutlineSubmission, programmeId: string) => {
+                  if (first.current) { first.current = false; setDraft(d => { const n = { ...d, outline: o, programmeId }; setSavedJson(JSON.stringify(n)); return n; }); return; }
+                  setDraft(d => (JSON.stringify(d.outline) === JSON.stringify(o) && d.programmeId === programmeId ? d : { ...d, outline: o, programmeId }));
                 }}
                 actions={<span />} />
             ) : (
