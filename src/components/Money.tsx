@@ -14,7 +14,7 @@ import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { Receipt, needsReceipt } from '../lib/postTraining';
 import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, removeReceipt, uploadReceipt } from './PaymentReceipts';
-import PaymentSummaryPanel from './PaymentSummaryPanel';
+import PaymentsBoard from './PaymentsBoard';
 import { BankRequestsBox, TrainerFeeRequests } from './TrainerPortalAdmin';
 import { FixRequest, PLTick, resubmitRequest } from './StepCosts';
 import { askReason, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
@@ -690,71 +690,44 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
     const c = clients.find(x => x.id === d.clientId)?.companyName || d.client || 'No client';
     return `${c} · ${d.courseName || 'No programme'}${d.trainingDate ? ` · ${formatDate(d.trainingDate)}` : ''}`;
   };
-  const { busy: approving, error: approveError, run: runApprove } = useRun();
-
-  const pending = outs.filter(o => o.status === 'pending').sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
-  const mine = pending.filter(o => canDecide(o, viewer));
-  const mineInBulk = mine.filter(o => !isTrainerFee(o));   // trainer fees are approved one by one, after their checks
-  const toPay = outs.filter(o => o.status === 'approved');
+  // Four sub-tabs (2026-10-26): Payments out is the board (approve → send to accounts → receipt); the rest moved off it.
+  const [tab, setTab] = useState<'out' | 'company' | 'owed' | 'settings'>('out');
   const owed = useMemo(() => ins.filter(m => !isPaid(m)), [ins]);
   const owedTotal = owed.reduce((t, m) => t + expectedFor(m, settings), 0);
   // Paid on clients' behalf and not yet paid back (2026-10-22).
   const behalfOwed = deals.reduce((t, d) => t + behalfStatus(d.id, outs, claims, receipts).outstanding, 0);
+  const tabs: [typeof tab, string][] = [['out', 'Payments out'], ['company', 'Company payments'], ['owed', `Owed by clients${behalfOwed > 0 ? ` · ${formatRM(behalfOwed)}` : ''}`], ['settings', 'Settings']];
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat label={viewer.role === 'management' ? 'Waiting for your approval' : 'Waiting for approval'} value={String(viewer.role === 'management' ? mine.length : pending.length)} />
-        <Stat label="Approved, to pay" value={`${toPay.length} · ${formatRM(toPay.reduce((t, o) => t + o.amount, 0))}`} />
-        <button type="button" onClick={onOpenPayments} disabled={!onOpenPayments} className="col-span-2 rounded-xl border border-line bg-white px-3 py-2.5 text-left hover:bg-surface sm:col-span-1">
-          <p className="text-xs font-semibold text-ink-soft">Invoiced, not paid yet ({owed.length})</p>
-          <p className="mt-0.5 text-lg font-bold tabular-nums">{formatRM(owedTotal)}</p>
-          {onOpenPayments && <p className="text-xs font-semibold text-accent">See them in Payment tracking</p>}
-        </button>
-        <a href="#owed-by-clients" className="col-span-2 rounded-xl border border-line bg-white px-3 py-2.5 text-left hover:bg-surface sm:col-span-1">
-          <p className="text-xs font-semibold text-ink-soft">Owed by clients (paid on their behalf)</p>
-          <p className={`mt-0.5 text-lg font-bold tabular-nums ${behalfOwed > 0 ? 'text-attention' : ''}`}>{formatRM(behalfOwed)}</p>
-          <p className="text-xs font-semibold text-accent">See the list below</p>
-        </a>
-      </div>
-
-      {/* From the trainer portal (2026-10-21): fee requests with photos and T3, and bank accounts to check */}
-      <TrainerFeeRequests outs={outs} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
-      <BankRequestsBox viewer={viewer} trainers={[]} />
-
-      {mineInBulk.length > 1 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" disabled={approving} className={btnPrimary} onClick={() => runApprove(() => approveMany(mineInBulk, viewer))}>
-            {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Approve all {mineInBulk.length} waiting for you ({formatSen(mineInBulk.reduce((t, o) => t + (Number(o.amount) || 0), 0))})
-          </button>
-          {mineInBulk.length < mine.length && <span className="text-sm text-ink-soft">Trainer fees are approved one by one, after their checks.</span>}
-          {approveError && <span role="alert" className="text-sm text-danger">{approveError}</span>}
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex flex-wrap rounded-lg border border-line bg-white p-0.5" role="tablist" aria-label="Money">
+          {tabs.map(([k, t]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === k ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'}`}>
+              {t}
+            </button>
+          ))}
         </div>
-      )}
-      <Section title="Payment requests waiting for approval" empty="Nothing waiting for approval.">
-        {pending.map(o => <OutRow key={o.id} o={o} viewer={viewer} context={dealLabel(o.dealId)} />)}
-      </Section>
-
-      {/* Approved payments live in the summary list only, and money still to come in in Payment tracking (2026-10-21). */}
-      <PaymentSummaryPanel outs={outs} viewer={viewer} forTextOf={o => dealLabel(o.dealId)} dealOf={o => deals.find(d => d.id === o.dealId)} />
-
-      <div id="owed-by-clients" className="scroll-mt-4">
-        <OwedByClients deals={deals} outs={outs} claims={claims} receipts={receipts} settings={settings} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
+        {onOpenPayments && (
+          <button type="button" onClick={onOpenPayments} className="text-left text-sm text-ink-soft hover:text-ink sm:ml-auto">
+            Money coming in: <strong className="tabular-nums text-ink">{formatRM(owedTotal)}</strong> invoiced, not paid yet ({owed.length}) · <span className="font-semibold text-accent">Payment tracking</span>
+          </button>
+        )}
       </div>
 
-      <CompanyPayments outs={outs} viewer={viewer} />
-
-      <MoneySettingsCard settings={settings} viewer={viewer} />
+      {tab === 'out' && (
+        <>
+          {/* From the trainer portal (2026-10-21): fee requests with photos and T3, and bank accounts to check */}
+          <TrainerFeeRequests outs={outs} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
+          <BankRequestsBox viewer={viewer} trainers={[]} />
+          <PaymentsBoard outs={outs} deals={deals} viewer={viewer} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
+        </>
+      )}
+      {tab === 'company' && <CompanyPayments outs={outs} viewer={viewer} />}
+      {tab === 'owed' && <OwedByClients deals={deals} outs={outs} claims={claims} receipts={receipts} settings={settings} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />}
+      {tab === 'settings' && <MoneySettingsCard settings={settings} viewer={viewer} />}
     </div>
-  );
-}
-
-function Section({ title, empty, children }: { title: string; empty: string; children: React.ReactNode[] }) {
-  return (
-    <section className="space-y-2">
-      <h4 className="font-bold">{title}</h4>
-      {children.length === 0 ? <p className="text-[15px] text-ink-soft">{empty}</p> : <ul className="space-y-2">{children}</ul>}
-    </section>
   );
 }
 

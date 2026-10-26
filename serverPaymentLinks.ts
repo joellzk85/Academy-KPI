@@ -230,9 +230,11 @@ function registerBatchRoutes(app: Express) {
     }
     const byName = String((await db.collection('team').doc(caller.memberId).get()).data()?.name || '');
     const token = crypto.randomBytes(16).toString('hex');
-    await db.collection('payment_links').doc(token).set({ kind: 'batch', moneyOutIds: ids, status: 'open', createdAt: Date.now(), byId: caller.memberId, byName });
+    const createdAt = Date.now();
+    await db.collection('payment_links').doc(token).set({ kind: 'batch', moneyOutIds: ids, status: 'open', createdAt, byId: caller.memberId, byName });
+    // The board's "With accounts" lane shows when and by whom (browsers can't read payment_links).
     const batch = db.batch();
-    docs.forEach(d => batch.update(d.ref, { summaryToken: token }));
+    docs.forEach(d => batch.update(d.ref, { summaryToken: token, summaryAt: createdAt, summaryByName: byName }));
     await batch.commit();
     return { token };
   }));

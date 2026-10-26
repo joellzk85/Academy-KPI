@@ -116,6 +116,8 @@ export interface MoneyOut {
   vendorId?: string;
   // On a payment summary sent to accounts (payment_links kind 'batch'): the summary's link token.
   summaryToken?: string;
+  summaryAt?: number;      // when that summary was sent (ms) and who sent it (2026-10-26, for the Payments out board)
+  summaryByName?: string;
   // Include in P&L (Joel, 2026-10-21): older requests without it count. Since the process audit (2026-10-22) new
   // cost lines start ticked, and leaving one out needs a short reason (notInPLReason).
   inPL?: boolean;
