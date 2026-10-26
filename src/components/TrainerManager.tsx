@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
-import { Download, FileText, GraduationCap, Info, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
+import { Check, Download, Eye, FileText, Link2, GraduationCap, Info, Loader2, Mail, MessageCircle, Pencil, Phone, Plus, Search, Trash2, X } from 'lucide-react';
 import { Representative, Trainer } from '../types';
 import { db, friendlyError } from '../lib/firebase';
 import { STAGE_LABELS, dealStage, formatDate, formatRM, todayIso } from '../lib/deals';
@@ -16,7 +16,9 @@ import PhotoPicker from './PhotoPicker';
 import { downloadBiodataPdf } from './TrainerBiodataDocument';
 import TrainerOverview, { useOverviewAllowed } from './TrainerOverview';
 import TrainingReportsList from './TrainingReportsList';
-import { BankRequestsBox, PortalAccessBox, PortalInviteDialog, TrainerRatings, useTrainerAccounts } from './TrainerPortalAdmin';
+import { BankRequestsBox, PortalAccessBox, PortalInviteDialog, TrainerRatings, portalUrl, useTrainerAccounts } from './TrainerPortalAdmin';
+import { isSuperManager } from '../lib/superManager';
+const ViewPortalAs = React.lazy(() => import('./TrainerPortal').then(m => ({ default: m.ViewPortalAs })));
 import { pdfErrorText } from '../lib/oldTab';
 import TrainerExtrasFields, { TopicList } from './TrainerExtrasFields';
 import { DOC_KINDS, TRAINING_TYPES, TrainingType, emptyExtras, cleanIc, extrasFrom, extrasToSave, BIO_LISTS, rowFilled, languagesText, linkHref, topicList, trainingTypeLabel,
@@ -128,6 +130,12 @@ function whatsappLink(phone: string): string {
 
 export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProps) {
   const isStaff = viewer.role === 'admin' || viewer.role === 'management';
+  // The owner can view a trainer's portal as them, view only (Joel, 2026-10-26).
+  const isOwner = isSuperManager(viewer);
+  const [viewAs, setViewAs] = useState<{ id: string; name: string } | null>(null);
+  const [copiedId, setCopiedId] = useState('');
+  const copyPortal = async (id: string) => { try { await navigator.clipboard.writeText(portalUrl()); setCopiedId(id); setTimeout(() => setCopiedId(''), 2000); } catch { /* the link is in the trainer's panel */ } };
+  const canViewAs = (t: any) => isOwner && (!!accounts[t.id]?.active || !!t.memberId);
   const [dirTrainers, setDirTrainers] = useState<Trainer[]>([]);
   // trainer_private, Admin and Management only (2026-10-22): their personal details are merged into each trainer.
   const [privates, setPrivates] = useState<Record<string, any> | null>(null);
@@ -546,8 +554,8 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
               const sub = [what, t.contact].map(x => (x || '').trim()).filter(Boolean).join(' · ');
               const next = nextTraining[t.id];
               return (
-                <li key={t.id}>
-                  <button type="button" onClick={() => { setOpenId(t.id); setPanelError(''); }} className="flex w-full items-center gap-4 px-5 py-3.5 text-left hover:bg-surface">
+                <li key={t.id} className="flex items-center hover:bg-surface">
+                  <button type="button" onClick={() => { setOpenId(t.id); setPanelError(''); }} className="flex min-w-0 flex-1 items-center gap-4 py-3.5 pl-5 pr-2 text-left">
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
                         <span className="truncate font-semibold">{t.name}</span>
@@ -560,6 +568,16 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                     <span className="hidden w-28 shrink-0 text-right text-sm font-semibold tabular-nums sm:block">{isStaff && t.rate ? `${formatRM(t.rate)}/day` : ''}</span>
                     <span className="w-32 shrink-0 text-right text-sm text-ink-soft">{next ? `Next ${formatDate(next)}` : 'No training booked'}</span>
                   </button>
+                  <span className="flex w-20 shrink-0 items-center justify-end gap-1 pr-4">
+                    {isStaff && accounts[t.id]?.active && (
+                      <button type="button" onClick={() => copyPortal(t.id)} title={`Copy portal link (logs in with ${accounts[t.id].email})`} aria-label={`Copy ${t.name}'s portal link`}
+                        className="rounded-lg p-1.5 text-ink-soft hover:bg-white hover:text-accent">{copiedId === t.id ? <Check className="h-4 w-4 text-accent" /> : <Link2 className="h-4 w-4" />}</button>
+                    )}
+                    {canViewAs(t) && (
+                      <button type="button" onClick={() => setViewAs({ id: t.id, name: t.name })} title="View their portal as them (view only)" aria-label={`View ${t.name}'s portal as them`}
+                        className="rounded-lg p-1.5 text-ink-soft hover:bg-white hover:text-accent"><Eye className="h-4 w-4" /></button>
+                    )}
+                  </span>
                 </li>
               );
             })}
@@ -604,6 +622,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
             <section className="mt-4 space-y-2 rounded-xl border border-line p-4">
               <h4 className="text-sm font-semibold text-ink-soft">Trainer portal</h4>
               <PortalAccessBox trainer={openTrainer} account={accounts[openTrainer.id]} viewer={viewer} onInvite={() => setPortalInvite(openTrainer.id)} />
+              {canViewAs(openTrainer) && <button type="button" className={btnSecondary} onClick={() => setViewAs({ id: openTrainer.id, name: openTrainer.name })}><Eye className="h-4 w-4" /> View portal as them</button>}
             </section>
             <section className="mt-4 space-y-2 rounded-xl border border-line p-4">
               <h4 className="text-sm font-semibold text-ink-soft">Rating</h4>
@@ -614,6 +633,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
       )}
 
       {/* Invite to the trainer portal (2026-10-21): a link where the trainer sets up their own login */}
+      {viewAs && <React.Suspense fallback={null}><ViewPortalAs trainerId={viewAs.id} trainerName={viewAs.name} onClose={() => setViewAs(null)} /></React.Suspense>}
       {portalInvite !== null && (
         <PortalInviteDialog viewer={viewer} trainers={trainers} preselect={portalInvite} onClose={() => setPortalInvite(null)} />
       )}

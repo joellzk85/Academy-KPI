@@ -38,6 +38,10 @@ pStorage.maxUploadRetryTime = 60_000;
 // Internal trainers (2026-10-25) use the same screens inside the CRM (InternalTrainerPortal below), with their CRM
 // login and storage instead of the portal's own. The two never show on the same page.
 let conn = { auth: pAuth, storage: pStorage };
+// The owner viewing a trainer's portal as them (2026-10-26): the CRM login plus the trainer's id; the server lets
+// only reading through, and uploads are stopped here.
+let viewAs = '';
+const VIEW_ONLY = "View only: nothing is saved while you're viewing as this trainer.";
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -56,10 +60,11 @@ async function token() {
   if (!u) throw new PortalError('not-logged-in', 'You are logged out. Log in again.');
   return u.getIdToken();
 }
+const authHeaders = async (): Promise<Record<string, string>> => ({ Authorization: `Bearer ${await token()}`, ...(viewAs ? { 'X-View-As-Trainer': viewAs } : {}) });
 async function api(path: string, body: any = {}) {
   let res: Response;
   try {
-    res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token()}` }, body: JSON.stringify(body) });
+    res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(await authHeaders()) }, body: JSON.stringify(body) });
   } catch (e: any) {
     if (e instanceof PortalError) throw e;
     throw new PortalError('network', 'No internet connection. Check it and try again.');
@@ -81,6 +86,7 @@ function loginError(e: any): string {
 }
 
 async function uploadTo(path: string, data: Blob, type: string, onProgress: (p: number) => void): Promise<string> {
+  if (viewAs) throw new PortalError('view-only', VIEW_ONLY);
   const r = ref(conn.storage, path);
   const task = uploadBytesResumable(r, data, { contentType: type });
   await new Promise<void>((resolve, reject) => task.on('state_changed', s => onProgress(s.totalBytes ? Math.round((s.bytesTransferred / s.totalBytes) * 100) : 0), reject, () => resolve()));
@@ -277,11 +283,29 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 // PO, the fee and the payment details; logging in and out is the CRM's.
 export function InternalTrainerPortal() {
   conn = { auth: crmAuth, storage: crmStorage };
+  viewAs = '';
   const uid = crmAuth.currentUser?.uid;
   return uid ? <Portal user={crmAuth.currentUser!} internal /> : null;
 }
 
-function Portal({ user, internal = false }: { user: User; internal?: boolean }) {
+// The owner viewing a trainer's portal as them (Joel, 2026-10-26), full screen over the CRM, view only.
+export function ViewPortalAs({ trainerId, trainerName, onClose }: { trainerId: string; trainerName: string; onClose: () => void }) {
+  conn = { auth: crmAuth, storage: crmStorage };
+  viewAs = trainerId;
+  useEffect(() => () => { viewAs = ''; }, []);
+  const uid = crmAuth.currentUser?.uid;
+  return (
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-surface">
+      <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 bg-attention px-4 py-2 text-sm font-semibold text-white">
+        <span>Viewing {trainerName}'s portal as them. View only: nothing you click is saved.</span>
+        <button type="button" onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 hover:bg-white/30"><X className="h-4 w-4" /> Close</button>
+      </div>
+      {uid && <Portal key={trainerId} user={crmAuth.currentUser!} viewing />}
+    </div>
+  );
+}
+
+function Portal({ user, internal = false, viewing = false }: { user: User; internal?: boolean; viewing?: boolean }) {
   const [info, setInfo] = useState<any>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('home');
@@ -297,13 +321,13 @@ function Portal({ user, internal = false }: { user: User; internal?: boolean }) 
   const right = (
     <div className="flex items-center gap-2">
       <span className="hidden text-sm text-ink-soft sm:inline">{info?.profile?.name || user.email}</span>
-      <button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}><LogOut className="h-4 w-4" /> Log out</button>
+      {!viewing && <button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}><LogOut className="h-4 w-4" /> Log out</button>}
     </div>
   );
   const frame = (children: React.ReactNode) => (internal ? <div className="font-sans text-ink">{children}</div> : shell(children, right, true));
-  if (error) return internal ? <p className={alertBox}>{error}</p> : shell(<div className={`${card} space-y-3`}><p className="text-[15px]">{error}</p><button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}>Log out</button></div>, right);
+  if (error) return internal || viewing ? <p className={`${alertBox} m-4`}>{error}</p> : shell(<div className={`${card} space-y-3`}><p className="text-[15px]">{error}</p><button type="button" className={btnSecondary} onClick={() => signOut(pAuth)}>Log out</button></div>, right);
   if (!info) return frame(<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading {internal ? 'your trainings' : 'your portal'}…</p>);
-  const tabs = internal ? TABS.filter(t => t.id !== 'fees' && t.id !== 'payment') : TABS;
+  const tabs = internal || info.internalTrainer ? TABS.filter(t => t.id !== 'fees' && t.id !== 'payment') : TABS;
 
   // Side menu like the CRM's (Joel, 2026-10-21); on phones a Menu button opens the same list.
   const menu = (
@@ -331,7 +355,7 @@ function Portal({ user, internal = false }: { user: User; internal?: boolean }) 
       <nav className="sticky top-4 hidden w-56 shrink-0 rounded-xl border border-line bg-white p-2 md:block" aria-label="Portal sections">{menu}</nav>
       <div className="min-w-0 flex-1 space-y-5">
       {note && <p className="flex items-start justify-between gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent">{note}<button type="button" onClick={() => setNote('')} aria-label="Close"><X className="h-4 w-4" /></button></p>}
-      {tab === 'home' && <HomeTab info={info} go={go} onPassword={internal ? undefined : passwordEmail} />}
+      {tab === 'home' && <HomeTab info={info} go={go} onPassword={internal || viewing ? undefined : passwordEmail} />}
       {tab === 'trainings' && <TrainingsTab info={info} reload={load} />}
       {tab === 'calendar' && <CalendarTab info={info} />}
       {(tab === 'outlines' || tab === 'teambuilding') && <DocsTab key={tab} kind={tab === 'outlines' ? 'outline' : 'teambuilding'} info={info} api={api} upload={uploadTo} />}
@@ -448,7 +472,7 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
     try { await fn(); } catch (e: any) { setError(e.message); } finally { setBusy(''); }
   };
   const downloadPo = (f: any) => run(`po-${f.id}`, async () => {
-    const res = await fetch('/api/portal/po', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token()}` }, body: JSON.stringify({ dealId: t.dealId, fileId: f.id }) });
+    const res = await fetch('/api/portal/po', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(await authHeaders()) }, body: JSON.stringify({ dealId: t.dealId, fileId: f.id }) });
     if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || "The PO couldn't be downloaded. Try again.");
     const url = URL.createObjectURL(await res.blob());
     const a = document.createElement('a'); a.href = url; a.download = f.name || 'PO'; a.click();

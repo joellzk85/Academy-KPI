@@ -49,6 +49,8 @@ export async function trainerFrom(req: Request) {
   let uid = '';
   try { uid = (await auth.verifyIdToken(token, true)).uid; }
   catch { throw new UserError(401, 'not-logged-in', 'Your login has expired. Log in again.'); }
+  const viewAs = String(req.headers['x-view-as-trainer'] || '');
+  if (viewAs) return ownerViewFrom(req, db, uid, viewAs);
   const trainerId = trainerIdFromUid(uid);
   if (!trainerId) return internalTrainerFrom(db, uid);
   // Their personal details (gender, address, emergency contact, race, nationality, rate) live in trainer_private
@@ -72,6 +74,20 @@ async function internalTrainerFrom(db: Firestore, uid: string) {
   const tr = found.docs[0];
   const priv = await db.collection('trainer_private').doc(tr.id).get();
   return { db, trainerId: tr.id, trainer: { ...withPrivate(tr.data() as any, priv.data()), id: tr.id }, account: { email: '', internalTrainer: true, memberId: uid } as any };
+}
+
+// View a trainer's portal as them (Joel, 2026-10-26): the owner only, view only. Only the routes that read are
+// allowed; nothing is saved and their "last used" stays as it was.
+const VIEW_ONLY_ROUTES = new Set(['/api/portal/me', '/api/portal/po', '/api/portal/report/get', '/api/portal/docs/list', '/api/portal/docs/get', '/api/portal/docs/library']);
+async function ownerViewFrom(req: Request, db: Firestore, uid: string, trainerId: string) {
+  const [link, owner] = await Promise.all([db.collection('auth_map').doc(uid).get(), db.collection('owner_access').doc(uid).get()]);
+  if (!link.data()?.active || !owner.exists) throw new UserError(403, 'no-access', 'This login no longer has access.');
+  if (!VIEW_ONLY_ROUTES.has(req.path)) throw new UserError(403, 'view-only', "View only: nothing is saved while you're viewing as this trainer.");
+  const [acc, tr, priv] = await Promise.all([db.collection('trainer_accounts').doc(trainerId).get(), db.collection('trainers_directory').doc(trainerId).get(), db.collection('trainer_private').doc(trainerId).get()]);
+  if (!tr.exists) throw new UserError(404, 'not-found', 'That trainer is no longer on the list.');
+  const t: any = tr.data();
+  const account = t.memberId ? { email: '', internalTrainer: true, memberId: t.memberId } : (acc.data() || { email: '' });
+  return { db, trainerId, trainer: { ...withPrivate(t, priv.data()), id: trainerId }, account: { ...account, viewOnly: true } as any };
 }
 
 async function externalFrom(req: Request) {

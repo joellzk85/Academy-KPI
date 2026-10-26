@@ -126,6 +126,7 @@ export function PortalAccessBox({ trainer, account, viewer, onInvite }: { traine
         <>
           <p className="flex items-center gap-1.5 text-[15px]"><BadgeCheck className="h-4 w-4 text-accent" /> Has access · logs in with <strong>{account.email}</strong></p>
           <p className="text-sm text-ink-soft">{account.lastSeenAt ? `Last used ${isoDay(account.lastSeenAt)}` : 'Not logged in yet'}{account.createdByName ? ` · given by ${account.createdByName}${account.createdAt ? ` on ${isoDay(account.createdAt)}` : ''}` : ''}</p>
+          <PortalLinkRow trainer={trainer} email={account.email} />
           {changing ? emailForm : (
             <div className="flex flex-wrap gap-2">
               <button type="button" disabled={busy} className={btnSecondary} onClick={resend}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Send password email again</button>
@@ -158,6 +159,20 @@ export function PortalAccessBox({ trainer, account, viewer, onInvite }: { traine
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// The portal link for a trainer with access (Joel, 2026-10-26): the same address for everyone, with their login email.
+export function PortalLinkRow({ trainer, email }: { trainer: any; email: string }) {
+  const [copied, setCopied] = useState(false);
+  const message = `Hi ${trainer.name}, your NEXT Academy trainer portal: ${portalUrl()}\nLog in with ${email}.`;
+  const copy = async () => { try { await navigator.clipboard.writeText(portalUrl()); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* the link is on screen to select */ } };
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm">
+      <span className="min-w-0 flex-1 break-all">Portal link: <a href={portalUrl()} target="_blank" rel="noreferrer" className="font-semibold text-accent hover:underline">{portalUrl()}</a></span>
+      <button type="button" className={btnSecondary} onClick={copy}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copied ? 'Copied' : 'Copy link'}</button>
+      <a href={whatsappShare(portalUrl(), message.replace(`: ${portalUrl()}`, ':'), trainer.contact)} target="_blank" rel="noreferrer" className={btnSecondary}><MessageCircle className="h-4 w-4" /> WhatsApp</a>
     </div>
   );
 }
