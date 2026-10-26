@@ -7,11 +7,13 @@
 //   outlineId?, programmeId?, trainerId?, trainerName?, title?, submission?, submittedAt?, decidedById?, decidedByName?, decidedAt? }
 // An outline link either belongs to an outline (outlineId: "Send to trainer" in the editor) or is an invite made
 // from the Course outlines list (no outlineId; Joel, 2026-10-20): accepting that one makes a new outline.
+// Since 2026-10-26 every new outline invite makes the outline first, and a teambuilding link (kind 'teambuilding',
+// proposalId) belongs to its proposal: what the trainer sends goes straight into that record (applied: true), no Accept.
 
 import { TrainerExtras, cleanExtras, cleanIc } from './trainerProfile';
 import type { CourseOutline } from '../types';
 
-export type LinkKind ='outline' | 'profile';
+export type LinkKind = 'outline' | 'profile' | 'teambuilding';
 export type LinkStatus = 'open' | 'submitted' | 'accepted' | 'cancelled';
 export const LINK_DAYS = 14;
 
@@ -40,7 +42,8 @@ export interface ProfileSubmission extends TrainerExtras {
 export interface TrainerLink {
   id: string; token: string; kind: LinkKind; status: LinkStatus;
   createdAt: number; expiresAt: number; requestedById: string; requestedByName: string;
-  outlineId?: string; programmeId?: string; trainerId?: string; trainerName?: string; title?: string;
+  outlineId?: string; proposalId?: string; programmeId?: string; trainerId?: string; trainerName?: string; title?: string;
+  applied?: boolean;   // what the trainer sent went straight into the outline or proposal (2026-10-26)
   submission?: OutlineSubmission | ProfileSubmission; submittedAt?: number;
   decidedById?: string; decidedByName?: string; decidedAt?: number;
 }

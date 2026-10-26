@@ -252,6 +252,12 @@ export interface CourseOutline {
   trainerId?: string;           // the trainer who wrote / will deliver it (trainers_directory)
   fromTrainerDocId?: string;    // made from a trainer's own outline in the portal (trainer_docs, lib/trainerDocs.ts)
   fromTrainerDocVersion?: number;   // which version of it we have
+  // Written by a trainer (2026-10-26, lib/trainerDocs.ts): the trainer portal, My trainings and trainer links write
+  // their parts straight into this record until it's sent to a client.
+  writerTrainerId?: string;     // trainers_directory id ('' for someone not in the list)
+  writerTrainerName?: string;
+  trainerEditedAt?: number;     // the trainer's last change
+  writerRemoved?: boolean;      // taken off the trainer's own list (the record stays here)
   fromTbProposalId?: string;    // made with "Speed course outline" from this teambuilding proposal (2026-10-24, lib/outlineTb.ts)
   status?: 'draft' | 'sent';
   sentAt?: string;

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import {
   AlertTriangle, ArrowLeft, BookmarkPlus, ClipboardList, ChevronDown, ChevronRight, Copy, Download, Eye, EyeOff, FilePlus2, Laptop, Library, Link2, Loader2, Lock,
-  MoreHorizontal, Pencil, Plus, RectangleHorizontal, RectangleVertical, RotateCcw, Search, Send, Smartphone, Table2, Trash2, Unlock, X,
+  MoreHorizontal, Pencil, Plus, RectangleHorizontal, RectangleVertical, RotateCcw, Search, Send, Smartphone, Table2, Trash2, Unlock, UserPlus, X,
 } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { CourseOutline, QuoteSendEntry, Representative } from '../types';
@@ -34,8 +34,9 @@ import { clientCode, refWithCode } from '../lib/docRefs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { AcceptBlock } from './ProposalLinkPage';
 import { ActivityLibrary, PackageTemplate, cleanActivity, useActivities, usePackageTemplate } from './TeambuildingLibrary';
-import { FromTrainers, TbTrainerPreview, TrainerUpdateBanner, useTrainerDocs } from './TrainerDocsBox';
-import { TrainerDoc, newerFromTrainer, tbFieldsFrom } from '../lib/trainerDocs';
+import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
+import { TrainerLink, isLive } from '../lib/trainerLinks';
+import { programmeTypeOf } from '../lib/outlineTb';
 import ListPager, { SortSelect, listSelect } from './ListPager';
 import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { ActivityForm, Agenda, Card, NumberBox, PackageEditor, Points, UpDown, btnPrimary, btnSecondary, iconBtn, input, label, linkBtn, move } from './TeambuildingParts';
@@ -81,11 +82,10 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
   const [loaded, setLoaded] = useState(false);
   const template = usePackageTemplate();
   const [draft, setDraft] = useState<{ p: TbProposal; isNew: boolean } | null>(null);
-  const [choosing, setChoosing] = useState<null | { step: 'deal'; fromDoc?: TrainerDoc; forTitle?: ForTitle } | { step: 'start'; deal: any | null; forTitle?: ForTitle }>(null);
+  const [choosing, setChoosing] = useState<null | { step: 'deal'; forTitle?: ForTitle } | { step: 'start'; deal: any | null; forTitle?: ForTitle }>(null);
   const [backDeal, setBackDeal] = useState<string | null>(null);
-  const trainerDocs = useTrainerDocs('teambuilding');
-  const [peekDoc, setPeekDoc] = useState<TrainerDoc | null>(null);
   const [docError, setDocError] = useState('');
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     const all = (s: any) => s.docs.map((d: any) => ({ ...d.data(), id: d.id }));
@@ -170,24 +170,22 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
     setChoosing(null);
     setDraft({ p, isNew: true });
   };
-  // A trainer's own proposal from the portal (2026-10-21): "Use for a deal" saves our own draft from what they last
-  // sent (their parts), with our package template, then opens it to add packages, venues and the rest.
-  const copyTrainerDoc = async (deal: any | null, d: TrainerDoc) => {
-    setChoosing(null); setDocError('');
+  // "Invite a trainer to write one" (Joel, 2026-10-26): the proposal is made first, general, with our package template;
+  // the trainer's link (and their portal, if they have one) writes their parts straight into it.
+  const makeForTrainer = async (programmeId: string, trainer: any): Promise<TbProposal> => {
     const date = todayIso();
-    const ownerId = (deal && dealOwnerId(deal)) || rep.id;
-    const fields = tbFieldsFrom(d.sent!.tb!);
+    const prog = programmes.find(x => x.id === programmeId);
     const p: TbProposal = JSON.parse(JSON.stringify({
-      ...blankProposalContent(template.pk), ...fields,
-      id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date, clientCode(clients.find(c => c.id === deal?.clientId))), refAuto: true, date,
-      preparedBy: me.name, creatorId: me.id, ownerId, ownerName: personName(ownerId) || rep.name,
-      clientId: deal?.clientId || '', pipelineId: deal?.id || '', preparedForCompany: '',
-      title: fields.title || (deal ? dealProgrammeName(deal, programmes) : ''),
-      fromTrainerDocId: d.id, fromTrainerDocVersion: d.version,
+      ...blankProposalContent(template.pk),
+      id: `tb_${Date.now()}`, refNumber: nextTbRef(list, date, ''), refAuto: true, date,
+      preparedBy: me.name, creatorId: me.id, ownerId: rep.id, ownerName: rep.name,
+      clientId: '', pipelineId: '', preparedForCompany: '', title: prog?.name || '', programmeId: prog?.id || '',
+      writerTrainerId: trainer?.id || '', writerTrainerName: trainer?.name || '',
+      ...(trainer ? { trainers: [{ id: newTbId('tr'), trainerId: trainer.id, role: 'Accredited HRDC Trainer' }] } : {}),
       status: 'draft', sharedWithIds: [], isHidden: false,
     }));
-    try { await setDoc(doc(db, 'teambuilding_proposals', p.id), cleanForSave(p)); open(p); }
-    catch (e) { setDocError(`Couldn't make the proposal: ${friendlyError(e)}`); }
+    await setDoc(doc(db, 'teambuilding_proposals', p.id), cleanForSave(p));
+    return p;
   };
   const open = (p: TbProposal) => {
     markSharedSeen(me.id, 'teambuilding', p);
@@ -207,7 +205,7 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
     return (
       <Editor key={draft.p.id} initial={draft.p} isNew={draft.isNew} me={me} staff={staff} reps={reps} sources={sources} programmes={programmes}
         dealsForPicker={dealsForPicker} templatePk={template.pk} onClose={() => { setDraft(null); setBackDeal(null); }}
-        backToDeal={backDeal && onBackToDeal ? leave : undefined} onOpenDeals={onOpenDeals} trainerDocs={trainerDocs}
+        backToDeal={backDeal && onBackToDeal ? leave : undefined} onOpenDeals={onOpenDeals} live={list.find(x => x.id === draft.p.id)}
         onSpeedOutline={onSpeedOutline ? (x: TbProposal) => onSpeedOutline(x, backDeal) : undefined} />
     );
   }
@@ -230,22 +228,16 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
         : tab === 'template' ? <PackageTemplate me={me} />
         : (
           <>
-          <FromTrainers kind="teambuilding" docs={trainerDocs} ours={list} programmes={programmes}
-            onUse={d => setChoosing({ step: 'deal', fromDoc: d })} onPreview={setPeekDoc} />
           {docError && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{docError}</p>}
           <ProposalList rep={rep} me={me} staff={staff} list={list} loaded={loaded} sources={sources} personName={personName} startOnShared={startOnShared}
-            onNew={() => setChoosing({ step: 'deal' })} onOpen={open} onDuplicate={duplicate} programmes={programmes} tbOutlines={tbOutlines}
+            onNew={() => setChoosing({ step: 'deal' })} onInvite={() => setInviting(true)} onOpen={open} onDuplicate={duplicate} programmes={programmes} tbOutlines={tbOutlines}
             onWriteTitle={g => setChoosing({ step: 'deal', forTitle: { programmeId: g.programme?.id, name: g.name } })} />
           </>
         )}
-      {peekDoc && (
-        <TbTrainerPreview tb={peekDoc.sent!.tb!} trainers={trainers} who={peekDoc.trainerName} onClose={() => setPeekDoc(null)}
-          actions={<button type="button" className={btnPrimary} onClick={() => { const d = peekDoc; setPeekDoc(null); setChoosing({ step: 'deal', fromDoc: d }); }}>Use for a deal</button>} />
-      )}
+      {inviting && <InviteModal me={me} trainers={trainers} programmes={programmes} outlines={tbOutlines} onMake={makeForTrainer} onClose={() => setInviting(false)} />}
       {choosing?.step === 'deal' && (
         <DealChooser deals={dealsForPicker} clients={clients} programmes={programmes} personName={personName}
-          title={choosing.fromDoc ? "Which deal is this trainer's proposal for?" : undefined}
-          onPick={deal => { const d = choosing.fromDoc; if (d) copyTrainerDoc(deal, d); else setChoosing({ step: 'start', deal, forTitle: choosing.forTitle }); }} onCancel={() => setChoosing(null)} allowGeneral />
+          onPick={deal => setChoosing({ step: 'start', deal, forTitle: choosing.forTitle })} onCancel={() => setChoosing(null)} allowGeneral />
       )}
       {choosing?.step === 'start' && (
         <StartChooser deal={choosing.deal} list={list} sources={sources} clients={clients}
@@ -256,6 +248,111 @@ export default function TeambuildingPage({ rep, reps, viewer, startDeal, onStart
 }
 
 // ---------- Choosers ----------
+// ---------- A trainer writing the proposal (Joel, 2026-10-26) ----------
+const tbLinkMessage = (l: TrainerLink, title: string) =>
+  `Hi${l.trainerName ? ` ${l.trainerName}` : ''}, please fill in your teambuilding proposal${title ? ` "${title}"` : ''} for NEXT Academy here. It saves as you type, and you can preview it:`;
+const sortedTrainers = (trainers: any[]) => trainers.filter(t => String(t.name || '').trim() && !t.archived).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+function InviteModal({ me, trainers, programmes, outlines, onMake, onClose }: {
+  me: Viewer; trainers: any[]; programmes: any[]; outlines: any[]; onMake: (programmeId: string, trainer: any) => Promise<TbProposal>; onClose: () => void;
+}) {
+  const [programmeId, setProgrammeId] = useState('');
+  const [trainerId, setTrainerId] = useState('');
+  const [link, setLink] = useState<TrainerLink | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const tbTitles = programmes.filter(x => programmeTypeOf(x, outlines) === 'teambuilding').sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const progName = String(programmes.find(x => x.id === programmeId)?.name || '').trim();
+  const trainer = trainers.find(t => t.id === trainerId);
+  const make = async () => {
+    setBusy(true); setError('');
+    try {
+      const p = await onMake(programmeId, trainer);
+      setLink(await createTrainerLink({ kind: 'teambuilding', proposalId: p.id, programmeId, title: progName, trainerId: trainer?.id || '', trainerName: trainer?.name || '' }, me));
+    } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Invite a trainer to write a teambuilding proposal" onCancel={onClose}>
+      {!link ? (
+        <div className="space-y-3">
+          <p className="text-[15px] text-ink-soft">A new proposal is made here now (general, marked "by" the trainer). The trainer gets a private link (no login) and writes the cover, objectives, trainers, agenda, activities and takeaways straight into it, as they type. You add the packages, venues and the rest.</p>
+          <div>
+            <label className={label} htmlFor="tinv-prog">Title <span className="font-normal text-ink-soft">(optional; the trainer can type one)</span></label>
+            <select id="tinv-prog" value={programmeId} onChange={e => setProgrammeId(e.target.value)} className={input}>
+              <option value="">Not chosen</option>
+              {tbTitles.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={label} htmlFor="tinv-trainer">Trainer <span className="font-normal text-ink-soft">(optional, for a trainer already in the list)</span></label>
+            <select id="tinv-trainer" value={trainerId} onChange={e => setTrainerId(e.target.value)} className={input}>
+              <option value="">Someone not in the list / not chosen</option>
+              {sortedTrainers(trainers).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" className={btnSecondary} onClick={onClose}>Cancel</button>
+            <button type="button" className={btnPrimary} disabled={busy} onClick={make}>{busy && <Loader2 className="h-4 w-4 animate-spin" />} Make the link</button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-[15px]">Send this link to {link.trainerName || 'the trainer'}. It works for 14 days. The proposal is in your list, marked "by {link.trainerName || 'trainer'}".</p>
+          <LinkShareBox link={link} phone={trainer?.contact} message={tbLinkMessage(link, progName)} />
+          <div className="flex justify-end"><button type="button" className={btnPrimary} onClick={onClose}>Done</button></div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// In the editor: who writes it, and the private link for the trainer (make, share, cancel).
+function TrainerLinkCard({ p, me, trainers, saved }: { p: TbProposal; me: Viewer; trainers: any[]; saved: boolean }) {
+  const links = useTrainerLinks();
+  const link = links.filter(l => l.kind === 'teambuilding' && l.proposalId === p.id && isLive(l)).sort((a, b) => b.createdAt - a.createdAt)[0];
+  const [trainerId, setTrainerId] = useState(p.writerTrainerId || (p.trainers || []).find(t => t.trainerId)?.trainerId || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async (fn: () => Promise<any>) => {
+    setBusy(true); setError('');
+    try { await fn(); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  const trainer = trainers.find(t => t.id === (link?.trainerId || trainerId));
+  const send = () => run(() => createTrainerLink({
+    kind: 'teambuilding', proposalId: p.id, programmeId: p.programmeId || '', title: p.title || '', trainerId: trainer?.id || '', trainerName: trainer?.name || '',
+  }, me));
+  return (
+    <section className="space-y-3 rounded-2xl border border-line bg-white p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-bold">Trainer link</h3>
+        <span className="text-sm text-ink-soft">A trainer can write their parts of this proposal from a private link, no login needed. It goes straight in here.</span>
+      </div>
+      {p.writerTrainerName && (
+        <p className="text-[15px]">
+          <strong>Written with {p.writerTrainerName}</strong>{p.writerTrainerId ? ' (also in their trainer portal)' : ''}. They change the cover, objectives, trainers,
+          agenda, activities and takeaways until it's sent to a client.
+          {p.trainerEditedAt ? ` Their last change: ${formatDate(new Date(p.trainerEditedAt).toISOString().slice(0, 10))}.` : ''}
+        </p>
+      )}
+      {link ? (
+        <LinkShareBox link={link} phone={trainer?.contact} message={tbLinkMessage(link, p.title || '')}
+          onCancel={() => { if (window.confirm('Cancel this link? The trainer will no longer be able to open it.')) run(() => closeTrainerLink(link, 'cancelled', me)); }} />
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={trainerId} onChange={e => setTrainerId(e.target.value)} className={`${input} w-auto min-w-[14rem]`} aria-label="Trainer to send the link to">
+            <option value="">Someone not in the list</option>
+            {sortedTrainers(trainers).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <button type="button" className={btnSecondary} disabled={busy || !saved} onClick={send}><UserPlus className="h-4 w-4" /> Send to trainer</button>
+          {!saved && <span className="text-sm text-ink-soft">It saves first: type something.</span>}
+        </div>
+      )}
+      {error && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+    </section>
+  );
+}
+
 function Modal({ title, onCancel, children, wide }: { title: string; onCancel: () => void; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-4 pt-16" role="dialog" aria-modal="true" onClick={onCancel}>
@@ -357,10 +454,10 @@ type ForTitle = { programmeId?: string; name: string };
 type ListView = 'titles' | 'all';
 const VIEW_KEY = 'tb_view';
 
-function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew, onOpen, onDuplicate, startOnShared, programmes, onWriteTitle, tbOutlines }: {
+function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew, onInvite, onOpen, onDuplicate, startOnShared, programmes, onWriteTitle, tbOutlines }: {
   tbOutlines: CourseOutline[];
   rep: Representative; me: Viewer; staff: boolean; list: TbProposal[]; loaded: boolean; sources: TbSources; personName: (id?: string) => string;
-  startOnShared?: boolean; onNew: () => void; onOpen: (p: TbProposal) => void; onDuplicate: (p: TbProposal) => Promise<void>;
+  startOnShared?: boolean; onNew: () => void; onInvite: () => void; onOpen: (p: TbProposal) => void; onDuplicate: (p: TbProposal) => Promise<void>;
   programmes: Programme[]; onWriteTitle: (g: TitleGroup) => void;
 }) {
   const [view, setViewState] = useState<ListView>(() => { try { return startOnShared ? 'all' : (localStorage.getItem(VIEW_KEY) as ListView) || 'titles'; } catch { return 'titles'; } });
@@ -410,7 +507,10 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
               className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === k ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'}`}>{t}</button>
           ))}
         </div>
-        {view === 'titles' && <button type="button" className={`${btnPrimary} ml-auto`} onClick={onNew}><Plus className="h-4 w-4" /> New proposal</button>}
+        <span className="ml-auto flex flex-wrap gap-2">
+          <button type="button" className={btnSecondary} onClick={onInvite}><UserPlus className="h-4 w-4" /> Invite a trainer to write one</button>
+          {view === 'titles' && <button type="button" className={btnPrimary} onClick={onNew}><Plus className="h-4 w-4" /> New proposal</button>}
+        </span>
       </div>
       {view === 'titles' ? (
         <TitlesView kind="teambuilding" programmes={programmes} docs={titleDocs} deals={sources.deals} trainers={sources.trainers} outlines={tbOutlines}
@@ -461,6 +561,7 @@ function ProposalList({ rep, me, staff, list, loaded, sources, personName, onNew
                         {p.refNumber}
                         {tbSent(p) ? <span className="rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Sent</span> : <span className="rounded bg-surface px-1.5 text-xs font-semibold">Draft</span>}
                         {p.isHidden && <span className="text-xs">hidden</span>}
+                        {p.writerTrainerName && <span className="truncate rounded bg-surface px-1.5 text-xs font-semibold text-ink">by {p.writerTrainerName}</span>}
                       </span>
                     </span>
                   </span>
@@ -508,10 +609,10 @@ function MenuBtn({ icon, text, onClick, danger }: { icon: React.ReactNode; text:
 }
 
 // ---------- Editor ----------
-function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsForPicker, templatePk, onClose, backToDeal, onOpenDeals, trainerDocs, onSpeedOutline }: {
+function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsForPicker, templatePk, onClose, backToDeal, onOpenDeals, live, onSpeedOutline }: {
   initial: TbProposal; isNew: boolean; me: Viewer; staff: boolean; reps: Representative[]; sources: TbSources; programmes: any[];
   onSpeedOutline?: (p: TbProposal) => void;   // "Speed course outline"
-  trainerDocs: TrainerDoc[];
+  live?: TbProposal;   // the record as it is in the database now (a trainer may be writing it)
   dealsForPicker: any[]; templatePk: any; onClose: () => void; backToDeal?: () => void; onOpenDeals?: () => void; key?: string;
 }) {
   const [p, setP] = useState<TbProposal>(initial);
@@ -529,18 +630,26 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   const [pdfBusy, setPdfBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const { list: library } = useActivities();
-  const [peekNewer, setPeekNewer] = useState(false);
 
   const set = (c: Partial<TbProposal>) => setP(x => ({ ...x, ...c }));
   const srcNow = gapDeal ? { ...sources, deals: sources.deals.map(d => (d.id === gapDeal.id ? gapDeal : d)) } : sources;
   const r = resolveTb(p, srcNow);
   const locked = tbSent(p);
-  const newer = newerFromTrainer(p, trainerDocs);   // the trainer sent a newer version of the proposal this came from
   // A draft numbered by the CRM takes its client's customer code (added, or swapped when the client changes).
   const wantRef = !locked && p.refAuto ? refWithCode(p.refNumber, clientCode(r.client)) : p.refNumber;
   useEffect(() => { if (wantRef !== p.refNumber) set({ refNumber: wantRef }); }, [wantRef]);
   const clientLink = openLinkOf(useDocLinks(p.id), 'teambuilding');   // the client's private link, if one was made
   const dirty = JSON.stringify(p) !== saved;
+  // The trainer writes straight into this proposal (2026-10-26). Their newer change comes in by itself when nothing is
+  // typed here yet; otherwise saving waits until it's loaded, so neither side overwrites the other.
+  const theirs = live && (live.trainerEditedAt || 0) > (p.trainerEditedAt || 0) ? live : null;
+  const takeTheirs = () => {
+    if (!theirs) return;
+    const c = JSON.parse(JSON.stringify({ ...blankProposalContent(null), ...theirs }));
+    setP(c);
+    setSaved(JSON.stringify(c));
+  };
+  useEffect(() => { if (theirs && !dirty) takeTheirs(); }, [theirs?.trainerEditedAt]);
   const nameOf = (id?: string) => reps.find(x => x.id === id)?.name || '';
   const deal = r.deal;
   const dealAtNew = !!deal && ['lead', 'appointment'].includes(dealStage(deal));
@@ -549,6 +658,7 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   const changePax = (n: number) => { setPax(n); set({ pax: n }); };
 
   const persist = async (out: TbProposal, msg: string) => {
+    if (theirs && dirty) { setError(`Load ${theirs.writerTrainerName || "the trainer"}'s changes first (the box above).`); return false; }
     setBusy(true); setError('');
     try {
       const final = cleanForSave({ ...out, updatedAt: new Date().toISOString() });
@@ -564,11 +674,13 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
   // A new proposal only once something in it was changed (the customer code going in doesn't count).
   const touched = !isNew || saved !== '' || JSON.stringify({ ...p, refNumber: '' }) !== JSON.stringify({ ...initial, refNumber: '' });
   const auto = useAutoSave({
-    value: p, dirty, enabled: !locked && touched && !busy,
+    value: p, dirty, enabled: !locked && touched && !busy && !theirs,
     write: async v => { await setDoc(doc(db, 'teambuilding_proposals', v.id), JSON.parse(JSON.stringify(cleanForSave({ ...v, updatedAt: new Date().toISOString() })))); },
     onSaved: setSaved,
   });
-  const status = note ? { text: note, tone: 'soft' as const } : autoSaveText(auto.state, dirty && touched, locked, touched);
+  const status = note ? { text: note, tone: 'soft' as const }
+    : theirs && dirty ? { text: "Not saved: load the trainer's changes first", tone: 'attention' as const }
+      : autoSaveText(auto.state, dirty && touched, locked, touched);
   const close = () => leaveAfterSave(auto.flush, onClose);
   // "Speed course outline": saved first, then the course outline made from it (or the one already made) opens.
   const speedOutline = () => {
@@ -720,19 +832,15 @@ function Editor({ initial, isNew, me, staff, reps, sources, programmes, dealsFor
         </div>
       )}
 
-      {newer && (
-        <TrainerUpdateBanner doc={newer} locked={locked} onPreview={() => setPeekNewer(true)}
-          onBring={() => {
-            if (!window.confirm("Replace the cover, objectives, trainers, agenda, activities and takeaways with the trainer's latest version? Packages, venues, HRDC and terms stay.")) return;
-            set({ ...tbFieldsFrom(newer.sent!.tb!), fromTrainerDocVersion: newer.version });
-            setNote("Brought in the trainer's changes. Check them; they save in a moment.");
-            window.setTimeout(() => setNote(''), 4000);
-          }}
-          onKeep={() => (locked
-            ? updateDoc(doc(db, 'teambuilding_proposals', p.id), { fromTrainerDocVersion: newer.version }).then(() => setP(x => ({ ...x, fromTrainerDocVersion: newer.version }))).catch(e => setError(friendlyError(e)))
-            : set({ fromTrainerDocVersion: newer.version }))} />
+      {theirs && dirty && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-2xl border border-attention/40 bg-attention-soft/40 p-4">
+          <AlertTriangle className="h-5 w-5 text-attention" />
+          <p className="min-w-0 flex-1 text-[15px]">{theirs.writerTrainerName || 'The trainer'} changed this proposal while you were editing. Load their changes before saving; what you typed since your last save will need typing again.</p>
+          <button type="button" className={btnPrimary} onClick={takeTheirs}>Load their changes</button>
+        </div>
       )}
-      {peekNewer && newer && <TbTrainerPreview tb={newer.sent!.tb!} trainers={sources.trainers} who={newer.trainerName} onClose={() => setPeekNewer(false)} />}
+      {!locked && <TrainerLinkCard p={p} me={me} trainers={sources.trainers} saved={!!saved} />}
+      {locked && p.writerTrainerName && <p className="text-sm text-ink-soft">Written with {p.writerTrainerName}. Locked for them too until you click Revise.</p>}
 
       {!locked && p.refAuto && (
         <CustomerCodeBox client={r.client} clients={sources.clients} refNumber={p.refNumber}

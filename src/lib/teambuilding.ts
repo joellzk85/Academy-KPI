@@ -276,6 +276,10 @@ export interface TbProposal {
   updatedAt?: string;
   fromTrainerDocId?: string;       // made from a trainer's own proposal in the portal (trainer_docs, lib/trainerDocs.ts)
   fromTrainerDocVersion?: number;  // which version of it we have
+  writerTrainerId?: string;        // written by a trainer (2026-10-26): see CourseOutline and lib/trainerDocs.ts
+  writerTrainerName?: string;
+  trainerEditedAt?: number;
+  writerRemoved?: boolean;
   programmeId?: string;            // its title from the list (the deal's when made for a deal)
   fromOutlineId?: string;          // made with "Speed build proposal" from this course outline (2026-10-24, lib/outlineTb.ts)
   hideClientLogo?: boolean;        // the cover shows the client's logo (read live from clients/{id}.logoUrl) unless this is on

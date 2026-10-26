@@ -754,7 +754,9 @@ service cloud.firestore {
         || (isMember() && request.auth.uid in tbPeople(request.resource.data));
       allow update: if isStaff()
         || (isMember() && (request.auth.uid in tbPeople(resource.data)
-                           || request.auth.uid in resource.data.get('sharedWithIds', [])));
+                           || request.auth.uid in resource.data.get('sharedWithIds', [])
+                           // started by an outside trainer in the portal (2026-10-26): no owner until someone picks it up
+                           || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == '')));
       allow delete: if isStaff()
         || (isMember() && request.auth.uid in tbPeople(resource.data));
     }
@@ -1072,7 +1074,8 @@ service cloud.firestore {
       allow delete: if isManagement();
     }
     // Trainers' own course outlines and teambuilding proposals (2026-10-21; src/lib/trainerDocs.ts): written only by
-    // the server from the trainer portal; the team reads them and makes its own copy ("Use for a deal").
+    // the server from the trainer portal. Since 2026-10-26 trainers write the CRM records themselves (through the
+    // server) and these old copies are moved over and kept only as history.
     match /trainer_docs/{docId} {
       allow read: if isMember();
       allow write: if false;

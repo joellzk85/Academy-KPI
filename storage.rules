@@ -103,12 +103,13 @@ service firebase.storage {
 
     // Trainer files (2026-10-20): Accredited TTT form, biodata, trainer profile, professional photo.
     // From a trainer's private profile link (no login): trainer_uploads/{token}/{kind}_{time}_{name}. Allowed only while
-    // that link (Firestore trainer_links/{token}) is a live profile link; the 32-character token is the key.
+    // that link (Firestore trainer_links/{token}) is a live profile link (or, since 2026-10-26, a teambuilding proposal
+    // link: its photos); the 32-character token is the key.
     // Up to 20 MB; PDF, Word, JPG or PNG. The team reads them; never changed or deleted.
     function liveTrainerLink(token) {
       let l = /databases/(default)/documents/trainer_links/$(token);
       return firestore.exists(l)
-        && firestore.get(l).data.kind == 'profile'
+        && firestore.get(l).data.kind in ['profile', 'teambuilding']
         && firestore.get(l).data.status in ['open', 'submitted']
         && firestore.get(l).data.expiresAt > request.time.toMillis();
     }

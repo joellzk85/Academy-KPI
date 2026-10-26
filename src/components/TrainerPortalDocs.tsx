@@ -1,24 +1,29 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, BookOpen, CheckCircle2, ChevronDown, Eye, Laptop, Library, Loader2, Pencil, Plus, Search, Send, Smartphone, Trash2, X,
+  AlertTriangle, ArrowLeft, BookOpen, ChevronDown, Eye, Laptop, Library, Loader2, Lock, Pencil, Plus, RotateCcw, Search, Smartphone, Trash2, X,
 } from 'lucide-react';
 import OutlineLinkForm from './OutlineLinkForm';
+import CourseOutlineDocument from './CourseOutlineDocument';
 import TeambuildingSite from './TeambuildingSite';
 import PhoneFrame from './PhoneFrame';
 import PhotoPicker, { PhotoUpload, shrink } from './PhotoPicker';
 import { ActivityForm, Agenda, Points, UpDown, move } from './TeambuildingParts';
-import { OutlineSubmission } from '../lib/trainerLinks';
+import { OutlineSubmission, previewOutline } from '../lib/trainerLinks';
 import { TbProposalActivity, TbTrainer, activityFromLibrary, blankActivity, newTbId, resolveTb } from '../lib/teambuilding';
-import { TrainerDoc, TrainerDocContent, TrainerDocKind, TrainerTb, cleanTrainerTb, docProblem, docTitle, trainerPreviewTb } from '../lib/trainerDocs';
+import { TrainerDocContent, TrainerDocKind, TrainerTb, cleanTrainerTb, docTitle, trainerPreviewTb } from '../lib/trainerDocs';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 
-// The trainer's own course outlines and teambuilding proposals in the portal (Joel, 2026-10-21; lib/trainerDocs.ts).
-// They write and change them any time; what they type saves as a draft, and "Send to NEXT Academy" (later
-// "Send changes") makes it what the team sees. Preview only: no download or print.
+// The trainer's course outlines and teambuilding proposals in the portal and My trainings (Joel, 2026-10-21;
+// lib/trainerDocs.ts). Since 2026-10-26 they are NEXT Academy's own CRM records: what the trainer types saves straight
+// into them (the team sees it at once), until the team sends it to a client; then it's locked. Preview only: no
+// download or print.
 
 type Api = (path: string, body?: any) => Promise<any>;
 type Upload = (path: string, data: Blob, type: string, onProgress: (p: number) => void) => Promise<string>;
-type Row = Pick<TrainerDoc, 'id' | 'kind' | 'draft' | 'version' | 'sentAt' | 'updatedAt'> & { unsent: boolean; used: number; title?: string; summary?: string };
+type Row = {
+  id: string; kind: TrainerDocKind; draft: TrainerDocContent; stamp: string; updatedAt: number; locked: boolean; forClient: boolean;
+  title?: string; summary?: string;
+};
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -31,17 +36,18 @@ const card = 'rounded-2xl border border-line bg-white p-5';
 const alertBox = 'rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger';
 const NO_PRINT = '@media print { html { display: none !important; } }';
 
-const WORDS: Record<TrainerDocKind, { one: string; many: string; intro: string; place: string }> = {
+const WORDS: Record<TrainerDocKind, { one: string; many: string; intro: string }> = {
   outline: {
-    one: 'course outline', many: 'Course outlines', place: 'Course outlines',
-    intro: 'Write the course outlines for the programmes you teach. Click Preview to see one the way NEXT Academy prints it.',
+    one: 'course outline', many: 'Course outlines',
+    intro: 'Write the course outlines for the programmes you teach. They save as you type, straight into NEXT Academy\'s course outlines. Click Preview to see one the way NEXT Academy prints it.',
   },
   teambuilding: {
-    one: 'teambuilding proposal', many: 'Teambuilding proposals', place: 'Teambuilding proposals',
-    intro: 'Design teambuilding programmes: objectives, agenda, activities and takeaways. NEXT Academy adds the packages, prices and venues for each client.',
+    one: 'teambuilding proposal', many: 'Teambuilding proposals',
+    intro: 'Design teambuilding programmes: objectives, agenda, activities and takeaways. They save as you type, straight into NEXT Academy\'s proposals; NEXT Academy adds the packages, prices and venues for each client.',
   },
 };
 const dayText = (ms?: number) => (ms ? new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+const LOCKED_TEXT = 'NEXT Academy has sent this to a client, so it is locked. If it needs changes, ask NEXT Academy to revise it.';
 
 export default function DocsTab({ kind, info, api, upload }: { kind: TrainerDocKind; info: any; api: Api; upload: Upload }) {
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -60,8 +66,8 @@ export default function DocsTab({ kind, info, api, upload }: { kind: TrainerDocK
     catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
   const remove = async (r: Row) => {
-    if (!window.confirm(`Remove "${r.title || `this ${w.one}`}" from your list?${r.used ? ' NEXT Academy keeps the copies they already made.' : ''}`)) return;
-    try { await api('/api/portal/docs/delete', { id: r.id }); load(); } catch (e: any) { setError(e.message); }
+    if (!window.confirm(`Take "${r.title || `this ${w.one}`}" off your list? NEXT Academy keeps it.`)) return;
+    try { await api('/api/portal/docs/delete', { kind, id: r.id }); load(); } catch (e: any) { setError(e.message); }
   };
 
   if (open) return <DocEditor key={open.id} start={open} info={info} api={api} upload={upload} onClose={() => { setOpen(null); load(); }} />;
@@ -104,17 +110,15 @@ export default function DocsTab({ kind, info, api, upload }: { kind: TrainerDocK
                 <li key={r.id} className={`${card} flex flex-wrap items-center gap-3 p-4`}>
                   <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(r)}>
                     <span className="block truncate font-bold">{r.title || `Untitled ${w.one}`}</span>
-                    <span className="block text-sm text-ink-soft">{[r.summary, `changed ${dayText(r.updatedAt)}`].filter(Boolean).join(' · ')}</span>
+                    <span className="block text-sm text-ink-soft">{[r.summary, r.updatedAt ? `changed ${dayText(r.updatedAt)}` : ''].filter(Boolean).join(' · ')}</span>
                     <span className="mt-1.5 flex flex-wrap gap-1.5 text-xs font-semibold">
-                      {r.sentAt
-                        ? <span className="rounded bg-accent-soft px-1.5 py-0.5 text-accent">Sent to NEXT Academy {dayText(r.sentAt)}</span>
-                        : <span className="rounded bg-surface px-1.5 py-0.5 text-ink-soft">Draft, not sent yet</span>}
-                      {r.sentAt > 0 && r.unsent && <span className="rounded bg-attention-soft px-1.5 py-0.5 text-attention">Changes not sent yet</span>}
-                      {r.used > 0 && <span className="rounded bg-surface px-1.5 py-0.5 text-ink">Used by NEXT Academy {r.used === 1 ? 'once' : `${r.used} times`}</span>}
+                      {r.locked
+                        ? <span className="inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-accent"><Lock className="h-3 w-3" /> Sent to a client: locked</span>
+                        : <span className="rounded bg-surface px-1.5 py-0.5 text-ink-soft">{r.forClient ? 'Being prepared for a client' : 'General'}</span>}
                     </span>
                   </button>
                   <span className="flex gap-2">
-                    <button type="button" className={btnSecondary} onClick={() => setOpen(r)}><Pencil className="h-4 w-4" /> Open</button>
+                    <button type="button" className={btnSecondary} onClick={() => setOpen(r)}>{r.locked ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />} Open</button>
                     <button type="button" className={`${btnSecondary} text-danger`} onClick={() => remove(r)} aria-label={`Remove ${r.title || w.one}`}><Trash2 className="h-4 w-4" /></button>
                   </span>
                 </li>
@@ -128,42 +132,48 @@ export default function DocsTab({ kind, info, api, upload }: { kind: TrainerDocK
 // ---------- One document, full screen ----------
 function DocEditor({ start, info, api, upload, onClose }: { start: Row; info: any; api: Api; upload: Upload; onClose: () => void }) {
   const kind = start.kind;
+  const [row, setRow] = useState<Row>(start);
   const [draft, setDraft] = useState<TrainerDocContent>(start.draft);
   const [savedJson, setSavedJson] = useState(JSON.stringify(start.draft));
-  const [sentAt, setSentAt] = useState(start.sentAt || 0);
-  const [unsent, setUnsent] = useState(start.unsent);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState('');
-  const [note, setNote] = useState('');
+  const [blocked, setBlocked] = useState<'' | 'changed' | 'locked'>(start.locked ? 'locked' : '');
+  const [reloading, setReloading] = useState(false);
   const [preview, setPreview] = useState(false);
+  const stamp = useRef(start.stamp);
+  // The outline form tidies what it's given (e.g. the title shown as the programme's name): that first version is the
+  // starting point, not a change to save.
+  const first = useRef(kind === 'outline');
   const json = JSON.stringify(draft);
   const dirty = json !== savedJson;
   const { state, flush } = useAutoSave({
-    value: draft, dirty, enabled: true,
-    write: async v => { const d = await api('/api/portal/docs/save', { id: start.id, draft: v }); setUnsent(d.doc.unsent); }, onSaved: setSavedJson,
+    value: draft, dirty, enabled: !blocked,
+    write: async v => {
+      try {
+        const d = await api('/api/portal/docs/save', { kind, id: row.id, draft: v, stamp: stamp.current });
+        stamp.current = d.doc.stamp;
+      } catch (e: any) {
+        if (e?.code === 'changed' || e?.code === 'locked') setBlocked(e.code);
+        throw e;
+      }
+    },
+    onSaved: setSavedJson,
   });
   const close = () => leaveAfterSave(flush, onClose);
-  const line = note ? { text: note, tone: 'soft' as const } : autoSaveText(state, dirty, false);
-  const w = WORDS[kind];
-
-  const send = async () => {
-    setError(''); setNote('');
-    const p = docProblem(kind, kind === 'teambuilding' ? { ...draft, tb: cleanTrainerTb(draft.tb, info.trainerId) } : draft);
-    if (p) { setPreview(false); setError(p); return; }
-    setSending(true);
+  const reload = async () => {
+    setReloading(true);
     try {
-      const d = await api('/api/portal/docs/save', { id: start.id, draft, send: true });
-      setSavedJson(json); setUnsent(false); setSentAt(d.doc.sentAt);
-      setNote(d.nothing ? 'Nothing has changed since you sent it.' : `Sent. NEXT Academy can see it in their ${w.place}.`);
-    } catch (e: any) { setError(e.message); } finally { setSending(false); }
+      const d = await api('/api/portal/docs/get', { kind, id: row.id });
+      first.current = kind === 'outline';
+      stamp.current = d.doc.stamp;
+      setRow(d.doc); setDraft(d.doc.draft); setSavedJson(JSON.stringify(d.doc.draft)); setBlocked(d.doc.locked ? 'locked' : '');
+    } catch { /* the line at the top says what went wrong */ } finally { setReloading(false); }
   };
-  const sendBtn = (
-    <button type="button" className={btnPrimary} disabled={sending} onClick={send}>
-      {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} {sentAt ? 'Send changes' : 'Send to NEXT Academy'}
-    </button>
-  );
+  const line = blocked === 'locked' ? { text: 'Locked: sent to a client', tone: 'soft' as const }
+    : blocked === 'changed' ? { text: 'Not saved: NEXT Academy changed it', tone: 'danger' as const }
+      : autoSaveText(state, dirty, false);
+  const w = WORDS[kind];
   const title = docTitle(kind, draft, info.programmes);
   const progs = info.programmes;
+  const progName = progs.find((p: any) => p.id === draft.programmeId)?.name || '';
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-surface" role="dialog" aria-modal="true" aria-label={w.one}>
@@ -178,33 +188,52 @@ function DocEditor({ start, info, api, upload, onClose }: { start: Row; info: an
         </div>
       </header>
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-5 pb-28">
-        <p className="rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-ink">
-          {sentAt
-            ? <>You sent this to NEXT Academy on {dayText(sentAt)}. You can keep changing it: your changes save as you type, and NEXT Academy sees them once you click <strong>Send changes</strong>.{unsent && ' You have changes that are not sent yet.'}</>
-            : <>Your work saves as you type. When it's ready, click <strong>Send to NEXT Academy</strong>. You can change it again after sending.</>}
-        </p>
-        <section className={card}>
-          <label className={label} htmlFor="e-prog">Programme</label>
-          <select id="e-prog" value={draft.programmeId} onChange={e => setDraft(d => ({ ...d, programmeId: e.target.value }))} className={input}>
-            <option value="">Not in the list</option>
-            {progs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </section>
-        {kind === 'outline' ? (
-          <OutlineLinkForm info={{ prefill: draft.outline, title: progs.find((p: any) => p.id === draft.programmeId)?.name || '', trainerName: info.profile.name }}
-            onData={(o: OutlineSubmission) => setDraft(d => (JSON.stringify(d.outline) === JSON.stringify(o) ? d : { ...d, outline: o }))}
-            actions={sendBtn} />
+        {blocked === 'locked' ? (
+          <>
+            <p className="flex items-start gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-ink"><Lock className="mt-0.5 h-4 w-4 shrink-0 text-accent" /> {LOCKED_TEXT}</p>
+            {kind === 'outline' && draft.outline
+              ? <div className="overflow-x-auto rounded-xl bg-white shadow" onContextMenu={e => e.preventDefault()}><div className="min-w-[640px]"><CourseOutlineDocument o={previewOutline(draft.outline, progName)} /></div></div>
+              : <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>}
+          </>
         ) : (
-          <TbForm tb={draft.tb!} onChange={tb => setDraft(d => ({ ...d, tb }))} info={info} api={api} upload={upload} />
+          <>
+            {blocked === 'changed' ? (
+              <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-attention/40 bg-attention-soft/40 px-3 py-2.5 text-sm">
+                <AlertTriangle className="h-4 w-4 text-attention" />
+                <span className="min-w-0 flex-1">NEXT Academy changed this while you were writing, so your last change wasn't saved. Reload to see their version, then make your change again.</span>
+                <button type="button" className={btnSecondary} disabled={reloading} onClick={reload}>{reloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Reload</button>
+              </div>
+            ) : (
+              <p className="rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-ink">
+                Everything saves as you type, straight into NEXT Academy's {kind === 'outline' ? 'course outline' : 'proposal'}: they see your changes at once.
+                {row.forClient ? ' It is being prepared for a client; once they send it, it locks.' : ''}
+              </p>
+            )}
+            <section className={card}>
+              <label className={label} htmlFor="e-prog">Programme</label>
+              <select id="e-prog" value={draft.programmeId} onChange={e => setDraft(d => ({ ...d, programmeId: e.target.value }))} className={input}>
+                <option value="">Not in the list</option>
+                {progs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </section>
+            {kind === 'outline' ? (
+              <OutlineLinkForm key={row.stamp} info={{ prefill: draft.outline, title: progName, trainerName: info.profile.name }}
+                onData={(o: OutlineSubmission) => {
+                  if (first.current) { first.current = false; setDraft(d => { const n = { ...d, outline: o }; setSavedJson(JSON.stringify(n)); return n; }); return; }
+                  setDraft(d => (JSON.stringify(d.outline) === JSON.stringify(o) ? d : { ...d, outline: o }));
+                }}
+                actions={<span />} />
+            ) : (
+              <TbForm tb={draft.tb!} onChange={tb => setDraft(d => ({ ...d, tb }))} info={info} upload={upload}
+                loadLibrary={() => api('/api/portal/docs/library').then(d => d.activities)} />
+            )}
+          </>
         )}
-        {error && <p role="alert" className={alertBox}>{error}</p>}
-        {note && <p className="flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-sm text-accent"><CheckCircle2 className="h-4 w-4 shrink-0" /> {note}</p>}
       </main>
-      {kind === 'teambuilding' && (
+      {kind === 'teambuilding' && blocked !== 'locked' && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-white/95 backdrop-blur">
           <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-end gap-2 px-4 py-3">
             <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
-            {sendBtn}
           </div>
         </div>
       )}
@@ -226,14 +255,16 @@ function Part({ title, hint, action, children }: { title: string; hint?: string;
   );
 }
 
-function TbForm({ tb, onChange, info, api, upload }: { tb: TrainerTb; onChange: (tb: TrainerTb) => void; info: any; api: Api; upload: Upload }) {
+export function TbForm({ tb, onChange, info, loadLibrary, upload }: {
+  tb: TrainerTb; onChange: (tb: TrainerTb) => void; info: any; loadLibrary: () => Promise<any[]>; upload: Upload;
+}) {
   const set = (c: Partial<TrainerTb>) => onChange({ ...tb, ...c });
   const [picking, setPicking] = useState(false);
   const me = { id: info.trainerId, name: info.profile.name || 'Trainer' };
   // Photos go to the trainer's own folder; "photo_<time>.jpg" so the team's PDF can read them later.
   const photoUp: PhotoUpload = async (file, onProgress) => {
     const blob = await shrink(file);
-    return upload(`trainer_portal/${info.trainerId}/photo_${Date.now()}.jpg`, blob, 'image/jpeg', onProgress);
+    return upload(`${info.photoFolder || `trainer_portal/${info.trainerId}/`}photo_${Date.now()}.jpg`, blob, 'image/jpeg', onProgress);
   };
   return (
     <div className="space-y-4">
@@ -260,7 +291,7 @@ function TbForm({ tb, onChange, info, api, upload }: { tb: TrainerTb; onChange: 
         <Points list={tb.takeaways} onChange={takeaways => set({ takeaways })} prefix="tk" titlePh="e.g. Enhanced collaboration" textPh="One or two lines" />
       </Part>
       <p className="text-sm text-ink-soft">NEXT Academy adds the packages and prices, venues, HRDC note and terms for each client.</p>
-      {picking && <LibraryPicker api={api} used={tb.activities} onPick={a => { set({ activities: [...tb.activities, activityFromLibrary(a)] }); setPicking(false); }} onCancel={() => setPicking(false)} />}
+      {picking && <LibraryPicker load={loadLibrary} used={tb.activities} onPick={a => { set({ activities: [...tb.activities, activityFromLibrary(a)] }); setPicking(false); }} onCancel={() => setPicking(false)} />}
     </div>
   );
 }
@@ -268,22 +299,23 @@ function TbForm({ tb, onChange, info, api, upload }: { tb: TrainerTb; onChange: 
 function TrainersPart({ list, onChange, info, upload }: { list: TbTrainer[]; onChange: (l: TbTrainer[]) => void; info: any; upload: PhotoUpload }) {
   const setAt = (i: number, c: Partial<TbTrainer>) => onChange(list.map((x, k) => (k === i ? { ...x, ...c } : x)));
   const me = { id: info.trainerId, name: info.profile.name || 'Trainer' };
-  const hasMe = list.some(t => t.trainerId === info.trainerId);
+  const hasMe = !info.trainerId || list.some(t => t.trainerId === info.trainerId);
   return (
     <div className="space-y-3">
       {list.map((t, i) => {
-        const self = t.trainerId === info.trainerId;
+        const self = !!info.trainerId && t.trainerId === info.trainerId;
+        const listed = !self && !!t.trainerId;   // picked by NEXT Academy from their trainer list
         return (
           <div key={t.id} className="space-y-3 rounded-xl border border-line p-3">
             <div className="flex flex-wrap items-end gap-2">
-              {self
-                ? <p className="min-w-[12rem] flex-1 pb-2 font-semibold">{info.profile.name || 'You'} <span className="font-normal text-ink-soft">(you: name and photo from your profile)</span></p>
+              {self || listed
+                ? <p className="min-w-[12rem] flex-1 pb-2 font-semibold">{self ? info.profile.name || 'You' : 'A trainer from NEXT Academy\'s list'} <span className="font-normal text-ink-soft">{self ? '(you: name and photo from your profile)' : '(name and photo added by NEXT Academy)'}</span></p>
                 : <div className="min-w-[12rem] flex-1"><label className={label}>Name</label><input value={t.name || ''} onChange={e => setAt(i, { name: e.target.value })} className={input} /></div>}
               <div className="min-w-[12rem] flex-1"><label className={label}>Title under the name</label><input value={t.role || ''} onChange={e => setAt(i, { role: e.target.value })} className={input} placeholder="Accredited HRDC Trainer" /></div>
               <span className="flex"><UpDown i={i} n={list.length} onMove={by => onChange(move(list, i, by))} />
                 <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-surface hover:text-danger" onClick={() => onChange(list.filter((_, k) => k !== i))} aria-label="Remove trainer"><Trash2 className="h-4 w-4" /></button></span>
             </div>
-            {!self && <PhotoPicker photos={t.photo ? [t.photo] : []} onChange={ph => setAt(i, { photo: ph[0] || '' })} folder="trainers" me={me} single label="Photo" upload={upload} />}
+            {!self && !listed && <PhotoPicker photos={t.photo ? [t.photo] : []} onChange={ph => setAt(i, { photo: ph[0] || '' })} folder="trainers" me={me} single label="Photo" upload={upload} />}
             <div>
               <label className={label}>Bio</label>
               <textarea value={t.bio || ''} onChange={e => setAt(i, { bio: e.target.value })} rows={4} className={`${input} resize-y`}
@@ -331,11 +363,11 @@ function ActivitiesPart({ list, onChange, me, upload }: { list: TbProposalActivi
   );
 }
 
-function LibraryPicker({ api, used, onPick, onCancel }: { api: Api; used: TbProposalActivity[]; onPick: (a: any) => void; onCancel: () => void }) {
+function LibraryPicker({ load, used, onPick, onCancel }: { load: () => Promise<any[]>; used: TbProposalActivity[]; onPick: (a: any) => void; onCancel: () => void }) {
   const [list, setList] = useState<any[] | null>(null);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  useEffect(() => { api('/api/portal/docs/library').then(d => setList(d.activities)).catch(e => setError(e.message)); }, []);
+  useEffect(() => { load().then(setList).catch(e => setError(e.message)); }, []);
   const t = search.trim().toLowerCase();
   const shown = (list || []).filter(a => !t || `${a.name} ${a.summary} ${a.location}`.toLowerCase().includes(t));
   return (
@@ -371,7 +403,7 @@ function LibraryPicker({ api, used, onPick, onCancel }: { api: Api; used: TbProp
 }
 
 // What the client would see (their parts only). No download, no print.
-function TbPreview({ tb, info, onClose }: { tb: TrainerTb; info: any; onClose: () => void }) {
+export function TbPreview({ tb, info, onClose }: { tb: TrainerTb; info: any; onClose: () => void }) {
   const [phone, setPhone] = useState(false);
   const r = useMemo(() => resolveTb(trainerPreviewTb(cleanTrainerTb(tb, info.trainerId)), {
     clients: [], deals: [], venues: [], people: [],

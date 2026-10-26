@@ -1,14 +1,20 @@
-import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Eye, Loader2, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
+import { AlertTriangle, CheckCircle2, Eye, Loader2, Lock, X } from 'lucide-react';
 import TrainerBiodataDocument from './TrainerBiodataDocument';
 import Logo from './Logo';
 import { ProfileSubmission, cleanProfile, profileProblem } from '../lib/trainerLinks';
 import { PROFILE_PARTS, emptyExtras, profileGaps } from '../lib/trainerProfile';
 import TrainerProfileFields from './TrainerProfileFields';
 import OutlineLinkForm from './OutlineLinkForm';
+import { TbForm, TbPreview } from './TrainerPortalDocs';
+import { storage } from '../lib/firebase';
+import { TrainerTb } from '../lib/trainerDocs';
+import { autoSaveText, useAutoSave } from '../lib/useAutoSave';
 
 // The page a trainer opens from a private link (/t/<token>), without logging in (Joel, 2026-10-17).
-// It talks only to the CRM server (serverTrainerLinks.ts), never to the database.
+// It talks only to the CRM server (serverTrainerLinks.ts), never to the database. Since 2026-10-26 an outline or
+// teambuilding proposal link writes straight into that CRM record (a proposal as they type), until it's sent to a client.
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
@@ -26,8 +32,55 @@ async function post(path: string, body: any) {
     throw new Error('No internet connection. Check it and try again.');
   }
   const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.ok) throw new Error(data?.error || 'Something went wrong. Please try again in a minute.');
+  if (!res.ok || !data?.ok) throw Object.assign(new Error(data?.error || 'Something went wrong. Please try again in a minute.'), { code: data?.code || '' });
   return data;
+}
+
+// Uploads from a link go to its own folder (storage.rules: trainer_uploads/<token>/, while the link is live).
+async function uploadTo(path: string, data: Blob, type: string, onProgress: (p: number) => void): Promise<string> {
+  const r = ref(storage, path);
+  const task = uploadBytesResumable(r, data, { contentType: type });
+  await new Promise<void>((resolve, reject) => task.on('state_changed', s => onProgress(s.totalBytes ? Math.round((s.bytesTransferred / s.totalBytes) * 100) : 0), reject, () => resolve()));
+  return getDownloadURL(r);
+}
+
+// A teambuilding proposal link (2026-10-26): the trainer's parts, saved as they type straight into the proposal.
+function TbLinkForm({ token, info }: { token: string; info: any }) {
+  const [tb, setTb] = useState<TrainerTb>(info.prefill);
+  const [savedJson, setSavedJson] = useState(JSON.stringify(info.prefill));
+  const [blocked, setBlocked] = useState<'' | 'changed' | 'locked'>('');
+  const [preview, setPreview] = useState(false);
+  const stamp = useRef<string>(info.stamp || '');
+  const dirty = JSON.stringify(tb) !== savedJson;
+  const { state } = useAutoSave({
+    value: tb, dirty, enabled: !blocked,
+    write: async v => {
+      try { stamp.current = (await post('/api/trainer-link/save', { token, tb: v, stamp: stamp.current })).stamp; }
+      catch (e: any) { if (e?.code === 'changed' || e?.code === 'locked') setBlocked(e.code); throw e; }
+    },
+    onSaved: setSavedJson,
+  });
+  const me = { trainerId: info.trainerId || '', profile: info.profile || { name: info.trainerName || '' }, photoFolder: `trainer_uploads/${token}/` };
+  const line = autoSaveText(state, dirty, false);
+  return (
+    <div className="space-y-4 pb-24">
+      {blocked ? (
+        <p role="alert" className="flex items-start gap-2 rounded-lg border border-attention/40 bg-attention-soft/40 px-3 py-2.5 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-attention" />
+          {blocked === 'locked' ? 'NEXT Academy has just sent this to a client, so it is locked. Your last change was not saved.'
+            : 'NEXT Academy changed this while you were writing, so your last change was not saved. Reload the page to see their version, then make your change again.'}
+        </p>
+      ) : <p className="text-sm text-ink-soft">{line.text}</p>}
+      <TbForm tb={tb} onChange={setTb} info={me} upload={uploadTo} loadLibrary={() => post('/api/trainer-link/library', { token }).then(d => d.activities)} />
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-end gap-2 px-4 py-3">
+          <span className="mr-auto text-sm text-ink-soft">{blocked ? 'Not saved' : line.text}</span>
+          <button type="button" className={btnSecondary} onClick={() => setPreview(true)}><Eye className="h-4 w-4" /> Preview</button>
+        </div>
+      </div>
+      {preview && <TbPreview tb={tb} info={me} onClose={() => setPreview(false)} />}
+    </div>
+  );
 }
 
 export default function TrainerLinkPage({ token }: { token: string }) {
@@ -87,7 +140,7 @@ export default function TrainerLinkPage({ token }: { token: string }) {
   if (done) return shell(
     <div className="rounded-2xl border border-line bg-white p-6">
       <p className="flex items-center gap-2 text-lg font-bold"><CheckCircle2 className="h-6 w-6 text-accent" /> Thank you, we've received it.</p>
-      <p className="mt-2 text-[15px] text-ink-soft">The NEXT Academy team will review it. If you need to correct anything, open this link again and submit once more.</p>
+      <p className="mt-2 text-[15px] text-ink-soft">{info.kind === 'outline' ? 'It is now in NEXT Academy\'s course outline. If you need to correct anything, open this link again and submit once more.' : 'The NEXT Academy team will review it. If you need to correct anything, open this link again and submit once more.'}</p>
       <button type="button" className={`${btnSecondary} mt-4`} onClick={() => setDone(false)}>Make a correction</button>
     </div>
   );
@@ -116,15 +169,18 @@ export default function TrainerLinkPage({ token }: { token: string }) {
 
   const intro = (
       <div>
-        <h1 className="text-xl font-bold">{info.kind === 'outline' ? 'Course outline' : 'Your trainer profile'}</h1>
+        <h1 className="text-xl font-bold">{info.kind === 'outline' ? 'Course outline' : info.kind === 'teambuilding' ? 'Teambuilding proposal' : 'Your trainer profile'}</h1>
         <p className="mt-1 text-[15px] text-ink-soft">
           {info.trainerName ? `Hi ${info.trainerName}, ` : 'Hi, '}
           {info.kind === 'outline'
             ? <>{info.askedBy} from NEXT Academy is asking for your course outline{info.title ? <> for <strong className="text-ink">{info.title}</strong></> : ''}.</>
-            : <>{info.askedBy} from NEXT Academy is asking you to fill in your trainer profile.</>}
-          {' '}Your answers go to the NEXT Academy team for review.
+            : info.kind === 'teambuilding'
+              ? <>{info.askedBy} from NEXT Academy is asking you to write a teambuilding proposal{info.title ? <> for <strong className="text-ink">{info.title}</strong></> : ''}.</>
+              : <>{info.askedBy} from NEXT Academy is asking you to fill in your trainer profile.</>}
+          {' '}{info.kind === 'profile' ? 'Your answers go to the NEXT Academy team for review.' : info.kind === 'teambuilding' ? 'It saves as you type, straight into NEXT Academy\'s proposal.' : 'What you submit goes straight into NEXT Academy\'s course outline.'}
         </p>
-        {info.status === 'submitted' && <p className="mt-2 rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">You've already submitted this. You can correct it and submit again.</p>}
+        {info.status === 'submitted' && info.kind !== 'teambuilding' && !info.locked && <p className="mt-2 rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">You've already submitted this. You can correct it and submit again.</p>}
+        {info.locked && <p className="mt-2 flex items-start gap-2 rounded-lg bg-accent-soft px-3 py-2 text-sm text-ink"><Lock className="mt-0.5 h-4 w-4 shrink-0 text-accent" /> NEXT Academy has sent this to a client, so it is locked. If it needs changes, contact NEXT Academy.</p>}
         {info.kind === 'outline' && <p className="mt-2 text-[15px] text-ink-soft">Fill in the parts below. Click <strong className="text-ink">Preview</strong> any time to see it the way NEXT Academy prints it.</p>}
         {info.kind === 'profile' && (() => {
           const pct = Math.round(((PROFILE_PARTS - profileGaps({ ...profile, icOnFile: info.icOnFile }).length) / PROFILE_PARTS) * 100);
@@ -142,7 +198,13 @@ export default function TrainerLinkPage({ token }: { token: string }) {
   if (info.kind === 'outline') return shell(
     <div className="space-y-5">
       {intro}
-      <OutlineLinkForm info={info} token={token} post={post} onDone={sent => { setInfo((i: any) => ({ ...i, prefill: sent, status: 'submitted' })); setDone(true); }} />
+      {!info.locked && <OutlineLinkForm info={info} token={token} post={post} onDone={(sent, res) => { setInfo((i: any) => ({ ...i, prefill: sent, status: 'submitted', stamp: res?.stamp || i.stamp })); setDone(true); }} />}
+    </div>
+  );
+  if (info.kind === 'teambuilding') return shell(
+    <div className="space-y-5">
+      {intro}
+      {!info.locked && <TbLinkForm token={token} info={info} />}
     </div>
   );
 

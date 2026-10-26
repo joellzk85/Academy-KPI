@@ -29,9 +29,13 @@ export function ownedByTeam(r: any, ids: Set<string>): boolean {
   return !!owner && ids.has(owner);
 }
 
+// A course outline or teambuilding proposal an outside trainer started in the portal (2026-10-26) has no owner yet;
+// it shows until someone picks it up.
+const trainerWritten = (r: any) => !recordOwnerId(r) && !!(r?.writerTrainerId || r?.writerTrainerName);
+
 export function isLinked(r: any): boolean {
   if (isDeletedRecord(r)) return false;
-  return !teamIds || ownedByTeam(r, teamIds);
+  return !teamIds || ownedByTeam(r, teamIds) || trainerWritten(r);
 }
 
 export function linkedOnly<T>(list: T[]): T[] {
@@ -46,5 +50,5 @@ export function withoutDeleted<T>(list: T[]): T[] {
 
 // Linked records including deleted ones (only for Management → Lost and deleted).
 export function linkedWithDeleted<T>(list: T[]): T[] {
-  return list.filter((r: any) => !teamIds || (!!recordOwnerId(r) && teamIds.has(recordOwnerId(r))));
+  return list.filter((r: any) => !teamIds || (!!recordOwnerId(r) && teamIds.has(recordOwnerId(r))) || trainerWritten(r));
 }

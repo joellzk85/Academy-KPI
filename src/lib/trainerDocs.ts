@@ -3,19 +3,23 @@
 // "trainer can create teambuilding proposal as well - but cannot download").
 // Shared by the server (serverTrainerDocs.ts), the portal (TrainerPortalDocs.tsx) and the CRM screens. Pure, so it can be tested.
 //
-// trainer_docs/{id}: the trainer's own copy, written only by the server (members read it).
-//   { kind: 'outline' | 'teambuilding', trainerId, trainerName, draft, sent?, version, sentAt?, createdAt, updatedAt, archived? }
-//   draft  what the trainer is typing (saved as they type)
-//   sent   what they last sent to NEXT Academy ("Send to NEXT Academy" / "Send changes"); the team reads only this
-//   version goes up by one on every send
-// The team clicks "Use for a deal" (Course outlines / Teambuilding proposal → From trainers): that makes our own
-// course outline or teambuilding proposal from the sent copy, remembering fromTrainerDocId and fromTrainerDocVersion.
-// When the trainer sends a newer version, our copy shows "<trainer> updated this: bring in the changes?". Their
-// edits never change our copy by themselves, so nothing already sent to a client changes.
+// One record, no copies (Joel, 2026-10-26: "trainer portal, trainer links to fill up proposal and course outline, it
+// all should just link back to crm database"). A trainer's course outline or teambuilding proposal IS the CRM's
+// course_outlines / teambuilding_proposals record, marked writerTrainerId / writerTrainerName. The portal, My trainings
+// (internal trainers) and trainer links write only the trainer's parts into it, through the server
+// (serverTrainerDocs.ts writeTrainerParts), saved as they type; the team sees every change straight away.
+// Once the team sends it to a client (status 'sent') it's locked for the trainer too, until the team clicks Revise.
+// partsStamp: the server refuses a save made on top of an older version of the trainer's parts (someone else changed
+// them in between), so nobody's work is silently overwritten.
 // A trainer's teambuilding proposal has the content parts only (Joel's choice): cover, objectives, agenda, activities,
 // trainers, key takeaways. Packages and prices, venues, HRDC and terms are added by the team.
+//
+// Before 2026-10-26 the trainer kept their own copy in trainer_docs/{id} (draft, sent, version) and the team made our
+// own copy with "Use for a deal" (fromTrainerDocId / fromTrainerDocVersion). The server moves each trainer's
+// trainer_docs into the CRM the first time their list is opened (archived: true, movedTo: <record id>); copies the
+// team already made stay as they are.
 
-import { OutlineSubmission, cleanOutline, outlineProblem, outlineSummary } from './trainerLinks';
+import { OutlineSubmission, cleanOutline, outlineFieldsFrom, outlineProblem, outlineSummary } from './trainerLinks';
 import {
   AGENDA_TAGS, AgendaTag, LOCATIONS, RATINGS, TbAgendaDay, TbPoint, TbProposal, TbProposalActivity, TbSection, TbTrainer,
   SECTION_DEFAULTS, blankActivity, defaultPackages,
@@ -53,30 +57,43 @@ const list = (v: any, each: number, most: number) =>
   (Array.isArray(v) ? v : []).map((x: any) => text(x, each)).slice(0, most);
 
 // A photo must be a Firebase download link from our own bucket, in the trainer's portal folder or the team's photos
-// (the Activity library's). Anything else is dropped.
+// (the Activity library's). Anything else is dropped. A trainer link (no login) uploads into its own folder,
+// trainer_uploads/<token>/ (`folder`).
 export function photoPath(url: string): string {
   const m = /^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^/]+\/o\/([^?#]+)/.exec(String(url || ''));
   if (!m) return '';
   try { return decodeURIComponent(m[1]); } catch { return ''; }
 }
-export function photoOk(url: any, trainerId: string, bucket = ''): boolean {
+export function photoOk(url: any, trainerId: string, bucket = '', folder = `trainer_portal/${trainerId}/`): boolean {
   const u = String(url || '');
   if (u.length > 1000) return false;
   if (bucket && !u.startsWith(`https://firebasestorage.googleapis.com/v0/b/${bucket}/o/`)) return false;
   const path = photoPath(u);
-  return !!path && !path.includes('..') && (path.startsWith(`trainer_portal/${trainerId}/`) || path.startsWith('photos/'));
+  return !!path && !path.includes('..') && ((!!folder && !folder.includes('//') && path.startsWith(folder)) || path.startsWith('photos/'));
 }
-const photos = (v: any, trainerId: string, bucket: string, most: number) =>
-  (Array.isArray(v) ? v : []).filter((u: any) => photoOk(u, trainerId, bucket)).map(String).slice(0, most);
+
+// What the record already has stays allowed: photos the team added, trainers the team picked from the list.
+export interface TbKeep { photos: Set<string>; trainerIds: Set<string> }
+export interface TbCleanOptions { folder?: string; keep?: TbKeep }
+export function keepOf(record: any): TbKeep {
+  const photos = new Set<string>();
+  const json = JSON.stringify(record || {});
+  for (const m of json.matchAll(/"(https:\/\/firebasestorage\.googleapis\.com\/[^"\\]+)"/g)) photos.add(m[1]);
+  const trainerIds = new Set<string>((record?.trainers || []).map((t: any) => String(t?.trainerId || '')).filter(Boolean));
+  return { photos, trainerIds };
+}
 
 const points = (v: any, p: string) => (Array.isArray(v) ? v : []).slice(0, 20)
   .map((x: any, i: number) => ({ id: id(x?.id, p, i), title: text(x?.title, 200), text: text(x?.text, 1500) }));
 
-export function cleanTrainerTb(d: any, trainerId: string, bucket = ''): TrainerTb {
+export function cleanTrainerTb(d: any, trainerId: string, bucket = '', opt: TbCleanOptions = {}): TrainerTb {
   const tags = AGENDA_TAGS.map(t => t.key);
+  const folder = opt.folder ?? (trainerId ? `trainer_portal/${trainerId}/` : '');
+  const photos = (v: any, most: number) => (Array.isArray(v) ? v : [])
+    .filter((u: any) => opt.keep?.photos.has(String(u || '')) || photoOk(u, trainerId, bucket, folder)).map(String).slice(0, most);
   return {
     title: text(d?.title, 200), subtitle: text(d?.subtitle, 500), stay: text(d?.stay, 60),
-    coverPhoto: photos([d?.coverPhoto], trainerId, bucket, 1)[0] || '',
+    coverPhoto: photos([d?.coverPhoto], 1)[0] || '',
     objectives: points(d?.objectives, 'ob'),
     takeaways: points(d?.takeaways, 'tk'),
     agenda: (Array.isArray(d?.agenda) ? d.agenda : []).slice(0, 7).map((day: any, i: number) => ({
@@ -93,7 +110,7 @@ export function cleanTrainerTb(d: any, trainerId: string, bucket = ''): TrainerT
       return {
         ...blankActivity(),
         id: id(a?.id, 'pa', i), ...(libraryId ? { libraryId } : {}),
-        name: text(a?.name, 120), summary: text(a?.summary, 400), photos: photos(a?.photos, trainerId, bucket, 8),
+        name: text(a?.name, 120), summary: text(a?.summary, 400), photos: photos(a?.photos, 8),
         duration: text(a?.duration, 60), location: LOCATIONS.includes(a?.location) ? a.location : 'Indoor', format: text(a?.format, 120),
         groupSize: text(a?.groupSize, 60), minPax: num(a?.minPax, 0, 10000) || undefined, maxPax: num(a?.maxPax, 0, 10000) || undefined,
         objectives: list(a?.objectives, 300, 20), howPlayed: text(a?.howPlayed, 4000), takeaways: list(a?.takeaways, 300, 20),
@@ -101,11 +118,12 @@ export function cleanTrainerTb(d: any, trainerId: string, bucket = ''): TrainerT
       };
     }).map((a: any) => JSON.parse(JSON.stringify(a))),
     trainers: (Array.isArray(d?.trainers) ? d.trainers : []).slice(0, 8).map((t: any, i: number) => {
-      const self = t?.trainerId === trainerId;   // the trainer themself: name and photo come from their profile
+      // The trainer themself, or a trainer from our list the team already put on it: name and photo come from the list.
+      const listed = !!t?.trainerId && ((!!trainerId && t.trainerId === trainerId) || !!opt.keep?.trainerIds.has(String(t.trainerId)));
       return JSON.parse(JSON.stringify({
-        id: id(t?.id, 'tr', i), ...(self ? { trainerId } : { name: text(t?.name, 100), photo: photos([t?.photo], trainerId, bucket, 1)[0] || '' }),
-        // Their own bio left empty = the bio on their profile.
-        role: text(t?.role, 120), bio: self && !str(t?.bio, 3000) ? undefined : text(t?.bio, 3000),
+        id: id(t?.id, 'tr', i), ...(listed ? { trainerId: String(t.trainerId) } : { name: text(t?.name, 100), photo: photos([t?.photo], 1)[0] || '' }),
+        // Their bio left empty = the bio on their profile.
+        role: text(t?.role, 120), bio: listed && !str(t?.bio, 3000) ? undefined : text(t?.bio, 3000),
       }));
     }),
   };
@@ -146,14 +164,45 @@ export function docSummary(kind: TrainerDocKind, c: TrainerDocContent | undefine
   return [days ? `${days} day${days === 1 ? '' : 's'} of agenda` : '', `${acts} activit${acts === 1 ? 'y' : 'ies'}`].filter(Boolean).join(' · ');
 }
 
-// Typed but not sent yet.
-export const hasUnsent = (d: Pick<TrainerDoc, 'draft' | 'sent'>) => !d.sent || JSON.stringify(d.draft) !== JSON.stringify(d.sent);
+// ---------- The trainer's parts of a CRM record (2026-10-26) ----------
+export const RECORD_PLACE: Record<TrainerDocKind, string> = { outline: 'course_outlines', teambuilding: 'teambuilding_proposals' };
 
-// The team's copy is behind the trainer's latest send.
-export function newerFromTrainer(ours: { fromTrainerDocId?: string; fromTrainerDocVersion?: number }, docs: TrainerDoc[]): TrainerDoc | null {
-  if (!ours.fromTrainerDocId) return null;
-  const d = docs.find(x => x.id === ours.fromTrainerDocId);
-  return d && d.sent && !d.archived && d.version > (ours.fromTrainerDocVersion || 0) ? d : null;
+/** Sent to a client: locked for the trainer until the team clicks Revise. */
+export const writerLocked = (r: { status?: string } | null | undefined) => r?.status === 'sent';
+
+/** What the trainer's form starts from: the record's trainer parts. `programmeId` is the one it prints with (its own,
+ *  else its deal's). */
+export function partsOf(kind: TrainerDocKind, r: any, programmeId: string): TrainerDocContent {
+  if (kind === 'outline') return { programmeId, outline: cleanOutline({ ...r, courseTitle: r?.useProgrammeName ? '' : r?.courseTitle, level: undefined }) };
+  return {
+    programmeId,
+    tb: JSON.parse(JSON.stringify({
+      title: r?.title || '', subtitle: r?.subtitle || '', stay: r?.stay || '', coverPhoto: r?.coverPhoto || '',
+      objectives: r?.objectives || [], agenda: r?.agenda || [], activities: r?.activities || [], trainers: r?.trainers || [], takeaways: r?.takeaways || [],
+    })),
+  };
+}
+
+/** A short fingerprint of the trainer's parts: a save made on an older one is refused. */
+export function partsStamp(kind: TrainerDocKind, r: any, programmeId: string): string {
+  const s = JSON.stringify(partsOf(kind, r, programmeId));
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return `${s.length.toString(36)}${(h >>> 0).toString(36)}`;
+}
+
+/** The change to the record from what the trainer typed (already cleaned). The programme is written only when they
+ *  picked another one (a deal's outline otherwise keeps following its deal). */
+export function recordUpdate(kind: TrainerDocKind, c: TrainerDocContent, programmeName: string, programmeChanged: boolean): Record<string, any> {
+  const prog = programmeChanged ? { programmeId: c.programmeId } : {};
+  if (kind === 'outline') {
+    const s = c.outline!;
+    const title = str(s.courseTitle, 200);
+    const useProg = !!c.programmeId && (!title || title.toUpperCase() === programmeName.trim().toUpperCase());
+    const { courseTitle: _t, ...rest } = outlineFieldsFrom(s) as any;
+    return JSON.parse(JSON.stringify({ ...rest, courseTitle: useProg ? '' : title, useProgrammeName: useProg, ...prog }));
+  }
+  return JSON.parse(JSON.stringify({ ...tbFieldsFrom(c.tb!), coverPhoto: c.tb!.coverPhoto || '', ...prog }));
 }
 
 // ---------- A trainer's proposal as ours ----------

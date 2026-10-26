@@ -2,10 +2,13 @@
 // These two routes are the only way in: they read the link with the server's own access and
 // return just what the form needs (the programme title, who is asking, the trainer's current
 // details), and store what the trainer submits. The trainer never touches the database directly.
-// The team reviews and accepts the submission inside the CRM (src/lib/trainerLinks.ts).
+// Since 2026-10-26 a course outline or teambuilding proposal link writes straight into that CRM record
+// (serverTrainerDocs.ts writeTrainerParts), never once it's sent to a client. Profile links are still reviewed and
+// accepted in the CRM (src/lib/trainerLinks.ts).
 
 import type { Express, Request } from 'express';
 import { admin, UserError, route } from './serverAuth';
+import { activityLibrary, readForTrainer, writeTrainerParts } from './serverTrainerDocs';
 import {
   cleanOutline, cleanProfile, isExpired, outlineProblem, profileProblem,
 } from './src/lib/trainerLinks';
@@ -13,12 +16,12 @@ import { privateOf, splitTrainerPrivate, withPrivate } from './src/lib/trainerPr
 
 // Light protection against someone hammering the links: 40 requests a minute per address.
 const hits = new Map<string, { n: number; since: number }>();
-function slowDown(req: Request) {
+function slowDown(req: Request, most = 40) {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   const now = Date.now();
   const h = hits.get(ip);
   if (!h || now - h.since > 60_000) { hits.set(ip, { n: 1, since: now }); return; }
-  if (++h.n > 40) throw new UserError(429, 'too-many', 'Too many tries. Wait a minute and try again.');
+  if (++h.n > most) throw new UserError(429, 'too-many', 'Too many tries. Wait a minute and try again.');
 }
 
 async function openLink(token: any) {
@@ -71,17 +74,49 @@ export function registerTrainerLinkRoutes(app: Express) {
           professional: t.professional || [], career: t.career || [], trainingExp: t.trainingExp || [],
         };
       }
+    } else if (link.kind === 'teambuilding') {
+      // The proposal itself (2026-10-26): the trainer's parts only, never packages, prices, venues or the client.
+      const { row } = await readForTrainer(db, 'teambuilding', link.proposalId);
+      out.prefill = row.draft.tb;
+      out.stamp = row.stamp;
+      out.locked = row.locked;
+      out.trainerId = link.trainerId || '';
+      const t: any = link.trainerId ? (await db.collection('trainers_directory').doc(link.trainerId).get()).data() : null;
+      out.profile = { name: t?.name || link.trainerName || '', bio: t?.bio || '', photoUrl: t?.photoUrl || '' };
+    } else if (link.outlineId) {
+      // The outline itself (2026-10-26): what it has now, cleaned the same way as a submission, so only the
+      // outline's own content goes out. The course title starts as the programme's name; the trainer can change it.
+      const { row } = await readForTrainer(db, 'outline', link.outlineId);
+      out.prefill = row.draft.outline;
+      out.stamp = row.stamp;
+      out.locked = row.locked;
+      if (!out.prefill.courseTitle) out.prefill.courseTitle = row.title || link.title || '';
     } else {
+      // An invite from before 2026-10-26 (no outline yet): it waits for the team to accept it.
       if (link.submission) out.prefill = link.submission;
-      else if (link.outlineId) {
-        const o = (await db.collection('course_outlines').doc(link.outlineId).get()).data();
-        // What the outline already has (cleaned the same way as a submission, so only the outline's own content goes out).
-        if (o) out.prefill = cleanOutline({ ...o, courseTitle: o.useProgrammeName ? '' : o.courseTitle, level: undefined });
-      }
-      // The course title starts as the programme's (or the outline's) name; the trainer can change it.
       if (out.prefill && !out.prefill.courseTitle) out.prefill.courseTitle = link.title || '';
     }
     return out;
+  }));
+
+  // A teambuilding link saves as the trainer types, straight into the proposal.
+  app.post('/api/trainer-link/save', route(async req => {
+    slowDown(req, 120);
+    const { db, ref, link } = await openLink(req.body?.token);
+    if (link.kind !== 'teambuilding') throw new UserError(400, 'invalid', 'This link is not for a teambuilding proposal.');
+    const row = await writeTrainerParts(db, 'teambuilding', link.proposalId, { tb: req.body?.tb }, {
+      trainerId: link.trainerId || '', trainerName: link.trainerName || '', stamp: String(req.body?.stamp || ''), folder: `trainer_uploads/${ref.id}/`,
+    });
+    await ref.update({ submittedAt: Date.now(), status: 'submitted', applied: true });
+    return { stamp: row.stamp };
+  }));
+
+  // The Activity library, for a teambuilding link.
+  app.post('/api/trainer-link/library', route(async req => {
+    slowDown(req);
+    const { db, link } = await openLink(req.body?.token);
+    if (link.kind !== 'teambuilding') throw new UserError(400, 'invalid', 'This link is not for a teambuilding proposal.');
+    return { activities: await activityLibrary(db) };
   }));
 
   // The trainer submits (again, if they want to correct it, until the team accepts it).
@@ -105,10 +140,20 @@ export function registerTrainerLinkRoutes(app: Express) {
       await priv.set({ ...privatePart, detailsAt: Date.now(), ...(ic ? { icNumber: ic, at: Date.now() } : {}) }, { merge: true });
       submission.icSent = !!ic || !!(await priv.get()).data()?.icNumber;
       submission.privateSent = true;
-    } else {
+    } else if (link.kind === 'outline') {
       submission = cleanOutline(req.body?.data);
       const problem = outlineProblem(submission);
       if (problem) throw new UserError(400, 'invalid', problem);
+      // Straight into the outline (2026-10-26); the link keeps a note of what was sent.
+      if (link.outlineId) {
+        const row = await writeTrainerParts(db, 'outline', link.outlineId, { outline: submission }, {
+          trainerId: link.trainerId || '', trainerName: link.trainerName || '', stamp: String(req.body?.stamp || ''),
+        });
+        await ref.update({ submission, submittedAt: Date.now(), status: 'submitted', applied: true });
+        return { stamp: row.stamp };
+      }
+    } else {
+      throw new UserError(400, 'invalid', 'This link is for a teambuilding proposal: it saves as you type.');
     }
     await ref.update({ submission, submittedAt: Date.now(), status: 'submitted' });
     return {};

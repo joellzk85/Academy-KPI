@@ -72,7 +72,7 @@ function move<T>(list: T[], i: number, dir: number): T[] {
 // The trainer portal (2026-10-21) uses the same form for a trainer's own outlines: onData gets every change (saved as
 // they type) and actions replaces the Submit button.
 export default function OutlineLinkForm({ info, token = '', post, onDone, onData, actions }: {
-  info: any; token?: string; post?: (path: string, body: any) => Promise<any>; onDone?: (sent: OutlineSubmission) => void;
+  info: any; token?: string; post?: (path: string, body: any) => Promise<any>; onDone?: (sent: OutlineSubmission, res?: any) => void;
   onData?: (data: OutlineSubmission) => void; actions?: React.ReactNode;
 }) {
   const [d, setD] = useState<Draft>(() => toDraft(info.prefill ? cleanOutline(info.prefill) : null, info.title || ''));
@@ -115,8 +115,9 @@ export default function OutlineLinkForm({ info, token = '', post, onDone, onData
     if (p) { setPreview(false); setProblem(p); return; }
     setBusy(true);
     try {
-      await post?.('/api/trainer-link/submit', { token, data });
-      onDone?.(data);
+      // stamp: the outline as it was when the link opened (the server refuses a submit on top of a newer change).
+      const res = await post?.('/api/trainer-link/submit', { token, data, ...(info.stamp ? { stamp: info.stamp } : {}) });
+      onDone?.(data, res);
       window.scrollTo(0, 0);
     } catch (err: any) {
       setProblem(err.message);
