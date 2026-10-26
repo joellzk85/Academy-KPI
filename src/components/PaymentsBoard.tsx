@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
-import { ArrowRight, Check, Copy, Download, ExternalLink, Loader2, MessageCircle, Send, X } from 'lucide-react';
+import { ArrowRight, Check, Download, ExternalLink, Link2, Loader2, MessageCircle, Search, Send, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
 import { formatDate, todayIso } from '../lib/deals';
-import { MoneyOut, TIMING_LABELS, canDecide, isCompanyPayment } from '../lib/money';
+import { ACCOUNTS_PAID_BY, MoneyOut, TIMING_LABELS, canDecide, isCompanyPayment, paidViaLink, paymentRef } from '../lib/money';
+import { ListSort, sortList, usePaged } from '../lib/listPaging';
+import ListPager, { SortSelect, listSelect } from './ListPager';
 import { buildSummary, payToProblem, PaymentSummary, summaryProblem, summaryRef } from '../lib/paymentSummary';
 import { isTrainerFee } from '../lib/feeChecks';
 import { feeIsAgreed } from '../lib/trainerPortal';
@@ -21,7 +23,9 @@ import { OutRow, approveMany } from './Money';
 //   2. Ready for accounts approved, not on a summary; ready ones start ticked, blocked ones say why (bank details, date)
 //   3. With accounts      the summaries sent (one card per summary), and older per-payment links
 //   4. Paid, receipt needed paid since receipts came in (2026-10-20) with no receipt yet; drop it on the card
-// "Send N to accounts" makes the summary and its link in one click and copies the message for WhatsApp.
+// "Send N to accounts" makes the summary and its link in one click and copies the approval link for accounts.
+// Under the lanes, History (2026-10-26): paid, approved, rejected, deleted and fully paid summaries, with search, month
+// filter and total, who raised / approved / paid, and a "No receipt" flag.
 // Clicking a card opens the full request in a side panel (reject, fix, trainer fee checks, mark paid, take off).
 // The rules are unchanged: lib/paymentSummary.ts decides what can go on a summary, the server checks it again.
 
@@ -66,8 +70,8 @@ async function downloadSummaryPdf(summary: PaymentSummary, ref: string, madeBy: 
 
 type Open = { kind: 'pay'; id: string } | { kind: 'summary'; token: string } | null;
 
-export default function PaymentsBoard({ outs, deals, viewer, dealLabel, onOpenDeal }: {
-  outs: MoneyOut[]; deals: any[]; viewer: Viewer; dealLabel: (dealId: string) => string; onOpenDeal?: (dealId: string) => void;
+export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, dealLabel, onOpenDeal }: {
+  outs: MoneyOut[]; deletedOuts?: MoneyOut[]; deals: any[]; viewer: Viewer; dealLabel: (dealId: string) => string; onOpenDeal?: (dealId: string) => void;
 }) {
   const vendors = useVendors(true);
   const receipts = useReceipts(true);
@@ -95,9 +99,9 @@ export default function PaymentsBoard({ outs, deals, viewer, dealLabel, onOpenDe
   const paidNoReceipt = outs.filter(o => o.status === 'paid' && paidDay(o) >= RECEIPTS_FROM && !receiptsOf(o).length)
     .sort((a, b) => paidDay(b).localeCompare(paidDay(a)));
 
-  // One card per summary sent (payments still to pay), then each older per-payment link.
+  // Every summary sent: lane 3 shows those with payments still to pay (then each older per-payment link), History the rest.
   const summaries = useMemo(() => {
-    const tokens = [...new Set(withAccounts.filter(o => o.summaryToken).map(o => o.summaryToken as string))];
+    const tokens = [...new Set(outs.filter(o => o.summaryToken).map(o => o.summaryToken as string))];
     return tokens.map(token => {
       const all = outs.filter(o => o.summaryToken === token);
       return { token, all, unpaid: all.filter(o => o.status === 'approved'), first: all[0] };
@@ -117,8 +121,7 @@ export default function PaymentsBoard({ outs, deals, viewer, dealLabel, onOpenDe
     try {
       const ids = ticked.map(o => o.id);
       const { token } = await callServer<{ token: string }>('/api/pay-batch/create', { ids }, true);
-      const summary = buildSummary(ticked, vendors, forText);
-      const copied = await copyText(summaryMessage(summary, summaryRef(Date.now(), token), linkOf(token)));
+      const copied = await copyText(linkOf(token));
       setSent({ token, copied });
       setSkipped(new Set());
     } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
@@ -136,7 +139,7 @@ export default function PaymentsBoard({ outs, deals, viewer, dealLabel, onOpenDe
           <Check className="h-5 w-5 text-accent" />
           <p className="min-w-[14rem] flex-1 text-[15px]">
             <strong>Sent to accounts:</strong> {sentSummary.all.length} payment{sentSummary.all.length === 1 ? '' : 's'}, {sen(sum(sentSummary.all))}.{' '}
-            {sent.copied ? 'The message with the link is copied: paste it to accounts.' : 'Copy the message below and send it to accounts.'}
+            {sent.copied ? 'The approval link is copied: paste it to accounts.' : 'Copy the link below and send it to accounts.'}
           </p>
           <SummaryButtons s={sentSummary} vendors={vendors} forText={forText} viewer={viewer} />
           <button type="button" className="rounded-md p-1.5 text-ink-soft hover:bg-white" aria-label="Close" onClick={() => setSent(null)}><X className="h-4 w-4" /></button>
@@ -208,6 +211,10 @@ export default function PaymentsBoard({ outs, deals, viewer, dealLabel, onOpenDe
           ))}
         </Lane>
       </div>
+
+      <History outs={outs} deletedOuts={deletedOuts} summaries={summaries.filter(s => !s.unpaid.length)} forText={forText}
+        noReceipt={o => paidDay(o) >= RECEIPTS_FROM && !receiptsOf(o).length}
+        onOpenPay={openPay} onOpenSummary={token => setOpen({ kind: 'summary', token })} />
 
       {(openOut || openSummary) && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpen(null)}>
@@ -303,7 +310,8 @@ function PendingCard({ o, viewer, forText, onOpen }: { o: MoneyOut; viewer: View
   );
 }
 
-// Copy message, WhatsApp, PDF and Open for one summary (lane 3 card, the "sent" bar and the summary panel).
+// Copy link, WhatsApp, PDF and Open for one summary (lane 3 card, the "sent" bar and the summary panel). Copy link copies
+// only the approval link accounts open (Joel, 2026-10-26); WhatsApp still sends the short message with the link.
 function SummaryButtons({ s, vendors, forText, viewer, compact }: {
   s: { token: string; all: MoneyOut[]; first: MoneyOut }; vendors: any[]; forText: (o: MoneyOut) => string; viewer: Viewer; compact?: boolean;
 }) {
@@ -315,7 +323,7 @@ function SummaryButtons({ s, vendors, forText, viewer, compact }: {
   const msg = summaryMessage(summary, ref, linkOf(s.token));
   const cls = compact ? btnTiny : `${btnSecondary} py-1.5`;
   const copy = async () => {
-    if (!(await copyText(msg))) window.prompt('Copy this:', msg);
+    if (!(await copyText(linkOf(s.token)))) window.prompt('Copy this link:', linkOf(s.token));
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
   };
@@ -326,7 +334,7 @@ function SummaryButtons({ s, vendors, forText, viewer, compact }: {
   };
   return (
     <>
-      <button type="button" className={cls} onClick={copy}>{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied ? 'Copied' : 'Copy message'}</button>
+      <button type="button" className={cls} onClick={copy}>{copied ? <Check className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}{copied ? 'Link copied' : 'Copy link'}</button>
       <a className={cls} href={`https://wa.me/?text=${encodeURIComponent(msg)}`} target="_blank" rel="noopener"><MessageCircle className="h-3.5 w-3.5" /> WhatsApp</a>
       <button type="button" disabled={busy} className={cls} onClick={pdf}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF</button>
       {!compact && <a className={cls} href={linkOf(s.token)} target="_blank" rel="noopener"><ExternalLink className="h-3.5 w-3.5" /> Open link</a>}
@@ -453,5 +461,150 @@ function SummaryDetail({ s, vendors, forText, viewer, onOpenPay, onGone }: {
         <div className="min-w-[680px]"><PaymentSummaryDocument summary={summary} refText={ref} madeBy={s.first.summaryByName || '—'} madeAt={s.first.summaryAt ? new Date(s.first.summaryAt).toISOString() : new Date().toISOString()} /></div>
       </div>
     </div>
+  );
+}
+
+// ---------- History (Joel, 2026-10-26: "a list of past payment / approval / withdrawn") ----------
+// Five tabs under the board. Each row says who raised, approved (or rejected) and paid it, with dates; paid ones since
+// receipts started without a receipt are flagged. Search, month (with the total shown), sort and pages.
+// Deleted holds approved or paid requests marked deleted (a request withdrawn while waiting is erased, so not listed).
+
+type Summary = { token: string; all: MoneyOut[]; unpaid: MoneyOut[]; first: MoneyOut };
+type HistTab = 'paid' | 'approved' | 'rejected' | 'deleted' | 'summaries';
+type HistRow = { key: string; name: string; date: string; amount: number; search: string; o?: MoneyOut; s?: Summary };
+
+const HIST_TABS: [HistTab, string][] = [['paid', 'Paid'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['deleted', 'Deleted'], ['summaries', 'Past summaries']];
+const monthLabel = (m: string) => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }); };
+const isoOf = (ms?: number) => (ms ? new Date(ms).toISOString() : '');
+
+function History({ outs, deletedOuts, summaries, forText, noReceipt, onOpenPay, onOpenSummary }: {
+  outs: MoneyOut[]; deletedOuts: MoneyOut[]; summaries: Summary[]; forText: (o: MoneyOut) => string;
+  noReceipt: (o: MoneyOut) => boolean; onOpenPay: (o: MoneyOut) => void; onOpenSummary: (token: string) => void;
+}) {
+  const [tab, setTab] = useState<HistTab>('paid');
+  const [q, setQ] = useState('');
+  const [month, setMonth] = useState('');
+  const [missing, setMissing] = useState(false);
+  const [sort, setSort] = useState<ListSort>('newest');
+
+  const outRow = (o: MoneyOut, date: string): HistRow => ({
+    key: o.id, name: o.payee || '', date, amount: Number(o.amount) || 0, o,
+    search: [o.payee, o.category, o.description, forText(o), paymentRef(o), o.requestedByName, o.decidedByName, o.paidByName, o.rejectReason, o.deletedReason].join(' ').toLowerCase(),
+  });
+  const rows: HistRow[] = useMemo(() => {
+    if (tab === 'paid') return outs.filter(o => o.status === 'paid').map(o => outRow(o, paidDay(o)));
+    if (tab === 'approved') return outs.filter(o => o.status === 'approved' || o.status === 'paid').map(o => outRow(o, o.decidedAt || ''));
+    if (tab === 'rejected') return outs.filter(o => o.status === 'rejected').map(o => outRow(o, o.decidedAt || o.requestedAt || ''));
+    if (tab === 'deleted') return deletedOuts.map(o => outRow(o, o.deletedAt || ''));
+    return summaries.map(s => ({
+      key: s.token, name: refOf(s.first), date: isoOf(s.first.summaryAt), amount: sum(s.all), s,
+      search: [refOf(s.first), s.first.summaryByName, ...s.all.map(o => `${o.payee} ${forText(o)}`)].join(' ').toLowerCase(),
+    }));
+  }, [tab, outs, deletedOuts, summaries]);
+
+  const months = [...new Set(rows.map(r => r.date.slice(0, 7)).filter(Boolean))].sort().reverse();
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = sortList(rows.filter(r =>
+    (!month || r.date.slice(0, 7) === month)
+    && words.every(w => r.search.includes(w))
+    && (!missing || tab !== 'paid' || (!!r.o && noReceipt(r.o)))), sort, r => r.name, r => r.date);
+  const paged = usePaged(shown, [tab, q, month, missing, sort]);
+  const total = shown.reduce((t, r) => t + r.amount, 0);
+  const pick = (t: HistTab) => { setTab(t); setMonth(''); setMissing(false); };
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-line bg-white" aria-label="Payment history">
+      <div className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <h4 className="text-base font-bold">History</h4>
+          <div className="inline-flex flex-wrap rounded-lg border border-line bg-white p-0.5" role="tablist" aria-label="History">
+            {HIST_TABS.map(([k, t]) => (
+              <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => pick(k)}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === k ? 'bg-accent text-white' : 'text-ink-soft hover:text-ink'}`}>{t}</button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="relative min-w-[14rem] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search vendor, deal, reference or person" aria-label="Search history" className={`${input} pl-9`} />
+          </label>
+          <select value={month} onChange={e => setMonth(e.target.value)} className={listSelect} aria-label="Month">
+            <option value="">All months</option>
+            {months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+          <SortSelect value={sort} onChange={setSort} />
+          {tab === 'paid' && (
+            <label className="flex items-center gap-1.5 text-sm text-ink">
+              <input type="checkbox" checked={missing} onChange={e => setMissing(e.target.checked)} className="h-4 w-4 accent-[#0E6E62]" /> No receipt only
+            </label>
+          )}
+        </div>
+        <p className="text-sm text-ink-soft">
+          {shown.length} {tab === 'summaries' ? `summar${shown.length === 1 ? 'y' : 'ies'}` : `payment${shown.length === 1 ? '' : 's'}`}
+          {month ? ` in ${monthLabel(month)}` : ''} · total <strong className="tabular-nums text-ink">{sen(total)}</strong>
+        </p>
+      </div>
+      {shown.length === 0
+        ? <p className="border-t border-line px-4 py-4 text-sm text-ink-soft">Nothing here{q || month || missing ? ' for this search' : ' yet'}.</p>
+        : (
+          <ul className="divide-y divide-line border-t border-line">
+            {paged.pageItems.map(r => r.s
+              ? <SummaryRow key={r.key} s={r.s} onOpen={() => onOpenSummary(r.s!.token)} />
+              : <HistoryRow key={r.key} o={r.o!} forText={forText(r.o!)} flag={tab === 'paid' || tab === 'approved' ? noReceipt(r.o!) : false}
+                  showStatus={tab === 'approved'} onOpen={tab === 'deleted' ? undefined : () => onOpenPay(r.o!)} />)}
+          </ul>
+        )}
+      <ListPager paged={paged} noun={tab === 'summaries' ? 'summaries' : 'payments'} />
+    </section>
+  );
+}
+
+function HistoryRow({ o, forText, flag, showStatus, onOpen }: {
+  o: MoneyOut; forText: string; flag: boolean; showStatus: boolean; onOpen?: () => void; key?: string;
+}) {
+  const steps: string[] = [`Raised by ${o.requestedByName || '—'}, ${formatDate(o.requestDate || o.requestedAt)}`];
+  if (o.status === 'rejected') steps.push(`${o.trainingCancelled ? 'Stopped' : 'Rejected'} by ${o.decidedByName || '—'}, ${formatDate(o.decidedAt || '')}${o.rejectReason ? `: ${o.rejectReason}` : ''}`);
+  else if (o.decidedByName) steps.push(`Approved by ${o.decidedByName}, ${formatDate(o.decidedAt || '')}`);
+  if (o.status === 'paid') steps.push(`Paid ${formatDate(paidDay(o))} by ${paidViaLink(o) ? ACCOUNTS_PAID_BY : o.paidByName || '—'}${o.paidRef ? ` (ref ${o.paidRef})` : ''}`);
+  if (o.deleted) steps.push(`Deleted by ${o.deletedByName || '—'}, ${formatDate(o.deletedAt || '')}${o.deletedReason ? `: ${o.deletedReason}` : ''}`);
+  const chip = 'rounded-md px-2 py-0.5 text-xs font-semibold';
+  const body = (
+    <>
+      <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="min-w-0 break-words font-semibold">{o.payee || 'Not named'}</span>
+        {showStatus && <span className={`${chip} ${o.status === 'paid' ? 'bg-accent-soft text-accent' : 'bg-surface text-ink-soft'}`}>{o.status === 'paid' ? 'Paid' : 'Not paid yet'}</span>}
+        {o.trainingCancelled && <span className={`${chip} bg-surface text-ink-soft`}>Training cancelled</span>}
+        {flag && <span className={`${chip} bg-attention-soft text-attention`}>No receipt</span>}
+        <span className="ml-auto shrink-0 font-semibold tabular-nums">{sen(o.amount)}</span>
+      </p>
+      <p className="truncate text-sm text-ink-soft">{paymentRef(o)} · {o.category}{o.description ? `: ${o.description}` : ''} · {isCompanyPayment(o) ? 'Company payment' : forText}</p>
+      <p className="text-sm text-ink-soft">{steps.join(' · ')}</p>
+    </>
+  );
+  return (
+    <li>
+      {onOpen
+        ? <button type="button" onClick={onOpen} className="block w-full px-4 py-2.5 text-left hover:bg-surface">{body}</button>
+        : <div className="px-4 py-2.5">{body}</div>}
+    </li>
+  );
+}
+
+function SummaryRow({ s, onOpen }: { s: Summary; onOpen: () => void; key?: string }) {
+  const lastPaid = s.all.map(paidDay).sort().pop() || '';
+  return (
+    <li>
+      <button type="button" onClick={onOpen} className="block w-full px-4 py-2.5 text-left hover:bg-surface">
+        <p className="flex items-baseline gap-2">
+          <span className="font-semibold">{refOf(s.first)}</span>
+          <span className="ml-auto font-semibold tabular-nums">{sen(sum(s.all))}</span>
+        </p>
+        <p className="truncate text-sm text-ink-soft">{s.all.length} payment{s.all.length === 1 ? '' : 's'} · {[...new Set(s.all.map(o => o.payee))].join(', ')}</p>
+        <p className="text-sm text-ink-soft">
+          Sent {formatDate(isoOf(s.first.summaryAt))}{s.first.summaryByName ? ` by ${s.first.summaryByName}` : ''}{lastPaid ? ` · all paid by ${formatDate(lastPaid)}` : ''}
+        </p>
+      </button>
+    </li>
   );
 }

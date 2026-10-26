@@ -669,7 +669,10 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
   const [deals, setDeals] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [ins, setIns] = useState<MoneyIn[]>([]);
-  const [outs, setOuts] = useState<MoneyOut[]>([]);
+  const [allOuts, setAllOuts] = useState<MoneyOut[]>([]);
+  const outs = useMemo(() => withoutDeleted(allOuts), [allOuts]);
+  // Marked deleted (not with a deleted deal), for the Payments out History's Deleted tab (2026-10-26).
+  const deletedOuts = useMemo(() => allOuts.filter(o => o.deleted && !(o as any).dealDeleted), [allOuts]);
   const claims = useClaimBacks(true);
   const receipts = useReceipts(true);
 
@@ -678,7 +681,7 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
       onSnapshot(query(collection(db, 'pipelines')), s => setDeals(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id }))))),
       onSnapshot(query(collection(db, 'clients')), s => setClients(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'money_in')), s => setIns(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id }))))),
-      onSnapshot(query(collection(db, 'money_out')), s => setOuts(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id }))))),
+      onSnapshot(query(collection(db, 'money_out')), s => setAllOuts(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))),
     ];
     return () => subs.forEach(u => u());
   }, []);
@@ -721,7 +724,7 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
           {/* From the trainer portal (2026-10-21): fee requests with photos and T3, and bank accounts to check */}
           <TrainerFeeRequests outs={outs} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
           <BankRequestsBox viewer={viewer} trainers={[]} />
-          <PaymentsBoard outs={outs} deals={deals} viewer={viewer} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
+          <PaymentsBoard outs={outs} deletedOuts={deletedOuts} deals={deals} viewer={viewer} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
         </>
       )}
       {tab === 'company' && <CompanyPayments outs={outs} viewer={viewer} />}
