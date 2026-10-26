@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
-import { ArrowRight, Check, Download, ExternalLink, Link2, Loader2, MessageCircle, Search, Send, X } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, Download, ExternalLink, Link2, Loader2, MessageCircle, Search, Send, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
 import { formatDate, todayIso } from '../lib/deals';
@@ -183,21 +183,17 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
         <Lane n={3} title="With accounts" list={withAccounts} empty="Nothing with accounts right now.">
           {[
             ...summaries.filter(s => s.unpaid.length).map(s => (
-              <li key={s.token}>
-                <div role="button" tabIndex={0} onClick={() => setOpen({ kind: 'summary', token: s.token })} onKeyDown={e => e.key === 'Enter' && setOpen({ kind: 'summary', token: s.token })}
-                  className="cursor-pointer rounded-xl border border-line bg-white px-3 py-2.5 hover:border-accent/40">
-                  <p className="font-semibold">{refOf(s.first)}</p>
-                  <p className="font-semibold tabular-nums">{sen(sum(s.unpaid))}</p>
-                  <p className="text-sm text-ink-soft">
-                    {s.unpaid.length} to pay{s.all.length > s.unpaid.length ? `, ${s.all.length - s.unpaid.length} paid` : ''}
-                    {s.first.summaryAt ? ` · sent ${formatDate(new Date(s.first.summaryAt).toISOString())}` : ''}
-                  </p>
-                  <p className="truncate text-sm text-ink-soft">{[...new Set(s.unpaid.map(o => o.payee))].join(', ')}</p>
-                  <div className="mt-2 flex flex-wrap gap-1" onClick={e => e.stopPropagation()}>
-                    <SummaryButtons s={s} vendors={vendors} forText={forText} viewer={viewer} compact />
-                  </div>
+              <FoldCard key={s.token} onOpen={() => setOpen({ kind: 'summary', token: s.token })}
+                name={refOf(s.first)} amount={sum(s.unpaid)}>
+                <p className="text-sm text-ink-soft">
+                  {s.unpaid.length} to pay{s.all.length > s.unpaid.length ? `, ${s.all.length - s.unpaid.length} paid` : ''}
+                  {s.first.summaryAt ? ` · sent ${formatDate(new Date(s.first.summaryAt).toISOString())}` : ''}
+                </p>
+                <p className="truncate text-sm text-ink-soft">{[...new Set(s.unpaid.map(o => o.payee))].join(', ')}</p>
+                <div className="mt-2 flex flex-wrap gap-1" onClick={e => e.stopPropagation()}>
+                  <SummaryButtons s={s} vendors={vendors} forText={forText} viewer={viewer} compact />
                 </div>
-              </li>
+              </FoldCard>
             )),
             ...ownLinks.map(o => <Card key={o.id} o={o} forText={forText(o)} onOpen={() => openPay(o)} note="Older link of its own" />),
           ]}
@@ -239,16 +235,24 @@ function Lane({ n, title, list, top, bottom, empty, children }: {
   n: number; title: string; list: MoneyOut[]; top?: React.ReactNode; bottom?: React.ReactNode; empty: string; children: React.ReactNode[];
 }) {
   const [all, setAll] = useState(false);
+  const [fold, setFold] = useState({ folded: false, stamp: 0 });
   const shown = all ? children : children.slice(0, LANE_SHOW);
   return (
     <section className="space-y-2 rounded-2xl bg-surface p-3" aria-label={title}>
       <div className="flex items-baseline gap-2 px-1">
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-ink-soft">{n}</span>
         <h4 className="font-bold">{title}</h4>
+        {children.length > 0 && (
+          <button type="button" className="ml-auto text-sm font-semibold text-accent hover:underline"
+            onClick={() => setFold(f => ({ folded: !f.folded, stamp: f.stamp + 1 }))}>
+            {fold.folded ? 'Unfold all' : 'Fold all'}
+          </button>
+        )}
       </div>
       {list.length > 0 && <p className="-mt-1 px-1 pl-9 text-sm text-ink-soft">{list.length} · {sen(sum(list))}</p>}
       {top}
-      {children.length === 0 ? <p className="px-1 py-2 text-sm text-ink-soft">{empty}</p> : <ul className="space-y-2">{shown}</ul>}
+      {children.length === 0 ? <p className="px-1 py-2 text-sm text-ink-soft">{empty}</p>
+        : <LaneFold.Provider value={fold}><ul className="space-y-2">{shown}</ul></LaneFold.Provider>}
       {children.length > LANE_SHOW && (
         <button type="button" className="w-full text-center text-sm font-semibold text-accent hover:underline" onClick={() => setAll(a => !a)}>
           {all ? 'Show fewer' : `Show all ${children.length}`}
@@ -259,9 +263,16 @@ function Lane({ n, title, list, top, bottom, empty, children }: {
   );
 }
 
-function Card({ o, forText, onOpen, lead, note, extra, muted }: {
-  o: MoneyOut; forText: string; onOpen: () => void; lead?: React.ReactNode; note?: React.ReactNode; extra?: React.ReactNode; muted?: boolean; key?: string;
+// Fold a card to its name and amount (Joel, 2026-10-26: "make each card collapsible"): the arrow on each card, or
+// Fold all / Unfold all on the lane (a lane-wide click resets every card in it).
+const LaneFold = createContext({ folded: false, stamp: 0 });
+
+function FoldCard({ name, amount, onOpen, lead, muted, children }: {
+  name: React.ReactNode; amount: number; onOpen: () => void; lead?: React.ReactNode; muted?: boolean; children: React.ReactNode; key?: string;
 }) {
+  const lane = useContext(LaneFold);
+  const [folded, setFolded] = useState(lane.folded);
+  useEffect(() => { setFolded(lane.folded); }, [lane.stamp]);
   return (
     <li>
       <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={e => e.key === 'Enter' && onOpen()}
@@ -269,16 +280,31 @@ function Card({ o, forText, onOpen, lead, note, extra, muted }: {
         {lead}
         <div className="min-w-0 flex-1">
           <p className="flex items-baseline justify-between gap-2">
-            <span className="min-w-0 break-words font-semibold">{o.payee || 'Not named'}</span>
-            <span className="shrink-0 font-semibold tabular-nums">{sen(o.amount)}</span>
+            <span className="min-w-0 break-words font-semibold">{name}</span>
+            <span className="ml-auto shrink-0 font-semibold tabular-nums">{sen(amount)}</span>
+            <button type="button" className="-my-1 -mr-1 shrink-0 self-center rounded-md p-1 text-ink-soft hover:bg-surface"
+              aria-expanded={!folded} aria-label={folded ? 'Unfold card' : 'Fold card'}
+              onClick={e => { e.stopPropagation(); setFolded(f => !f); }} onKeyDown={e => e.stopPropagation()}>
+              <ChevronDown className={`h-4 w-4 transition-transform ${folded ? '-rotate-90' : ''}`} />
+            </button>
           </p>
-          <p className="truncate text-sm text-ink-soft">{o.category}{o.description ? `: ${o.description}` : ''}</p>
-          <p className="truncate text-sm text-ink-soft">{isCompanyPayment(o) ? 'Company payment' : `${forText} · ${TIMING_LABELS[o.timing] || TIMING_LABELS.after}`}</p>
-          {note && <p className="mt-0.5 text-sm">{note}</p>}
-          {extra && <div className="mt-2">{extra}</div>}
+          {!folded && children}
         </div>
       </div>
     </li>
+  );
+}
+
+function Card({ o, forText, onOpen, lead, note, extra, muted }: {
+  o: MoneyOut; forText: string; onOpen: () => void; lead?: React.ReactNode; note?: React.ReactNode; extra?: React.ReactNode; muted?: boolean; key?: string;
+}) {
+  return (
+    <FoldCard name={o.payee || 'Not named'} amount={o.amount} onOpen={onOpen} lead={lead} muted={muted}>
+      <p className="truncate text-sm text-ink-soft">{o.category}{o.description ? `: ${o.description}` : ''}</p>
+      <p className="truncate text-sm text-ink-soft">{isCompanyPayment(o) ? 'Company payment' : `${forText} · ${TIMING_LABELS[o.timing] || TIMING_LABELS.after}`}</p>
+      {note && <p className="mt-0.5 text-sm">{note}</p>}
+      {extra && <div className="mt-2">{extra}</div>}
+    </FoldCard>
   );
 }
 
