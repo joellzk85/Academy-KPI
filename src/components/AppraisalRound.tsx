@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, where, writeBatch } from 'firebase/firestore';
-import { Eye, Loader2, Lock, Play, Send, Unlock } from 'lucide-react';
+import { Eye, Loader2, Lock, Play, Send, Unlock, Users } from 'lucide-react';
 import { monthsBetween, PersonScorecardData, ScorecardSources, usePersonScorecard } from './Appraisal';
 import { useAllRatings, useRatingRounds } from './Rating360';
 import { SidePanel } from './Scorecard';
@@ -11,7 +11,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso } from '../lib/deals';
 import { useFormDraft } from '../lib/useFormDraft';
 import { kpiLight, LIGHT_BADGE } from '../lib/kpi';
-import { roundPairs } from '../lib/rating360';
+import { RatingPair, roundPairs } from '../lib/rating360';
 import { prevQuarter, quarterMonths, quarterOf, quarterText, readReview, Review } from '../lib/scorecard';
 import { AppraisalCycle, AppraisalResult, readResult, resultId } from '../lib/appraisalCycle';
 
@@ -21,6 +21,8 @@ import { AppraisalCycle, AppraisalResult, readResult, resultId } from '../lib/ap
 // - Follow who has done their self review, their 360 ratings and has a manager review; change the deadline.
 // - Close: no more self reviews or ratings (the 360 round closes too, so its ratings count on the scorecards).
 //   Reopen if needed.
+// - Who rates whom (Joel, 2026-10-26): everyone rates everyone, or Management ticks each reviewer → person pair
+//   (the round's mode 'picked'). Can be changed while the round is open; ratings already given are kept.
 // - Release results: shows everyone's scores first, then copies each person's scorecard to appraisal_results, and
 //   only then can each person see theirs. Releasing again updates the copies.
 
@@ -31,6 +33,10 @@ const input = 'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15p
 const label = 'mb-1 block text-sm font-semibold text-ink';
 const primaryBtn = 'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white transition-colors hover:bg-[#0B5A50] disabled:opacity-60';
 const secondaryBtn = 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-50';
+type Who = { mode: 'all' | 'picked'; pairs: RatingPair[] };
+const allPairs = (ids: string[]): RatingPair[] => ids.flatMap(raterId => ids.filter(id => id !== raterId).map(rateeId => ({ raterId, rateeId })));
+// Only pairs between people in the round, never yourself.
+const keepPairs = (pairs: RatingPair[], ids: string[]) => pairs.filter(p => p.raterId !== p.rateeId && ids.includes(p.raterId) && ids.includes(p.rateeId));
 const STATUS_TEXT: Record<AppraisalCycle['status'], [string, string]> = {
   open: ['Open', 'bg-attention-soft text-attention'], closed: ['Closed, not released', 'bg-surface text-ink'], released: ['Released', 'bg-accent-soft text-accent'],
 };
@@ -73,15 +79,17 @@ export default function AppraisalRound({ viewer, src }: { viewer: Viewer; src: S
 function CommenceForm({ viewer, people, onDone }: { viewer: Viewer; people: Person[]; onDone: () => void }) {
   const now = quarterOf(todayIso().slice(0, 7));
   const choices = [prevQuarter(now), now];
-  const [f, setF] = useState(() => ({ quarter: now, dueDate: '', people: people.map(p => p.id) }));
+  const [f, setF] = useState(() => ({ quarter: now, dueDate: '', people: people.map(p => p.id), mode: 'all' as Who['mode'], pairs: [] as RatingPair[] }));
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const draft = useFormDraft(viewer.id, 'appraisal-round:new', f, setF);
+  const draft = useFormDraft(viewer.id, 'appraisal-round:new', f, v => setF({ mode: 'all', pairs: [], ...v }));
+  const pairs = keepPairs(f.pairs, f.people);
   const set = (c: Partial<typeof f>) => { setF(x => ({ ...x, ...c })); setError(''); };
   const save = async () => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.dueDate)) return setError('Choose the deadline.');
     if (f.dueDate < todayIso()) return setError('The deadline has passed. Choose a later date.');
     if (f.people.length < 2) return setError('Tick at least two people.');
+    if (f.mode === 'picked' && pairs.length === 0) return setError('Tick at least one reviewer and person to review.');
     setBusy(true);
     try {
       const stamp = Date.now().toString(36);
@@ -89,9 +97,9 @@ function CommenceForm({ viewer, people, onDone }: { viewer: Viewer; people: Pers
       const name = `Appraisal ${quarterText(f.quarter)}`;
       const at = new Date().toISOString();
       const b = writeBatch(db);
-      // The 360 round: everyone in it rates everyone else; it counts in the quarter's last month.
+      // The 360 round: everyone in it rates everyone else, or only the pairs picked; it counts in the quarter's last month.
       b.set(doc(db, 'rating_rounds', roundId), {
-        name, month: quarterMonths(f.quarter)[1], mode: 'all', view: 'open', dueDate: f.dueDate, people: f.people, pairs: [],
+        name, month: quarterMonths(f.quarter)[1], mode: f.mode, view: 'open', dueDate: f.dueDate, people: f.people, pairs: f.mode === 'picked' ? pairs : [],
         status: 'open', cycleId, createdAt: at, createdById: viewer.id, createdByName: viewer.name,
       });
       b.set(doc(db, 'appraisal_cycles', cycleId), {
@@ -117,7 +125,7 @@ function CommenceForm({ viewer, people, onDone }: { viewer: Viewer; people: Pers
         <div><label htmlFor="ar-due" className={label}>Deadline</label><input id="ar-due" type="date" min={todayIso()} className={input} value={f.dueDate} onChange={e => set({ dueDate: e.target.value })} /></div>
       </div>
       <div>
-        <span className={label}>Who is in this round (each person reviews themselves and rates everyone else ticked)</span>
+        <span className={label}>Who is in this round (each person reviews themselves)</span>
         <div className="flex flex-wrap gap-2">
           {people.map(p => {
             const on = f.people.includes(p.id);
@@ -126,6 +134,7 @@ function CommenceForm({ viewer, people, onDone }: { viewer: Viewer; people: Pers
           })}
         </div>
       </div>
+      <WhoRatesWhom people={people.filter(p => f.people.includes(p.id))} value={{ mode: f.mode, pairs }} onChange={w => set(w)} />
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" className={secondaryBtn} onClick={onDone}>Cancel</button>
@@ -146,6 +155,7 @@ function CycleCard({ viewer, cycle: c, src }: { viewer: Viewer; cycle: Appraisal
   const [busy, setBusy] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [viewing, setViewing] = useState<AppraisalResult | null>(null);
+  const [who, setWho] = useState<Who | null>(null);
   const pairs = round ? roundPairs(round) : [];
   const nameOf = (id: string) => src.people.find(p => p.id === id)?.name || 'Former team member';
   const late = c.status === 'open' && c.dueDate && c.dueDate < todayIso();
@@ -181,8 +191,32 @@ function CycleCard({ viewer, cycle: c, src }: { viewer: Viewer; cycle: Appraisal
         <div className="flex flex-wrap items-end gap-2">
           <div><label htmlFor={`due-${c.id}`} className={label}>Change the deadline</label><input id={`due-${c.id}`} type="date" className={`${input} w-auto`} value={due} onChange={e => setDue(e.target.value)} /></div>
           <button type="button" className={secondaryBtn} disabled={busy || !due || due === c.dueDate} onClick={() => update({ dueDate: due })}>Save deadline</button>
+          {round && !who && <button type="button" className={secondaryBtn} onClick={() => setWho({ mode: round.mode, pairs })}><Users className="h-4 w-4" /> Change who rates whom</button>}
         </div>
       )}
+      {c.status === 'open' && round && who && (() => {
+        const kept = keepPairs(who.pairs, c.people);
+        const givenGone = who.mode === 'picked' ? ratings.filter(x => !kept.some(p => p.raterId === x.raterId && p.rateeId === x.rateeId)).length : 0;
+        const save = async () => {
+          if (who.mode === 'picked' && kept.length === 0) return setError('Tick at least one reviewer and person to review.');
+          setBusy(true); setError('');
+          try {
+            await writeBatch(db).set(doc(db, 'rating_rounds', round.id), { mode: who.mode, pairs: who.mode === 'picked' ? kept : [] }, { merge: true }).commit();
+            setWho(null);
+          } catch (e) { setError(friendlyError(e)); }
+          setBusy(false);
+        };
+        return (
+          <div className="space-y-3 rounded-xl border border-line bg-surface/50 p-4">
+            <WhoRatesWhom people={c.people.map(id => ({ id, name: nameOf(id), role: '' }))} value={{ mode: who.mode, pairs: kept }} onChange={setWho} />
+            {givenGone > 0 && <p className="text-sm text-attention">{givenGone} rating{givenGone === 1 ? ' was' : 's were'} already given for a pair you untick. {givenGone === 1 ? 'It is' : 'They are'} kept and still count.</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className={secondaryBtn} onClick={() => { setWho(null); setError(''); }}>Cancel</button>
+              <button type="button" className={primaryBtn} disabled={busy} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save who rates whom</button>
+            </div>
+          </div>
+        );
+      })()}
       {c.status === 'closed' && <p className="text-sm text-ink-soft">Finish the manager reviews in Scorecards (pick the person and {quarterText(c.quarter)}), then release the results.</p>}
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
       <div className="overflow-x-auto">
@@ -221,6 +255,68 @@ function CycleCard({ viewer, cycle: c, src }: { viewer: Viewer; cycle: Appraisal
       {releasing && <ReleasePanel viewer={viewer} cycle={c} src={src} onClose={() => setReleasing(false)} />}
       {viewing && <ResultPanel result={viewing} onClose={() => setViewing(null)} />}
     </section>
+  );
+}
+
+// ---------- Who rates whom ----------
+// Everyone rates everyone, or a tick box for each reviewer (row) → person reviewed (column).
+function WhoRatesWhom({ people, value, onChange }: { people: Person[]; value: Who; onChange: (w: Who) => void }) {
+  const ids = people.map(p => p.id);
+  const has = (raterId: string, rateeId: string) => value.pairs.some(p => p.raterId === raterId && p.rateeId === rateeId);
+  const toggle = (raterId: string, rateeId: string) => onChange({ mode: 'picked', pairs: has(raterId, rateeId)
+    ? value.pairs.filter(p => !(p.raterId === raterId && p.rateeId === rateeId)) : [...value.pairs, { raterId, rateeId }] });
+  // Switching to "I pick" starts with everyone ticked, so you only untick.
+  const choice = (mode: Who['mode'], text: string) => (
+    <button type="button" aria-pressed={value.mode === mode}
+      onClick={() => onChange({ mode, pairs: mode === 'picked' && value.mode !== 'picked' ? allPairs(ids) : value.pairs })}
+      className={`rounded-full border px-3 py-1 text-sm font-medium ${value.mode === mode ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-soft hover:bg-surface'}`}>{text}</button>
+  );
+  return (
+    <div className="space-y-2">
+      <span className={label}>Who rates whom</span>
+      <div className="flex flex-wrap gap-2">{choice('all', 'Everyone rates everyone')}{choice('picked', 'I pick who rates whom')}</div>
+      {value.mode === 'picked' && (
+        <>
+          <div className="flex flex-wrap items-center gap-3 text-sm text-ink-soft">
+            <span>Each row is the reviewer: tick the people they rate. {value.pairs.length} pair{value.pairs.length === 1 ? '' : 's'} ticked.</span>
+            <button type="button" className="font-semibold text-accent hover:underline" onClick={() => onChange({ mode: 'picked', pairs: allPairs(ids) })}>Tick all</button>
+            <button type="button" className="font-semibold text-accent hover:underline" onClick={() => onChange({ mode: 'picked', pairs: [] })}>Clear all</button>
+          </div>
+          {people.length < 2 ? <p className="text-sm text-ink-soft">Tick at least two people in the round first.</p> : (
+            <div className="overflow-x-auto rounded-xl border border-line bg-white">
+              <table className="text-sm">
+                <thead>
+                  <tr className="text-left text-ink-soft">
+                    <th className="sticky left-0 bg-white px-3 py-2 font-semibold">Reviewer ↓ rates →</th>
+                    {people.map(p => <th key={p.id} className="whitespace-nowrap px-2 py-2 text-center font-semibold">{p.name}</th>)}
+                    <th className="px-3 py-2 text-center font-semibold">Rates</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {people.map(r => (
+                    <tr key={r.id} className="border-t border-line">
+                      <td className="sticky left-0 whitespace-nowrap bg-white px-3 py-2 font-semibold">{r.name}</td>
+                      {people.map(p => (
+                        <td key={p.id} className="px-2 py-2 text-center">
+                          {r.id === p.id ? <span className="text-ink-soft">–</span>
+                            : <input type="checkbox" className="h-4 w-4 accent-[#0E6E62]" aria-label={`${r.name} rates ${p.name}`} checked={has(r.id, p.id)} onChange={() => toggle(r.id, p.id)} />}
+                        </td>
+                      ))}
+                      <td className="px-3 py-2 text-center tabular-nums text-ink-soft">{value.pairs.filter(x => x.raterId === r.id).length}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t border-line text-ink-soft">
+                    <td className="sticky left-0 bg-white px-3 py-2">Rated by</td>
+                    {people.map(p => <td key={p.id} className="px-2 py-2 text-center tabular-nums">{value.pairs.filter(x => x.rateeId === p.id).length}</td>)}
+                    <td />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
