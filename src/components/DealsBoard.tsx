@@ -3,7 +3,7 @@ import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2, PartyPopper, Copy,
-  PauseCircle, PlayCircle, Calculator,
+  PauseCircle, PlayCircle, Calculator, CalendarDays, MapPin, Users, GraduationCap,
 } from 'lucide-react';
 import ProposalTracking from './ProposalTracking';
 import { seesLink } from '../lib/proposalTracking';
@@ -20,7 +20,7 @@ import TrainingDaysPicker from './TrainingDaysPicker';
 import { FollowUpAlert, alertText, followUpAlert, followUpNotes } from '../lib/followUps';
 import { AlertLine, FollowUpForm, FollowUpList, followUpCountText } from './FollowUps';
 import { GapsBox, MarkWonBox } from './DealGates';
-import { Picked, coTrainerShort, coTrainerText, dealVenue, progress } from '../lib/checklist';
+import { Picked, coTrainerShort, coTrainerText, dealVenue, effectiveTrainer, leadTrainerTask, progress } from '../lib/checklist';
 import DealChecklist from './DealChecklist';
 import { AddDealTask, DealTaskList, useDealTasks } from './DealTasks';
 import { isDone } from '../lib/tasks';
@@ -153,6 +153,7 @@ export default function DealsBoard({
   const [proposalFiles, setProposalFiles] = useState<ProposalFile[]>([]);
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const [venues, setVenues] = useState<any[]>([]);
+  const [trainers, setTrainers] = useState<any[]>([]);
   const referrers = useReferrers();
   const moneySettings = useMoneySettings();
   const [loaded, setLoaded] = useState(false);
@@ -196,6 +197,7 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'money_in')), s => setMoneyIn(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id }))))),
       onSnapshot(query(collection(db, 'proposal_files')), s => setProposalFiles(s.docs.map(d => ({ ...(d.data() as ProposalFile), id: d.id }))), () => {}),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, 'trainers_directory')), s => setTrainers(s.docs.map(d => ({ ...d.data(), id: d.id }))), () => {}),
     ];
     // Payouts and costs are for Admin and Management only.
     if (viewer.role !== 'rep') {
@@ -772,6 +774,24 @@ export default function DealsBoard({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{clientName(p)}</span>
                       <span className="block truncate text-sm text-ink-soft">{askedFor(p) || 'No programme yet'}{p.type ? `, ${dealTypeLabel(p.type).toLowerCase()}` : ''}</span>
+                      {(() => {
+                        // Training essentials on the row (Joel, 2026-10-26): only what is filled in.
+                        const dq = quotes.filter(q => q.pipelineId === p.id);
+                        const venue = dealVenue(checklists[p.id] || null, dq, venues);
+                        const trainer = effectiveTrainer(leadTrainerTask(checklists[p.id]?.tasks || []), dq, trainers);
+                        const pax = Math.round(Number(p.participants) || 0);
+                        const bits = [
+                          trainingDateText(p, true) && { icon: CalendarDays, text: trainingDateText(p, true) },
+                          venue && { icon: MapPin, text: venue.name },
+                          trainer && { icon: GraduationCap, text: trainer.name },
+                          pax > 0 && { icon: Users, text: `${pax} pax` },
+                        ].filter(Boolean) as { icon: typeof MapPin; text: string }[];
+                        return bits.length > 0 && (
+                          <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-ink-soft">
+                            {bits.map(({ icon: Icon, text }) => <span key={text} className="inline-flex min-w-0 max-w-full items-center gap-1"><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{text}</span></span>)}
+                          </span>
+                        );
+                      })()}
                       {showOwner && <span className="block truncate text-sm font-medium text-accent">{personName(dealOwnerId(p))}</span>}
                     </span>
                     <span className="flex flex-wrap items-center gap-2 sm:justify-end">

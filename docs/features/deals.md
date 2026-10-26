@@ -127,3 +127,7 @@ Joel asked to stop Closing RM being inflated or moved by backdating, editing won
 - **Referred by** (deal form): pick a referrer or **+ New referrer…** (name and phone), then the fee as **% of the deal value** or **Fixed RM** (can be left blank and added later). Fields `referrerId`, `referrerName`, `referralFeeType`, `referralFeeValue` (`lib/referrers.ts`). The deal page shows the referrer, the fee and **Send link for bank details** (copy or WhatsApp); see `money.md` for the link, Admin work → Referrers and the fee request.
 - Once won, the co-closer and the referral fee change only by Management (`wonLockOk` in `firestore.rules`), like the owner. Management changing the fee on a won deal updates the fee request while it is still waiting for approval.
 - Tested: a script (10 checks: shares add up to the sen, bad % rejected, P&L profit unchanged by the split, Payment tracking split, % and RM fees, approved fee is a cost and pending isn't, referrer form checks, Found by fallback). The rules, server routes and the link from a phone need the live site.
+
+## Deal list rows show training essentials (2026-10-26)
+
+Each row in the deal list has a small grey line under the programme: training date (with days), venue (checklist, else quotation), lead trainer (checklist, else quotation) and pax. Only what is filled in shows. `DealsBoard.tsx`; nothing to publish.
