@@ -18,7 +18,7 @@ import { openProposalFile, storageError } from './ProposalFiles';
 // box takes a pasted screenshot (Ctrl+V): the box under the mouse or focused, else the newest one in an open form.
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
-export type ReceiptTarget = { dealId: string; moneyInId: string; recordId: string; moneyOutId?: string; claimBackId?: string; kind?: 'copy' | 'invoice';
+export type ReceiptTarget = { dealId: string; moneyInId: string; recordId: string; moneyOutId?: string; claimBackId?: string; kind?: 'copy' | 'invoice' | 'support';
   vendorInvoiceFor?: string; invoiceNo?: string; invoiceAmount?: number };
 
 type PasteTaker = (f: File[]) => void;
@@ -109,7 +109,7 @@ export const receiptError = (e: any) => (e instanceof Error && !(e as any).code 
 
 /** The receipts already uploaded, with open and delete. */
 export function ReceiptList({ receipts, viewer, copyLabel = 'Copy' }: { receipts: Receipt[]; viewer: Viewer; copyLabel?: string }) {
-  const word = (r: Receipt) => (r.kind === 'copy' ? copyLabel : r.kind === 'invoice' ? `Invoice${r.invoiceNo ? ` ${r.invoiceNo}` : ''}${r.invoiceAmount ? ` (RM ${Number(r.invoiceAmount).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : ''}` : 'Receipt');
+  const word = (r: Receipt) => (r.kind === 'copy' ? copyLabel : r.kind === 'support' ? 'Document' : r.kind === 'invoice' ? `Invoice${r.invoiceNo ? ` ${r.invoiceNo}` : ''}${r.invoiceAmount ? ` (RM ${Number(r.invoiceAmount).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : ''}` : 'Receipt');
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
   if (!receipts.length) return null;

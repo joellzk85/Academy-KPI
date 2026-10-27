@@ -97,7 +97,9 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
   const ready = toSend.filter(o => !problemOf(o)).sort((a, b) => String(a.payee).localeCompare(String(b.payee)));
   const blocked = toSend.filter(o => problemOf(o)).sort((a, b) => String(a.payee).localeCompare(String(b.payee)));
   const ticked = ready.filter(o => !skipped.has(o.id));
-  const receiptsOf = (o: MoneyOut) => receipts.filter(r => r.moneyOutId === o.id);
+  const receiptsOf = (o: MoneyOut) => receipts.filter(r => r.moneyOutId === o.id && r.kind !== 'support');
+  // Documents and screenshots attached when a company payment is raised (2026-10-27): shown, never the receipt.
+  const docsOf = (o: MoneyOut) => receipts.filter(r => r.moneyOutId === o.id && r.kind === 'support');
   const paidNoReceipt = outs.filter(o => o.status === 'paid' && paidDay(o) >= RECEIPTS_FROM && !receiptsOf(o).length)
     .sort((a, b) => paidDay(b).localeCompare(paidDay(a)));
 
@@ -223,7 +225,7 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
               <button type="button" className="ml-auto rounded-md p-1.5 text-ink-soft hover:bg-surface" aria-label="Close" onClick={() => setOpen(null)}><X className="h-5 w-5" /></button>
             </div>
             {openOut && <PaymentDetail o={openOut} viewer={viewer} outs={outs} forText={forText(openOut)} problem={openOut.status === 'approved' ? problemOf(openOut) : ''}
-              receipts={receiptsOf(openOut)} onOpenDeal={onOpenDeal && openOut.dealId ? () => { setOpen(null); onOpenDeal(openOut.dealId); } : undefined}
+              receipts={receiptsOf(openOut)} docs={docsOf(openOut)} onOpenDeal={onOpenDeal && openOut.dealId ? () => { setOpen(null); onOpenDeal(openOut.dealId); } : undefined}
               onOpenSummary={openOut.summaryToken ? () => setOpen({ kind: 'summary', token: openOut.summaryToken! }) : undefined} />}
             {openSummary && <SummaryDetail s={openSummary} vendors={vendors} forText={forText} viewer={viewer} onOpenPay={openPay} onGone={() => setOpen(null)} />}
           </div>
@@ -376,8 +378,8 @@ function SummaryButtons({ s, vendors, forText, viewer, compact }: {
 
 // The side panel for one payment: the full request (approve, reject, fix, trainer fee checks, delete, undo paid), then
 // what to do next by its lane: bank details, mark paid or take off the summary, the receipt.
-function PaymentDetail({ o, viewer, forText, problem, receipts, onOpenDeal, onOpenSummary, outs }: {
-  o: MoneyOut; viewer: Viewer; forText: string; problem: string; receipts: Receipt[]; onOpenDeal?: () => void; onOpenSummary?: () => void; outs: MoneyOut[];
+function PaymentDetail({ o, viewer, forText, problem, receipts, docs, onOpenDeal, onOpenSummary, outs }: {
+  o: MoneyOut; viewer: Viewer; forText: string; problem: string; receipts: Receipt[]; docs: Receipt[]; onOpenDeal?: () => void; onOpenSummary?: () => void; outs: MoneyOut[];
 }) {
   const vendors = useVendors(true);
   const { trainers, venues } = useTrainersVenues();
@@ -386,7 +388,7 @@ function PaymentDetail({ o, viewer, forText, problem, receipts, onOpenDeal, onOp
   const payTo = o.status === 'approved' && !o.summaryToken ? payToProblem(o, v) : '';
   return (
     <div className="space-y-4">
-      <ul><OutRow o={o} viewer={viewer} outs={outs} context={isCompanyPayment(o) ? 'Company payment' : forText} /></ul>
+      <ul><OutRow o={o} viewer={viewer} outs={outs} docs={docs} context={isCompanyPayment(o) ? 'Company payment' : forText} /></ul>
       <div className="flex flex-wrap gap-2">
         {onOpenDeal && <button type="button" className={btnSecondary} onClick={onOpenDeal}>Open the deal <ArrowRight className="h-4 w-4" /></button>}
         {onOpenSummary && <button type="button" className={btnSecondary} onClick={onOpenSummary}>Open its payment summary <ArrowRight className="h-4 w-4" /></button>}

@@ -393,7 +393,8 @@ function OldAccountsLink({ o }: { o: MoneyOut }) {
   );
 }
 
-export function OutRow({ o, viewer, context, docFor, outs = [o] }: { o: MoneyOut; viewer: Viewer; context?: string; docFor?: string; outs?: MoneyOut[]; key?: string }) {
+// docs: a company payment's documents and screenshots (receipts kind 'support', 2026-10-27).
+export function OutRow({ o, viewer, context, docFor, outs = [o], docs = [] }: { o: MoneyOut; viewer: Viewer; context?: string; docFor?: string; outs?: MoneyOut[]; docs?: Receipt[]; key?: string }) {
   const [mode, setMode] = useState<null | 'reject' | 'fix' | 'approve'>(null);
   const [reason, setReason] = useState('');
   const { busy, error, setError, run } = useRun();
@@ -437,7 +438,7 @@ export function OutRow({ o, viewer, context, docFor, outs = [o] }: { o: MoneyOut
     return run(() => deleteMoney('money_out', o, viewer, what, reason));
   };
 
-  if (mode === 'fix' && company) return <li><CompanyForm viewer={viewer} editing={o} onDone={() => setMode(null)} /></li>;
+  if (mode === 'fix' && company) return <li><CompanyForm viewer={viewer} editing={o} docs={docs} onDone={() => setMode(null)} /></li>;
 
   return (
     <li className="rounded-xl border border-line bg-white px-3.5 py-3">
@@ -459,6 +460,7 @@ export function OutRow({ o, viewer, context, docFor, outs = [o] }: { o: MoneyOut
           {o.description && <p className="text-sm text-ink-soft">{o.description}</p>}
           {company && o.neededBy && <p className="text-sm text-ink-soft">Needed by {formatDate(o.neededBy)}</p>}
           {company && o.paymentDetails && <p className="text-sm text-ink-soft">Payment details: {o.paymentDetails}</p>}
+          {company && docs.length > 0 && <div className="mt-1.5"><ReceiptList receipts={docs} viewer={viewer} /></div>}
           <p className="text-sm text-ink-soft">
             Requested by {o.requestedByName} on {formatDate(o.requestDate || o.requestedAt)}{o.resubmittedAt ? ` (fixed and sent again ${formatDate(o.resubmittedAt)})` : ''}
             {o.decidedByName && ` · ${o.status === 'rejected' ? 'rejected' : 'approved'} by ${o.decidedByName} on ${formatDate(o.decidedAt || '')}`}
@@ -511,7 +513,11 @@ const blankItem = (): ItemDraft => ({ description: '', qty: '1', price: '' });
 // Who is paid comes from Admin work → Vendors (2026-10-21), so bank details are kept in one place; "+ New vendor"
 // adds one there. Older company payments keep what was typed in "Pay to" and "Payment details".
 // editing: a rejected request, fixed by the person who raised it and sent again (resubmitRequest).
-function CompanyForm({ viewer, onDone, editing }: { viewer: Viewer; onDone: () => void; editing?: MoneyOut }) {
+// Documents and screenshots (2026-10-27, Joel: "upload document / screenshot, multiple"): uploaded when it's sent,
+// stored as receipts kind 'support' on the request, so they never count as the payment receipt.
+function CompanyForm({ viewer, onDone, editing, docs = [] }: { viewer: Viewer; onDone: () => void; editing?: MoneyOut; docs?: Receipt[] }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [progress, setProgress] = useState<string | null>(null);
   const vendors = useVendors(true);
   const [f, setF] = useState({
     requestDate: editing?.requestDate || todayIso(), category: editing?.category || COMPANY_CATEGORIES[0], vendorId: editing?.vendorId || '',
@@ -545,16 +551,29 @@ function CompanyForm({ viewer, onDone, editing }: { viewer: Viewer; onDone: () =
       requestDate: f.requestDate, items: used, neededBy: f.neededBy, paymentDetails: vendor && hasBank(vendor) ? '' : f.paymentDetails.trim(),
     };
     return run(async () => {
-      if (editing) {
-        await resubmitRequest(editing, fields, viewer);
-      } else {
-        const id = `out_${Date.now()}`;
-        await setDoc(doc(db, 'money_out', id), {
-          id, dealId: '', kind: 'company', timing: 'before', ...fields,
-          status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
-          decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
-        });
+      const id = editing ? editing.id : `out_${Date.now()}`;
+      let up: Receipt[] = [];
+      if (files.length) {
+        setProgress('0%');
+        try { up = await uploadReceipts(files, { dealId: '', moneyInId: '', recordId: '', moneyOutId: id, kind: 'support' }, viewer, setProgress); }
+        catch (e) { setProgress(null); throw new Error(receiptError(e)); }
+        setProgress(null);
       }
+      try {
+        if (editing) {
+          await resubmitRequest(editing, fields, viewer);
+        } else {
+          await setDoc(doc(db, 'money_out', id), {
+            id, dealId: '', kind: 'company', timing: 'before', ...fields,
+            status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
+            decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
+          });
+        }
+      } catch (e) {
+        await Promise.all(up.map(r => removeReceipt(r).catch(() => {})));   // don't leave files without their request
+        throw e;
+      }
+      setFiles([]);
       draft.clear();
       onDone();
     });
@@ -615,12 +634,16 @@ function CompanyForm({ viewer, onDone, editing }: { viewer: Viewer; onDone: () =
       {!(vendor && hasBank(vendor)) && (
         <div><label className={small} htmlFor="cp-bank">Payment details (optional)</label><input id="cp-bank" value={f.paymentDetails} onChange={e => setF(x => ({ ...x, paymentDetails: e.target.value }))} className={input} placeholder="Only if the vendor has no bank details yet" /></div>
       )}
+      <div className="space-y-2">
+        {docs.length > 0 && <ReceiptList receipts={docs} viewer={viewer} />}
+        <ReceiptPick files={files} onFiles={setFiles} label="Documents or screenshots (optional): invoice, quotation, chat" what="document" />
+      </div>
 
       <p className="text-sm text-ink-soft">{viewer.role === 'management' ? 'The other manager must approve this before it can be paid.' : 'A manager must approve this before it can be paid.'}</p>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
         <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
-        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{editing ? 'Send for approval again' : 'Send for approval'}</button>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{progress !== null ? `Uploading… ${progress}` : editing ? 'Send for approval again' : 'Send for approval'}</button>
       </div>
     </form>
   );
@@ -628,6 +651,7 @@ function CompanyForm({ viewer, onDone, editing }: { viewer: Viewer; onDone: () =
 
 function CompanyPayments({ outs, viewer }: { outs: MoneyOut[]; viewer: Viewer }) {
   const [adding, setAdding] = useState(false);
+  const docs = useReceipts(true).filter(r => r.kind === 'support');
   const [month, setMonth] = useState('');   // '' = all months
   const list = outs.filter(isCompanyPayment);
   const dateOf = (o: MoneyOut) => String(o.requestDate || o.requestedAt || '').slice(0, 10);
@@ -660,7 +684,7 @@ function CompanyPayments({ outs, viewer }: { outs: MoneyOut[]; viewer: Viewer })
       )}
       {shown.length === 0
         ? <p className="text-[15px] text-ink-soft">{list.length ? 'No company payments in this month.' : 'No company payments yet.'}</p>
-        : <ul className="space-y-2">{shown.map(o => <OutRow key={o.id} o={o} viewer={viewer} />)}</ul>}
+        : <ul className="space-y-2">{shown.map(o => <OutRow key={o.id} o={o} viewer={viewer} docs={docs.filter(r => r.moneyOutId === o.id)} />)}</ul>}
     </section>
   );
 }

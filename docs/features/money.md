@@ -142,3 +142,11 @@ What was built:
   - **Reminders:** `partDueFlags` (work queue and My home): amber within the checklist red-flag days of the due date, red on and after it, "(still waiting for approval)" when not approved. `prePaymentFlags` skips parts with a due date so nothing shows twice.
   - Fix and send again stays per part; deleting a part deletes only that part.
 - Nothing to publish (no rules change). Go-live checklist item 75.
+
+## Documents and screenshots on company payments (2026-10-27)
+
+Joel: "need to have upload document / screenshot, multiple". Raise a company payment (and Fix and send again) has a
+box for one or more documents or screenshots (drop, paste with Ctrl+V, or choose), uploaded when it is sent; all or
+none. Stored in `payment_receipts` with `moneyOutId` and kind `support`, shown as "Document" on the request in Company
+payments and on its Payments out card. They never count as the payment receipt (Payments out `receiptsOf` skips
+them). Nothing to publish.
