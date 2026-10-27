@@ -233,21 +233,21 @@ export default function GlobalSearch({ viewer, people, deals, quotations, outlin
       {open && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 px-4 pt-[10vh] font-sans" role="dialog" aria-modal="true" aria-label="Search">
           <div ref={panelRef} className="flex max-h-[75vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-line bg-white text-left shadow-xl">
-            <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-              <Search className="h-5 w-5 shrink-0 text-ink-soft" />
+            <div className="flex items-center gap-3 border-b border-line px-5 py-4">
+              <Search className="h-5 w-5 shrink-0 text-accent" />
               <input
                 ref={inputRef}
                 value={text}
                 onChange={e => setText(e.target.value)}
                 onKeyDown={onKeyDown}
                 placeholder="Search clients, deals, quotations, outlines, trainers, venues…"
-                className="min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-soft"
+                className="min-w-0 flex-1 border-0 bg-transparent text-base text-ink outline-none! placeholder:text-ink-soft/70"
                 aria-label="Search everything"
                 aria-controls="global-search-results"
                 aria-activedescendant={flat[active] ? `gs-${active}` : undefined}
               />
               {loading && <Loader2 className="h-4 w-4 animate-spin text-ink-soft" />}
-              <button type="button" onClick={close} className="rounded p-1 text-ink-soft hover:bg-surface hover:text-ink" aria-label="Close search">
+              <button type="button" onClick={close} className="rounded-lg p-1.5 text-ink-soft hover:bg-surface hover:text-ink" aria-label="Close search">
                 <X className="h-4 w-4" />
               </button>
             </div>
