@@ -9,8 +9,9 @@
 // Automatic SST = the SST part of the income when the deal's quotation adds SST or its price includes SST
 // (its rate, normally 8%; lib/quoteSst.ts);
 // Management can type the amount instead, saved in project_pl/{dealId}.sstAmount. SST comes off profit.
-// Commission (Joel, 2026-10-20): the deal owner (sales person) earns commissionPct (3%) of the selling price before SST
-// and before HRDC's %, i.e. income minus SST. It comes off profit; it isn't a payment request (it's for payslips later).
+// Commission (Joel, 2026-10-20; base changed 2026-10-27, for every training, past ones too): the deal owner (sales person)
+// earns commissionPct (3%) of the price after SST and after HRDC's %, i.e. income minus SST minus HRDC's 4% (not minus any
+// other shortfall: the client tops that up). It comes off profit; it isn't a payment request (it's for payslips later).
 // Co-closed deals (2026-10-24, lib/coClose.ts): the co-closer shares the owner's commission by the agreed %, or gets their
 // own % of the price on top (then commission is the total of both); commissionShares says who gets what. commissionTo
 // stays the owner, who keeps the GP % KPI.
@@ -49,7 +50,8 @@ export interface ProjectRow {
   sstTyped: boolean;             // Management typed the SST amount
   sstRate: number;               // the quotation's SST rate, 0 if it adds no SST
   hrdcFee: number;               // HRDC's % (plus any extra shortfall HRDC didn't pay)
-  commission: number;            // the sales person's commission (commissionPct of income before SST)
+  commission: number;            // the sales person's commission (commissionPct of commissionBase)
+  commissionBase: number;        // income minus SST minus HRDC's % (0 if cancelled)
   commissionPct: number;
   commissionTo: string;          // the deal owner's id (the sales person)
   commissionShares: CommissionShare[];   // who gets the commission: the owner, plus a co-closer (share or own %)
@@ -98,13 +100,15 @@ export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], al
   const sst = sstTyped ? (typed as number) : (income * sstRate) / (100 + sstRate);
   const hrdcFee = estimate ? (isHrdc(deal) ? income * (s.hrdcDeductionPct / 100) : 0) : pl.hrdcFee + pl.shortfall;
   const beforeSst = income - sst;
-  const ownerCommission = cancelled ? 0 : Math.round(Math.max(0, beforeSst) * (s.commissionPct || 0)) / 100;
-  const shares = commissionShares(deal, dealOwnerId(deal), ownerCommission, cancelled ? 0 : beforeSst, s.commissionPct || 0);
+  const hrdcPart = estimate ? hrdcFee : pl.hrdcFee;   // HRDC's % only, not any other shortfall
+  const commissionBase = cancelled ? 0 : Math.max(0, beforeSst - hrdcPart);
+  const ownerCommission = Math.round(commissionBase * (s.commissionPct || 0)) / 100;
+  const shares = commissionShares(deal, dealOwnerId(deal), ownerCommission, commissionBase, s.commissionPct || 0);
   const commission = sharesTotal(shares);   // more than the owner's when the co-closer has their own %
   const profit = income - sst - hrdcFee - commission - pl.costs;
 
   return {
-    deal, trainingDate, training, estimate, income, sst, sstTyped, sstRate, hrdcFee, commission, commissionPct: s.commissionPct || 0, commissionTo: dealOwnerId(deal),
+    deal, trainingDate, training, estimate, income, sst, sstTyped, sstRate, hrdcFee, commission, commissionBase, commissionPct: s.commissionPct || 0, commissionTo: dealOwnerId(deal),
     commissionShares: shares,
     costs: pl.costs, profit,
     margin: beforeSst > 0 ? (profit / beforeSst) * 100 : 0,

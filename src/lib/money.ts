@@ -260,7 +260,7 @@ export interface MoneySettings {
   overdueDays: number;                 // invoice or claim unpaid this long = overdue
   claimDeadlineDays: number | null;    // days after training to submit the HRDC claim (blank = no deadline countdown)
   claimReminderDays: number;           // claim still not submitted this many days after training = red
-  commissionPct: number;               // sales person's commission: % of the selling price before SST and HRDC's % (Joel, 2026-10-20: 3)
+  commissionPct: number;               // sales person's commission: % of the selling price after SST and HRDC's % (Joel, 2026-10-20: 3; base 2026-10-27)
   behalfReminderDays: number;          // paid on behalf of the client, not claimed back this many days after training = red
   balanceDaysBefore: number;           // a cost paid in parts: the balance is due this many days before the training (2026-10-26)
   // Earlier HRDC % and commission % (process audit, 2026-10-22): each applied up to and including 'until', so changing

@@ -268,7 +268,7 @@ export default function ProjectPL({ pipelinesSync, people, viewer }: Props) {
           </div>
         )}
         <p className="mt-3 text-sm text-ink-soft">
-          Profit = income − SST − HRDC's {settings.hrdcDeductionPct}% (and anything else HRDC didn't pay) − the sales person's {settings.commissionPct}% commission (on the price before SST and HRDC's %) − approved and paid costs.
+          Profit = income − SST − HRDC's {settings.hrdcDeductionPct}% (and anything else HRDC didn't pay) − the sales person's {settings.commissionPct}% commission (on the price after SST and HRDC's %) − approved and paid costs.
           SST is worked out automatically when the deal's quotation adds SST (normally 8%), or you can type the amount in a line's details.
           "Estimate" means no invoice or claim is recorded yet, so the deal value is used. Click a line to see the details, or tick lines to add them up.
           Invoices, claims and costs are added in the deal's Money section (Admin work).
@@ -333,7 +333,7 @@ function Breakdown({ r, viewer, personName }: { r: ProjectRow; viewer: { id: str
         )}
         <p className="mt-2 text-ink-soft">Received {formatRM(r.received)} · still to come in {formatRM(r.toComeIn)}</p>
         <SstBox r={r} viewer={viewer} />
-        <p className="mt-2"><span className="font-semibold">Commission</span> {formatRM(r.commission)} <span className="text-ink-soft">({r.commissionShares.length > 1 ? '' : `${r.commissionPct}% of `}{formatRM(r.income - r.sst)}, the price before SST and HRDC's %; for {r.commissionShares.length > 1 ? r.commissionShares.map(x => `${personName(x.id)} ${x.label} (${formatRM(x.amount)})`).join(', ') : personName(r.commissionTo)})</span></p>
+        <p className="mt-2"><span className="font-semibold">Commission</span> {formatRM(r.commission)} <span className="text-ink-soft">({r.commissionShares.length > 1 ? '' : `${r.commissionPct}% of `}{formatRM(r.commissionBase)}, the price after SST and HRDC's %; for {r.commissionShares.length > 1 ? r.commissionShares.map(x => `${personName(x.id)} ${x.label} (${formatRM(x.amount)})`).join(', ') : personName(r.commissionTo)})</span></p>
       </div>
       <div>
         <p className="mb-1 font-semibold">Costs (approved and paid)</p>

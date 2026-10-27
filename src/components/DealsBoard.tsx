@@ -1105,7 +1105,7 @@ export default function DealsBoard({
                         aria-label={form.coCloseMode === 'own' ? "Co-closer's own commission (% of the price)" : "Co-closer's share of the commission (%)"} disabled={formWon && viewer.role !== 'management'} />
                       <span className="text-sm text-ink-soft">
                         {form.coCloseMode === 'own'
-                          ? '% of the price before SST, on top; the owner keeps the full commission'
+                          ? "% of the price after SST and HRDC's %, on top; the owner keeps the full commission"
                           : `% of the commission (owner keeps ${Number(form.coClosePct) > 0 && Number(form.coClosePct) < 100 ? 100 - Number(form.coClosePct) : '…'}%)`}
                       </span>
                     </div>

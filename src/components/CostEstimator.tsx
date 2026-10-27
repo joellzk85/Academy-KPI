@@ -199,7 +199,7 @@ function EstimateEditor({ start, isNew, onBack }: { start: CostEstimate; isNew: 
   const suggested = target > 0 ? priceForTarget(e, target) : null;
 
   const lineRows = (key: 'costs' | 'expenses') => e[key].map(l => {
-    const amt = lineAmount(l, r.price);
+    const amt = lineAmount(l, r.netSales);
     return (
       <div key={l.id} className="grid grid-cols-[1fr_auto] items-center gap-2 border-b border-line/60 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_270px_120px_64px_32px]">
         <input className={`${cellInput} w-full`} value={l.label} placeholder="Item" aria-label="Item" onChange={ev => setLine(key, l.id, { label: ev.target.value })} />
@@ -209,12 +209,12 @@ function EstimateEditor({ start, isNew, onBack }: { start: CostEstimate; isNew: 
         <div className="col-span-2 flex items-center gap-1.5 sm:col-span-1">
           <select
             aria-label="How it's worked out"
-            className="w-[92px] shrink-0 rounded-md border border-line bg-white px-1.5 py-1.5 text-sm text-ink"
+            className="w-[120px] shrink-0 rounded-md border border-line bg-white px-1.5 py-1.5 text-sm text-ink"
             value={l.mode}
             onChange={ev => setLine(key, l.id, { mode: ev.target.value as 'rm' | 'pct' })}
           >
             <option value="rm">RM</option>
-            <option value="pct">% of price</option>
+            <option value="pct">% of net sales</option>
           </select>
           {l.mode === 'rm' ? (
             <>
@@ -223,7 +223,7 @@ function EstimateEditor({ start, isNew, onBack }: { start: CostEstimate; isNew: 
               <NumInput ariaLabel="Unit price" value={l.unit} onChange={v => setLine(key, l.id, { unit: v })} />
             </>
           ) : (
-            <NumInput ariaLabel="Percent of price" value={l.pct} onChange={v => setLine(key, l.id, { pct: v })} />
+            <NumInput ariaLabel="Percent of net sales" value={l.pct} onChange={v => setLine(key, l.id, { pct: v })} />
           )}
         </div>
         <p className="text-right text-sm font-semibold tabular-nums sm:text-[15px]">{formatRM(amt)}</p>

@@ -1,13 +1,13 @@
 // Costing estimator (Joel, 2026-10-21): a mock P&L to help set the price of a training before quoting.
 // "Selling price − cost of training − expenses = GP", GP per training only (no net profit).
-// SST and HRDC's % are optional switches; every cost and expense line is typed line by line and shows its % of the price.
+// SST and HRDC's % are optional switches; every cost and expense line is typed line by line and shows its % of the price; % lines are a % of net sales (after HRDC's %).
 // Several prices can be compared side by side against the same costs.
 // Saved in `cost_estimates` (owner sees their own; Admin and Management see all). Nothing here touches deals or money.
 
 export type EstimateLine = {
   id: string;
   label: string;
-  mode: 'rm' | 'pct';     // rm: qty × unit price; pct: a % of the selling price (e.g. sales commission)
+  mode: 'rm' | 'pct';     // rm: qty × unit price; pct: a % of net sales, the price after HRDC's % (e.g. sales commission, Joel 2026-10-27)
   qty: number;
   unit: number;
   pct: number;
@@ -69,9 +69,9 @@ export function blankEstimate(ownerId: string, opts: { hrdcPct: number; commissi
 
 const n = (v: any) => Number(v) || 0;
 
-// The amount of one line at a given selling price.
-export function lineAmount(l: EstimateLine, price: number): number {
-  return l.mode === 'pct' ? (price * n(l.pct)) / 100 : n(l.qty) * n(l.unit);
+// The amount of one line. % lines are a % of net sales (the price after HRDC's %), like the sales commission in the Project P&L.
+export function lineAmount(l: EstimateLine, netSales: number): number {
+  return l.mode === 'pct' ? (netSales * n(l.pct)) / 100 : n(l.qty) * n(l.unit);
 }
 
 export type EstimateResult = {
@@ -93,20 +93,20 @@ export function estimateResult(e: Pick<CostEstimate, 'sstOn' | 'sstRate' | 'hrdc
   const clientPays = price + sst;
   const hrdcFee = e.hrdcOn ? (clientPays * n(e.hrdcPct)) / 100 : 0;
   const netSales = price - hrdcFee;
-  const costs = e.costs.reduce((s, l) => s + lineAmount(l, price), 0);
-  const expenses = e.expenses.reduce((s, l) => s + lineAmount(l, price), 0);
+  const costs = e.costs.reduce((s, l) => s + lineAmount(l, netSales), 0);
+  const expenses = e.expenses.reduce((s, l) => s + lineAmount(l, netSales), 0);
   const gp = netSales - costs - expenses;
   return { price, sst, clientPays, hrdcFee, netSales, costs, expenses, gp, gpPct: price ? (gp / price) * 100 : 0, perPax: n(e.pax) > 0 ? price / n(e.pax) : 0 };
 }
 
-// The selling price that gives the target GP %. Fixed RM lines don't change with price; % lines and HRDC's % do.
+// The selling price that gives the target GP %. Fixed RM lines don't change with price; % lines (of net sales) and HRDC's % do.
 // Returns null when the target can't be reached (the %s alone already eat the whole price).
 export function priceForTarget(e: Pick<CostEstimate, 'sstOn' | 'sstRate' | 'hrdcOn' | 'hrdcPct' | 'costs' | 'expenses'>, targetPct: number): number | null {
   const lines = [...e.costs, ...e.expenses];
   const fixed = lines.filter(l => l.mode === 'rm').reduce((s, l) => s + n(l.qty) * n(l.unit), 0);
   const pctShare = lines.filter(l => l.mode === 'pct').reduce((s, l) => s + n(l.pct), 0) / 100;
   const hrdcShare = e.hrdcOn ? (n(e.hrdcPct) / 100) * (1 + (e.sstOn ? n(e.sstRate) / 100 : 0)) : 0;
-  const left = 1 - hrdcShare - pctShare - n(targetPct) / 100;
+  const left = (1 - hrdcShare) * (1 - pctShare) - n(targetPct) / 100;
   if (left <= 0 || fixed <= 0) return null;
   return Math.ceil(fixed / left / 10) * 10;   // rounded up to the next RM 10
 }

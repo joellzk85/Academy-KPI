@@ -1,7 +1,7 @@
 // Co-closed deals (Joel, 2026-10-24): a deal closed together with a teammate. Two ways to pay the co-closer:
 // - 'share' (default): they get coClosePct % of the sales commission and the deal owner keeps the rest; the total
 //   commission doesn't change.
-// - 'own': the owner keeps the full commission and the co-closer gets their own coClosePct % of the price before SST
+// - 'own': the owner keeps the full commission and the co-closer gets their own coClosePct % of the price after SST and HRDC's %
 //   (like commissionPct), on top; that extra commission comes off the deal's profit.
 // KPIs (Closing RM, won deals, GP % credit) stay 100% with the owner (Joel's choice: "commission only").
 // Deal fields: coCloserId, coCloserName, coCloseMode, coClosePct. Once won, only Management changes them (firestore.rules).
@@ -19,7 +19,7 @@ export function coCloser(deal: any): { id: string; name: string; pct: number; mo
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Who gets the commission. commission = the owner's (commissionPct of base); base = the price before SST (0 if cancelled). */
+/** Who gets the commission. commission = the owner's (commissionPct of base); base = the price after SST and HRDC's % (0 if cancelled). */
 export function commissionShares(deal: any, ownerId: string, commission: number, base: number, ownerPct: number): CommissionShare[] {
   const co = coCloser(deal);
   if (!co || co.id === ownerId) return [{ id: ownerId, amount: commission, label: 'the whole commission' }];
@@ -60,6 +60,6 @@ export function coCloseText(deal: any, name: string): string {
   const co = coCloser(deal);
   if (!co) return '';
   return co.mode === 'own'
-    ? `${name}: own ${co.pct}% of the price before SST, on top (owner keeps the full commission)`
+    ? `${name}: own ${co.pct}% of the price after SST and HRDC's %, on top (owner keeps the full commission)`
     : `${name}: ${co.pct}% of the commission (owner ${100 - co.pct}%)`;
 }
