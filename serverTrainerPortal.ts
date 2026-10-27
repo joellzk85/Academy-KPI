@@ -24,7 +24,8 @@ import {
   icsCalendar, inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
 import { FieldValue } from 'firebase-admin/firestore';
-import { cleanTrainerPart, dealPax, newReport, reportChanges, reportDates, reportGaps, withDates, withPax } from './src/lib/trainingReport';
+import { cleanTrainerPart, dealPax, newReport, outlineTopics, reportChanges, reportDates, reportGaps, withDates, withPax } from './src/lib/trainingReport';
+import { readReportSettings } from './src/lib/reportSettings';
 
 const BUCKET = String((firebaseConfig as any).storageBucket || '');
 const nowIso = () => new Date().toISOString();
@@ -588,7 +589,7 @@ export function registerTrainerPortalRoutes(app: Express) {
     const base = mine
       ? withDates({ ...newReport(deal.id, trainerId, t.name || '', seed), ...mine, ...(mine.trainerDraft || {}) }, seed.dates)
       : newReport(deal.id, trainerId, t.name || '', seed);
-    const { participant, showToHr, history, trainerDraft, hrHeader, ...report } = withPax(base, seed.pax) as any;
+    const { participant, showToHr, showToHod, history, trainerDraft, hrHeader, checkin, checkinAnswer, ...report } = withPax(base, seed.pax) as any;
     // Photos are uploaded once (Joel, 2026-10-23): a report with no photos yet starts with the fee request's.
     if (!(report.photos || []).length) {
       const job: any = (await db.collection('trainer_jobs').doc(jobId(deal.id, trainerId)).get()).data();
@@ -597,6 +598,8 @@ export function registerTrainerPortalRoutes(app: Express) {
     }
     return {
       report, names: seed.names, pax: seed.pax, pending: !!mine?.trainerDraft,
+      // Management's questions (2026-10-27, config/training_report): only what the form needs.
+      settings: reportSettingsForTrainer(await reportSettings(db)),
       programmes: (await db.collection('programmes').get()).docs.map(d => ({ id: d.id, name: String(d.data().name || '').trim() })).filter(p => p.name),
     };
   }));
@@ -617,7 +620,7 @@ export function registerTrainerPortalRoutes(app: Express) {
     const part = withPax(cleanTrainerPart(req.body?.report, list => cleanFiles(list, claimFolder(trainerId, deal.id), 12)), dealPax(deal));
     const submit = req.body?.submit === true;
     if (submit) {
-      const gaps = reportGaps(part);
+      const gaps = reportGaps(part, await reportSettings(db));
       if (gaps.length) throw new UserError(400, 'invalid', `Please fill in: ${gaps.join(', ')}.`);
     }
     const at = nowIso();
@@ -718,5 +721,14 @@ async function reportSeed(db: Firestore, deal: any, checklist: any) {
     .sort((a, b) => Number(b.status === 'sent') - Number(a.status === 'sent') || String(b.sentAt || b.date || '').localeCompare(String(a.sentAt || a.date || '')));
   const objectives = ((outlines[0]?.outcomes || []) as any[]).map(x => String(x || '').trim()).filter(Boolean).slice(0, 40);
   const names = ((checklist?.t3?.trainees || []) as any[]).map(x => String(x?.name || '').trim()).filter(Boolean).slice(0, 500);
-  return { dates: reportDates(String(deal.trainingDate || '').slice(0, 10), trainingDays(deal)), objectives, names, pax: dealPax(deal) };
+  return { dates: reportDates(String(deal.trainingDate || '').slice(0, 10), trainingDays(deal)), objectives, names, pax: dealPax(deal), topics: outlineTopics(outlines[0]) };
+}
+
+// Management's training report settings (2026-10-27, lib/reportSettings.ts).
+async function reportSettings(db: Firestore) {
+  return readReportSettings((await db.collection('config').doc('training_report').get()).data());
+}
+// The trainer sees the questions, never the check-in questions or who changed the settings.
+function reportSettingsForTrainer(s: ReturnType<typeof readReportSettings>) {
+  return { sections: s.sections, custom: s.custom };
 }

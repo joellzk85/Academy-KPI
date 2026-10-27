@@ -1,12 +1,13 @@
 // Training reports (Joel, 2026-10-21): every training report in one list, on the Trainers page (Admin and Management).
 // Trainings that have started with no report yet show as "Not written yet". A row opens the same panel as the deal's
 // "Training report" step; marking it checked or reopening it ticks or unticks that step (setReportStep).
+// Settings (2026-10-27, Management only): the questions, HR's and the HOD's copies, the check-in, with a preview.
 
 import React, { useEffect, useMemo, useState } from 'react';
 import ListPager, { listSelect } from './ListPager';
 import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { FileText, Search } from 'lucide-react';
+import { FileText, Search, Settings } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { dealStage, formatDate, isDeletedDeal, todayIso, trainingDateText } from '../lib/deals';
 import { approvalCodeOf, effectiveTrainer, effectiveVenue, leadTrainerTask } from '../lib/checklist';
@@ -14,6 +15,7 @@ import { STATUS_TEXT, ReportStatus, TrainingReport } from '../lib/trainingReport
 import { isInternalTrainer } from '../lib/trainerPortal';
 import { ReportPanel, setReportStep, useTrainingReport, useTrainingReports } from './TrainingReportAdmin';
 import type { ReportHeader } from './TrainingReportDocument';
+const TrainingReportSettings = React.lazy(() => import('./TrainingReportSettings'));
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 type Status = ReportStatus | 'none';
@@ -42,6 +44,7 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
   const [sortBy, setSortBy] = useState<'' | ListSort>('');   // '' = waiting to be checked first
   const [openId, setOpenId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const today = todayIso();
 
   const rows: Row[] = useMemo(() => deals
@@ -110,6 +113,9 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
           <option value="az">Programme A to Z</option>
           <option value="za">Programme Z to A</option>
         </select>
+        {viewer.role === 'management' && (
+          <button type="button" className={btnSecondary} onClick={() => setSettingsOpen(true)}><Settings className="h-4 w-4" /> Settings</button>
+        )}
       </div>
 
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
@@ -150,6 +156,9 @@ export default function TrainingReportsList({ viewer, deals, checklists, quotes,
         </div>
       )}
 
+      {settingsOpen && viewer.role === 'management' && (
+        <React.Suspense fallback={null}><TrainingReportSettings viewer={viewer} onClose={() => setSettingsOpen(false)} /></React.Suspense>
+      )}
       {open && <OpenReport row={open} viewer={viewer} onClose={() => setOpenId(null)} onChecked={() => tick(true)} onReopened={() => tick(false)} />}
     </section>
   );

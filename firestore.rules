@@ -92,16 +92,17 @@ service cloud.firestore {
       // scorecard (2026-10-25): the performance scorecard's weights per level, people's levels and competency skills. Management only.
       // month_locks (2026-10-22): months Management reopened (Deal checks → Month lock); Management only.
       // one_to_one (2026-10-25): see below.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one']))
+      // training_report (2026-10-27): the training report questions and HR's / the HOD's copies; Management only.
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report']))
                             || (docId in ['checklist_tasks'] && isStaff())
-                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard'] && isManagement())
+                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report'] && isManagement())
                             // one_to_one (2026-10-25): who runs the 1-to-1s and the questions. The owner sets it (owner
                             // override rule); the person who runs them changes the questions, never who runs them.
                             || (docId == 'one_to_one' && isMember() && resource != null
                                 && resource.data.get('coachId', '') == request.auth.uid
                                 && request.resource.data.get('coachId', '') == request.auth.uid);
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one']));
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -1124,13 +1125,19 @@ service cloud.firestore {
       }
       function trainerKeys() {
         return ['registered', 'days', 'objectives', 'observations', 'outstanding', 'attention', 'followUps', 'photos',
-                'internal', 'trainerId', 'trainerName', 'submittedAt', 'submittedByName'];
+                'internal', 'trainerId', 'trainerName', 'submittedAt', 'submittedByName',
+                'summary', 'hours', 'certificates', 'topics', 'scores', 'personNotes', 'actions', 'hodTips', 'answers'];
       }
+      // 2026-10-27: the HOD's 30-day check-in is written only by the server (serverReportCheckin.ts).
+      function serverKeys() { return ['checkin', 'checkinAnswer']; }
       allow read: if isMember();
-      allow create: if isStaff() && (!('showToHr' in request.resource.data) || isManagement())
+      allow create: if isStaff() && ((!('showToHr' in request.resource.data) && !('showToHod' in request.resource.data)) || isManagement())
+        && !request.resource.data.keys().hasAny(serverKeys())
         && !internalTrainer(request.resource.data.get('trainerId', ''));
       allow update: if isStaff()
-        && (request.resource.data.get('showToHr', {}) == resource.data.get('showToHr', {}) || isManagement())
+        && ((request.resource.data.get('showToHr', {}) == resource.data.get('showToHr', {})
+             && request.resource.data.get('showToHod', {}) == resource.data.get('showToHod', {})) || isManagement())
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverKeys())
         && (!internalTrainer(resource.data.get('trainerId', ''))
             || !request.resource.data.diff(resource.data).affectedKeys().hasAny(trainerKeys()));
       allow delete: if isManagement();

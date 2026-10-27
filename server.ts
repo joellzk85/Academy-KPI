@@ -11,6 +11,7 @@ import { registerMailRoutes } from "./serverMail";
 import { registerTrainerPortalRoutes } from "./serverTrainerPortal";
 import { registerTrainerDocRoutes } from "./serverTrainerDocs";
 import { registerDocLinkRoutes } from "./serverDocLinks";
+import { registerReportCheckinRoutes } from "./serverReportCheckin";
 import { registerPhotoRoutes } from "./serverPhotos";
 import { registerProposalLinkRoutes } from "./serverProposalLinks";
 import { registerLinkVisitRoutes } from "./serverLinkVisits";
@@ -58,6 +59,8 @@ async function startServer() {
 
   // Client links: a client opens a sent quotation or course outline as a web page, without logging in
   registerDocLinkRoutes(app);
+  // The HOD's 30-day check-in on a training report (/c/<token>, 2026-10-27).
+  registerReportCheckinRoutes(app);
 
   // Trainer portal (/trainer): trainers with access log in by email; Admin and Management give access
   registerTrainerPortalRoutes(app);

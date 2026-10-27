@@ -20,6 +20,17 @@
 // The number of participants comes from the deal's Participants (typed only when the deal has none).
 // Management picks every section on HR's copy (showToHr: the main sections are on unless unticked, the internal
 // notes off unless ticked) and can send it to HR as a PDF or a client link (/r/<token>, serverDocLinks.ts).
+//
+// 2026-10-27 (Joel: "the report had to be beneficial to HR and the HOD"): Management sets the questions in Trainers →
+// Training reports → Settings (lib/reportSettings.ts: sections on / off, wording, required, their own questions).
+// New sections: summary, training hours and certificates, topics covered, before and after test scores, notes on each
+// participant, action plan, how the HOD can help; answers to Management's own questions (answers[]). Two copies:
+// HR's (showToHr) and the head of department's (showToHod), each section on or off by default from the settings.
+// A 30-day check-in link for the HOD (/c/<token>, serverReportCheckin.ts) saves their answers in checkinAnswer.
+
+import {
+  CopyKind, CopyKey, ReportAnswer, ReportSettings, SectionKey, answerText, cleanAnswers, onCopy, sectionOf, sectionsOf,
+} from './reportSettings';
 
 export type ReportStatus = 'draft' | 'submitted' | 'returned' | 'checked';
 export type TimeKey = '' | 'on_time' | 'ran_over' | 'rushed' | 'finished_early';
@@ -45,6 +56,12 @@ export interface ReportInternal {
 }
 
 export interface ParticipantRating { avg: number; responses: number; note: string; byName?: string; at?: string }
+export interface ScoreRow { name: string; pre: number | null; post: number | null }
+export interface Scores { outOf: number; rows: ScoreRow[] }
+export interface PersonNote { name: string; strengths: string; improve: string }
+// The HOD's answers on the 30-day check-in link (server only).
+export interface CheckinAnswer { name: string; role: string; at: string; answers: ReportAnswer[] }
+export interface CheckinLink { token: string; status: 'open' | 'answered' | 'stopped'; createdAt: string; byName: string }
 
 export interface TrainingReport {
   dealId: string;
@@ -60,8 +77,24 @@ export interface TrainingReport {
   followUps: FollowUp[];
   photos: ReportPhoto[];
   internal: ReportInternal;
+  // 2026-10-27 (older reports may not have these)
+  summary?: string;
+  hours?: number;
+  certificates?: number;
+  topics?: string[];
+  scores?: Scores;
+  personNotes?: PersonNote[];
+  actions?: string[];
+  hodTips?: string[];
+  answers?: ReportAnswer[];
   participant?: ParticipantRating | null;
-  showToHr?: Partial<Record<HrKey, boolean>>;
+  showToHr?: Partial<Record<CopyKey, boolean>>;
+  showToHod?: Partial<Record<CopyKey, boolean>>;
+  checkin?: CheckinLink | null;          // server only
+  checkinAnswer?: CheckinAnswer | null;  // server only
+  // Only on a copy made by copyOf (HR's or the HOD's): which sections print, with their titles.
+  copy?: CopyKind;
+  printed?: Partial<Record<SectionKey, { on: boolean; label: string }>>;
   submittedAt?: string;
   submittedByName?: string;
   returnNote?: string;
@@ -79,39 +112,14 @@ export interface TrainingReport {
 // The trainer's own part of a saved report. For an internal trainer (2026-10-25) only they write it (through the
 // server); Admin and Management may change everything else (status, participants' rating, HR's copy), and
 // firestore.rules refuses a change to these keys from the CRM.
-export const TRAINER_KEYS = ['registered', 'days', 'objectives', 'observations', 'outstanding', 'attention', 'followUps', 'photos', 'internal', 'trainerId', 'trainerName', 'submittedAt', 'submittedByName'] as const;
+export const TRAINER_KEYS = ['registered', 'days', 'objectives', 'observations', 'outstanding', 'attention', 'followUps', 'photos', 'internal', 'trainerId', 'trainerName', 'submittedAt', 'submittedByName',
+  'summary', 'hours', 'certificates', 'topics', 'scores', 'personNotes', 'actions', 'hodTips', 'answers'] as const;
+// Written only by the server (the HOD's check-in link); the CRM never sends them back.
+export const SERVER_KEYS = ['trainerDraft', 'revisions', 'checkin', 'checkinAnswer'] as const;
 
 export interface Revision { at: string; byName: string; changes: string[] }
 export interface ReportHeaderData { programme: string; client: string; dates: string; venue: string; trainer: string; grantNumber: string }
 export type TrainerPart = ReturnType<typeof cleanTrainerPart>;
-
-// The main sections of HR's copy: on unless Management unticks them.
-export type PublicKey = 'attendance' | 'objectives' | 'participant' | 'observations' | 'outstanding' | 'attention' | 'followUps' | 'photos';
-export const PUBLIC_PARTS: { key: PublicKey; label: string }[] = [
-  { key: 'attendance', label: 'Attendance' },
-  { key: 'objectives', label: 'Objectives achieved' },
-  { key: 'participant', label: "Participants' rating" },
-  { key: 'observations', label: "Trainer's observations" },
-  { key: 'outstanding', label: 'Outstanding participants' },
-  { key: 'attention', label: 'Participants needing special attention' },
-  { key: 'followUps', label: 'Recommended follow-up training' },
-  { key: 'photos', label: 'Photos' },
-];
-// The internal sections Management can put on HR's copy (off unless ticked).
-export type InternalKey = 'trainerStars' | 'missing' | 'time' | 'review' | 'issues' | 'leads';
-export type HrKey = PublicKey | InternalKey;
-const PUBLIC_KEYS = new Set<string>(['attendance', 'objectives', 'participant', 'observations', 'outstanding', 'attention', 'followUps', 'photos']);
-/** Is this section on HR's copy? */
-export const onHrCopy = (r: Pick<TrainingReport, 'showToHr'>, key: HrKey) =>
-  PUBLIC_KEYS.has(key) ? r.showToHr?.[key] !== false : r.showToHr?.[key] === true;
-export const INTERNAL_PARTS: { key: InternalKey; label: string }[] = [
-  { key: 'trainerStars', label: "Trainer's rating of the training" },
-  { key: 'missing', label: 'What was missing' },
-  { key: 'time', label: 'Time management' },
-  { key: 'review', label: 'Review (went well, do better, start, stop, more)' },
-  { key: 'issues', label: 'Issues on the day' },
-  { key: 'leads', label: 'Sales leads spotted' },
-];
 
 export const TIME_LABELS: Record<Exclude<TimeKey, ''>, string> = {
   on_time: 'Ran on time',
@@ -151,6 +159,14 @@ export interface ReportSeed {
   objectives: string[];       // from the deal's course outline (learning outcomes)
   names: string[];            // participants from the T3 name list (HRDC deals), if any
   pax?: number;               // the deal's Participants
+  topics?: string[];          // the course outline's module titles (2026-10-27)
+}
+
+/** The course outline's module titles, for "Topics covered" (else the first line of each module's topics). */
+export function outlineTopics(o: any): string[] {
+  return (Array.isArray(o?.items) ? o.items : [])
+    .map((m: any) => String(m?.moduleTitle || '').trim() || String(m?.topics || '').split('\n')[0].trim())
+    .filter(Boolean).slice(0, 30);
 }
 
 /** The deal's number of participants (0 when not given). */
@@ -167,6 +183,8 @@ export function newReport(dealId: string, trainerId: string, trainerName: string
     objectives: seed.objectives.map(text => ({ text, stars: 0, comment: '' })),
     observations: '', outstanding: [], attention: [], followUps: [], photos: [],
     internal: emptyInternal(),
+    summary: '', hours: 0, certificates: 0, topics: seed.topics || [], scores: { outOf: 100, rows: [] },
+    personNotes: [], actions: [], hodTips: [], answers: [],
   };
 }
 
@@ -180,6 +198,8 @@ export function withDates(r: TrainingReport, dates: string[]): TrainingReport {
 const str = (v: any, max: number) => String(v ?? '').replace(/\u0000/g, '').trim().slice(0, max);
 const names = (v: any, most = 200) => (Array.isArray(v) ? v : []).map(x => str(x, 120)).filter(Boolean).slice(0, most);
 const stars = (v: any) => { const n = Math.round(Number(v) || 0); return n >= 1 && n <= 5 ? n : 0; };
+const score = (v: any) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Math.round(Math.min(10000, Math.max(0, Number(v))) * 10) / 10);
+const lines = (v: any, most: number, max = 500) => (Array.isArray(v) ? v : []).map(x => str(x, max)).filter(Boolean).slice(0, most);
 const pairs = (v: any, most = 50): NamedReason[] =>
   (Array.isArray(v) ? v : []).map((x: any) => ({ name: str(x?.name, 120), reason: str(x?.reason, 1000) })).filter(x => x.name || x.reason).slice(0, most);
 
@@ -209,18 +229,56 @@ export function cleanTrainerPart(d: any, photosOk: (list: any) => ReportPhoto[])
       wentWell: str(i.wentWell, 2000), doBetter: str(i.doBetter, 2000), start: str(i.start, 2000), stop: str(i.stop, 2000), more: str(i.more, 2000),
       issues: str(i.issues, 2000), leads: str(i.leads, 2000),
     },
+    summary: str(d?.summary, 3000),
+    hours: Math.round(Math.min(1000, Math.max(0, Number(d?.hours) || 0)) * 2) / 2,
+    certificates: Math.round(Math.min(10000, Math.max(0, Number(d?.certificates) || 0))),
+    topics: lines(d?.topics, 30),
+    scores: {
+      outOf: Math.round(Math.min(10000, Math.max(1, Number(d?.scores?.outOf) || 100))),
+      rows: (Array.isArray(d?.scores?.rows) ? d.scores.rows : []).slice(0, 300)
+        .map((x: any) => ({ name: str(x?.name, 120), pre: score(x?.pre), post: score(x?.post) })).filter((x: ScoreRow) => x.name || x.pre !== null || x.post !== null),
+    },
+    personNotes: (Array.isArray(d?.personNotes) ? d.personNotes : []).slice(0, 300)
+      .map((x: any) => ({ name: str(x?.name, 120), strengths: str(x?.strengths, 1000), improve: str(x?.improve, 1000) })).filter((x: PersonNote) => x.name || x.strengths || x.improve),
+    actions: lines(d?.actions, 20),
+    hodTips: lines(d?.hodTips, 20),
+    answers: cleanAnswers(d?.answers),
   };
 }
 
-/** What still has to be filled in before the report can be sent (empty when it's ready). */
-export function reportGaps(r: Pick<TrainingReport, 'registered' | 'days' | 'objectives' | 'observations' | 'internal'>): string[] {
+// Is a section filled in? (for "required" in the settings)
+function filled(r: Partial<TrainingReport>, key: SectionKey): boolean {
+  const i = r.internal || emptyInternal();
+  switch (key) {
+    case 'summary': return !!r.summary?.trim();
+    case 'hours': return (r.hours || 0) > 0;
+    case 'topics': return !!r.topics?.some(t => t.trim());
+    case 'scores': return !!r.scores?.rows.some(x => x.post !== null);
+    case 'observations': return !!r.observations?.trim();
+    case 'personNotes': return !!r.personNotes?.some(x => x.name.trim());
+    case 'outstanding': return !!r.outstanding?.some(x => x.name.trim());
+    case 'attention': return !!r.attention?.some(x => x.name.trim());
+    case 'actions': return !!r.actions?.some(t => t.trim());
+    case 'hodTips': return !!r.hodTips?.some(t => t.trim());
+    case 'followUps': return !!r.followUps?.some(x => x.name.trim());
+    case 'trainerStars': return !!i.trainerStars;
+    case 'time': return !!i.time;
+    case 'missing': return !!i.missing.trim();
+    case 'review': return REVIEW_PARTS.some(p => i[p.key].trim());
+    case 'issues': return !!i.issues.trim();
+    case 'leads': return !!i.leads.trim();
+    default: return true;
+  }
+}
+
+/** What still has to be filled in before the report can be sent (empty when it's ready), by Management's settings. */
+export function reportGaps(r: Pick<TrainingReport, 'registered' | 'days' | 'objectives' | 'observations' | 'internal'> & Partial<TrainingReport>, s?: ReportSettings | null): string[] {
   const out: string[] = [];
   if (!(r.registered > 0)) out.push('How many participants were registered');
   if (!r.objectives.length) out.push('At least one objective');
   else if (r.objectives.some(o => !o.stars)) out.push('A star rating for every objective');
-  if (!r.observations.trim()) out.push('Your observations');
-  if (!r.internal.trainerStars) out.push('Your rating of the training');
-  if (!r.internal.time) out.push('Time management');
+  sectionsOf(s).forEach(x => { if (x.on && x.required && !x.locked && !x.team && !filled(r, x.key)) out.push(x.label); });
+  (s?.custom || []).forEach(q => { if (q.required && !r.answers?.some(a => a.id === q.id && a.value)) out.push(q.label || 'One of the questions'); });
   return out;
 }
 
@@ -236,6 +294,16 @@ export function attendancePct(r: Pick<TrainingReport, 'registered' | 'days'>): n
 export function objectivesAverage(objectives: ReportObjective[]): number {
   const s = objectives.map(o => o.stars).filter(n => n >= 1);
   return s.length ? Math.round((s.reduce((a, b) => a + b, 0) / s.length) * 10) / 10 : 0;
+}
+/** Class averages from the before and after scores (only people with both count for the improvement). */
+export function scoreSummary(sc: Scores | undefined) {
+  const rows = sc?.rows || [];
+  const avg = (ns: number[]) => (ns.length ? Math.round((ns.reduce((a, b) => a + b, 0) / ns.length) * 10) / 10 : null);
+  const pre = avg(rows.map(x => x.pre).filter((n): n is number => n !== null));
+  const post = avg(rows.map(x => x.post).filter((n): n is number => n !== null));
+  const both = rows.filter(x => x.pre !== null && x.post !== null);
+  const gain = avg(both.map(x => (x.post as number) - (x.pre as number)));
+  return { pre, post, gain, outOf: sc?.outOf || 100, count: rows.length };
 }
 export const cleanParticipant = (p: any): ParticipantRating | null => {
   const avg = Math.round(Math.min(5, Math.max(0, Number(p?.avg) || 0)) * 10) / 10;
@@ -294,6 +362,17 @@ export function reportChanges(a: TrainerPart, b: TrainerPart): string[] {
   REVIEW_PARTS.forEach(p => { if (ia[p.key] !== ib[p.key]) out.push(`${p.label} changed`); });
   if (ia.issues !== ib.issues) out.push('Issues on the day changed');
   if (ia.leads !== ib.leads) out.push('Sales leads changed');
+  if ((a.summary || '') !== (b.summary || '')) out.push('Summary changed');
+  if ((a.hours || 0) !== (b.hours || 0)) out.push(`Training hours: ${a.hours || 0} → ${b.hours || 0}`);
+  if ((a.certificates || 0) !== (b.certificates || 0)) out.push(`Certificates: ${a.certificates || 0} → ${b.certificates || 0}`);
+  listChange('Topics', a.topics || [], b.topics || [], out);
+  if (JSON.stringify(a.scores || null) !== JSON.stringify(b.scores || null)) out.push('Test scores changed');
+  if (JSON.stringify(a.personNotes || []) !== JSON.stringify(b.personNotes || [])) out.push('Notes on participants changed');
+  listChange('Action plan', a.actions || [], b.actions || [], out);
+  listChange('How the HOD can help', a.hodTips || [], b.hodTips || [], out);
+  const ans = new Map((a.answers || []).map(x => [x.id, x.value]));
+  (b.answers || []).forEach(x => { if (ans.get(x.id) !== x.value) out.push(`"${short(x.label, 40)}" changed`); });
+  (a.answers || []).filter(x => !(b.answers || []).some(y => y.id === x.id)).forEach(x => out.push(`"${short(x.label, 40)}" cleared`));
   return out;
 }
 
@@ -301,32 +380,48 @@ export function reportChanges(a: TrainerPart, b: TrainerPart): string[] {
 export const revisionWhen = (iso: string) =>
   iso ? new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kuala_Lumpur' }) : '';
 
-// ---------- HR's copy ----------
-const PRIVATE_REPORT = ['trainerId', 'history', 'revisions', 'trainerDraft', 'returnNote', 'returnedByName', 'submittedByName', 'updatedAt', 'updatedByName', 'status'] as const;
-/** Only what HR may see: unticked sections emptied, internal notes kept only where ticked, team details left out. */
-export function hrCopy(r: TrainingReport): TrainingReport {
+// ---------- HR's and the HOD's copies ----------
+const PRIVATE_REPORT = ['trainerId', 'history', 'revisions', 'trainerDraft', 'returnNote', 'returnedByName', 'submittedByName', 'updatedAt', 'updatedByName', 'status', 'checkin', 'checkinAnswer'] as const;
+/** Is this section (or answer) on this copy? */
+export const shows = (r: TrainingReport, copy: CopyKind, key: CopyKey, s: ReportSettings | null | undefined, answer?: ReportAnswer) => onCopy(r, copy, key, s, answer);
+
+/** Only what HR (or the HOD) may see: sections off for that copy emptied, team details left out. */
+export function copyOf(r: TrainingReport, s: ReportSettings | null | undefined, copy: CopyKind = 'hr'): TrainingReport {
   const x: any = { ...r };
   PRIVATE_REPORT.forEach(k => delete x[k]);
-  if (!onHrCopy(r, 'attendance')) x.days = [];
-  if (!onHrCopy(r, 'objectives')) x.objectives = [];
-  if (!onHrCopy(r, 'participant')) x.participant = null;
-  if (!onHrCopy(r, 'observations')) x.observations = '';
-  if (!onHrCopy(r, 'outstanding')) x.outstanding = [];
-  if (!onHrCopy(r, 'attention')) x.attention = [];
-  if (!onHrCopy(r, 'followUps')) x.followUps = [];
-  if (!onHrCopy(r, 'photos')) x.photos = [];
+  const on = (k: SectionKey) => onCopy(r, copy, k, s);
+  if (!on('attendance')) x.days = [];
+  if (!on('objectives')) x.objectives = [];
+  if (!on('participant')) x.participant = null;
+  if (!on('observations')) x.observations = '';
+  if (!on('outstanding')) x.outstanding = [];
+  if (!on('attention')) x.attention = [];
+  if (!on('followUps')) x.followUps = [];
+  if (!on('photos')) x.photos = [];
+  if (!on('summary')) x.summary = '';
+  if (!on('hours')) { x.hours = 0; x.certificates = 0; }
+  if (!on('topics')) x.topics = [];
+  if (!on('scores')) x.scores = { outOf: 100, rows: [] };
+  if (!on('personNotes')) x.personNotes = [];
+  if (!on('actions')) x.actions = [];
+  if (!on('hodTips')) x.hodTips = [];
+  x.answers = (r.answers || []).filter(a => onCopy(r, copy, `q:${a.id}`, s, a));
   const i = { ...emptyInternal() };
   const src = r.internal || emptyInternal();
-  if (onHrCopy(r, 'trainerStars')) i.trainerStars = src.trainerStars;
-  if (onHrCopy(r, 'missing')) i.missing = src.missing;
-  if (onHrCopy(r, 'time')) { i.time = src.time; i.timeNote = src.timeNote; }
-  if (onHrCopy(r, 'review')) REVIEW_PARTS.forEach(p => { i[p.key] = src[p.key]; });
-  if (onHrCopy(r, 'issues')) i.issues = src.issues;
-  if (onHrCopy(r, 'leads')) i.leads = src.leads;
+  if (on('trainerStars')) i.trainerStars = src.trainerStars;
+  if (on('missing')) i.missing = src.missing;
+  if (on('time')) { i.time = src.time; i.timeNote = src.timeNote; }
+  if (on('review')) REVIEW_PARTS.forEach(p => { i[p.key] = src[p.key]; });
+  if (on('issues')) i.issues = src.issues;
+  if (on('leads')) i.leads = src.leads;
   x.internal = i;
   if (x.participant) x.participant = { avg: x.participant.avg, responses: x.participant.responses, note: x.participant.note };
+  // What prints on this copy, decided here so the page needs no settings of its own.
+  x.copy = copy;
+  x.printed = Object.fromEntries(sectionsOf(s).map(sec => [sec.key, { on: on(sec.key), label: sec.label }]));
   return x;
 }
+export { answerText, sectionOf };
 
 /** The red flag in Admin work: a report waiting to be checked. */
 export function reportFlag(r: TrainingReport | null | undefined, trainerName = 'The trainer'): string {

@@ -21,6 +21,7 @@ import {
 import { formatDateRange, formatRM, daysText } from '../lib/deals';
 import { COMPANY } from '../lib/company';
 import { TrainingReport, reportGaps, revisionWhen } from '../lib/trainingReport';
+import { ReportSettings, readReportSettings } from '../lib/reportSettings';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import TrainingReportForm, { RevisionList } from './TrainingReportForm';
 import DocsTab from './TrainerPortalDocs';
@@ -771,14 +772,14 @@ function ClaimForm({ t, trainerId, onCancel, onDone }: { t: any; trainerId: stri
 // (2026-10-21): their typing is kept aside until they click "Send changes", which records what changed.
 function ReportEditor({ t, trainerId, onClose }: { t: any; trainerId: string; onClose: () => void }) {
   const [report, setReport] = useState<TrainingReport | null>(null);
-  const [extra, setExtra] = useState<{ names: string[]; pax: number; programmes: { id: string; name: string }[] }>({ names: [], pax: 0, programmes: [] });
+  const [extra, setExtra] = useState<{ names: string[]; pax: number; programmes: { id: string; name: string }[]; settings: ReportSettings | null }>({ names: [], pax: 0, programmes: [], settings: null });
   const [savedJson, setSavedJson] = useState('');
   const [pending, setPending] = useState(false);   // changes kept aside, not sent yet
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   useEffect(() => {
     api('/api/portal/report/get', { dealId: t.dealId })
-      .then(d => { setReport(d.report); setSavedJson(JSON.stringify(d.report)); setPending(!!d.pending); setExtra({ names: d.names || [], pax: Number(d.pax) || 0, programmes: d.programmes || [] }); })
+      .then(d => { setReport(d.report); setSavedJson(JSON.stringify(d.report)); setPending(!!d.pending); setExtra({ names: d.names || [], pax: Number(d.pax) || 0, programmes: d.programmes || [], settings: readReportSettings(d.settings) }); })
       .catch(e => setError(e.message));
   }, [t.dealId]);
   const sentBefore = !!report?.submittedAt;
@@ -791,7 +792,7 @@ function ReportEditor({ t, trainerId, onClose }: { t: any; trainerId: string; on
   const send = async () => {
     if (!report) return;
     setError('');
-    const gaps = reportGaps(report);
+    const gaps = reportGaps(report, extra.settings);
     if (gaps.length) { setError(`Please fill in: ${gaps.join(', ')}.`); return; }
     setSending(true);
     try {
@@ -826,7 +827,7 @@ function ReportEditor({ t, trainerId, onClose }: { t: any; trainerId: string; on
         )}
         {pending && <p className="rounded-lg bg-attention-soft px-3 py-2.5 text-sm">You have changes that are not sent yet.</p>}
         {report && (
-          <TrainingReportForm value={report} onChange={setReport} names={extra.names} pax={extra.pax} programmes={extra.programmes}
+          <TrainingReportForm value={report} onChange={setReport} names={extra.names} pax={extra.pax} programmes={extra.programmes} settings={extra.settings}
             photos={<FileDrop title="Photos" hint="JPG or PNG. Photos are made smaller before they upload." photo folder={claimFolder(trainerId, t.dealId)} kind="report" files={report.photos as PortalFile[]} setFiles={setPhotos} />} />
         )}
         {report?.revisions?.length ? <RevisionList revisions={report.revisions} title="Your changes after sending" /> : null}

@@ -3,16 +3,19 @@
 // type the participants' rating from the Output assessment, send it back or mark it checked, and save HR's PDF.
 // Marking it checked ticks the step; reopening it unticks it. Management ticks which sections HR sees and sends HR
 // the PDF or a link (/r/<token>); the trainer's changes after sending are listed with date and time (2026-10-21).
+// 2026-10-27: the questions follow Management's settings (lib/reportSettings.ts); two copies, HR's and the head of
+// department's (HOD), each with its own ticks and PDF; a 30-day check-in link for the HOD (serverReportCheckin.ts).
 
 import React, { useEffect, useState } from 'react';
 import { collection, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
-import { CheckCircle2, Download, FileText, Link2, Loader2, Lock, Plus, Undo2, X } from 'lucide-react';
+import { CheckCircle2, Copy, Download, FileText, Link2, Loader2, Lock, Plus, Undo2, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso, trainingDays, trainingEndDate } from '../lib/deals';
 import { linkedOnly } from '../lib/linked';
 import {
-  HrKey, INTERNAL_PARTS, PUBLIC_PARTS, ReportPhoto, STATUS_TEXT, TRAINER_KEYS, TrainingReport, cleanParticipant, dealPax, newReport, onHrCopy, reportDates, reportGaps, withDates, withPax,
+  ReportPhoto, SERVER_KEYS, STATUS_TEXT, TRAINER_KEYS, TrainingReport, cleanParticipant, copyOf, dealPax, newReport, outlineTopics, reportDates, reportGaps, revisionWhen, withDates, withPax,
 } from '../lib/trainingReport';
+import { CopyKey, CopyKind, ReportSettings, answerText, checkinQuestions, emptySettings, onCopy, readReportSettings, sectionsOf } from '../lib/reportSettings';
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import { jobId } from '../lib/trainerPortal';
 import PanelResizer from './PanelResizer';
@@ -30,12 +33,20 @@ const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
 
 const clean = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+const plusDays = (iso: string, n: number) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const nowIso = () => new Date().toISOString();
 
 export function useTrainingReport(dealId: string): TrainingReport | null | undefined {
   const [r, setR] = useState<TrainingReport | null | undefined>(undefined);
   useEffect(() => onSnapshot(doc(db, 'training_reports', dealId), s => setR(s.exists() ? (s.data() as TrainingReport) : null), () => setR(null)), [dealId]);
   return r;
+}
+
+// Management's training report settings (config/training_report, 2026-10-27); the defaults until it loads.
+export function useReportSettings(): ReportSettings {
+  const [s, setS] = useState<ReportSettings>(emptySettings);
+  useEffect(() => onSnapshot(doc(db, 'config', 'training_report'), x => setS(readReportSettings(x.data())), () => setS(emptySettings())), []);
+  return s;
 }
 
 // Every report (Admin work's red flag: a report waiting to be checked).
@@ -62,13 +73,14 @@ export async function setReportStep(dealId: string, viewer: Viewer, done: boolea
   });
 }
 
-async function savePdf(r: TrainingReport, h: ReportHeader) {
+// HR's copy or the head of department's (2026-10-27): only the sections ticked for that copy.
+async function savePdf(r: TrainingReport, h: ReportHeader, settings: ReportSettings, copy: CopyKind = 'hr') {
   const [{ default: TrainingReportDocument }, { makeDocumentPdf }] = await Promise.all([import('./TrainingReportDocument'), import('../lib/quotePdf')]);
-  const blob = await makeDocumentPdf(React.createElement(TrainingReportDocument, { r, h }), `Training report ${h.programme}`);
+  const blob = await makeDocumentPdf(React.createElement(TrainingReportDocument, { r: copyOf(r, settings, copy), h }), `Training report ${h.programme}`);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Training report - ${[h.programme, h.client].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|]/g, '')}.pdf`;
+  a.download = `Training report${copy === 'hod' ? ' for HOD' : ''} - ${[h.programme, h.client].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|]/g, '')}.pdf`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
@@ -87,6 +99,7 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, intern
   onReopened: () => void;          // untick it
 }) {
   const r = useTrainingReport(deal.id);
+  const settings = useReportSettings();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -96,10 +109,10 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, intern
   if (r === undefined) return null;
   const internal = internalIds.includes(r?.trainerId || trainerId);
 
-  const pdf = async () => {
+  const pdf = async (copy: CopyKind) => {
     if (!r) return;
     setBusy(true); setError('');
-    try { await savePdf(withPax(r, dealPax(deal)), header); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+    try { await savePdf(withPax(r, dealPax(deal)), header, settings, copy); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
   };
 
   return (
@@ -128,9 +141,9 @@ export function TrainingReportBox({ deal, viewer, trainerId, trainerName, intern
             </button>
           )}
           {!staff && r && <button type="button" className={btnSecondary} onClick={() => setOpen(true)}><FileText className="h-4 w-4" /> View the report</button>}
-          {r && r.status === 'checked' && (
-            <button type="button" className={btnSecondary} disabled={busy} onClick={pdf}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF for HR</button>
-          )}
+          {r && r.status === 'checked' && (['hr', 'hod'] as CopyKind[]).map(c => (
+            <button key={c} type="button" className={btnSecondary} disabled={busy} onClick={() => pdf(c)}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF for {c === 'hr' ? 'HR' : 'HOD'}</button>
+          ))}
         </div>
       </div>
       {!r && ended && trainerId && <p className="mt-1 text-sm font-semibold text-attention">The training has ended: waiting for {trainerName}'s report.</p>}
@@ -149,6 +162,7 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
 }) {
   const staff = viewer.role !== 'rep';
   const isManager = viewer.role === 'management';
+  const settings = useReportSettings();
   const dates = reportDates(String(deal.trainingDate || '').slice(0, 10), trainingDays(deal));
   const pax = dealPax(deal);   // the deal's Participants (2026-10-21)
   const [report, setReport] = useState<TrainingReport | null>(saved ? withPax(withDates(clean({ ...newReport(deal.id, trainerId, trainerName, { dates, objectives: [], names, pax }), ...saved }), dates), pax) : null);
@@ -171,7 +185,7 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
       const outlines = linkedOnly(s.docs.map(d => ({ ...(d.data() as any), id: d.id })))
         .sort((a: any, b: any) => Number(b.status === 'sent') - Number(a.status === 'sent') || String(b.sentAt || b.date || '').localeCompare(String(a.sentAt || a.date || '')));
       const objectives = ((outlines[0] as any)?.outcomes || []).map((x: any) => String(x || '').trim()).filter(Boolean);
-      const fresh = newReport(deal.id, trainerId, trainerName, { dates, objectives, names, pax });
+      const fresh = newReport(deal.id, trainerId, trainerName, { dates, objectives, names, pax, topics: outlineTopics(outlines[0]) });
       setReport(fresh);
       setSavedJson(JSON.stringify(fresh));   // nothing is saved until someone types
     }).catch(e => setError(friendlyError(e)));
@@ -187,7 +201,8 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
   // The deal details are saved with it for HR's link.
   const write = async (v: TrainingReport | null) => {
     if (!v) return;
-    const { trainerDraft, revisions, ...all } = v;
+    // Never the server's own fields (the trainer's draft and changes, the HOD's check-in).
+    const all = Object.fromEntries(Object.entries(v).filter(([k]) => !(SERVER_KEYS as readonly string[]).includes(k)));
     const rest = internal ? Object.fromEntries(Object.entries(all).filter(([k]) => !(TRAINER_KEYS as readonly string[]).includes(k))) : all;
     await setDoc(doc(db, 'training_reports', deal.id), clean({ ...rest, hrHeader: header, updatedAt: nowIso(), updatedByName: viewer.name }), { merge: true });
   };
@@ -208,7 +223,7 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
   };
   const markChecked = () => {
     if (!report) return;
-    const gaps = reportGaps(report);
+    const gaps = reportGaps(report, settings);
     if (gaps.length && !window.confirm(`Still missing: ${gaps.join(', ')}. Mark it checked anyway?`)) return;
     act('check', { status: 'checked', checkedAt: nowIso(), checkedByName: viewer.name, returnNote: '' }, 'Checked, ready for HR', onChecked);
   };
@@ -217,23 +232,50 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
     act('return', { status: 'returned', returnNote: note.trim(), returnedByName: viewer.name }, `Sent back: ${note.trim()}`, () => { setReturning(false); setNote(''); });
   };
   const reopen = () => act('reopen', { status: 'submitted', checkedAt: '', checkedByName: '' }, 'Reopened', onReopened);
-  const pdf = async () => {
+  const pdf = async (copy: CopyKind = 'hr') => {
     if (!report) return;
-    setBusy('pdf'); setError('');
-    try { await flush(); await savePdf(report, header); } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
+    setBusy(`pdf-${copy}`); setError('');
+    try { await flush(); await savePdf(report, header, settings, copy); } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
   };
 
-  // Management picks HR's sections; on a checked (locked) report the tick is saved at once.
-  const setHr = async (key: HrKey, on: boolean) => {
+  // Management picks each copy's sections (HR's, the HOD's); on a checked (locked) report the tick is saved at once.
+  const setCopy = async (copy: CopyKind, key: CopyKey, on: boolean) => {
     if (!report) return;
-    const showToHr = { ...(report.showToHr || {}), [key]: on };
-    if (!locked) { setReport({ ...report, showToHr }); return; }
+    const field = copy === 'hr' ? 'showToHr' : 'showToHod';
+    const ticks = { ...(report[field] || {}), [key]: on };
+    if (!locked) { setReport({ ...report, [field]: ticks }); return; }
     setBusy('hr'); setError('');
     try {
-      await updateDoc(doc(db, 'training_reports', deal.id), { showToHr, updatedAt: nowIso(), updatedByName: viewer.name });
-      const next = { ...report, showToHr };
+      await updateDoc(doc(db, 'training_reports', deal.id), { [field]: ticks, updatedAt: nowIso(), updatedByName: viewer.name });
+      const next = { ...report, [field]: ticks };
       setReport(next); setSavedJson(JSON.stringify(next));
     } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
+  };
+  // The rows of the copies box: every section that is on, then Management's questions (and answers to removed ones).
+  const copyRows: { key: CopyKey; label: string; internal: boolean; answer?: any }[] = report ? [
+    ...sectionsOf(settings).filter(x => x.on).map(x => ({ key: x.key as CopyKey, label: x.label, internal: x.group === 'internal' })),
+    ...settings.custom.map(q => ({ key: `q:${q.id}` as CopyKey, label: q.label || 'Untitled question', internal: q.internal })),
+    ...(report.answers || []).filter(a => !settings.custom.some(q => q.id === a.id)).map(a => ({ key: `q:${a.id}` as CopyKey, label: a.label, internal: a.internal, answer: a })),
+  ] : [];
+
+  // The 30-day check-in with the HOD (2026-10-27): Management makes the link; the HOD's answers come back here.
+  const checkin = saved?.checkin || null;
+  const checkinAnswer = saved?.checkinAnswer || null;
+  const checkinUrl = checkin?.token ? `${window.location.origin}/c/${checkin.token}` : '';
+  const checkinDue = trainingEndDate(deal) ? plusDays(trainingEndDate(deal), 30) : '';
+  const [copied, setCopied] = useState(false);
+  const makeCheckin = async () => {
+    setBusy('checkin'); setError('');
+    try { await callServer('/api/report-checkin/create', { dealId: deal.id }, true); } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
+  };
+  const stopCheckin = async () => {
+    if (!window.confirm('Stop this check-in link? The HOD will no longer be able to answer.')) return;
+    setBusy('checkin'); setError('');
+    try { await callServer('/api/report-checkin/stop', { dealId: deal.id }, true); } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
+  };
+  const copyCheckin = async () => {
+    const text = `Dear Sir / Madam, it has been about a month since your team attended ${header.programme || 'our training'}. Could you spare 2 minutes to tell us how they are applying it? ${checkinUrl}`;
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { window.prompt('Copy this message:', text); }
   };
 
   // HR's link (Management): the report's deal details are saved first, so the link shows them.
@@ -328,22 +370,26 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
           {saved?.trainerDraft && <p className="rounded-lg bg-surface px-3 py-2.5 text-sm text-ink-soft">{trainerName} is changing the report in {internal ? 'My trainings' : 'the trainer portal'}. You'll see the changes once they send them.</p>}
           {internal && staff && <p className="rounded-lg bg-surface px-3 py-2.5 text-sm text-ink-soft">{trainerName} is an internal trainer: only they write this report (in My trainings). You can check it, send it back with a note, and add the participants' rating.</p>}
 
-          {/* Management: which sections go on HR's copy (2026-10-21: every section) */}
+          {/* Management: which sections go on HR's copy and the HOD's copy (2026-10-27) */}
           {report && staff && (
             <section className="rounded-2xl border border-line bg-white p-4">
-              <h3 className="text-base font-bold">On HR's copy</h3>
-              <p className="mb-2 text-sm text-ink-soft">Ticked sections go on the PDF and the link for HR. The internal notes stay with NEXT Academy unless ticked.{isManager && locked ? ' Changes here are saved at once.' : ''}</p>
-              {[{ title: 'Report', parts: PUBLIC_PARTS }, { title: 'For NEXT Academy only, unless ticked', parts: INTERNAL_PARTS }].map(g => (
-                <div key={g.title} className="mt-2">
-                  <p className="mb-1 text-sm font-semibold">{g.title}</p>
-                  <ul className="grid gap-1.5 sm:grid-cols-2">
-                    {g.parts.map(x => (
-                      <li key={x.key}>
-                        <label className={`flex items-center gap-2 text-[15px] ${isManager ? 'cursor-pointer' : 'text-ink-soft'}`}>
-                          <input type="checkbox" className="h-4 w-4 accent-[#0E6E62]" disabled={!isManager || busy === 'hr'} checked={onHrCopy(report, x.key)}
-                            onChange={e => setHr(x.key, e.target.checked)} />
-                          {x.label}
-                        </label>
+              <h3 className="text-base font-bold">On each copy</h3>
+              <p className="mb-2 text-sm text-ink-soft">Ticked sections go on HR's copy (PDF and link) and the head of department's copy (HOD). The starting ticks come from the training report settings.{isManager && locked ? ' Changes here are saved at once.' : ''}</p>
+              {[{ title: 'Report', rows: copyRows.filter(x => !x.internal) }, { title: 'For NEXT Academy only, unless ticked', rows: copyRows.filter(x => x.internal) }].filter(g => g.rows.length).map(g => (
+                <div key={g.title} className="mt-3">
+                  <div className="mb-1 grid grid-cols-[1fr_3rem_3rem] items-end gap-2 text-sm font-semibold">
+                    <span>{g.title}</span><span className="text-center">HR</span><span className="text-center">HOD</span>
+                  </div>
+                  <ul className="divide-y divide-line/60">
+                    {g.rows.map(x => (
+                      <li key={x.key} className="grid grid-cols-[1fr_3rem_3rem] items-center gap-2 py-1.5 text-[15px]">
+                        <span className={isManager ? '' : 'text-ink-soft'}>{x.label}</span>
+                        {(['hr', 'hod'] as CopyKind[]).map(c => (
+                          <span key={c} className="flex justify-center">
+                            <input type="checkbox" className="h-4 w-4 accent-[#0E6E62]" aria-label={`${x.label} on the ${c === 'hr' ? "HR's" : "HOD's"} copy`} disabled={!isManager || busy === 'hr'}
+                              checked={onCopy(report, c, x.key, settings, x.answer)} onChange={e => setCopy(c, x.key, e.target.checked)} />
+                          </span>
+                        ))}
                       </li>
                     ))}
                   </ul>
@@ -356,10 +402,11 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
           {/* Send to HR: PDF (Admin or Management), or a client link (Management) */}
           {report?.status === 'checked' && staff && (
             <section className="rounded-2xl border border-accent/30 bg-accent-soft/30 p-4">
-              <h3 className="text-base font-bold">Send to HR</h3>
-              <p className="mb-3 text-sm text-ink-soft">Save the PDF and attach it, or send HR a private link that shows the same report (no download or copying).</p>
+              <h3 className="text-base font-bold">Send to HR and the HOD</h3>
+              <p className="mb-3 text-sm text-ink-soft">Save the PDF and attach it, or send HR a private link that shows HR's copy (no download or copying). The HOD's copy leaves out the HRDC details and keeps the people and actions.</p>
               <div className="flex flex-wrap gap-2">
-                <button type="button" className={btnSecondary} disabled={!!busy} onClick={pdf}>{busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF for HR</button>
+                <button type="button" className={btnSecondary} disabled={!!busy} onClick={() => pdf('hr')}>{busy === 'pdf-hr' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF for HR</button>
+                <button type="button" className={btnSecondary} disabled={!!busy} onClick={() => pdf('hod')}>{busy === 'pdf-hod' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF for HOD</button>
                 {isManager && !hrLink && <button type="button" className={btnPrimary} disabled={!!busy} onClick={makeLink}>{busy === 'link' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Make the link for HR</button>}
               </div>
               {hrLink && isManager && <div className="mt-3"><DocLinkBox link={hrLink} viewer={viewer} message={`Dear HR, here is the training report for ${[header.programme, header.dates].filter(Boolean).join(', ')}.`} /></div>}
@@ -367,7 +414,41 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
             </section>
           )}
 
-          {report && <TrainingReportForm value={report} onChange={setReport} names={names} pax={pax} paxNote="From the deal's Participants. Change it there if it's wrong." programmes={programmes} disabled={partLocked} photos={photos} teamPart={teamPart} />}
+          {/* 30-day check-in with the HOD (2026-10-27) */}
+          {report?.status === 'checked' && staff && (
+            <section className="rounded-2xl border border-line bg-white p-4">
+              <h3 className="text-base font-bold">30-day check-in with the HOD</h3>
+              <p className="mb-3 text-sm text-ink-soft">
+                About a month after the training, send the participants' head of department a short link: are they using what they learned?
+                {checkinDue ? ` Best sent around ${formatDate(checkinDue)}.` : ''} Their answers show here, and a "yes" to more training is a lead for the deal owner.
+              </p>
+              {checkinAnswer ? (
+                <div className="space-y-2 rounded-xl bg-accent-soft/40 p-3 text-[15px]">
+                  <p className="text-sm text-ink-soft">Answered by <strong className="text-ink">{checkinAnswer.name}</strong>{checkinAnswer.role ? `, ${checkinAnswer.role}` : ''} · {revisionWhen(checkinAnswer.at)}</p>
+                  {checkinAnswer.answers.map(a => <p key={a.id} className="whitespace-pre-line"><strong>{a.label}</strong><br />{answerText(a)}</p>)}
+                </div>
+              ) : checkin?.status === 'open' ? (
+                <div className="space-y-2">
+                  <p className="break-all rounded-lg bg-surface px-3 py-2 text-sm">{checkinUrl}</p>
+                  <p className="text-sm text-ink-soft">Made by {checkin.byName} · {revisionWhen(checkin.createdAt)}. Not answered yet.</p>
+                  {isManager && (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className={btnPrimary} onClick={copyCheckin}><Copy className="h-4 w-4" /> {copied ? 'Copied' : 'Copy message with the link'}</button>
+                      <button type="button" className={btnSecondary} disabled={!!busy} onClick={stopCheckin}>Stop the link</button>
+                    </div>
+                  )}
+                </div>
+              ) : isManager ? (
+                <button type="button" className={btnPrimary} disabled={!!busy} onClick={makeCheckin}>{busy === 'checkin' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Make the check-in link</button>
+              ) : <p className="text-sm text-ink-soft">Management sends this link.</p>}
+              <details className="mt-3 text-sm">
+                <summary className="cursor-pointer font-semibold text-ink-soft">Questions the HOD is asked</summary>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-ink-soft">{checkinQuestions(settings).map(q => <li key={q.id}>{q.label}</li>)}</ol>
+              </details>
+            </section>
+          )}
+
+          {report && <TrainingReportForm value={report} onChange={setReport} names={names} pax={pax} paxNote="From the deal's Participants. Change it there if it's wrong." programmes={programmes} disabled={partLocked} photos={photos} teamPart={teamPart} settings={settings} />}
 
           {saved?.revisions?.length ? <RevisionList revisions={saved.revisions} title={`${trainerName}'s changes after sending`} /> : null}
 
@@ -403,7 +484,7 @@ export function ReportPanel({ deal, viewer, saved, trainerId, trainerName, inter
                   ) : (
                     <>
                       {report.status === 'submitted' && <button type="button" className={btnSecondary} disabled={!!busy} onClick={() => setReturning(true)}>Send back to the trainer</button>}
-                      <button type="button" className={btnSecondary} disabled={!!busy} onClick={pdf}>{busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Preview PDF</button>
+                      <button type="button" className={btnSecondary} disabled={!!busy} onClick={() => pdf('hr')}>{busy === 'pdf-hr' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Preview PDF</button>
                       <button type="button" className={btnPrimary} disabled={!!busy} onClick={markChecked}>{busy === 'check' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Checked, ready for HR</button>
                     </>
                   )}

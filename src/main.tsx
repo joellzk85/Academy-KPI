@@ -23,6 +23,10 @@ const paymentToken = window.location.pathname.match(/^\/pay\/([a-f0-9]{32})\/?$/
 const ReferrerLinkPage = lazy(() => import('./components/ReferrerLinkPage'));
 const referrerToken = window.location.pathname.match(/^\/ref\/([a-f0-9]{32})\/?$/)?.[1];
 
+// The head of department's 30-day check-in on a training report (/c/<token>, CheckinPage.tsx, 2026-10-27).
+const CheckinPage = lazy(() => import('./components/CheckinPage'));
+const checkinToken = window.location.pathname.match(/^\/c\/([a-f0-9]{32})\/?$/)?.[1];
+
 // The trainer portal (/trainer): trainers with access log in by email (TrainerPortal.tsx, 2026-10-21).
 const TrainerPortal = lazy(() => import('./components/TrainerPortal'));
 const portalMatch = window.location.pathname.match(/^\/trainer(?:\/join\/([a-f0-9]{32}))?\/?$/);
@@ -33,6 +37,8 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {trainerPortal ? (
       <Suspense fallback={null}><TrainerPortal inviteToken={portalInvite} /></Suspense>
+    ) : checkinToken ? (
+      <Suspense fallback={null}><CheckinPage token={checkinToken} /></Suspense>
     ) : referrerToken ? (
       <Suspense fallback={null}><ReferrerLinkPage token={referrerToken} /></Suspense>
     ) : paymentToken ? (

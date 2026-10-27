@@ -1,12 +1,14 @@
 // The training report form (2026-10-21; lib/trainingReport.ts). One form for the trainer (trainer portal) and for
 // Admin or Management writing it on the deal for a trainer without portal access (TrainingReportAdmin.tsx).
 // First the part HR sees, then "For NEXT Academy only" (shown to HR only when Management ticks it).
+// Since 2026-10-27 the sections, their wording and Management's own questions follow the settings (lib/reportSettings.ts).
 
 import React, { useId, useState } from 'react';
-import { Lock, Plus, Star, X } from 'lucide-react';
+import { Lock, Plus, Star, Users, X } from 'lucide-react';
 import {
-  FollowUp, NamedReason, REVIEW_PARTS, ReportDay, Revision, TIME_LABELS, TimeKey, TrainingReport, absentCount, attendancePct, presentCount, revisionWhen,
+  FollowUp, NamedReason, PersonNote, REVIEW_PARTS, ReportDay, Revision, ScoreRow, Scores, TIME_LABELS, TimeKey, TrainingReport, absentCount, attendancePct, presentCount, revisionWhen, scoreSummary,
 } from '../lib/trainingReport';
+import { CustomQuestion, ReportSettings, Section, SectionKey, sectionsOf } from '../lib/reportSettings';
 
 const input =
   'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15 disabled:bg-surface';
@@ -108,7 +110,47 @@ export function RevisionList({ revisions, title = 'Changes after sending' }: { r
   );
 }
 
-export default function TrainingReportForm({ value: r, onChange, names, pax = 0, paxNote = 'From the training details. Ask NEXT Academy if this number is wrong.', programmes, disabled, photos, teamPart }: {
+// A simple list of lines (topics, action plan, tips for the HOD).
+function LineList({ rows, onChange, disabled, placeholder, what }: { rows: string[]; onChange: (r: string[]) => void; disabled?: boolean; placeholder: string; what: string }) {
+  return (
+    <div className="space-y-2">
+      {rows.map((t, i) => (
+        <div key={i} className="flex items-start gap-2">
+          <input className={input} value={t} disabled={disabled} placeholder={placeholder} aria-label={`${what} ${i + 1}`} onChange={e => onChange(rows.map((x, j) => (j === i ? e.target.value : x)))} />
+          {!disabled && <button type="button" className={removeBtn} aria-label={`Remove ${what} ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}><X className="h-4 w-4" /></button>}
+        </div>
+      ))}
+      {!disabled && <button type="button" className={addBtn} onClick={() => onChange([...rows, ''])}><Plus className="h-4 w-4" /> Add {rows.length ? 'another' : 'one'}</button>}
+      {disabled && !rows.length && <p className="text-sm text-ink-soft">None.</p>}
+    </div>
+  );
+}
+
+// One of Management's own questions (2026-10-27, lib/reportSettings.ts). Also used on the HOD's check-in page.
+export function QuestionInput({ q, value, onChange, disabled }: { q: CustomQuestion; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const id = useId();
+  return (
+    <div>
+      <label className={label} htmlFor={id}>{q.label || 'Untitled question'}{q.required ? '' : <span className="font-normal text-ink-soft"> (optional)</span>}</label>
+      {q.hint && <p className={hint}>{q.hint}</p>}
+      {q.type === 'short' && <input id={id} className={input} disabled={disabled} value={value} onChange={e => onChange(e.target.value)} />}
+      {q.type === 'long' && <textarea id={id} className={input} rows={3} disabled={disabled} value={value} onChange={e => onChange(e.target.value)} />}
+      {q.type === 'stars' && <StarPicker value={Number(value) || 0} disabled={disabled} label={q.label} onChange={n => onChange(n ? String(n) : '')} />}
+      {(q.type === 'yesno' || q.type === 'choice') && (
+        <div id={id} className="flex flex-wrap gap-2">
+          {(q.type === 'yesno' ? [['yes', 'Yes'], ['no', 'No']] : q.options.map(o => [o, o])).map(([v, t]) => (
+            <button key={v} type="button" disabled={disabled} aria-pressed={value === v} onClick={() => onChange(value === v ? '' : v)}
+              className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${value === v ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{t}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const optional = (sec: Section) => (sec.required || sec.locked ? null : <span className="ml-1 text-sm font-normal text-ink-soft">(optional)</span>);
+
+export default function TrainingReportForm({ value: r, onChange, names, pax = 0, paxNote = 'From the training details. Ask NEXT Academy if this number is wrong.', programmes, disabled, photos, teamPart, settings }: {
   value: TrainingReport;
   onChange: (r: TrainingReport) => void;
   names: string[];                              // participants (T3 list), for suggestions
@@ -118,63 +160,92 @@ export default function TrainingReportForm({ value: r, onChange, names, pax = 0,
   disabled?: boolean;
   photos?: React.ReactNode;                     // the photo picker (portal upload or the team's pick)
   teamPart?: React.ReactNode;                   // Admin and Management: participant rating
+  settings?: ReportSettings | null;             // Management's questions (2026-10-27); none = the defaults
 }) {
   const set = (c: Partial<TrainingReport>) => onChange({ ...r, ...c });
   const setDay = (i: number, c: Partial<ReportDay>) => set({ days: r.days.map((d, j) => (j === i ? { ...d, ...c } : d)) });
   const setInt = (c: Partial<TrainingReport['internal']>) => set({ internal: { ...r.internal, ...c } });
   const setFollow = (i: number, c: Partial<FollowUp>) => set({ followUps: r.followUps.map((f, j) => (j === i ? { ...f, ...c } : f)) });
   const pct = attendancePct(r);
+  const scores = r.scores || { outOf: 100, rows: [] };
+  const setScores = (c: Partial<Scores>) => set({ scores: { ...scores, ...c } });
+  const setScoreRow = (i: number, c: Partial<ScoreRow>) => setScores({ rows: scores.rows.map((x, j) => (j === i ? { ...x, ...c } : x)) });
+  const sc = scoreSummary(scores);
+  const notes = r.personNotes || [];
+  const setNote = (i: number, c: Partial<PersonNote>) => set({ personNotes: notes.map((x, j) => (j === i ? { ...x, ...c } : x)) });
+  const num = (v: string) => (v.trim() === '' ? null : Math.max(0, Number(v) || 0));
+  const answers = r.answers || [];
+  const answerOf = (q: CustomQuestion) => answers.find(a => a.id === q.id)?.value || '';
+  const setAnswer = (q: CustomQuestion, value: string) => set({
+    answers: [...answers.filter(a => a.id !== q.id), ...(value ? [{ id: q.id, label: q.label, type: q.type, internal: q.internal, value }] : [])],
+  });
+  const missingNames = (have: string[]) => names.filter(n => !have.some(h => h.toLowerCase() === n.toLowerCase()));
+  const fromList = (have: string[], add: (n: string[]) => void) => {
+    const more = missingNames(have);
+    return !disabled && more.length > 0 ? <button type="button" className={addBtn} onClick={() => add(more)}><Users className="h-4 w-4" /> Add everyone from the participants list ({more.length})</button> : null;
+  };
+  const custom = settings?.custom || [];
 
-  return (
-    <div className="space-y-5">
-      {/* 1. Attendance */}
-      <section className={card}>
-        <h3 className="text-base font-bold">Attendance</h3>
-        <p className={hint}>Who wasn't there, day by day. The number absent and the attendance rate are counted for you.</p>
-        <div className="max-w-xs">
-          <label className={label} htmlFor="rep-registered">Participants registered</label>
-          {/* The deal's Participants (2026-10-21); typed here only when the deal has none */}
-          {pax > 0 ? (
-            <>
-              <p id="rep-registered" className="text-[15px]"><strong>{pax} pax</strong></p>
-              <p className={hint}>{paxNote}</p>
-            </>
-          ) : (
-            <>
-              <input id="rep-registered" type="number" min={0} inputMode="numeric" className={input} disabled={disabled} value={r.registered || ''}
-                onChange={e => set({ registered: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
-              {names.length > 0 && r.registered !== names.length && !disabled && (
-                <button type="button" className="mt-1 text-sm font-semibold text-accent hover:underline" onClick={() => set({ registered: names.length })}>Use {names.length} from the participants list</button>
-              )}
-            </>
-          )}
-        </div>
-        <div className="mt-4 space-y-3">
-          {r.days.map((d, i) => (
-            <div key={d.date || i} className="rounded-xl border border-line p-3">
-              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                <p className="font-semibold">{r.days.length > 1 ? `Day ${i + 1}` : 'Training day'}{d.date ? ` · ${dayText(d.date)}` : ''}</p>
-                <p className="text-sm text-ink-soft">
-                  {r.registered ? <><strong className="text-ink">{presentCount(r.registered, d)}</strong> present · </> : null}
-                  <strong className={absentCount(d) ? 'text-danger' : 'text-ink'}>{absentCount(d)}</strong> absent
-                </p>
+  const body = (sec: Section): React.ReactNode => {
+    switch (sec.key) {
+      case 'summary': return <textarea className={input} rows={4} disabled={disabled} value={r.summary || ''} aria-label={sec.label} onChange={e => set({ summary: e.target.value })} />;
+      case 'attendance': return (
+        <>
+          <div className="max-w-xs">
+            <label className={label} htmlFor="rep-registered">Participants registered</label>
+            {/* The deal's Participants (2026-10-21); typed here only when the deal has none */}
+            {pax > 0 ? (
+              <>
+                <p id="rep-registered" className="text-[15px]"><strong>{pax} pax</strong></p>
+                <p className={hint}>{paxNote}</p>
+              </>
+            ) : (
+              <>
+                <input id="rep-registered" type="number" min={0} inputMode="numeric" className={input} disabled={disabled} value={r.registered || ''}
+                  onChange={e => set({ registered: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
+                {names.length > 0 && r.registered !== names.length && !disabled && (
+                  <button type="button" className="mt-1 text-sm font-semibold text-accent hover:underline" onClick={() => set({ registered: names.length })}>Use {names.length} from the participants list</button>
+                )}
+              </>
+            )}
+          </div>
+          <div className="mt-4 space-y-3">
+            {r.days.map((d, i) => (
+              <div key={d.date || i} className="rounded-xl border border-line p-3">
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="font-semibold">{r.days.length > 1 ? `Day ${i + 1}` : 'Training day'}{d.date ? ` · ${dayText(d.date)}` : ''}</p>
+                  <p className="text-sm text-ink-soft">
+                    {r.registered ? <><strong className="text-ink">{presentCount(r.registered, d)}</strong> present · </> : null}
+                    <strong className={absentCount(d) ? 'text-danger' : 'text-ink'}>{absentCount(d)}</strong> absent
+                  </p>
+                </div>
+                <p className="mb-1 text-sm font-semibold">Absent</p>
+                <NameChips names={d.absent} onChange={absent => setDay(i, { absent })} suggestions={names} disabled={disabled} placeholder="Type a name, then Enter" aria={`Absent on ${d.date || 'the day'}`} />
+                <p className="mb-1 mt-3 text-sm font-semibold">Came late or left early <span className="font-normal text-ink-soft">(HRDC may not count part attendance)</span></p>
+                <NameChips names={d.late} onChange={late => setDay(i, { late })} suggestions={names} disabled={disabled} placeholder="Type a name, then Enter" aria={`Late or left early on ${d.date || 'the day'}`} />
+                <input className={`${input} mt-3`} disabled={disabled} value={d.note} placeholder="Note for this day (optional)" aria-label={`Note for ${d.date || 'the day'}`} onChange={e => setDay(i, { note: e.target.value })} />
               </div>
-              <p className="mb-1 text-sm font-semibold">Absent</p>
-              <NameChips names={d.absent} onChange={absent => setDay(i, { absent })} suggestions={names} disabled={disabled} placeholder="Type a name, then Enter" aria={`Absent on ${d.date || 'the day'}`} />
-              <p className="mb-1 mt-3 text-sm font-semibold">Came late or left early <span className="font-normal text-ink-soft">(HRDC may not count part attendance)</span></p>
-              <NameChips names={d.late} onChange={late => setDay(i, { late })} suggestions={names} disabled={disabled} placeholder="Type a name, then Enter" aria={`Late or left early on ${d.date || 'the day'}`} />
-              <input className={`${input} mt-3`} disabled={disabled} value={d.note} placeholder="Note for this day (optional)" aria-label={`Note for ${d.date || 'the day'}`} onChange={e => setDay(i, { note: e.target.value })} />
-            </div>
-          ))}
+            ))}
+          </div>
+          {r.registered > 0 && <p className="mt-3 text-sm">Attendance rate: <strong>{pct}%</strong></p>}
+        </>
+      );
+      case 'hours': return (
+        <div className="grid max-w-md gap-3 sm:grid-cols-2">
+          <div>
+            <label className={label} htmlFor="rep-hours">Training hours (total)</label>
+            <input id="rep-hours" type="number" min={0} step={0.5} inputMode="decimal" className={input} disabled={disabled} value={r.hours || ''} onChange={e => set({ hours: Math.max(0, Number(e.target.value) || 0) })} />
+          </div>
+          <div>
+            <label className={label} htmlFor="rep-certs">Certificates issued</label>
+            <input id="rep-certs" type="number" min={0} inputMode="numeric" className={input} disabled={disabled} value={r.certificates || ''} onChange={e => set({ certificates: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
+          </div>
         </div>
-        {r.registered > 0 && <p className="mt-3 text-sm">Attendance rate: <strong>{pct}%</strong></p>}
-      </section>
-
-      {/* 2. Objectives */}
-      <section className={card}>
-        <h3 className="text-base font-bold">Did we achieve the agreed objectives?</h3>
-        <p className={hint}>Rate each objective from 1 to 5 stars and say why. {r.objectives.length ? 'They come from the course outline.' : 'Add the objectives agreed with the client.'}</p>
+      );
+      case 'topics': return <LineList rows={r.topics || []} onChange={topics => set({ topics })} disabled={disabled} placeholder="Topic" what="Topic" />;
+      case 'objectives': return (
         <div className="space-y-3">
+          {!r.objectives.length && <p className={hint}>Add the objectives agreed with the client.</p>}
           {r.objectives.map((o, i) => (
             <div key={i} className="rounded-xl border border-line p-3">
               <div className="flex items-start gap-2">
@@ -189,34 +260,56 @@ export default function TrainingReportForm({ value: r, onChange, names, pax = 0,
           ))}
           {!disabled && <button type="button" className={addBtn} onClick={() => set({ objectives: [...r.objectives, { text: '', stars: 0, comment: '' }] })}><Plus className="h-4 w-4" /> Add an objective</button>}
         </div>
-      </section>
-
-      {/* 3. Participant rating (the team fills it from the Output assessment) */}
-      {teamPart}
-
-      {/* 4. Observations */}
-      <section className={card}>
-        <h3 className="text-base font-bold">Trainer's observations</h3>
-        <p className={hint}>How the group took part, what they did well, where they still have gaps.</p>
-        <textarea className={input} rows={5} disabled={disabled} value={r.observations} aria-label="Trainer's observations" onChange={e => set({ observations: e.target.value })} />
-      </section>
-
-      {/* 5. People */}
-      <section className={card}>
-        <h3 className="text-base font-bold">Outstanding participants</h3>
-        <p className={hint}>Anyone who stood out. Add as many as you like.</p>
-        <PeopleList rows={r.outstanding} onChange={outstanding => set({ outstanding })} suggestions={names} disabled={disabled} reasonHint="Why they stood out" what="Outstanding participant" />
-      </section>
-      <section className={card}>
-        <h3 className="text-base font-bold">Participants who may need special attention</h3>
-        <p className={hint}>Keep it factual and kind: HR will read this about their own staff.</p>
-        <PeopleList rows={r.attention} onChange={attention => set({ attention })} suggestions={names} disabled={disabled} reasonHint="What they need help with" what="Participant needing attention" />
-      </section>
-
-      {/* 6. Follow-up training */}
-      <section className={card}>
-        <h3 className="text-base font-bold">Recommended follow-up training</h3>
-        <p className={hint}>What this group should do next. Pick from our programmes or type one.</p>
+      );
+      case 'scores': return (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <label htmlFor="rep-outof" className="font-semibold">Scores out of</label>
+            <input id="rep-outof" type="number" min={1} className={`${input} w-24`} disabled={disabled} value={scores.outOf || ''} onChange={e => setScores({ outOf: Math.max(1, Math.round(Number(e.target.value) || 0)) })} />
+          </div>
+          {scores.rows.map((x, i) => (
+            <div key={i} className="flex items-start gap-2 rounded-xl border border-line p-2.5">
+              <div className="grid min-w-0 flex-1 grid-cols-[1fr_5.5rem_5.5rem] gap-2">
+                <input className={input} value={x.name} disabled={disabled} placeholder="Name" aria-label={`Score ${i + 1}: name`} onChange={e => setScoreRow(i, { name: e.target.value })} />
+                <input className={input} type="number" min={0} inputMode="decimal" value={x.pre ?? ''} disabled={disabled} placeholder="Before" aria-label={`Score ${i + 1}: before`} onChange={e => setScoreRow(i, { pre: num(e.target.value) })} />
+                <input className={input} type="number" min={0} inputMode="decimal" value={x.post ?? ''} disabled={disabled} placeholder="After" aria-label={`Score ${i + 1}: after`} onChange={e => setScoreRow(i, { post: num(e.target.value) })} />
+              </div>
+              {!disabled && <button type="button" className={removeBtn} aria-label={`Remove score ${i + 1}`} onClick={() => setScores({ rows: scores.rows.filter((_, j) => j !== i) })}><X className="h-4 w-4" /></button>}
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2">
+            {!disabled && <button type="button" className={addBtn} onClick={() => setScores({ rows: [...scores.rows, { name: '', pre: null, post: null }] })}><Plus className="h-4 w-4" /> Add a person</button>}
+            {fromList(scores.rows.map(x => x.name), more => setScores({ rows: [...scores.rows, ...more.map(name => ({ name, pre: null, post: null }))] }))}
+          </div>
+          {sc.count > 0 && <p className="text-sm">Class average: before <strong>{sc.pre ?? '-'}</strong>, after <strong>{sc.post ?? '-'}</strong>{sc.gain !== null ? <>, improvement <strong>{sc.gain > 0 ? '+' : ''}{sc.gain}</strong></> : null}</p>}
+        </div>
+      );
+      case 'participant': return null;   // the team's part (teamPart)
+      case 'observations': return <textarea className={input} rows={5} disabled={disabled} value={r.observations} aria-label={sec.label} onChange={e => set({ observations: e.target.value })} />;
+      case 'personNotes': return (
+        <div className="space-y-2">
+          {notes.map((x, i) => (
+            <div key={i} className="flex items-start gap-2 rounded-xl border border-line p-2.5">
+              <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(0,12rem)_1fr_1fr]">
+                <input className={input} value={x.name} disabled={disabled} placeholder="Name" aria-label={`Participant note ${i + 1}: name`} onChange={e => setNote(i, { name: e.target.value })} />
+                <input className={input} value={x.strengths} disabled={disabled} placeholder="Strengths" aria-label={`Participant note ${i + 1}: strengths`} onChange={e => setNote(i, { strengths: e.target.value })} />
+                <input className={input} value={x.improve} disabled={disabled} placeholder="To work on" aria-label={`Participant note ${i + 1}: to work on`} onChange={e => setNote(i, { improve: e.target.value })} />
+              </div>
+              {!disabled && <button type="button" className={removeBtn} aria-label={`Remove participant note ${i + 1}`} onClick={() => set({ personNotes: notes.filter((_, j) => j !== i) })}><X className="h-4 w-4" /></button>}
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2">
+            {!disabled && <button type="button" className={addBtn} onClick={() => set({ personNotes: [...notes, { name: '', strengths: '', improve: '' }] })}><Plus className="h-4 w-4" /> Add a person</button>}
+            {fromList(notes.map(x => x.name), more => set({ personNotes: [...notes, ...more.map(name => ({ name, strengths: '', improve: '' }))] }))}
+          </div>
+          {disabled && !notes.length && <p className="text-sm text-ink-soft">None.</p>}
+        </div>
+      );
+      case 'outstanding': return <PeopleList rows={r.outstanding} onChange={outstanding => set({ outstanding })} suggestions={names} disabled={disabled} reasonHint="Why they stood out" what="Outstanding participant" />;
+      case 'attention': return <PeopleList rows={r.attention} onChange={attention => set({ attention })} suggestions={names} disabled={disabled} reasonHint="What they need help with" what="Participant needing attention" />;
+      case 'actions': return <LineList rows={r.actions || []} onChange={actions => set({ actions })} disabled={disabled} placeholder="e.g. Hold a 15-minute huddle every Monday" what="Action" />;
+      case 'hodTips': return <LineList rows={r.hodTips || []} onChange={hodTips => set({ hodTips })} disabled={disabled} placeholder="e.g. Join the first huddle, then let them lead" what="Tip" />;
+      case 'followUps': return (
         <div className="space-y-2">
           {r.followUps.map((f, i) => (
             <div key={i} className="flex items-start gap-2 rounded-xl border border-line p-2.5">
@@ -232,59 +325,81 @@ export default function TrainingReportForm({ value: r, onChange, names, pax = 0,
           {!disabled && <button type="button" className={addBtn} onClick={() => set({ followUps: [...r.followUps, { programmeId: '', name: '', reason: '' }] })}><Plus className="h-4 w-4" /> Add a recommendation</button>}
           {disabled && !r.followUps.length && <p className="text-sm text-ink-soft">None.</p>}
         </div>
-      </section>
+      );
+      case 'photos': return photos;
+      case 'trainerStars': return <StarPicker value={r.internal.trainerStars} disabled={disabled} label={sec.label} onChange={trainerStars => setInt({ trainerStars })} />;
+      case 'time': return (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(TIME_LABELS) as Exclude<TimeKey, ''>[]).map(k => (
+              <button key={k} type="button" disabled={disabled} aria-pressed={r.internal.time === k} onClick={() => setInt({ time: r.internal.time === k ? '' : k })}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${r.internal.time === k ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{TIME_LABELS[k]}</button>
+            ))}
+          </div>
+          <input className={`${input} mt-2`} disabled={disabled} value={r.internal.timeNote} placeholder={sec.hint || 'Which part ran over or was rushed? (optional)'} aria-label="Time management note" onChange={e => setInt({ timeNote: e.target.value })} />
+        </>
+      );
+      case 'missing': return <textarea id="rep-missing" className={input} rows={2} disabled={disabled} value={r.internal.missing} placeholder={sec.hint} aria-label={sec.label} onChange={e => setInt({ missing: e.target.value })} />;
+      case 'review': return (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {REVIEW_PARTS.map(p => (
+            <div key={p.key}>
+              <label className={label} htmlFor={`rep-${p.key}`}>{p.label}</label>
+              <textarea id={`rep-${p.key}`} className={input} rows={2} disabled={disabled} value={r.internal[p.key]} placeholder={p.hint} onChange={e => setInt({ [p.key]: e.target.value })} />
+            </div>
+          ))}
+        </div>
+      );
+      case 'issues': return <textarea className={input} rows={2} disabled={disabled} value={r.internal.issues} placeholder={sec.hint} aria-label={sec.label} onChange={e => setInt({ issues: e.target.value })} />;
+      case 'leads': return <textarea className={input} rows={2} disabled={disabled} value={r.internal.leads} placeholder={sec.hint} aria-label={sec.label} onChange={e => setInt({ leads: e.target.value })} />;
+    }
+  };
+  // The hint is the placeholder for these short internal boxes.
+  const hintInBox = new Set<SectionKey>(['time', 'missing', 'issues', 'leads']);
 
-      {photos && (
+  const main = sectionsOf(settings, 'main').filter(x => x.on);
+  const internal = sectionsOf(settings, 'internal').filter(x => x.on);
+  const mainQs = custom.filter(q => !q.internal);
+  const internalQs = custom.filter(q => q.internal);
+
+  return (
+    <div className="space-y-5">
+      {main.map(sec => {
+        if (sec.key === 'participant') return <React.Fragment key={sec.key}>{teamPart}</React.Fragment>;
+        if (sec.key === 'photos' && !photos) return null;
+        return (
+          <section key={sec.key} className={card}>
+            <h3 className="text-base font-bold">{sec.label}{optional(sec)}</h3>
+            {sec.hint && <p className={hint}>{sec.hint}</p>}
+            {body(sec)}
+          </section>
+        );
+      })}
+
+      {mainQs.length > 0 && (
         <section className={card}>
-          <h3 className="text-base font-bold">Photos for the report</h3>
-          <p className={hint}>4 to 6 good photos of the training. Up to 12.</p>
-          {photos}
+          <h3 className="mb-3 text-base font-bold">More questions</h3>
+          <div className="space-y-4">{mainQs.map(q => <QuestionInput key={q.id} q={q} value={answerOf(q)} disabled={disabled} onChange={v => setAnswer(q, v)} />)}</div>
         </section>
       )}
 
-      {/* 7. For NEXT Academy only */}
-      <section className={`${card} border-ink/15 bg-surface/60`}>
-        <h3 className="flex items-center gap-2 text-base font-bold"><Lock className="h-4 w-4 text-ink-soft" /> For NEXT Academy only</h3>
-        <p className={hint}>HR doesn't see this part unless NEXT Academy decides to include it.</p>
-        <div className="space-y-4">
-          <div>
-            <p className={label}>Your rating of the training</p>
-            <StarPicker value={r.internal.trainerStars} disabled={disabled} label="Trainer's rating of the training" onChange={trainerStars => setInt({ trainerStars })} />
-          </div>
-          <div>
-            <p className={label}>Time management</p>
-            <div className="flex flex-wrap gap-2">
-              {(Object.keys(TIME_LABELS) as Exclude<TimeKey, ''>[]).map(k => (
-                <button key={k} type="button" disabled={disabled} aria-pressed={r.internal.time === k} onClick={() => setInt({ time: r.internal.time === k ? '' : k })}
-                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${r.internal.time === k ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{TIME_LABELS[k]}</button>
-              ))}
-            </div>
-            <input className={`${input} mt-2`} disabled={disabled} value={r.internal.timeNote} placeholder="Which part ran over or was rushed? (optional)" aria-label="Time management note" onChange={e => setInt({ timeNote: e.target.value })} />
-          </div>
-          <div>
-            <label className={label} htmlFor="rep-missing">What was missing</label>
-            <textarea id="rep-missing" className={input} rows={2} disabled={disabled} value={r.internal.missing} placeholder="Materials, equipment, information, content..." onChange={e => setInt({ missing: e.target.value })} />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {REVIEW_PARTS.map(p => (
-              <div key={p.key}>
-                <label className={label} htmlFor={`rep-${p.key}`}>{p.label}</label>
-                <textarea id={`rep-${p.key}`} className={input} rows={2} disabled={disabled} value={r.internal[p.key]} placeholder={p.hint} onChange={e => setInt({ [p.key]: e.target.value })} />
+      {/* For NEXT Academy only */}
+      {(internal.length > 0 || internalQs.length > 0) && (
+        <section className={`${card} border-ink/15 bg-surface/60`}>
+          <h3 className="flex items-center gap-2 text-base font-bold"><Lock className="h-4 w-4 text-ink-soft" /> For NEXT Academy only</h3>
+          <p className={hint}>HR doesn't see this part unless NEXT Academy decides to include it.</p>
+          <div className="space-y-4">
+            {internal.map(sec => (
+              <div key={sec.key}>
+                <p className={label}>{sec.label}{optional(sec)}</p>
+                {sec.hint && !hintInBox.has(sec.key) && <p className={hint}>{sec.hint}</p>}
+                {body(sec)}
               </div>
             ))}
+            {internalQs.map(q => <QuestionInput key={q.id} q={q} value={answerOf(q)} disabled={disabled} onChange={v => setAnswer(q, v)} />)}
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className={label} htmlFor="rep-issues">Issues on the day</label>
-              <textarea id="rep-issues" className={input} rows={2} disabled={disabled} value={r.internal.issues} placeholder="Venue, equipment, food, transport" onChange={e => setInt({ issues: e.target.value })} />
-            </div>
-            <div>
-              <label className={label} htmlFor="rep-leads">Sales leads spotted</label>
-              <textarea id="rep-leads" className={input} rows={2} disabled={disabled} value={r.internal.leads} placeholder="Other departments interested, a manager asking about other courses" onChange={e => setInt({ leads: e.target.value })} />
-            </div>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }

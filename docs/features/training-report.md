@@ -73,3 +73,26 @@ Joel: training reports get their own place under Trainers, listing them all. **T
 report yet ("Not written yet"). Filters All / Needs checking / With the trainer / Checked, and a search by programme,
 client or trainer; waiting-to-check first, then latest training first. A row opens the same panel as the deal's step
 (`ReportPanel`); Checked / Reopen also tick or untick the deal's "Training report" step (`setReportStep`). No rule change.
+
+## Settings, HR and HOD copies, 30-day check-in (2026-10-27)
+Joel: "Training report setting page. Preview. Set questions. Only viewable by managers", and the report must help
+both HR and the head of department (HOD). Built from Claude's suggestions, all accepted ("Build it").
+- **Settings** (Trainers → Training reports → **Settings**, Management only; `TrainingReportSettings.tsx`,
+  `lib/reportSettings.ts`, `config/training_report`, saves by itself). Each section: on / off, title and hint, required,
+  on HR's copy, on the HOD's copy (defaults; Management still ticks per report). **Attendance and Objectives are always
+  on and required** (HRDC). Your own questions (short, long, stars, yes / no, pick one; required; NEXT Academy only; HR /
+  HOD). The HOD check-in questions. **Back to default** clears everything. **Preview** tab: trainer's form, HR's copy,
+  HOD's copy, check-in page, with a made-up example. Same questions for every training type (Claude's default).
+- **New sections:** Summary (required by default), Training hours and certificates, Topics covered (from the outline's
+  modules), Before and after test scores (class averages and improvement counted), Notes on each participant, Action
+  plan, How the HOD can help. Answers to own questions are saved with the question's wording (`answers[]`).
+- **Two copies:** `copyOf(r, settings, 'hr' | 'hod')` (replaces `hrCopy`); the panel's "On each copy" box has HR and HOD
+  ticks (`showToHr`, `showToHod`, Management only); **PDF for HR** and **PDF for HOD**. The HOD copy leaves out the HRDC
+  approval code and, by default, hours. HR's link (/r/) shows HR's copy.
+- **30-day check-in:** on a checked report, Management → **Make the check-in link** (/c/<token>, 60 days,
+  `serverReportCheckin.ts`, `CheckinPage.tsx`); Copy message with the link; the HOD answers once (name, position,
+  the questions); answers show on the report panel and in the deal's History (a "yes" to more training is flagged as
+  a lead). `report_checkins` and the report's `checkin` / `checkinAnswer` are written only by the server.
+- **Rules:** `firestore.rules`: `config/training_report` Management only; `showToHod` Management only; the new trainer
+  keys locked for internal trainers' reports; `checkin` / `checkinAnswer` refused from the CRM. Tested with a logic
+  script (copies, gaps, cleaning, changes, older reports) and a local page (settings, preview, phone width).

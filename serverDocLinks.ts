@@ -12,7 +12,8 @@ import { DocumentReference, FieldValue, Firestore } from 'firebase-admin/firesto
 import { admin, UserError, callerFrom, route } from './serverAuth';
 import { canSendQuotation } from './serverMail';
 import { DOC_NOUN, DocKind, isLinkToken, publicDocFields } from './src/lib/docLinks';
-import { dealPax, hrCopy, withPax } from './src/lib/trainingReport';
+import { copyOf, dealPax, withPax } from './src/lib/trainingReport';
+import { readReportSettings } from './src/lib/reportSettings';
 import { isDeletedRecord } from './src/lib/linked';
 import { endOfDayMY, expiryDateMY, expiryProblem, isExpired, plusDaysMY } from './src/lib/proposalTracking';
 import { COMPANY } from './src/lib/company';
@@ -27,7 +28,7 @@ const canLink = (kind: DocKind, d: any, caller: { memberId: string; role: string
 
 // Light protection against someone hammering the links: 60 requests a minute per address.
 const hits = new Map<string, { n: number; since: number }>();
-function slowDown(req: Request) {
+export function slowDown(req: Request) {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   const now = Date.now();
   const h = hits.get(ip);
@@ -231,7 +232,8 @@ export function registerDocLinkRoutes(app: Express) {
     if (kind === 'report') {
       const deal: any = (await db.collection('pipelines').doc(link.docId).get()).data();
       if (!deal || isDeletedRecord(deal)) throw new UserError(404, 'doc-gone', gone);
-      report = hrCopy(withPax(d, dealPax(deal)));
+      const settings = readReportSettings((await db.collection('config').doc('training_report').get()).data());
+      report = copyOf(withPax(d, dealPax(deal)), settings, 'hr');
     }
 
     // No "Client opened" History line (2026-10-20): History is seen by everyone on the deal, tracking only by Management.
