@@ -27,6 +27,7 @@ import PanelResizer from './PanelResizer';
 import ListPager, { SortSelect, listSelect } from './ListPager';
 import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { useSearchPrefill } from './GlobalSearch';
+import DownloadButton from './DownloadButton';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -712,7 +713,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
                 {DOC_KINDS.map(k => (
                   <li key={k.id} className="flex items-center justify-between gap-3 py-2">
                     <span className="text-sm text-ink-soft">{k.label}</span>
-                    {s.docs?.[k.id] ? <a href={s.docs[k.id]!.url} target="_blank" rel="noreferrer" className="truncate font-semibold text-accent hover:underline">{s.docs[k.id]!.name}</a>
+                    {s.docs?.[k.id] ? <span className="flex min-w-0 items-center"><a href={s.docs[k.id]!.url} target="_blank" rel="noreferrer" className="truncate font-semibold text-accent hover:underline">{s.docs[k.id]!.name}</a><DownloadButton file={s.docs[k.id]!} /></span>
                       : <span className="text-sm text-ink-soft">{cur?.docs?.[k.id] ? 'Not sent; the current file is kept' : 'Not uploaded'}</span>}
                   </li>
                 ))}
@@ -979,7 +980,7 @@ function TrainerPanel(props: {
               return (
                 <div key={k.id} className="flex items-center justify-between gap-3 px-3 py-2">
                   <span className="text-sm">{k.label}</span>
-                  {f ? <a href={f.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold text-accent hover:underline"><FileText className="h-4 w-4 shrink-0" /><span className="truncate">{f.name}</span></a>
+                  {f ? <span className="flex min-w-0 items-center"><a href={f.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold text-accent hover:underline"><FileText className="h-4 w-4 shrink-0" /><span className="truncate">{f.name}</span></a><DownloadButton file={f} /></span>
                     : <span className="text-sm text-ink-soft">Not uploaded</span>}
                 </div>
               );

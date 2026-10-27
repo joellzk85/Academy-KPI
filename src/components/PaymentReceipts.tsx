@@ -7,6 +7,7 @@ import { formatDate } from '../lib/deals';
 import { CHECKLIST_FILE_ACCEPT, CHECKLIST_FILE_KINDS, checklistFileProblem, checklistFileType, safeFileName, sizeText } from '../lib/checklistFiles';
 import { Receipt } from '../lib/postTraining';
 import { openProposalFile, storageError } from './ProposalFiles';
+import DownloadButton from './DownloadButton';
 
 // Payment receipts from the client or HRDC (Joel, 2026-10-20), on a deal's invoice or claim (money_in) or on an
 // imported Payment tracking line (payment_records). Admin and Management upload, open and delete (uploader or
@@ -134,6 +135,7 @@ export function ReceiptList({ receipts, viewer, copyLabel = 'Copy' }: { receipts
               <span className="flex items-center gap-1.5 text-[15px] font-medium text-accent hover:underline"><span className="truncate">{word(r)}: {r.name}</span><ExternalLink className="h-3.5 w-3.5 shrink-0" /></span>
               <span className="block text-sm text-ink-soft">{r.byName} · {formatDate(r.at)} · {sizeText(r.size)}</span>
             </button>
+            <DownloadButton file={r} />
             {(r.byId === viewer.id || viewer.role === 'management') && (
               <button type="button" disabled={busyId === r.id} onClick={() => remove(r)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Delete receipt ${r.name}`}>
                 {busyId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}

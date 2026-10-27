@@ -4,6 +4,7 @@ import { FileText, Loader2, Plus, Upload, X } from 'lucide-react';
 import { storage } from '../lib/firebase';
 import { shrink } from './PhotoPicker';
 import { storageError } from './ProposalFiles';
+import DownloadButton from './DownloadButton';
 import {
   BIO_LISTS, BioRow, DOC_KINDS, DocKind, rowFilled, GENDERS, LANGUAGES, TRAINER_FILE_ACCEPT, TRAINER_FILE_KINDS, TRAINING_TYPES, TrainerExtras, TrainerFile,
   safeName, topicList, topicText, trainerFileProblem, trainerFileType,
@@ -82,6 +83,7 @@ function DropBox({ title, hint, accept, kinds, current, onFileNote, upload, onRe
             ? <img src={current.url} alt={title} className="h-20 w-20 rounded-lg object-cover" />
             : <a href={current.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1.5 text-[15px] font-semibold text-accent hover:underline"><FileText className="h-4 w-4 shrink-0" /><span className="truncate">{current.name}</span></a>}
           {!!current.size && <span className="text-sm text-ink-soft">{sizeText(current.size)}</span>}
+          <DownloadButton file={{ ...current, name: current.name || title }} />
           <span className="flex gap-2">
             <button type="button" className={btnSecondary} disabled={busy !== null} onClick={() => inputRef.current?.click()}>{busy !== null ? <><Loader2 className="h-4 w-4 animate-spin" /> {busy}%</> : 'Replace'}</button>
             <button type="button" className="rounded-md p-2 text-ink-soft hover:bg-surface" onClick={onRemove} aria-label={`Remove ${title}`}><X className="h-4 w-4" /></button>

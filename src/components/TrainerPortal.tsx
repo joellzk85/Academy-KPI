@@ -24,6 +24,7 @@ import { TrainingReport, reportGaps, revisionWhen } from '../lib/trainingReport'
 import { autoSaveText, leaveAfterSave, useAutoSave } from '../lib/useAutoSave';
 import TrainingReportForm, { RevisionList } from './TrainingReportForm';
 import DocsTab from './TrainerPortalDocs';
+import DownloadButton from './DownloadButton';
 
 // The trainer portal (Joel, 2026-10-21), at /trainer. A trainer whom Admin or Management gave access logs in with
 // their email and password (Firebase's own email + password login; "Forgot password" is Firebase's reset email).
@@ -882,6 +883,7 @@ function FileDrop({ title, hint, photo, folder, kind, files, setFiles }: {
               {/^image\//.test(f.type) ? <img src={f.url} alt="" className="h-10 w-10 shrink-0 rounded object-cover" /> : <FileText className="h-5 w-5 shrink-0 text-ink-soft" />}
               <a href={f.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-medium hover:underline">{f.name}</a>
               <span className="shrink-0 text-ink-soft">{sizeText(f.size)}</span>
+              <DownloadButton file={f} />
               <button type="button" className="rounded p-1 text-ink-soft hover:bg-surface hover:text-danger" aria-label={`Remove ${f.name}`} onClick={() => setFiles(cur => cur.filter(x => x.path !== f.path))}><X className="h-4 w-4" /></button>
             </li>
           ))}

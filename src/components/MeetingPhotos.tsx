@@ -8,6 +8,7 @@ import { isSuperManager } from '../lib/superManager';
 import { formatDate } from '../lib/deals';
 import { shrink } from './PhotoPicker';
 import { storageError } from './ProposalFiles';
+import DownloadButton from './DownloadButton';
 
 // Meeting photos on a face-to-face appointment or a "Visit" follow-up, and screenshots of an online appointment
 // (lib/meetingPhotos.ts has the rules). Photos and screenshots can also be dropped on the box or pasted (Ctrl+V).
@@ -179,6 +180,7 @@ export default function MeetingPhotos({ photos, deal, kind, noteId = '', meeting
             <li key={p.id} className="w-36">
               <div className="relative h-24 w-36 overflow-hidden rounded-lg border border-line bg-surface">
                 <a href={p.url} target="_blank" rel="noreferrer" aria-label="Open photo"><img src={p.url} alt="Meeting" className="h-full w-full object-cover" /></a>
+                <DownloadButton onPhoto file={{ url: p.url, path: p.path, name: `meeting-${p.meetingDate || 'photo'}-${p.id.slice(0, 4)}.jpg` }} />
                 {(p.byId === viewer.id || viewer.role === 'management') && (
                   <button type="button" onClick={() => remove(p)} className="absolute right-1 top-1 rounded bg-ink/60 p-0.5 text-white" aria-label="Remove photo"><X className="h-3.5 w-3.5" /></button>
                 )}

@@ -10,6 +10,7 @@ import { Vendor, withBankStamp } from '../lib/vendors';
 import { newToken, whatsappShare } from '../lib/trainerLinks';
 import { isTrainerFee } from '../lib/feeChecks';
 import { FeeChecksBox } from './FeeChecks';
+import DownloadButton from './DownloadButton';
 import {
   BankRequest, Booking, INVITE_DAYS, PORTAL_PATH, PortalInvite, STARS, STAR_WORDS, TrainerAccount, TrainerJob, claimFlag, clashesWith, cleanEmail, emailProblem, inviteLive, invitePath,
   jobId, poDeclinedFlag, poLines, ratingAverage,
@@ -476,12 +477,18 @@ export function TrainerJobBox({ deal, task, trainerName, viewer, outs, internal 
           {flag && staff && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm font-semibold text-danger">{flag}</p>}
           <div className="flex flex-wrap gap-2">
             {(claim.photos || []).map(f => (
-              <a key={f.path} href={f.url} target="_blank" rel="noreferrer" title={f.name}><img src={f.url} alt={f.name} className="h-16 w-16 rounded-lg border border-line object-cover hover:opacity-80" /></a>
+              <span key={f.path} className="relative">
+                <a href={f.url} target="_blank" rel="noreferrer" title={f.name}><img src={f.url} alt={f.name} className="h-16 w-16 rounded-lg border border-line object-cover hover:opacity-80" /></a>
+                <DownloadButton onPhoto file={f} className="!p-0.5" />
+              </span>
             ))}
           </div>
           <div className="flex flex-wrap gap-2">
             {(claim.t3 || []).map(f => (
-              <a key={f.path} href={f.url} target="_blank" rel="noreferrer" className={btnSecondary}><FileText className="h-4 w-4" /> T3: {f.name}</a>
+              <span key={f.path} className="inline-flex items-center">
+                <a href={f.url} target="_blank" rel="noreferrer" className={btnSecondary}><FileText className="h-4 w-4" /> T3: {f.name}</a>
+                <DownloadButton file={f} />
+              </span>
             ))}
           </div>
           {staff && claim.status === 'submitted' && <button type="button" disabled={busy} className={btnSecondary} onClick={sendBack}>Ask the trainer to fix something</button>}

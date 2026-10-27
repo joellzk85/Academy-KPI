@@ -17,6 +17,7 @@ import { ProposalFile } from '../lib/proposals';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { openProposalFile, storageError } from './ProposalFiles';
+import DownloadButton from './DownloadButton';
 import { uploadPhoto } from './PhotoPicker';
 import {
   COLOUR_LABELS, ClientSummary, ClientTouchPoint, ContactColour, FILTER_LABELS, TOUCH_HOW_LABELS, TimelineEntry, TimelineFilter, TouchHow,
@@ -1041,7 +1042,10 @@ function Timeline(props: React.ComponentProps<typeof ClientPanel>) {
                       : <span className="text-ink-soft">Deal: {dealLabel(e.dealId)}</span>
                   )}
                   {fileList.map(f => (
-                    <button key={f.id} type="button" className={link} onClick={async () => setErr(await openProposalFile(f))}><FileText className="h-3.5 w-3.5" /> {f.name}</button>
+                    <span key={f.id} className="inline-flex items-center">
+                      <button type="button" className={link} onClick={async () => setErr(await openProposalFile(f))}><FileText className="h-3.5 w-3.5" /> {f.name}</button>
+                      <DownloadButton file={f} />
+                    </span>
                   ))}
                   {q && props.onOpenQuotation && mayOpen(q) && <button type="button" className={link} onClick={() => props.onOpenQuotation!(q.id)}><FileText className="h-3.5 w-3.5" /> Open quotation</button>}
                   {q && q.status === 'sent' && (

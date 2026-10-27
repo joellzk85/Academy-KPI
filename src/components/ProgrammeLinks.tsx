@@ -8,6 +8,7 @@ import { Programme, ProgrammeFile } from '../lib/programmes';
 import { PROPOSAL_ACCEPT, proposalFileProblem, proposalType, safeFileName, sizeText } from '../lib/proposals';
 import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { storageError } from './ProposalFiles';
+import DownloadButton from './DownloadButton';
 
 // A programme's course outlines, outline files and trainers, linked from the programme itself (Joel, 2026-10-23:
 // "the programme approved is not linked to the course outline"). An outline points to one programme (programmeId);
@@ -195,6 +196,7 @@ export default function ProgrammeLinks({ programme, programmes, outlines, deals,
                 </button>
                 <span className="flex shrink-0 items-center gap-2 text-sm text-ink-soft">
                   {sizeText(f.size)}
+                  <DownloadButton file={f} />
                   <button type="button" onClick={() => removeFile(f)} aria-label={`Remove ${f.name}`} className="rounded p-1 hover:bg-danger-soft hover:text-danger"><Trash2 className="h-4 w-4" /></button>
                 </span>
               </li>
@@ -250,6 +252,7 @@ export function ProgrammeLinkedInfo({ programme, programmes }: { programme: Prog
           {files.map((f, i) => (
             <React.Fragment key={f.id}>{i > 0 && ' · '}
               <button type="button" onClick={() => openProgrammeFile(f)} className="font-semibold text-accent hover:underline">{f.name}</button>
+              <DownloadButton file={f} className="ml-0.5 !p-0.5 align-middle" />
             </React.Fragment>
           ))}
         </p>

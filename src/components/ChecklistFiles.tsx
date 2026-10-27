@@ -8,6 +8,7 @@ import {
   CHECKLIST_FILE_ACCEPT, CHECKLIST_FILE_KINDS, ChecklistFile, checklistFileProblem, checklistFileType, safeFileName, sizeText,
 } from '../lib/checklistFiles';
 import { openProposalFile, storageError } from './ProposalFiles';
+import DownloadButton from './DownloadButton';
 
 // The file drop box and file list on a checklist step that has "Has a file upload" (lib/checklistFiles.ts).
 // Admin and Management upload; everyone sees the list and can open the files.
@@ -115,6 +116,7 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
                 </span>
                 <span className="block text-sm text-ink-soft">{f.byName} · {formatDate(f.at)} · {sizeText(f.size)}</span>
               </button>
+              <DownloadButton file={f} />
               {canDelete(f) && (
                 <button type="button" disabled={busyId === f.id} onClick={() => remove(f)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Delete ${f.name}`}>
                   {busyId === f.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}

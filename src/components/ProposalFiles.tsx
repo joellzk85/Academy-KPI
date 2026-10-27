@@ -4,6 +4,7 @@ import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from 'firebas
 import { ExternalLink, FileText, Loader2, Trash2, Upload } from 'lucide-react';
 import { db, friendlyError, storage } from '../lib/firebase';
 import { formatDate } from '../lib/deals';
+import DownloadButton from './DownloadButton';
 import { PROPOSAL_ACCEPT, ProposalFile, proposalFileProblem, proposalType, safeFileName, sizeText } from '../lib/proposals';
 
 // Proposal files on a deal (lib/proposals.ts). ProposalDrop is the "drop your proposal here" box next to
@@ -167,6 +168,7 @@ export function ProposalFilesList({ dealId, files, viewer, editable, onUploaded 
                 </span>
                 <span className="block text-sm text-ink-soft">{f.byName} · {formatDate(f.at)} · {sizeText(f.size)}</span>
               </button>
+              <DownloadButton file={f} />
               {canDelete(f) && (
                 <button type="button" disabled={busyId === f.id} onClick={() => remove(f)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Delete ${f.name}`}>
                   {busyId === f.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
