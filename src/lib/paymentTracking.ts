@@ -14,6 +14,7 @@ import { MoneyIn, MoneySettings, isPaid } from './money';
 import { dealAskedFor, dealOwnerId } from './deals';
 import { ProjectRow } from './projectPL';
 import { approvalCodeOf } from './checklist';
+import { employerLabel, grantEmployers } from './grantEmployers';
 
 export interface TrackLine extends PaymentLine {
   dealId?: string;           // set for lines read from a deal's Money section
@@ -53,15 +54,21 @@ export function dealLines(args: {
     const approval = approvalCodeOf(checklists[d.id]?.tasks);
     const row = args.rows.find(r => r.deal.id === d.id);
     const date = isIsoDay(String(d.trainingDate || '').slice(0, 10)) ? String(d.trainingDate).slice(0, 10) : '';
+    // Several employers claiming (2026-10-27): each claim's line shows its own employer, codes and approval.
+    const group = grantEmployers(checklists[d.id]?.tasks);
     mine.forEach(m => {
       const hrdc = m.source === 'hrdc';
+      const line = group.length && m.employerClientId ? group.find(e => e.clientId === m.employerClientId) : undefined;
+      const employer = line ? clients.find(c => c.id === line.clientId) : client;
       const monthFrom = date || (isIsoDay(m.invoiceDate) ? m.invoiceDate : '');
       out.push({
         id: `deal_${m.id}`, source: 'manual', dealId: d.id,
         month: monthFrom.slice(0, 7), groupNo: `deal#${d.id}`, date, dateText: '',
         programme: dealAskedFor(d, args.programmeName(d)), salesPerson: args.personName(dealOwnerId(d)),
-        claimId: (m.invoiceNo || '').trim(), grantId: hrdc ? approval : '',
-        client: client?.companyName || d.client || '', employer: (client?.employerName || '').trim(), employerCode: hrdc ? String(client?.employerCode || '').trim() : '', employerAddress: '', venue: '',
+        claimId: (m.invoiceNo || '').trim(), grantId: hrdc ? (line ? String(line.approvalCode || '').trim() : approval) : '',
+        client: client?.companyName || d.client || '',
+        employer: line ? employerLabel(employer) : (client?.employerName || '').trim(),
+        employerCode: hrdc || line ? String(employer?.employerCode || '').trim() : '', employerAddress: '', venue: '',
         approved: Number(m.amount) || 0,
         afterDeduct: hrdc ? Math.round((Number(m.amount) || 0) * (1 - settings.hrdcDeductionPct / 100) * 100) / 100 : Number(m.amount) || 0,
         afterTax: null,

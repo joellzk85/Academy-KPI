@@ -24,6 +24,7 @@ import { formatDate, formatRM, todayIso, trainingEndDate } from './deals';
 import { DEFAULT_MONEY_SETTINGS, InSource, MoneyIn, MoneyOut, MoneySettings, isPaid, openShortfalls, shortfall } from './money';
 import { BehalfStatus, ClaimBack, behalfFlags, behalfNext, behalfStatus } from './onBehalf';
 import { isHrdc } from './checklist';
+import { GrantEmployer, employersWithoutClaim, grantEmployers, isGroupClaim } from './grantEmployers';
 import { openTodos } from './trainingChange';
 import { pendingDiscount } from './dealOffers';
 
@@ -86,7 +87,8 @@ export interface PostStatus {
   ended: boolean;
   daysSince: number | null;
   started: boolean;                 // anything after training recorded yet
-  missingInvoices: InSource[];      // still to be recorded
+  missingInvoices: InSource[];      // still to be recorded ('hrdc' while any of several employers has no claim yet)
+  unclaimed: GrantEmployer[];       // several employers: those with no HRDC claim yet (2026-10-27)
   invoiceDone: boolean;
   docs: ChecklistTask[];            // the after-training steps that apply (optional ones last)
   docsOpen: ChecklistTask[];        // needed and not done
@@ -114,7 +116,9 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   const daysSince = daysSinceTraining(deal, today);
   const ended = daysSince !== null;
   const needed = invoicesNeeded(deal?.fundingType);
-  const missingInvoices = needed.filter(src => !ins.some(m => m.source === src));
+  // Several employers claiming (2026-10-27): the HRDC claim is missing until every employer has its own.
+  const unclaimed = employersWithoutClaim(tasks, ins);
+  const missingInvoices = needed.filter(src => (src === 'hrdc' && unclaimed.length) || !ins.some(m => m.source === src));
   // No funding type: any invoice or claim will do.
   const invoiceDone = needed.length ? missingInvoices.length === 0 : ins.length > 0;
   const after = applicableTasks(tasks, deal?.fundingType).filter(t => t.after);
@@ -144,7 +148,9 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
   const hrdcOrder = docsFirst(deal);
   const invoiceStep = hrdcOrder ? 2 : 1;
   const docsNext = () => `${docsOpen[0].label}${docsOpen.length > 1 ? ` (then ${docsOpen.slice(1).map(t => t.label).join(', ')})` : ''}`;
-  const invoiceNext = () => (missingInvoices.length ? `Record the ${missingInvoices.map(s => INVOICE_WORDS[s]).join(' and the ')}` : 'Record the invoice or HRDC claim');
+  const invoiceWord = (src: InSource) => src === 'hrdc' && unclaimed.length && isGroupClaim(tasks) && ins.some(m => m.source === 'hrdc')
+    ? `${INVOICE_WORDS[src]} for ${plural(unclaimed.length, 'more employer')}` : INVOICE_WORDS[src];
+  const invoiceNext = () => (missingInvoices.length ? `Record the ${missingInvoices.map(invoiceWord).join(' and the ')}` : 'Record the invoice or HRDC claim');
 
   let next = '';
   let step = steps + 1;
@@ -186,7 +192,7 @@ export function postTraining(deal: any, tasks: ChecklistTask[] | undefined, ins:
     ? [...ins.map(m => m.paidDate || ''), ...docs.map(t => t.doneAt || ''), ...receipts.filter(r => ins.some(m => m.id === r.moneyInId)).map(r => r.at.slice(0, 10)),
       ...outs.map(o => o.paidDate || ''), ...behalf.claims.map(c => c.paidDate || '')].filter(isDay).map(d => d.slice(0, 10)).sort().pop() || ''
     : '';
-  return { ended, daysSince, started, missingInvoices, invoiceDone, docs, docsOpen, unpaid, noReceipt, noCopy, outsOpen, shortfallsOpen, beforeOpen, loopsOpen, invoiceStep, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
+  return { ended, daysSince, started, missingInvoices, unclaimed, invoiceDone, docs, docsOpen, unpaid, noReceipt, noCopy, outsOpen, shortfallsOpen, beforeOpen, loopsOpen, invoiceStep, paymentInDone, outsDone, paymentDone, behalf, steps, closed, closedOn, next, step };
 }
 
 /** Reminders from the day after the training until the case is closed (the work queue, My home's After training card). */
@@ -212,7 +218,7 @@ export function postTrainingFlags(deal: any, tasks: ChecklistTask[] | undefined,
   if (claimMissing) {
     flags.push(deadline !== null && deadline < 0
       ? { level: 'danger', text: `HRDC claim deadline passed ${plural(-deadline, 'day')} ago` }
-      : { level: claimLate ? 'danger' : 'attention', text: `HRDC claim not submitted, ${plural(since, 'day')} since training${deadline !== null ? ` (deadline in ${plural(deadline, 'day')})` : ''}` });
+      : { level: claimLate ? 'danger' : 'attention', text: `HRDC claim not submitted${st.unclaimed.length && st.unclaimed.length < grantEmployers(tasks).length ? ` for ${plural(st.unclaimed.length, 'employer')}` : ''}, ${plural(since, 'day')} since training${deadline !== null ? ` (deadline in ${plural(deadline, 'day')})` : ''}` });
   }
   if (st.missingInvoices.includes('client')) flags.push({ level: 'danger', text: 'Client invoice not sent, training has passed' });
   if (st.docsOpen.length) flags.push({ level: 'attention', text: `After training: ${st.docsOpen.map(t => t.label).join(', ')} still to do` });

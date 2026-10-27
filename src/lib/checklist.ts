@@ -7,8 +7,9 @@
 // - Whether a task applies (e.g. "Apply grant" only for HRDC deals) is worked
 //   out from the deal's current funding type, so changing it later just works.
 
-import { FundingType, trainingEndDate } from './deals';
+import { FundingType, dealValue, formatRM, trainingEndDate } from './deals';
 import { isItemsOnly } from './dealQuotes';
+import { GrantEmployer, grantEmployers, isGroupClaim, valueGap } from './grantEmployers';
 
 // Before training (Joel, 2026-10-20): venue, bus and facilitator first ask "Needed? Yes / No"; materials is a small
 // tick list of its own. Costs on these steps are payment requests (money_out with checklistTaskId, StepCosts.tsx).
@@ -45,6 +46,7 @@ export interface ChecklistTask {
   grantNumber?: string;      // older checklists; read through approvalCodeOf
   grantApprovedDate?: string;
   approvalCode?: string;     // HRDC's approval code (grant ID), typed on Grant approved (2026-10-23). The Employer code lives on the client.
+  employers?: GrantEmployer[]; // several employers claiming for one training (2026-10-27, lib/grantEmployers.ts); none = one employer
   // Check venue + payment (picked from the venue list, or typed)
   venueId?: string;
   venueName?: string;
@@ -213,6 +215,9 @@ export function grantApproved(deal: any, tasks: ChecklistTask[] | undefined): bo
 /** HRDC's approval code for the deal, from the Grant approved step ('' = not typed yet). Older checklists kept it as grantNumber. */
 export function approvalCodeOf(tasks: ChecklistTask[] | undefined): string {
   const g = (tasks || []).find(t => t.kind === 'grant');
+  // Several employers (2026-10-27): each has its own approval code, listed together.
+  const group = grantEmployers(tasks);
+  if (group.length) return group.map(e => String(e.approvalCode || '').trim()).filter(Boolean).join(', ');
   return String(g?.approvalCode || g?.grantNumber || '').trim();
 }
 
@@ -403,7 +408,11 @@ export function checklistFlags(deal: any, tasks: ChecklistTask[] | undefined, se
   const end = daysUntil(trainingEndDate(deal), today);
   if (co && !(end !== null && end < 0)) rest.push({ level: 'attention', text: `${co.pax} pax, HRDC needs ${co.need} trainers: co-trainer not chosen` });
   // Grant approved ticked but HRDC's approval code not typed: a reminder, never a block (Joel, 2026-10-23).
-  if (isHrdc(deal?.fundingType) && (tasks || []).find(t => t.kind === 'grant')?.done && !approvalCodeOf(tasks)) rest.push({ level: 'attention', text: 'Grant approved: approval code not filled in' });
+  const codeGap = isGroupClaim(tasks) ? grantEmployers(tasks).some(e => !String(e.approvalCode || '').trim()) : !approvalCodeOf(tasks);
+  if (isHrdc(deal?.fundingType) && (tasks || []).find(t => t.kind === 'grant')?.done && codeGap) rest.push({ level: 'attention', text: 'Grant approved: approval code not filled in' });
+  // Several employers: their approved amounts add up to something other than the deal value (a reminder, 2026-10-27).
+  const gap = isHrdc(deal?.fundingType) ? valueGap(grantEmployers(tasks), dealValue(deal)) : 0;
+  if (gap) rest.push({ level: 'attention', text: `Employers' approved total is ${formatRM(Math.abs(gap))} ${gap > 0 ? 'more' : 'less'} than the deal value` });
   // "Not applied" already says more than "not approved", so only one shows.
   return g ? [g, ...rest.filter(f => !/grant not approved$/.test(f.text))] : rest;
 }

@@ -8,6 +8,8 @@ import { INVOICE_WORDS, Receipt, copiesFor, docsFirst, invoicesNeeded, postTrain
 import { hrdcClaimBlock, progress } from '../lib/checklist';
 import { askReason, withDealHistory } from '../lib/moneyActions';
 import DealChecklist, { HrdcCodes } from './DealChecklist';
+import { byId, useClientList } from './GrantEmployers';
+import { employerLabel, grantEmployers } from '../lib/grantEmployers';
 import { InForm, InRow } from './Money';
 import { ReceiptDrop, ReceiptList, useReceipts } from './PaymentReceipts';
 import { ClaimBackStep, useClaimBacks } from './ClaimBacks';
@@ -51,7 +53,13 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
   // reason in the History (process audit, 2026-10-22).
   const claimBlock = hrdcClaimBlock(deal, checklist?.tasks);
   const [override, setOverride] = useState('');
-  const [topUp, setTopUp] = useState<{ claimId: string; amount: number; claimNo: string } | null>(null);
+  const [topUp, setTopUp] = useState<{ claimId: string; amount: number; claimNo: string; employerClientId?: string } | null>(null);
+  // Several employers claiming (2026-10-27): each HRDC claim names its employer; the ones without a claim come first.
+  const group = grantEmployers(checklist?.tasks);
+  const groupClients = byId(useClientList(staff && group.length > 0));
+  const employerOf = (m: MoneyIn) => (group.length && m.employerClientId ? employerLabel(groupClients[m.employerClientId]) : '');
+  const claimEmployers = [...st.unclaimed, ...group.filter(e => !st.unclaimed.includes(e))]
+    .map(e => ({ clientId: e.clientId, name: employerLabel(groupClients[e.clientId]), amount: Number(e.approvedAmount) || 0 }));
   const [error, setError] = useState('');
   const startAdding = (src: InSource) => {
     setError('');
@@ -112,7 +120,7 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
               const word = m.source === 'hrdc' ? 'Claim copy' : 'Invoice copy';
               return (
                 <li key={m.id} className="rounded-lg border border-line bg-white px-3 py-2 text-[15px]">
-                  <span className="font-semibold">{m.source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}{m.invoiceNo ? ` ${m.invoiceNo}` : ''}</span>
+                  <span className="font-semibold">{m.source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}{m.invoiceNo ? ` ${m.invoiceNo}` : ''}{employerOf(m) ? ` · ${employerOf(m)}` : ''}</span>
                   {staff && <> · {formatRM(m.amount)}</>}
                   <span className="text-ink-soft"> · {m.source === 'hrdc' ? 'submitted' : 'invoiced'} {formatDate(m.invoiceDate)}</span>
                   {staff && m.copyNeeded && !copies.length && <p className="text-sm font-semibold text-attention">{word} not uploaded yet: the case closes once it's in.</p>}
@@ -126,11 +134,11 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
         )}
         {!sortedIns.length && <p className="text-[15px] text-ink-soft">{staff ? 'Nothing recorded yet.' : 'Not issued yet.'}</p>}
         {staff && (adding ? (
-          <InForm deal={deal} source={adding} viewer={viewer} settings={settings} override={adding === 'hrdc' ? override : ''} onDone={() => { setAdding(null); setOverride(''); }} />
+          <InForm deal={deal} source={adding} viewer={viewer} settings={settings} override={adding === 'hrdc' ? override : ''} employers={group.length ? claimEmployers : undefined} onDone={() => { setAdding(null); setOverride(''); }} />
         ) : (
           <div className="flex flex-wrap gap-2">
             {st.missingInvoices.map(src => (
-              <button key={src} type="button" className={btnPrimary} onClick={() => startAdding(src)}><Plus className="h-4 w-4" /> Record the {INVOICE_WORDS[src]}</button>
+              <button key={src} type="button" className={btnPrimary} onClick={() => startAdding(src)}><Plus className="h-4 w-4" /> Record the {INVOICE_WORDS[src]}{src === 'hrdc' && group.length > 1 ? ` (${st.unclaimed.length} of ${group.length} employers to go)` : ''}</button>
             ))}
             {(needed.includes('hrdc') || !needed.length) && !st.missingInvoices.includes('hrdc') && (
               <button type="button" className={btnSecondary} onClick={() => startAdding('hrdc')}><Plus className="h-4 w-4" /> {ins.some(m => m.source === 'hrdc') ? 'Another HRDC claim' : 'Record HRDC claim'}</button>
@@ -162,7 +170,7 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
         ) : (
           <ul className="space-y-2">
             {sortedIns.map(m => staff
-              ? <InRow key={m.id} m={m} viewer={viewer} settings={settings} receipts={receiptsFor(m, receipts)} />
+              ? <InRow key={m.id} m={m} viewer={viewer} settings={settings} receipts={receiptsFor(m, receipts)} employer={employerOf(m)} />
               : (
                 <li key={m.id} className="rounded-lg border border-line bg-white px-3 py-2 text-[15px]">
                   <span className="font-semibold">{m.source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}{m.invoiceNo ? ` ${m.invoiceNo}` : ''}</span>
@@ -177,10 +185,10 @@ export default function AfterTraining({ deal, checklist, quotes, viewer, ins, ou
             <InForm key={m.id} deal={deal} source="client" viewer={viewer} settings={settings} topUp={topUp} onDone={() => setTopUp(null)} />
           ) : (
             <div key={m.id} className="rounded-lg border border-danger/30 bg-danger-soft/50 px-3 py-2.5">
-              <p className="text-[15px] font-semibold text-danger">HRDC paid {formatRM(shortfall(m, settings))} less than expected on claim {m.invoiceNo || ''}.</p>
+              <p className="text-[15px] font-semibold text-danger">HRDC paid {formatRM(shortfall(m, settings))} less than expected on claim {m.invoiceNo || ''}{employerOf(m) ? ` (${employerOf(m)})` : ''}.</p>
               <p className="text-sm text-ink-soft">Bill the client for the difference on a top-up invoice. The case can't close until it's raised{viewer.role === 'management' ? ' or written off' : ''}.</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className={btnPrimary} onClick={() => setTopUp({ claimId: m.id, amount: shortfall(m, settings), claimNo: m.invoiceNo || '' })}><Plus className="h-4 w-4" /> Raise top-up invoice</button>
+                <button type="button" className={btnPrimary} onClick={() => setTopUp({ claimId: m.id, amount: shortfall(m, settings), claimNo: m.invoiceNo || '', ...(m.employerClientId ? { employerClientId: m.employerClientId } : {}) })}><Plus className="h-4 w-4" /> Raise top-up invoice</button>
                 {viewer.role === 'management' && <button type="button" className={btnSecondary} onClick={() => writeOff(m)}>Write it off</button>}
               </div>
             </div>

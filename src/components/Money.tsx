@@ -205,15 +205,25 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'da
 // ---------- Money in ----------
 // topUp (process audit, 2026-10-22): a top-up invoice to the client for what HRDC didn't pay on a claim. override: why
 // Management records an HRDC claim before the grant is approved or the training delivered (kept in the deal's History).
-export function InForm({ deal, source, viewer, settings, onDone, topUp, override }: {
+// employers (2026-10-27, lib/grantEmployers.ts): several employers claim for this training, so an HRDC claim names its
+// employer; the amount starts at that employer's approved amount. A top-up invoice keeps its claim's employer.
+export function InForm({ deal, source, viewer, settings, onDone, topUp, override, employers }: {
   deal: any; source: InSource; viewer: Viewer; settings: MoneySettings; onDone: () => void;
-  topUp?: { claimId: string; amount: number; claimNo: string }; override?: string;
+  topUp?: { claimId: string; amount: number; claimNo: string; employerClientId?: string }; override?: string;
+  employers?: { clientId: string; name: string; amount: number }[]; key?: string;
 }) {
+  const pickEmployers = source === 'hrdc' && !!employers?.length;
+  const first = pickEmployers ? employers![0] : null;
   const [f, setF] = useState({
     invoiceNo: '', invoiceDate: todayIso(),
-    amount: topUp ? String(Math.round(topUp.amount * 100) / 100) : dealValue(deal) ? String(dealValue(deal)) : '',
+    amount: topUp ? String(Math.round(topUp.amount * 100) / 100) : first ? (first.amount > 0 ? String(first.amount) : '') : dealValue(deal) ? String(dealValue(deal)) : '',
     note: topUp ? `Top-up: HRDC paid less on claim${topUp.claimNo ? ` ${topUp.claimNo}` : ''}` : '',
+    employerClientId: topUp?.employerClientId || first?.clientId || '',
   });
+  const pickEmployer = (id: string) => {
+    const e = employers?.find(x => x.clientId === id);
+    setF(x => ({ ...x, employerClientId: id, amount: e && e.amount > 0 ? String(e.amount) : x.amount }));
+  };
   // Kept in this browser until it's saved (lib/useFormDraft.ts).
   const draft = useFormDraft(viewer.id, `money-in:${source}:${deal.id}${topUp ? `:topup:${topUp.claimId}` : ''}`, f, setF);
   // The copy of the claim or invoice we sent (2026-10-24): uploaded with the record, or later on its line.
@@ -225,6 +235,8 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
     const amount = num(f.amount);
     if (!f.invoiceDate) return setError(source === 'hrdc' ? 'Enter the date the claim was submitted.' : 'Enter the invoice date.');
     if (!(amount > 0)) return setError('Enter the amount, for example 15000.');
+    if (pickEmployers && !f.employerClientId) return setError('Pick the employer this claim is for.');
+    const employerName = employers?.find(x => x.clientId === f.employerClientId)?.name || '';
     const id = `in_${Date.now()}`;
     return run(async () => {
       let copies: Receipt[] = [];
@@ -234,11 +246,12 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
         catch (e) { setProgress(null); throw new Error(receiptError(e)); }
         setProgress(null);
       }
-      const what = `${topUp ? 'Top-up invoice' : IN_SOURCE_LABELS[source]}${f.invoiceNo.trim() ? ` ${f.invoiceNo.trim()}` : ''} recorded (${formatRM(amount)})${override ? `, before the grant or delivery was ticked: ${override}` : ''}`;
+      const what = `${topUp ? 'Top-up invoice' : IN_SOURCE_LABELS[source]}${f.invoiceNo.trim() ? ` ${f.invoiceNo.trim()}` : ''}${pickEmployers && employerName ? ` for ${employerName}` : ''} recorded (${formatRM(amount)})${override ? `, before the grant or delivery was ticked: ${override}` : ''}`;
       try {
         await withDealHistory(deal.id, viewer, what, batch => batch.set(doc(db, 'money_in', id), {
           id, dealId: deal.id, source, invoiceNo: f.invoiceNo.trim(), invoiceDate: f.invoiceDate, amount, paidDate: '', paidAmount: 0, note: f.note.trim(),
           ...(topUp ? { topUpFor: topUp.claimId } : {}),
+          ...((pickEmployers || topUp?.employerClientId) && f.employerClientId ? { employerClientId: f.employerClientId } : {}),
           copyNeeded: true, createdAt: Date.now(), createdById: viewer.id, createdByName: viewer.name,
         }));
       } catch (e) {
@@ -255,6 +268,14 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
     <form onSubmit={save} className="space-y-3 rounded-xl border border-line bg-surface p-4">
       <p className="text-sm font-semibold">{source === 'hrdc' ? 'HRDC claim' : 'Client invoice'}</p>
       <DraftBar draft={draft} what={source === 'hrdc' ? 'HRDC claim' : 'client invoice'} />
+      {pickEmployers && (
+        <div>
+          <label className={small} htmlFor="mi-emp">Employer (each claims on its own approval)</label>
+          <select id="mi-emp" value={f.employerClientId} onChange={e => pickEmployer(e.target.value)} className={input}>
+            {employers!.map(e => <option key={e.clientId} value={e.clientId}>{e.name}{e.amount > 0 ? ` · approved ${formatRM(e.amount)}` : ''}</option>)}
+          </select>
+        </div>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <div><label className={small} htmlFor="mi-no">{source === 'hrdc' ? 'Claim / invoice no.' : 'Invoice no.'}</label><input id="mi-no" value={f.invoiceNo} onChange={e => setF(x => ({ ...x, invoiceNo: e.target.value }))} className={input} /></div>
         <div><label className={small} htmlFor="mi-date">{source === 'hrdc' ? 'Submitted on' : 'Invoice date'}</label><input id="mi-date" type="date" value={f.invoiceDate} onChange={e => setF(x => ({ ...x, invoiceDate: e.target.value }))} className={input} /></div>
@@ -276,8 +297,9 @@ export function InForm({ deal, source, viewer, settings, onDone, topUp, override
 
 // One invoice or HRDC claim, with "Record payment" (date, amount and the receipt) and its receipts.
 // readOnly: reps see the status only (no buttons, no receipts).
-export function InRow({ m, viewer, settings, context, receipts = [], readOnly }: {
+export function InRow({ m, viewer, settings, context, receipts = [], readOnly, employer }: {
   m: MoneyIn; viewer: Viewer; settings: MoneySettings; context?: string; receipts?: Receipt[]; readOnly?: boolean; key?: string;
+  employer?: string;   // several employers claiming (2026-10-27): who this claim is for
 }) {
   const [paying, setPaying] = useState(false);
   const [pay, setPay] = useState({ date: todayIso(), amount: String(Math.round(expectedFor(m, settings) * 100) / 100) });
@@ -326,7 +348,7 @@ export function InRow({ m, viewer, settings, context, receipts = [], readOnly }:
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           {context && <p className="text-sm font-semibold text-ink-soft">{context}</p>}
-          <p className="font-semibold">{IN_SOURCE_LABELS[m.source]}{m.invoiceNo ? ` ${m.invoiceNo}` : ''} · {formatRM(m.amount)}</p>
+          <p className="font-semibold">{IN_SOURCE_LABELS[m.source]}{m.invoiceNo ? ` ${m.invoiceNo}` : ''}{employer ? ` · ${employer}` : ''} · {formatRM(m.amount)}</p>
           <p className="text-sm text-ink-soft">
             {m.source === 'hrdc' ? 'Submitted' : 'Invoiced'} {formatDate(m.invoiceDate)}
             {m.source === 'hrdc' && ` · expect ${formatRM(expectedFor(m, settings))}`}

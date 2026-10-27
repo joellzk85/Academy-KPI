@@ -25,6 +25,8 @@ import { MakePoButton } from './TrainerPoDocument';
 import { hasAutoPo, isInternalTrainer } from '../lib/trainerPortal';
 import { vendorForTrainer } from '../lib/vendors';
 import { askReason } from '../lib/moneyActions';
+import { grantEmployers, groupGrantBlock } from '../lib/grantEmployers';
+import { EmployerList, EmployersEditor, byId, useClientList } from './GrantEmployers';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -133,6 +135,10 @@ export default function DealChecklist({
   const inPart = (t: { after?: boolean }) => !part || (part === 'after') === !!t.after;
   const tasks = applicableTasks(allTasks, deal.fundingType).filter(inPart);
   const { done, total } = progress(allTasks, deal.fundingType, part);
+  // Several employers claiming (2026-10-27): their client records hold the names and Employer codes.
+  const group = grantEmployers(allTasks);
+  const [groupStart, setGroupStart] = useState(false);
+  const clients = useClientList(isHrdc(deal.fundingType) && (group.length > 0 || groupStart));
 
   const save = async (next: ChecklistTask[], action: string) => {
     setBusy(true);
@@ -177,7 +183,11 @@ export default function DealChecklist({
     const gate = taskGate(t, quotes.length, grantBlock, !!venue, !!trainer, filesOf(t).length + autoPo + internal);
     if (gate) return setError(gate);
     // HRDC deals: Grant approved needs the Employer code and the Approval code (Joel, 2026-10-23).
-    if (t.kind === 'grant' && isHrdc(deal.fundingType)) {
+    if (t.kind === 'grant' && isHrdc(deal.fundingType) && group.length) {
+      if (!clients.length) return setError('Loading the employers, try again in a moment.');
+      const block = groupGrantBlock(group, byId(clients));
+      if (block) return setError(block);
+    } else if (t.kind === 'grant' && isHrdc(deal.fundingType)) {
       const missing = [!String(client?.employerCode || '').trim() && 'Employer code', !approvalCodeOf(allTasks) && 'Approval code'].filter(Boolean).join(' and ');
       if (missing) return setError(`Fill in the ${missing} below first: Grant approved needs both.`);
     }
@@ -329,10 +339,26 @@ export default function DealChecklist({
                     <ClipboardList className="h-4 w-4" /> {grantOutline.label}
                   </button>
                 )}
-                {t.kind === 'grant' && !arranging && (
-                  <HrdcCodes deal={deal} tasks={allTasks} editable={editable} busy={busy}
-                    onApproval={code => patch(t.id, { approvalCode: code }, `${t.label}: approval code ${code ? `set to ${code}` : 'cleared'}`)}
-                    onEmployerSaved={code => save(allTasks, `${t.label}: employer code ${code ? `set to ${code}` : 'cleared'} (saved on the client)`)} />
+                {t.kind === 'grant' && !arranging && isHrdc(deal.fundingType) && editable && (group.length > 0 || groupStart) ? (
+                  <EmployersEditor deal={deal} list={group} clients={clients} viewer={viewer} busy={busy}
+                    onChange={(next, action) => { if (!next.length) setGroupStart(false); patch(t.id, { employers: next }, action); }}
+                    onLog={action => save(allTasks, action)} />
+                ) : t.kind === 'grant' && !arranging && (
+                  <>
+                    <HrdcCodes deal={deal} tasks={allTasks} editable={editable} busy={busy}
+                      onApproval={code => patch(t.id, { approvalCode: code }, `${t.label}: approval code ${code ? `set to ${code}` : 'cleared'}`)}
+                      onEmployerSaved={code => save(allTasks, `${t.label}: employer code ${code ? `set to ${code}` : 'cleared'} (saved on the client)`)} />
+                    {editable && isHrdc(deal.fundingType) && (
+                      <button type="button" disabled={busy} className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline"
+                        onClick={() => {
+                          setGroupStart(true);
+                          // The deal's client becomes the first employer, keeping the approval code already typed.
+                          if (deal.clientId) patch(t.id, { employers: [{ id: `emp_${Date.now()}`, clientId: deal.clientId, approvalCode: approvalCodeOf(allTasks) }] }, `${t.label}: several employers claiming for this training`);
+                        }}>
+                        <Plus className="h-4 w-4" /> Several employers claim for this training
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
               {!arranging && (
@@ -699,7 +725,11 @@ export function HrdcCodes({ deal, tasks, editable, busy = false, onApproval, onE
 }) {
   const client = useClient(deal.clientId);
   const [error, setError] = useState('');
+  // Several employers (2026-10-27): each with its own codes, shown read-only here (edited in EmployersEditor).
+  const group = grantEmployers(tasks);
+  const groupClients = useClientList(isHrdc(deal.fundingType) && group.length > 0);
   if (!isHrdc(deal.fundingType)) return null;
+  if (group.length) return <EmployerList list={group} clients={byId(groupClients)} />;
   const employer = String(client?.employerCode || '').trim();
   const approval = approvalCodeOf(tasks);
   const grantDone = !!(tasks || []).find(t => t.kind === 'grant')?.done;
