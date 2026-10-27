@@ -131,3 +131,7 @@ Joel asked to stop Closing RM being inflated or moved by backdating, editing won
 ## Deal list rows show training essentials (2026-10-26)
 
 Each row in the deal list has a small grey line under the programme: training date (with days), venue (checklist, else quotation), lead trainer (checklist, else quotation) and pax. Only what is filled in shows. `DealsBoard.tsx`; nothing to publish.
+
+## Stage boxes: changes for the day / week (2026-10-27)
+
+Each stage box on the Deals board shows "+N today · +N this week": deals that reached that stage today and since Monday, counted from the date each stage was reached (a deal that has since moved on still counts; Lost uses the lost date). Nothing to publish.

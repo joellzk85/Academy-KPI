@@ -13,7 +13,7 @@ import { Representative } from '../types';
 import {
   DealStage, FundingType, STAGE_LABELS, FUNDING_LABELS, LOST_REASONS, OPEN_STAGES, JOURNEY, journeyStage, canQuote, canManageDeal, dealNeedsAttention, stageDate,
   dealStage, statusForStage, dealOwnerId, dealValue, dealWonDate, todayIso, formatDate, formatRM, dealGaps, dealAskedFor, DealField, lostNoteProblem, reachedStage, SKIP_REASONS,
-  trainingDays, trainingDateText, parseTrainingDays, TRAINING_DAYS_PROBLEM, canMoveDeal,
+  trainingDays, trainingDateText, parseTrainingDays, TRAINING_DAYS_PROBLEM, canMoveDeal, addDays,
 } from '../lib/deals';
 import { countedIds, countedTotal, isItemsOnly, quoteDealAmount } from '../lib/dealQuotes';
 import TrainingDaysPicker from './TrainingDaysPicker';
@@ -242,6 +242,22 @@ export default function DealsBoard({
       agreed: { count: 0, value: 0 }, quoted: { count: 0, value: 0 }, won: { count: 0, value: 0 }, lost: { count: 0, value: 0 },
     };
     myDeals.forEach(p => { const st = journeyStage(dealStage(p)); out[st].count++; out[st].value += dealValue(p); });
+    return out;
+  }, [myDeals]);
+  // Changes for the day / week (Joel, 2026-10-27): deals that reached each stage today and since Monday,
+  // counted from the date each stage was reached, so a deal that has since moved on still counts.
+  const stageMoves = useMemo(() => {
+    const today = todayIso();
+    const weekStart = addDays(today, -((new Date().getDay() + 6) % 7));
+    const out = {} as Record<DealStage, { today: number; week: number }>;
+    (['lead', 'proposal', 'agreed', 'quoted', 'won', 'lost'] as DealStage[]).forEach(st => {
+      let t = 0, w = 0;
+      myDeals.forEach(p => {
+        const d = st === 'lost' ? (dealStage(p) === 'lost' ? String(p.lostDate || '').slice(0, 10) : '') : stageDate(p, st);
+        if (d && d >= weekStart && d <= today) { w++; if (d === today) t++; }
+      });
+      out[st] = { today: t, week: w };
+    });
     return out;
   }, [myDeals]);
   const onHoldDeals = useMemo(() => myDeals.filter(p => activeHold(p)), [myDeals]);
@@ -721,6 +737,9 @@ export default function DealsBoard({
               </span>
               <span className="mt-1 block text-2xl font-bold leading-none text-ink">{stageSummary[st].count}</span>
               <span className="mt-1 block text-sm text-ink-soft">{formatRM(stageSummary[st].value)}</span>
+              <span className={`mt-1.5 block text-xs font-semibold ${stageMoves[st].week ? 'text-accent' : 'text-ink-soft/70'}`}>
+                {stageMoves[st].week ? `+${stageMoves[st].today} today · +${stageMoves[st].week} this week` : 'No change this week'}
+              </span>
             </button>
           );
         })}
