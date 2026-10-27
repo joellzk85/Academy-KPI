@@ -15,6 +15,7 @@ import ProgrammeLinks, { ProgrammeLinkedInfo, linkOutline } from './ProgrammeLin
 import { StatusChip, TYPE_TAB_LABELS } from './Programmes';
 import { OutlineType, outlineTypeOf, programmeTypeOf, programmesFor } from '../lib/outlineTb';
 import ListPager from './ListPager';
+import { DeleteAction, pendingDelete } from '../lib/docDelete';
 import { LIST_SORT_LABELS, sortList, usePaged, type ListSort } from '../lib/listPaging';
 
 // Titles are the programmes (Joel, 2026-10-24): "Course outlines title IS the program, team building title is the
@@ -86,7 +87,7 @@ export function useTitleCategories(): string[] | null {
   return own;
 }
 
-export default function TitlesView({ kind, programmes, docs, deals, trainers, outlines, viewer, onOpenDoc, onWrite, loaded, onlyType, docType, onDuplicateDoc, onDeleteDoc, canDeleteDoc }: {
+export default function TitlesView({ kind, programmes, docs, deals, trainers, outlines, viewer, onOpenDoc, onWrite, loaded, onlyType, docType, onDuplicateDoc, docActions }: {
   kind: TitleKind; programmes: Programme[]; docs: TitleDoc[]; deals: any[]; trainers: any[];
   outlines: any[];                      // course outlines (for linking on a training title)
   onlyType?: OutlineType;               // training titles: show only Soft skill or Technical skill ones
@@ -94,10 +95,9 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
   viewer: Viewer; loaded: boolean;
   onOpenDoc: (d: TitleDoc) => void;
   onWrite: (g: TitleGroup) => void;     // "Write outline" / "Write proposal" for this title
-  // The ⋯ menu at the end of each row (Joel, 2026-10-26): Duplicate / Delete.
+  // The ⋯ menu at the end of each row (Joel, 2026-10-26): Duplicate, and Delete / Ask to delete / Approve (2026-10-27, lib/docDelete.ts).
   onDuplicateDoc?: (d: TitleDoc) => Promise<void>;
-  onDeleteDoc?: (d: TitleDoc) => Promise<void>;
-  canDeleteDoc?: (d: TitleDoc) => boolean;
+  docActions?: (d: TitleDoc) => DeleteAction[];
 }) {
   const staff = viewer.role !== 'rep';
   const docWord = docType || (kind === 'teambuilding' ? 'proposal' : 'outline');
@@ -261,30 +261,31 @@ export default function TitlesView({ kind, programmes, docs, deals, trainers, ou
                                     <span className="flex items-center gap-1.5 truncate text-sm text-ink-soft">
                                       {d.ref}
                                       {d.sent ? <span className="rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Sent</span> : <span className="rounded bg-surface px-1.5 text-xs font-semibold">Draft</span>}
+                                      {pendingDelete(d.raw) && <span className="rounded bg-danger-soft px-1.5 text-xs font-semibold text-danger">Delete asked</span>}
                                       {titleKey(d.title) !== titleKey(g.name) && <span className="truncate">· titled "{d.title || 'untitled'}"</span>}
                                     </span>
                                   </span>
                                   <span className="shrink-0 text-sm text-ink-soft">{formatDate(d.date) || ''}</span>
                                 </button>
-                                {(onDuplicateDoc || onDeleteDoc) && (
+                                {(onDuplicateDoc || docActions) && (
                                   <div ref={docMenu === d.id ? menuBox : undefined} className="shrink-0 pr-2">
                                     <button type="button" onClick={() => setDocMenu(m => (m === d.id ? null : d.id))} className="rounded-md p-2 text-ink-soft hover:bg-white hover:text-ink"
                                       aria-label={`More for ${d.ref}`} aria-expanded={docMenu === d.id}>
                                       <MoreHorizontal className="h-4 w-4" />
                                     </button>
                                     {docMenu === d.id && (
-                                      <div role="menu" className="absolute right-2 top-11 z-20 w-44 overflow-hidden rounded-xl border border-line bg-white py-1 shadow-lg">
+                                      <div role="menu" className="absolute right-2 top-11 z-20 w-56 overflow-hidden rounded-xl border border-line bg-white py-1 shadow-lg">
                                         {onDuplicateDoc && (
                                           <button type="button" role="menuitem" onClick={() => docAct(() => onDuplicateDoc(d))} className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-ink hover:bg-surface">
                                             <Copy className="h-4 w-4" /> Duplicate
                                           </button>
                                         )}
-                                        {onDeleteDoc && (!canDeleteDoc || canDeleteDoc(d)) && (
-                                          <button type="button" role="menuitem" className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-danger hover:bg-danger-soft"
-                                            onClick={() => { if (window.confirm(`Delete ${docWord} ${d.ref}? This can't be undone.`)) docAct(() => onDeleteDoc(d)); else setDocMenu(null); }}>
-                                            <Trash2 className="h-4 w-4" /> Delete
+                                        {(docActions?.(d) || []).map(a => (
+                                          <button key={a.key} type="button" role="menuitem" onClick={() => docAct(a.run)}
+                                            className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium ${a.danger ? 'text-danger hover:bg-danger-soft' : 'text-ink hover:bg-surface'}`}>
+                                            <Trash2 className="h-4 w-4" /> {a.label}
                                           </button>
-                                        )}
+                                        ))}
                                       </div>
                                     )}
                                   </div>

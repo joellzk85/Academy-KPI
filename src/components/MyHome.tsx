@@ -47,6 +47,7 @@ import { acceptToConfirm, canDecideDiscount, discountPct, pendingDiscount } from
 import { feeIsAgreed } from '../lib/trainerPortal';
 import { isTrainerFee } from '../lib/feeChecks';
 import { isSuperManager } from '../lib/superManager';
+import { DELETE_NOUN, DeletableColl, canDecideDelete } from '../lib/docDelete';
 import { useScreensOff } from '../lib/privateScreens';
 import { trainingEndDate } from '../lib/deals';
 import { GpAlert, gpAlerts } from '../lib/gpAlerts';
@@ -170,6 +171,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   const [plDocs, setPlDocs] = useState<Record<string, any>>({});
   const [trainerJobs, setTrainerJobs] = useState<TrainerJob[]>([]);
   const [reportsToCheck, setReportsToCheck] = useState<string[]>([]);   // deal ids whose training report the trainer sent, not checked yet
+  const [deleteAsks, setDeleteAsks] = useState<Record<string, any[]>>({});   // outlines and proposals someone asked to delete (Management, 2026-10-27)
   // Strange GP or a cost left out of the P&L on my own deals, from the server (2026-10-23; Management works it out itself).
   const [ownGpAlerts, setOwnGpAlerts] = useState<GpAlert[]>([]);
   useEffect(() => {
@@ -265,6 +267,9 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     // SST typed in Project P&L, for the Money position card's profit (Management only).
     if (viewer.role === 'management') {
       subs.push(onSnapshot(query(collection(db, 'project_pl')), s => setPlDocs(Object.fromEntries(s.docs.map(d => [d.id, d.data()]))), () => setPlDocs({})));
+      // Course outlines and teambuilding proposals someone asked to delete (2026-10-27): Management approves.
+      (['course_outlines', 'teambuilding_proposals'] as const).forEach(coll => subs.push(onSnapshot(query(collection(db, coll), where('deleteRequest.status', '==', 'pending')),
+        s => setDeleteAsks(a => ({ ...a, [coll]: linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id, coll }))) })), () => setDeleteAsks(a => ({ ...a, [coll]: [] })))));
     }
     return () => subs.forEach(u => u());
   }, [viewer.id, staff]);
@@ -378,6 +383,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     docLinks,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
     quotes, plDocs, trainerJobs, reportsToCheck, ownGpAlerts,
+    deleteAsks: Object.values(deleteAsks).flat(),
   };
 
   return (
@@ -826,6 +832,7 @@ type CardCtx = {
   quotes: any[]; plDocs: Record<string, any>;   // for the one P&L (SST from the quotation, or typed in Project P&L)
   trainerJobs: TrainerJob[];
   reportsToCheck: string[];
+  deleteAsks: any[];   // course outlines and teambuilding proposals asked to delete (lib/docDelete.ts)
   ownGpAlerts: GpAlert[];
 };
 
@@ -1224,6 +1231,12 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
             return { key: `${p.id}_disc`, title: `Discount · ${deal(p)}`, level: 'attention' as Item['level'], onClick: () => c.openDeal(p),
               sub: `${formatRM(d.fromValue)} to ${formatRM(d.toValue)} (${discountPct(d).toFixed(1)}% off)${d.gpTo !== null && d.gpTo !== undefined ? ` · GP ${d.gpTo.toFixed(1)}%` : ''} · asked by ${d.byName}` };
           }),
+          // Delete a course outline or teambuilding proposal (2026-10-27): never your own request.
+          ...c.deleteAsks.filter(r => canDecideDelete(r, c.viewer)).map(r => ({
+            key: `${r.coll}_${r.id}_del`, title: `Delete ${DELETE_NOUN[r.coll as DeletableColl]} · ${r.refNumber || ''} ${String(r.courseTitle || r.title || '').trim()}`.trim(),
+            level: 'danger' as Item['level'], sub: `${r.deleteRequest.reason} · asked by ${r.deleteRequest.byName} · decide in Management → Lost and deleted`,
+            onClick: () => c.nav.openManagement('lost'),
+          })),
           ...list.map(o => {
             const p = c.deals.find(d => d.id === o.dealId);
             return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · raised by ${o.requestedByName}, ${dateTimeMY(o.resubmittedAt || o.requestedAt)}`, onClick: () => c.nav.openAdminWork('money') };

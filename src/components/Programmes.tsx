@@ -6,6 +6,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { HRDC_STATUS_SHORT, HrdcStatus, Programme, programmeStatus, programmeTags, titleCaps, titleKey, typingCaps } from '../lib/programmes';
 import { ProgrammeLinkedInfo, linkOutline, outlineTitle } from './ProgrammeLinks';
 import { OUTLINE_TYPES, OutlineType, outlineTypeOf, programmeTypeOf, programmesFor } from '../lib/outlineTb';
+import { isDeletedRecord } from '../lib/linked';
 
 // ---------- Soft skill · Team building · Technical skill (Joel, 2026-10-24) ----------
 // Every list of titles or outlines sorts into these three: click one and only that list shows.
@@ -32,7 +33,7 @@ export function useOutlinesForTypes(given?: any[]) {
   useEffect(() => {
     if (given) return;
     let live = true;
-    getDocs(collection(db, 'course_outlines')).then(snap => { if (live) setLoaded(snap.docs.map(d => ({ id: d.id, ...d.data() }))); }).catch(() => {});
+    getDocs(collection(db, 'course_outlines')).then(snap => { if (live) setLoaded(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(o => !isDeletedRecord(o))); }).catch(() => {});
     return () => { live = false; };
   }, [!given]);
   return given || loaded;

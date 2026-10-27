@@ -55,7 +55,7 @@ async function openLink(db: Firestore, token: any, { allowExpired = false } = {}
 export async function loadProposal(db: Firestore, link: any) {
   const snap = await db.collection('teambuilding_proposals').doc(link.docId).get();
   const p = snap.data() as TbProposal | undefined;
-  if (!p || p.dealDeleted) throw new UserError(404, 'doc-gone', GONE);
+  if (!p || p.dealDeleted || (p as any).deleted === true) throw new UserError(404, 'doc-gone', GONE);   // deleted proposals too (2026-10-27)
   const deal = p.pipelineId ? (await db.collection('pipelines').doc(p.pipelineId).get()).data() : null;
   const clientId = (deal as any)?.clientId || p.clientId || '';
   const client = clientId ? (await db.collection('clients').doc(clientId).get()).data() : null;

@@ -224,7 +224,7 @@ export function registerDocLinkRoutes(app: Express) {
     if (kind === 'teambuilding') throw new UserError(404, 'link-not-found', gone);   // opened at /p/ (serverProposalLinks.ts)
     if (link.status !== 'open') return { gone: { code: 'link-stopped', message: `This ${NOUN[kind]} link is no longer active.`, contact: await contactOf(db, link) } };
     const d: any = (await db.collection(COLLECTION[kind]).doc(link.docId).get()).data();
-    if (!d || d.dealDeleted) throw new UserError(404, 'doc-gone', gone);
+    if (!d || d.dealDeleted || d.deleted === true) throw new UserError(404, 'doc-gone', gone);   // deleted outlines too (2026-10-27)
     if (d.status !== (kind === 'report' ? 'checked' : 'sent')) throw new UserError(409, 'being-revised', `NEXT Academy is updating this ${NOUN[kind]}. You'll receive the new version shortly.`);
     // A training report: only the sections Management chose for HR, with the deal's number of participants.
     let report: any = null;

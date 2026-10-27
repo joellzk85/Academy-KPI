@@ -9,6 +9,9 @@ import {
   LOST_REASONS, STAGE_LABELS, dealAskedFor, dealOwnerId, dealStage, dealValue, formatDate, formatRM, reachedStage, statusForStage,
 } from '../lib/deals';
 import { linkedWithDeleted } from '../lib/linked';
+import {
+  DELETE_NOUN, DeletableColl, approveDelete, canDecideDelete, eraseForever, pendingDelete, rejectDelete, restoreDeleted,
+} from '../lib/docDelete';
 import { daysBetween, followUpNotes } from '../lib/followUps';
 import { FollowUpList, followUpCountText } from './FollowUps';
 
@@ -255,8 +258,101 @@ export default function LostDeletedPage({ viewer, people }: { viewer: Viewer; pe
       </div>
       <p className="text-sm text-ink-soft">Old deals not yet linked to a Team member (Data tools) aren't listed.</p>
 
+      <DeletedDocs viewer={viewer} deals={deals} clients={clients} clientName={clientName} nameOf={nameOf} />
       <DeletedMoney viewer={viewer} deals={deals} clientName={clientName} />
     </div>
+  );
+}
+
+// Course outlines and teambuilding proposals (Joel, 2026-10-27): reps and Admin ask to delete one; Management approves
+// (never their own request) or keeps it, and restores deleted ones. Nothing is erased except by the owner override.
+const DOC_COLLS: DeletableColl[] = ['course_outlines', 'teambuilding_proposals'];
+
+function DeletedDocs({ viewer, deals, clients, clientName, nameOf }: {
+  viewer: Viewer & { role?: string }; deals: any[]; clients: any[]; clientName: (p: any) => string; nameOf: (id: string) => string;
+}) {
+  const [recs, setRecs] = useState<Record<string, any[]>>({});
+  const [busyId, setBusyId] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const subs = DOC_COLLS.map(coll => onSnapshot(query(collection(db, coll)),
+      s => setRecs(r => ({ ...r, [coll]: linkedWithDeleted(s.docs.map(d => ({ ...d.data(), id: d.id, coll }))).filter((x: any) => x.deleted === true || pendingDelete(x)) })),
+      () => setRecs(r => ({ ...r, [coll]: [] }))));
+    return () => subs.forEach(u => u());
+  }, []);
+  const all = DOC_COLLS.flatMap(coll => recs[coll] || []);
+  // A request on a record whose deal was deleted waits with the deal; it isn't listed.
+  const asked = all.filter(r => r.deleted !== true && !r.dealDeleted && pendingDelete(r)).sort((a, b) => String(a.deleteRequest.at).localeCompare(String(b.deleteRequest.at)));
+  const gone = all.filter(r => r.deleted === true).sort((a, b) => String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
+  if (!asked.length && !gone.length) return null;
+
+  const me = { ...viewer, role: 'management' };
+  const titleOf = (r: any) => String(r.coll === 'course_outlines' ? r.courseTitle : r.title || '').trim() || 'Untitled';
+  const forText = (r: any) => {
+    const d = r.pipelineId ? deals.find(x => x.id === r.pipelineId) : null;
+    return d ? clientName(d) : r.preparedForCompany || clients.find(c => c.id === r.clientId)?.companyName || 'General, not for a client';
+  };
+  const run = async (r: any, fn: () => Promise<void>) => {
+    setBusyId(r.id); setError('');
+    try { await fn(); } catch (e) { setError(friendlyError(e)); } finally { setBusyId(''); }
+  };
+  const head = (r: any) => (
+    <>
+      <p className="font-semibold">{titleOf(r)} <span className="font-normal text-ink-soft">· {DELETE_NOUN[r.coll as DeletableColl]} {r.refNumber || ''}</span></p>
+      <p className="text-sm text-ink-soft">{forText(r)} · {r.ownerId || r.creatorId ? nameOf(r.ownerId || r.creatorId) : r.writerTrainerName ? `trainer ${r.writerTrainerName}` : 'no owner yet'}{r.status === 'sent' ? ' · sent to the client' : ''}</p>
+    </>
+  );
+  const spin = (r: any) => (busyId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null);
+
+  return (
+    <section className="space-y-2">
+      <h3 className="text-lg font-bold">Course outlines and teambuilding proposals</h3>
+      <p className="text-[15px] text-ink-soft">Reps and Admin ask to delete; Management approves (never their own request). Deleted ones are kept and can be restored.</p>
+      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
+      {asked.length > 0 && <>
+        <h4 className="pt-1 font-semibold">Asked to delete <span className="font-normal text-ink-soft">({asked.length})</span></h4>
+        <ul className={`${card} divide-y divide-line`}>
+          {asked.map(r => {
+            const q = pendingDelete(r)!;
+            return (
+              <li key={`${r.coll}:${r.id}`} className="flex flex-wrap items-start gap-3 px-5 py-3">
+                <div className="min-w-[14rem] flex-1">
+                  {head(r)}
+                  <p className="text-sm"><strong className="text-danger">{q.reason}</strong> <span className="text-ink-soft">· asked {formatDate(ymd(q.at))} by {q.byName}</span></p>
+                </div>
+                {canDecideDelete(r, me) ? <>
+                  <button type="button" disabled={busyId === r.id} className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={() => run(r, () => approveDelete(r.coll, r, me))}>{spin(r)} Approve delete</button>
+                  <button type="button" disabled={busyId === r.id} className={btnSecondary} onClick={() => run(r, () => rejectDelete(r.coll, r, me))}>Keep it</button>
+                </> : <span className="text-sm text-ink-soft">Your own request: the other manager decides.</span>}
+              </li>
+            );
+          })}
+        </ul>
+      </>}
+      {gone.length > 0 && <>
+        <h4 className="pt-1 font-semibold">Deleted <span className="font-normal text-ink-soft">({gone.length})</span></h4>
+        <ul className={`${card} divide-y divide-line`}>
+          {gone.map(r => (
+            <li key={`${r.coll}:${r.id}`} className="flex flex-wrap items-start gap-3 px-5 py-3">
+              <div className="min-w-[14rem] flex-1">
+                {head(r)}
+                <p className="text-sm">
+                  <strong className="text-danger">{r.deletedReason || 'No reason given'}</strong>
+                  <span className="text-ink-soft"> · deleted {formatDate(ymd(r.deletedAt))} by {r.deletedByName || 'someone'}{r.deleteRequest?.status === 'approved' && r.deleteRequest.byName ? `, asked by ${r.deleteRequest.byName}` : ''}</span>
+                  {r.dealDeleted && <span className="text-ink-soft"> · its deal is deleted too</span>}
+                </p>
+              </div>
+              <button type="button" disabled={busyId === r.id} className={btnSecondary} onClick={() => run(r, () => restoreDeleted(r.coll, r, me))}>
+                {spin(r) || <Undo2 className="h-4 w-4" />} Restore
+              </button>
+              {isSuperManager(viewer) && (
+                <button type="button" disabled={busyId === r.id} className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={() => run(r, () => eraseForever(r.coll, r))}>Delete forever</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </>}
+    </section>
   );
 }
 

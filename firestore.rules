@@ -734,13 +734,44 @@ service cloud.firestore {
       allow read: if isMember();
       allow create: if isStaff()
         || (isMember() && request.auth.uid in outlinePeople(request.resource.data));
-      allow update: if isStaff()
+      allow update: if (isStaff()
         || (isMember() && (request.auth.uid in outlinePeople(resource.data)
                            || resource.data.get('taggedRepId', '') == request.auth.uid
                            || request.auth.uid in resource.data.get('sharedWithIds', [])
-                           || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == '')));
-      allow delete: if isStaff()
-        || (isMember() && request.auth.uid in outlinePeople(resource.data));
+                           || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == ''))))
+        && docDeleteOk();
+      // Kept when deleted (2026-10-27): marked deleted by Management instead (docDeleteOk).
+      allow delete: if false;
+    }
+
+    // Deleting course outlines and teambuilding proposals (2026-10-27, src/lib/docDelete.ts): never erased from a
+    // browser (only the owner override, at the end). A rep or Admin asks (deleteRequest: pending, signed with their own
+    // id). Only Management marks one deleted (signed, never on their own pending request) or restores it, and only
+    // Management changes one while it is deleted (except hiding or showing it with its deal).
+    function delFields() {
+      return ['deleted', 'deletedById', 'deletedByName', 'deletedAt', 'deletedReason', 'restoredById', 'restoredByName', 'restoredAt'];
+    }
+    function delRequestOk() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['deleteRequest'])
+        || isManagement()
+        || request.resource.data.get('deleteRequest', null) == null
+        || (request.resource.data.deleteRequest.get('status', '') == 'pending'
+            && request.resource.data.deleteRequest.get('byId', '') == request.auth.uid);
+    }
+    function docDeleteOk() {
+      return (resource.data.get('deleted', false) != true && request.resource.data.get('deleted', false) != true
+              && !request.resource.data.diff(resource.data).affectedKeys().hasAny(delFields())
+              && delRequestOk())
+        || (resource.data.get('deleted', false) != true && request.resource.data.get('deleted', false) == true
+            && isManagement()
+            && request.resource.data.get('deletedById', '') == request.auth.uid
+            && (resource.data.get('deleteRequest', null) == null
+                || resource.data.deleteRequest.get('status', '') != 'pending'
+                || resource.data.deleteRequest.get('byId', '') != request.auth.uid))
+        || (resource.data.get('deleted', false) == true && request.resource.data.get('deleted', false) == true
+            && (isManagement() || onlyChanged(['dealDeleted'])))
+        || (resource.data.get('deleted', false) == true && request.resource.data.get('deleted', false) != true
+            && isManagement() && onlyChanged(['deleted', 'restoredById', 'restoredByName', 'restoredAt']));
     }
 
     // Teambuilding proposals (2026-10-19): the same rights as course outlines (own, shared with, tagged,
@@ -752,13 +783,14 @@ service cloud.firestore {
       allow read: if isMember();
       allow create: if isStaff()
         || (isMember() && request.auth.uid in tbPeople(request.resource.data));
-      allow update: if isStaff()
+      allow update: if (isStaff()
         || (isMember() && (request.auth.uid in tbPeople(resource.data)
                            || request.auth.uid in resource.data.get('sharedWithIds', [])
                            // started by an outside trainer in the portal (2026-10-26): no owner until someone picks it up
-                           || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == '')));
-      allow delete: if isStaff()
-        || (isMember() && request.auth.uid in tbPeople(resource.data));
+                           || (resource.data.get('ownerId', '') == '' && resource.data.get('creatorId', '') == ''))))
+        && docDeleteOk();
+      // Kept when deleted (2026-10-27): marked deleted by Management instead (docDeleteOk).
+      allow delete: if false;
     }
 
     // Teambuilding activity library (2026-10-19): everyone reads, adds and edits (Joel: "everyone can amend").

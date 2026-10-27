@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
 import {
   AlertTriangle, ArrowLeft, Copy, Download, Eye, EyeOff, FilePlus2, Link2, Loader2, Lock, MoreHorizontal, Pencil, Plus, Printer, Search, Send, Trash2, Unlock, UserPlus, X, Zap,
 } from 'lucide-react';
@@ -19,6 +19,7 @@ import { downloadBlob, makeOutlinePdf, outlinePdfFileName, preloadPdfLibs } from
 import { pdfErrorText } from '../lib/oldTab';
 import DocLinkBox, { openLinkOf, useDocLinks } from './DocLinkBox';
 import { linkedOnly } from '../lib/linked';
+import { deleteActions, pendingDelete } from '../lib/docDelete';
 import ShareWithBox, { NewCount } from './ShareWithBox';
 import { isUnseen, markSharedSeen, useSharedSeen } from '../lib/sharedInbox';
 import { LinkShareBox, closeTrainerLink, createTrainerLink, useTrainerLinks } from './TrainerLinkTools';
@@ -483,6 +484,8 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
   const anyFilter = !!(ownerFilter || trainerFilter || catFilter);
 
   const canDelete = (o: CourseOutline) => staff || o.creatorId === me.id || o.ownerId === me.id;
+  // Delete (2026-10-27): reps and Admin ask, Management approves; nothing is erased (lib/docDelete.ts).
+  const delActions = (o: CourseOutline) => deleteActions('course_outlines', o, me, canDelete(o));
   const act = async (fn: () => Promise<void>) => { setMenu(null); setError(''); try { await fn(); } catch (e) { setError(friendlyError(e)); } };
 
   return (
@@ -517,7 +520,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
           programmes={sources.programmes as Programme[]} docs={titleDocs} deals={sources.deals} trainers={trainers}
           outlines={outlines.filter(o => (outlineTypeOf(o) === 'teambuilding') === (typeTab === 'teambuilding'))}
           viewer={me} loaded={loaded} onOpenDoc={d => onOpen(d.raw)} onWrite={onWriteTitle}
-          onDuplicateDoc={d => onDuplicate(d.raw)} canDeleteDoc={d => canDelete(d.raw)} onDeleteDoc={d => deleteDoc(doc(db, 'course_outlines', d.id))} />
+          onDuplicateDoc={d => onDuplicate(d.raw)} docActions={d => delActions(d.raw)} />
       ) : <>
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
@@ -581,6 +584,7 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
                       {o.refNumber}
                       {outlineSent(o) ? <span className="rounded bg-accent-soft px-1.5 text-xs font-semibold text-accent">Sent</span> : <span className="rounded bg-surface px-1.5 text-xs font-semibold">Draft</span>}
                       {o.isHidden && <span className="text-xs">hidden</span>}
+                      {pendingDelete(o) && <span className="rounded bg-danger-soft px-1.5 text-xs font-semibold text-danger">Delete asked</span>}
                       {links.some(l => l.outlineId === o.id && l.status === 'submitted' && !l.applied && isLive(l)) && <span className="rounded bg-attention-soft px-1.5 text-xs font-semibold text-attention">Trainer submitted: review</span>}
                       {o.writerTrainerName && <span className="truncate rounded bg-surface px-1.5 text-xs font-semibold text-ink">by {o.writerTrainerName}</span>}
                     </span>
@@ -598,15 +602,12 @@ function OutlineList({ rep, me, staff, outlines, loaded, sources, personName, li
                   <MoreHorizontal className="h-4 w-4" />
                 </button>
                 {menu === o.id && (
-                  <div role="menu" className="absolute right-4 top-12 z-20 w-48 overflow-hidden rounded-xl border border-line bg-white py-1 shadow-lg">
+                  <div role="menu" className="absolute right-4 top-12 z-20 w-56 overflow-hidden rounded-xl border border-line bg-white py-1 shadow-lg">
                     <MenuBtn icon={<Pencil className="h-4 w-4" />} text="Open" onClick={() => { setMenu(null); onOpen(o); }} />
                     <MenuBtn icon={<Copy className="h-4 w-4" />} text="Duplicate" onClick={() => act(() => onDuplicate(o))} />
                     <MenuBtn icon={o.isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} text={o.isHidden ? 'Unhide' : 'Hide'}
                       onClick={() => act(() => setDoc(doc(db, 'course_outlines', o.id), { isHidden: !o.isHidden }, { merge: true }))} />
-                    {canDelete(o) && (
-                      <MenuBtn danger icon={<Trash2 className="h-4 w-4" />} text="Delete"
-                        onClick={() => { if (window.confirm(`Delete outline ${o.refNumber}? This can't be undone.`)) act(() => deleteDoc(doc(db, 'course_outlines', o.id))); else setMenu(null); }} />
-                    )}
+                    {delActions(o).map(a => <MenuBtn key={a.key} danger={a.danger} icon={<Trash2 className="h-4 w-4" />} text={a.label} onClick={() => act(a.run)} />)}
                   </div>
                 )}
               </li>
