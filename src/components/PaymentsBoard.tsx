@@ -223,7 +223,7 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
         </Lane>
 
         <Lane n={4} title="Raised, pending release" list={raised}
-          top={raised.length > 0 && <p className="text-xs text-ink-soft">Keyed in the bank by accounts. {viewer.role === 'management' ? 'Release them in the bank, then click Payment done.' : 'Waiting for a manager to release them.'}</p>}
+          top={raised.length > 0 && <p className="text-xs text-ink-soft">Keyed in the bank by accounts. {viewer.role === 'management' ? 'Release them in the bank, then click Payment done or drop the payment receipt.' : 'Waiting for a manager to release them. Once released, drop the payment receipt on the card: that marks it done.'}</p>}
           bottom={viewer.role === 'management' && raised.length > 0 && (
             <button type="button" disabled={!!busy || !doneTicked.length} className={`${btnPrimary} w-full`} onClick={markDone}>
               {busy === 'done' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -242,7 +242,10 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
                   Raised by {o.accountsRaised!.byName}, {formatDate(o.accountsRaised!.at.slice(0, 10))}{o.accountsRaised!.ref ? ` · ref ${o.accountsRaised!.ref}` : ''}
                   {late ? ` · waiting ${workingDaysSince(o.accountsRaised!.at)} working days` : ''}
                   {o.accountsRaised!.note && <span className="block font-normal text-ink-soft">{o.accountsRaised!.note}</span>}
-                </span>} />
+                </span>}
+                // Admin or Management upload the payment receipt: that is Payment done too (Joel, 2026-10-28).
+                extra={<div onClick={e => e.stopPropagation()}><ReceiptDrop target={{ dealId: o.dealId, moneyInId: '', recordId: '', moneyOutId: o.id }} viewer={viewer} small
+                  prompt="Drop the payment receipt: Payment done" onUploaded={() => callServer('/api/accounts/done', { ids: [o.id] }, true)} /></div>} />
             );
           })}
         </Lane>
@@ -473,7 +476,7 @@ function PaymentDetail({ o, viewer, forText, problem, receipts, docs, onOpenDeal
       )}
       {editingVendor && v && <VendorForm vendor={v} vendors={vendors} trainers={trainers} venues={venues} viewer={viewer} onSaved={() => setEditingVendor(false)} onCancel={() => setEditingVendor(false)} />}
       {o.status === 'approved' && o.accountsRaised?.at && (
-        <p className="rounded-lg bg-surface px-3 py-2 text-sm">Raised in the bank by {o.accountsRaised.byName}, {formatDate(o.accountsRaised.at.slice(0, 10))}{o.accountsRaised.ref ? ` · ref ${o.accountsRaised.ref}` : ''}: waiting for a manager to release it{viewer.role === 'management' ? ' (tick it in lane 4 and click Payment done)' : ''}.</p>
+        <p className="rounded-lg bg-surface px-3 py-2 text-sm">Raised in the bank by {o.accountsRaised.byName}, {formatDate(o.accountsRaised.at.slice(0, 10))}{o.accountsRaised.ref ? ` · ref ${o.accountsRaised.ref}` : ''}: waiting for a manager to release it{viewer.role === 'management' ? ' (tick it in lane 4 and click Payment done)' : ' (once released, drop the payment receipt on its card in lane 4: that marks it done)'}.</p>
       )}
       {o.status === 'approved' && (!o.accountsRaised?.at || viewer.role === 'management') && <MarkPaid outs={[o]} viewer={viewer} label="Paid another way? Mark it paid" />}
       {o.status === 'paid' && (

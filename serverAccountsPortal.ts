@@ -211,14 +211,24 @@ export function registerAccountsPortalRoutes(app: Express) {
   }));
 
   // A manager released the raised payments in the bank and clicks Payment done (portal or the Payments out board).
+  // Admin completes one by uploading its payment receipt (Joel, 2026-10-28: "admin uploads the payment receipt as payment
+  // done as well"): only with a receipt on it, uploaded after it was raised.
   app.post('/api/accounts/done', route(async req => {
-    const caller = await managementFrom(req);
+    const caller = await staffFrom(req);
     const ids = cleanIds(req.body?.ids);
     if (!ids.length) throw new UserError(400, 'nothing', 'Tick at least one payment.');
     const typedRef = String(req.body?.ref || '').trim().slice(0, 80);
     const { db } = admin();
     const byName = await nameOf(db, caller.memberId);
-    await linesIn(db, ids, 'raised');
+    const outs = await linesIn(db, ids, 'raised');
+    const withReceipt = new Set<string>();
+    for (const o of outs) {
+      const recs = await db.collection('payment_receipts').where('moneyOutId', '==', o.id).get();
+      if (recs.docs.some(d => { const r: any = d.data(); return !r.kind && String(r.at || '') >= String(o.accountsRaised?.at || ''); })) withReceipt.add(o.id);
+    }
+    if (caller.role !== 'management' && withReceipt.size < outs.length) {
+      throw new UserError(403, 'receipt-needed', 'Admin marks a raised payment done by uploading its payment receipt. Upload the receipt first.');
+    }
     const now = new Date().toISOString();
     const paid: MoneyOut[] = [];
     for (const id of ids) {
@@ -234,11 +244,11 @@ export function registerAccountsPortalRoutes(app: Express) {
     }
     for (const o of paid) {
       if (o.dealId) await addDealHistory(db, o.dealId, caller.memberId, byName,
-        `Payment done (released): ${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${money(o.amount)})${o.paidRef ? `, ref ${o.paidRef}` : ''}`);
+        `Payment done (released${withReceipt.has(o.id) ? `, receipt uploaded by ${byName}` : ''}): ${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${money(o.amount)})${o.paidRef ? `, ref ${o.paidRef}` : ''}`);
     }
     if (paid.length) {
       await log(db, { byId: caller.memberId, byName, action: 'paid', moneyOutIds: paid.map(o => o.id),
-        text: `Payment done (released): ${paid.map(o => `${o.payee} ${money(o.amount)}`).join(', ')} (total ${money(paid.reduce((t, o) => t + (Number(o.amount) || 0), 0))})` });
+        text: `Payment done (released${paid.every(o => withReceipt.has(o.id)) ? `, receipt uploaded by ${byName}` : ''}): ${paid.map(o => `${o.payee} ${money(o.amount)}`).join(', ')} (total ${money(paid.reduce((t, o) => t + (Number(o.amount) || 0), 0))})` });
     }
     return { paid: paid.map(o => o.id), skipped: ids.length - paid.length };
   }));

@@ -150,7 +150,10 @@ export function ReceiptList({ receipts, viewer, copyLabel = 'Copy' }: { receipts
 }
 
 /** Drop box that uploads a receipt straight away (for a payment already recorded). */
-export function ReceiptDrop({ target, viewer, prompt = 'Drop the receipt here, or click to choose', small }: { target: ReceiptTarget; viewer: Viewer; prompt?: string; small?: boolean }) {
+// onUploaded runs once at least one file is saved (e.g. a raised payment's receipt marks it Payment done, 2026-10-28).
+export function ReceiptDrop({ target, viewer, prompt = 'Drop the receipt here, or click to choose', small, onUploaded }: {
+  target: ReceiptTarget; viewer: Viewer; prompt?: string; small?: boolean; onUploaded?: () => Promise<unknown> | void;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
@@ -164,6 +167,9 @@ export function ReceiptDrop({ target, viewer, prompt = 'Drop the receipt here, o
     for (let i = 0; i < files.length; i++) {
       try { await uploadReceipt(files[i], target, viewer, pct => setProgress(files.length > 1 ? `${i + 1} of ${files.length}, ${pct}%` : `${pct}%`)); }
       catch (e) { failed.push(`${files[i].name}: ${receiptError(e)}`); }
+    }
+    if (onUploaded && failed.length < files.length) {
+      try { await onUploaded(); } catch (e) { failed.push(receiptError(e)); }
     }
     setProgress(null);
     if (failed.length) setError(failed.join(' '));
