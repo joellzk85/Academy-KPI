@@ -3,7 +3,7 @@
 // change, cancel or move a run. Each company is a normal deal: "Add a company" opens the New deal form on this run.
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDoc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
-import { ArrowLeft, CalendarDays, GraduationCap, ListChecks, Loader2, MapPin, Pencil, Plus, Search, Users, X, XCircle } from 'lucide-react';
+import { ArrowLeft, Calculator, CalendarDays, GraduationCap, ListChecks, Loader2, MapPin, Pencil, Plus, Search, Users, X, XCircle } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import {
   FUNDING_LABELS, FundingType, STAGE_LABELS, dealOwnerId, dealStage, dealValue, formatRM, parseTrainingDays, todayIso, trainingDateText, trainingDays,
@@ -21,6 +21,8 @@ import ListPager from './ListPager';
 import { useFormDraft } from '../lib/useFormDraft';
 import { usePaged } from '../lib/listPaging';
 import DealChecklist from './DealChecklist';
+import CostEstimator, { RunStart } from './CostEstimator';
+import { newLineId } from '../lib/costEstimate';
 import { useMoneySettings } from './Money';
 import { projectRows } from '../lib/projectPL';
 import { MoneyIn, MoneyOut, inPL } from '../lib/money';
@@ -83,6 +85,7 @@ export default function PublicProgrammes({ runs, deals, programmes, outlines, ve
   const formDraft = useFormDraft(viewer.id, editing === 'new' ? 'public:new' : editing ? `public:${editing}` : null, form, setForm);
   const [cancelling, setCancelling] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [costing, setCosting] = useState<string | null>(null);   // run id: its Costing estimator estimate open (2026-10-28)
   const [toast, setToast] = useState('');
   const flash = (t: string) => { setToast(t); window.setTimeout(() => setToast(x => (x === t ? '' : x)), 4500); };
 
@@ -241,6 +244,25 @@ export default function PublicProgrammes({ runs, deals, programmes, outlines, ve
   };
 
   // ---------- Render ----------
+  // Cost this programme (Admin and Management, 2026-10-28): the Costing estimator's public programme estimate for this
+  // run, option A filled in with each company's pax, fee per pax (deal value ÷ pax) and HRDC or direct.
+  const costRun = costing ? runs.find(r => r.id === costing) : null;
+  if (costRun && staff) {
+    const start: RunStart = {
+      runId: costRun.id, title: costRun.title, days: Number(costRun.trainingDays) || 1,
+      listPrice: Number(costRun.pricePerPax) || 0, seatLimit: Number(costRun.seatLimit) || 0, minPax: Number(costRun.minPax) || 0,
+      groups: runDeals(costRun.id, deals).map(p => {
+        const pax = paxOf(p);
+        return {
+          id: newLineId(), name: clientName(p), pax,
+          fee: pax ? Math.round((dealValue(p) / pax) * 100) / 100 : Number(costRun.pricePerPax) || 0,
+          hrdc: p.fundingType === 'hrdc' || p.fundingType === 'hrdc_topup',
+        };
+      }),
+    };
+    return <CostEstimator viewer={viewer} people={people} run={start} backText="Back to the programme" onClose={() => setCosting(null)} />;
+  }
+
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -294,6 +316,7 @@ export default function PublicProgrammes({ runs, deals, programmes, outlines, ve
               cancelling={cancelling} setCancelling={setCancelling}
               onClose={() => { setOpenId(null); setCancelling(false); }}
               onEdit={() => startEdit(openRun)}
+              onCost={() => setCosting(openRun.id)}
               onAddCompany={() => onAddCompany(openRun)}
               onOpenDeal={onOpenDeal}
               moveDeals={moveDeals} moveText={moveText} flash={flash}
@@ -440,11 +463,11 @@ function RunRow({ run, deals, today, onOpen }: { run: PublicProgramme; deals: an
 }
 
 // ---------- One run: its companies, cancel or move ----------
-function RunPanel({ run, runs, deals, outlines, viewer, today, clientName, personName, cancelling, setCancelling, onClose, onEdit, onAddCompany, onOpenDeal, moveDeals, moveText, flash }: {
+function RunPanel({ run, runs, deals, outlines, viewer, today, clientName, personName, cancelling, setCancelling, onClose, onEdit, onCost, onAddCompany, onOpenDeal, moveDeals, moveText, flash }: {
   run: PublicProgramme; runs: PublicProgramme[]; deals: any[]; outlines: any[]; viewer: Viewer; today: string;
   clientName: (p: any) => string; personName: (id: string) => string;
   cancelling: boolean; setCancelling: (v: boolean) => void;
-  onClose: () => void; onEdit: () => void; onAddCompany: () => void; onOpenDeal: (id: string) => void;
+  onClose: () => void; onEdit: () => void; onCost: () => void; onAddCompany: () => void; onOpenDeal: (id: string) => void;
   moveDeals: (list: any[], newDate: string, newDays: number, why: string, toRun: PublicProgramme | null) => Promise<{ moved: number; asked: number; busyNames: string[]; failed: string[] }>;
   moveText: (r: { moved: number; asked: number; busyNames: string[]; failed: string[] }) => string;
   flash: (t: string) => void;
@@ -496,6 +519,7 @@ function RunPanel({ run, runs, deals, outlines, viewer, today, clientName, perso
       <div className="flex flex-wrap gap-2">
         {canJoin && <button type="button" onClick={onAddCompany} className={btnPrimary}><Plus className="h-4 w-4" /> Add a company</button>}
         {staff && run.status !== 'cancelled' && <button type="button" onClick={onEdit} className={btnSecondary}><Pencil className="h-4 w-4" /> Change</button>}
+        {staff && <button type="button" onClick={onCost} className={btnSecondary}><Calculator className="h-4 w-4" /> Cost this programme</button>}
         {staff && run.status !== 'cancelled' && st !== 'done' && !cancelling && (
           <button type="button" onClick={() => setCancelling(true)} className={`${btnSecondary} text-danger`}><XCircle className="h-4 w-4" /> Cancel or move companies</button>
         )}

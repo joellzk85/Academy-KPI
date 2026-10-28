@@ -1,78 +1,40 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { ArrowLeft, Calculator, Plus, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Calculator, Plus, Trash2, Users, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, formatRM } from '../lib/deals';
-import { LIGHT_TEXT } from '../lib/kpi';
-import { gpLight } from '../lib/kpiLibrary';
 import { useMoneySettings } from './Money';
 import { useAutoSave, autoSaveText, leaveAfterSave } from '../lib/useAutoSave';
 import {
-  CostEstimate, EstimateLine, MAX_PRICES, blankEstimate, estimateData, estimateResult, lineAmount, newLineId, priceForTarget,
+  CostEstimate, EstimateLine, MAX_PRICES, SeatGroup, blankEstimate, blankPublicEstimate, estimateData, estimateResult, newLineId, priceForTarget, publicResult,
 } from '../lib/costEstimate';
+import {
+  LineRows, NumInput, OPTION_NAMES, Switch, btnLink, btnPrimary, btnSecondary, cellInput, gpTone, input, label, pctText,
+} from './EstimateParts';
+import PublicEstimateEditor from './PublicEstimateEditor';
 
 // Costing estimator (Joel, 2026-10-21): beside New deal on the Deals page. Everyone can use it.
 // A mock P&L to set the price: selling price − cost of training − expenses = GP, with several prices side by side.
+// Public programme estimates (2026-10-28): a run with several companies, each at its own fee (PublicEstimateEditor).
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
-const input =
-  'w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
-const cellInput =
-  'min-w-0 rounded-md border border-line bg-white px-2 py-1.5 text-sm text-ink placeholder:text-ink-soft/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15';
-const label = 'mb-1.5 block text-sm font-semibold text-ink';
-const btnPrimary =
-  'inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0B5A50] disabled:opacity-60';
-const btnSecondary =
-  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
-const btnLink = 'inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline';
+// Opened from a public programme (Deals → Public programmes → the run → Cost this programme): its details and companies so far.
+export type RunStart = {
+  runId: string; title: string; days: number; listPrice: number; seatLimit: number; minPax: number; groups: SeatGroup[];
+};
 
-const OPTION_NAMES = ['A', 'B', 'C', 'D'];
-const pctText = (v: number) => `${(Number.isFinite(v) ? v : 0).toFixed(1)}%`;
-// GP colour: the company gross profit bands (KPI & appraisal → Settings → KPI library, Joel 2026-10-22); a loss is always red.
-const gpTone = (pct: number) => (pct < 0 ? 'text-danger' : LIGHT_TEXT[gpLight(pct)]);
-
-// A number box that lets you type freely ("12.", "") and hands back a number.
-function NumInput({ value, onChange, className, placeholder = '0', ariaLabel }: {
-  value: number; onChange: (v: number) => void; className?: string; placeholder?: string; ariaLabel?: string;
-}) {
-  const [text, setText] = useState(value ? String(value) : '');
-  useEffect(() => {
-    if ((Number(text) || 0) !== (Number(value) || 0)) setText(value ? String(value) : '');
-  }, [value]);
-  return (
-    <input
-      inputMode="decimal"
-      aria-label={ariaLabel}
-      className={className || `${cellInput} w-full`}
-      placeholder={placeholder}
-      value={text}
-      onChange={e => {
-        const t = e.target.value.replace(/[^0-9.]/g, '');
-        setText(t);
-        onChange(Number(t) || 0);
-      }}
-    />
-  );
-}
-
-function Switch({ on, onChange, children }: { on: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
-  return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-ink">
-      <input type="checkbox" className="h-4 w-4 accent-[#0E6E62]" checked={on} onChange={e => onChange(e.target.checked)} />
-      {children}
-    </label>
-  );
-}
-
-export default function CostEstimator({ viewer, people, onClose }: {
+export default function CostEstimator({ viewer, people, onClose, run, backText = 'Back to deals' }: {
   viewer: Viewer;
   people: { id: string; name: string }[];
   onClose: () => void;
+  run?: RunStart;
+  backText?: string;
 }) {
   const settings = useMoneySettings();
   const staff = viewer.role !== 'rep';
   const [list, setList] = useState<CostEstimate[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [open, setOpen] = useState<CostEstimate | null>(null);
 
@@ -82,18 +44,38 @@ export default function CostEstimator({ viewer, people, onClose }: {
     return onSnapshot(q, s => {
       setList(s.docs.map(d => ({ ...(d.data() as CostEstimate), id: d.id })).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')));
       setLoadError('');
-    }, err => setLoadError(friendlyError(err)));
+      setLoaded(true);
+    }, err => { setLoadError(friendlyError(err)); setLoaded(true); });
   }, [staff, viewer.id]);
 
-  const startNew = () => {
+  const startNew = (kind: 'one' | 'public', from?: RunStart) => {
     const now = new Date().toISOString();
-    setOpen({
-      ...blankEstimate(viewer.id, { hrdcPct: settings.hrdcDeductionPct, commissionPct: settings.commissionPct }),
-      id: doc(collection(db, 'cost_estimates')).id,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const opts = { hrdcPct: settings.hrdcDeductionPct, commissionPct: settings.commissionPct };
+    const base: CostEstimate = { ...(kind === 'public' ? blankPublicEstimate(viewer.id, opts) : blankEstimate(viewer.id, opts)), id: doc(collection(db, 'cost_estimates')).id, createdAt: now, updatedAt: now };
+    if (from) {
+      // Option A: the companies on the run so far; option B: plus the open seats at list price (when there's a seat limit).
+      const sold = from.groups.reduce((t, g) => t + g.pax, 0);
+      const open = from.seatLimit > sold ? from.seatLimit - sold : 0;
+      Object.assign(base, {
+        runId: from.runId, title: from.title, days: from.days || 1, listPrice: from.listPrice, seatLimit: from.seatLimit, minPax: from.minPax,
+        options: [
+          { id: newLineId(), name: 'Bookings so far', groups: from.groups.length ? from.groups : [{ id: newLineId(), name: '', pax: 0, fee: from.listPrice, hrdc: true }] },
+          ...(open ? [{ id: newLineId(), name: 'Full room', groups: [...from.groups.map(g => ({ ...g, id: newLineId() })), { id: newLineId(), name: 'Open seats', pax: open, fee: from.listPrice, hrdc: true }] }] : []),
+        ],
+      });
+    }
+    setOpen(base);
   };
+
+  // From a run: open its estimate if there is one, else start one filled in from the run (once the list has loaded).
+  const startedRun = useRef(false);
+  useEffect(() => {
+    if (!run || !loaded || startedRun.current) return;
+    startedRun.current = true;
+    const mine = list.find(e => e.runId === run.runId);
+    if (mine) setOpen(mine);
+    else startNew('public', run);
+  }, [run, loaded, list]);
 
   const remove = async (e: CostEstimate) => {
     if (!window.confirm(`Delete the estimate "${e.title || 'Untitled'}"?`)) return;
@@ -103,18 +85,27 @@ export default function CostEstimator({ viewer, people, onClose }: {
   const personName = (id: string) => (id === viewer.id ? 'You' : people.find(p => p.id === id)?.name || '');
 
   if (open) {
-    return <EstimateEditor key={open.id} start={open} isNew={!list.some(e => e.id === open.id)} onBack={() => setOpen(null)} />;
+    const isNew = !list.some(e => e.id === open.id);
+    // Opened straight from a run: back goes to the run.
+    const back = run && open.runId === run.runId ? onClose : () => setOpen(null);
+    return open.kind === 'public'
+      ? <PublicEstimateEditor key={open.id} start={open} isNew={isNew} onBack={back} backText={back === onClose ? backText : 'All estimates'} run={run && open.runId === run.runId ? run : undefined} />
+      : <EstimateEditor key={open.id} start={open} isNew={isNew} onBack={back} />;
   }
+  if (run) return <p className="py-8 text-center text-ink-soft">Opening the estimate…</p>;
 
   return (
     <div className="space-y-5 font-sans text-ink">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <button type="button" onClick={onClose} className={btnLink}><ArrowLeft className="h-4 w-4" /> Back to deals</button>
+          <button type="button" onClick={onClose} className={btnLink}><ArrowLeft className="h-4 w-4" /> {backText}</button>
           <h2 className="mt-1 text-xl font-bold">Costing estimator</h2>
           <p className="mt-0.5 text-[15px] text-ink-soft">Work out the price before you quote: selling price − cost of training − expenses = GP.</p>
         </div>
-        <button type="button" onClick={startNew} className={btnPrimary}><Plus className="h-4 w-4" /> New estimate</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => startNew('public')} className={btnSecondary}><Users className="h-4 w-4" /> New public programme estimate</button>
+          <button type="button" onClick={() => startNew('one')} className={btnPrimary}><Plus className="h-4 w-4" /> New estimate</button>
+        </div>
       </div>
 
       {loadError && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{loadError}</p>}
@@ -122,21 +113,23 @@ export default function CostEstimator({ viewer, people, onClose }: {
       {list.length === 0 ? (
         <div className="rounded-xl border border-dashed border-line bg-white p-8 text-center">
           <Calculator className="mx-auto h-8 w-8 text-ink-soft" />
-          <p className="mt-2 text-[15px] text-ink-soft">No estimates yet. Click New estimate to cost a training.</p>
+          <p className="mt-2 text-[15px] text-ink-soft">No estimates yet. Click New estimate to cost a training for one client, or New public programme estimate for a class many companies join.</p>
         </div>
       ) : (
         <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-white">
           {list.map(e => {
-            const results = (e.prices || []).filter(p => p > 0).map(p => estimateResult(e, p));
+            const isPublic = e.kind === 'public';
+            const summary = isPublic
+              ? (e.options || []).map((o, i) => { const r = publicResult(e, o); return r.pax ? `${OPTION_NAMES[i]}: ${r.pax} pax, ${formatRM(r.price)} → GP ${pctText(r.gpPct)}` : ''; }).filter(Boolean).join('   ')
+              : (e.prices || []).filter(p => p > 0).map((p, i) => { const r = estimateResult(e, p); return `${OPTION_NAMES[i]}: ${formatRM(r.price)} → GP ${pctText(r.gpPct)}`; }).join('   ');
             return (
               <li key={e.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 hover:bg-surface">
                 <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(e)}>
-                  <p className="font-semibold">{e.title || 'Untitled'}{e.clientName ? <span className="font-normal text-ink-soft"> · {e.clientName}</span> : null}</p>
-                  <p className="text-sm text-ink-soft">
-                    {results.length
-                      ? results.map((r, i) => `${OPTION_NAMES[i]}: ${formatRM(r.price)} → GP ${pctText(r.gpPct)}`).join('   ')
-                      : 'No price yet'}
+                  <p className="font-semibold">
+                    {e.title || 'Untitled'}{e.clientName && !isPublic ? <span className="font-normal text-ink-soft"> · {e.clientName}</span> : null}
+                    {isPublic && <span className="ml-2 rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-semibold text-accent">Public programme</span>}
                   </p>
+                  <p className="text-sm text-ink-soft">{summary || (isPublic ? 'No companies yet' : 'No price yet')}</p>
                   <p className="text-xs text-ink-soft">
                     {staff && e.ownerId !== viewer.id ? `${personName(e.ownerId)} · ` : ''}Updated {formatDate((e.updatedAt || '').slice(0, 10))}
                   </p>
@@ -198,39 +191,10 @@ function EstimateEditor({ start, isNew, onBack }: { start: CostEstimate; isNew: 
   const target = e.targetGpPct ?? 0;
   const suggested = target > 0 ? priceForTarget(e, target) : null;
 
-  const lineRows = (key: 'costs' | 'expenses') => e[key].map(l => {
-    const amt = lineAmount(l, r.netSales);
-    return (
-      <div key={l.id} className="grid grid-cols-[1fr_auto] items-center gap-2 border-b border-line/60 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_270px_120px_64px_32px]">
-        <input className={`${cellInput} w-full`} value={l.label} placeholder="Item" aria-label="Item" onChange={ev => setLine(key, l.id, { label: ev.target.value })} />
-        <button type="button" aria-label="Remove line" onClick={() => removeLine(key, l.id)} className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger sm:order-last">
-          <X className="h-4 w-4" />
-        </button>
-        <div className="col-span-2 flex items-center gap-1.5 sm:col-span-1">
-          <select
-            aria-label="How it's worked out"
-            className="w-[120px] shrink-0 rounded-md border border-line bg-white px-1.5 py-1.5 text-sm text-ink"
-            value={l.mode}
-            onChange={ev => setLine(key, l.id, { mode: ev.target.value as 'rm' | 'pct' })}
-          >
-            <option value="rm">RM</option>
-            <option value="pct">% of net sales</option>
-          </select>
-          {l.mode === 'rm' ? (
-            <>
-              <NumInput ariaLabel="Quantity" value={l.qty} onChange={v => setLine(key, l.id, { qty: v })} className={`${cellInput} w-16 shrink-0`} placeholder="1" />
-              <span className="text-ink-soft">×</span>
-              <NumInput ariaLabel="Unit price" value={l.unit} onChange={v => setLine(key, l.id, { unit: v })} />
-            </>
-          ) : (
-            <NumInput ariaLabel="Percent of net sales" value={l.pct} onChange={v => setLine(key, l.id, { pct: v })} />
-          )}
-        </div>
-        <p className="text-right text-sm font-semibold tabular-nums sm:text-[15px]">{formatRM(amt)}</p>
-        <p className="text-right text-sm tabular-nums text-ink-soft">{pctText(ofPrice(amt))}</p>
-      </div>
-    );
-  });
+  const lineRows = (key: 'costs' | 'expenses') => (
+    <LineRows lines={e[key]} netSales={r.netSales} pax={e.pax} ofPrice={ofPrice}
+      onChange={(id, patch) => setLine(key, id, patch)} onRemove={id => removeLine(key, id)} />
+  );
 
   const sumRow = (text: string, amt: number, strong = false, tone = '') => (
     <div className={`grid grid-cols-[1fr_auto_64px] items-center gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_120px_64px_32px] ${strong ? 'bg-surface font-bold' : ''}`}>
