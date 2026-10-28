@@ -350,8 +350,8 @@ export function DiscoveryPanel({ deal: p, allDeals, client, clientName, clientBa
         <div className="min-w-0">
           <h3 className="truncate text-lg font-bold">{clientName}</h3>
           <p className="flex flex-wrap items-center gap-2 text-[15px] text-ink-soft">
-            <span className="inline-flex items-center gap-1"><Compass className="h-4 w-4" /> Discovery, made {formatDate(discoveryDate(p)) || 'earlier'}</span>
-            {first && <span className="rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent">First touch point</span>}
+            <span className="inline-flex items-center gap-1"><Compass className="h-4 w-4" /> {ap?.status === 'held' ? `Discovery, made ${formatDate(discoveryDate(p)) || 'earlier'}, meeting ${formatDate(ap.date)}` : `Meeting booked, made ${formatDate(discoveryDate(p)) || 'earlier'}: not a discovery until logged`}</span>
+            {first && ap?.status === 'held' && <span className="rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent">First touch point</span>}
           </p>
           {clientBadge && <p className="mt-0.5">{clientBadge}</p>}
         </div>
@@ -372,7 +372,7 @@ export function DiscoveryPanel({ deal: p, allDeals, client, clientName, clientBa
             <p className="font-bold">{ap?.status === 'held' ? 'Next step: has the client asked us for something?' : ap ? 'Next step: hold the meeting, then log it' : 'Next step: book or log the discovery meeting'}</p>
             <p className="mt-0.5 text-sm text-ink-soft">
               {ap?.status === 'held' ? 'When the client asks for a training, a proposal or a quotation, convert this to a deal. Until then keep following up, or close it if there is no interest.'
-                : ap ? 'Log what happened in the Meeting box below. It can become a deal once the meeting is logged. If the date changes, move it; if the meeting never happens, close the discovery.'
+                : ap ? "It becomes a discovery, and counts in KPIs, only once the meeting is logged. Log what happened in the Meeting box below. If the date changes, move it; if the meeting never happens, close it with \"Meeting didn't happen\"."
                 : 'Use the Meeting box below: book it, or log it if it has happened. It counts as an appointment.'}
             </p>
             {editable ? (

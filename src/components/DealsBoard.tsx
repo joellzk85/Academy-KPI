@@ -60,7 +60,7 @@ import { CoCloseMode, coCloseProblem, coCloseText, coCloser } from '../lib/coClo
 import { ReferralFeeType, Referrer, referralProblem } from '../lib/referrers';
 import { ReferralFields, ReferralLine, raiseReferralFee, useReferrers } from './Referrers';
 import { DiscoveryForm, DiscoveryPanel } from './DiscoveryParts';
-import { discoveryClosed, isOpenDiscovery, moveBackProblem } from '../lib/discovery';
+import { discoveryClosed, discoveryMeetingDate, isOpenDiscovery, moveBackProblem } from '../lib/discovery';
 import { useDiscoverySettings } from '../lib/useDiscoverySettings';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
@@ -249,8 +249,12 @@ export default function DealsBoard({
     };
     myDeals.forEach(p => {
       const st = journeyStage(dealStage(p));
-      // Discovery box: open discoveries; its second line counts discoveries that became deals (value = that count).
-      if (st === 'discovery') { if (isOpenDiscovery(p)) out.discovery.count++; return; }
+      // Discovery box: open discoveries with the meeting logged (booked only isn't a discovery yet, Joel 2026-10-28);
+      // its second line counts discoveries that became deals (value = that count); appointment counts the booked ones.
+      if (st === 'discovery') {
+        if (isOpenDiscovery(p)) { if (discoveryMeetingDate(p)) out.discovery.count++; else out.appointment.count++; }
+        return;
+      }
       out[st].count++; out[st].value += dealValue(p);
       if (p.convertedDate) out.discovery.value++;
     });
@@ -306,7 +310,7 @@ export default function DealsBoard({
       const urgentD = dealNeedsAttention(p, today);
       const apD = apptOf(p);
       if (apptOverdue(p, today)) return { text: `Meeting on ${formatDate(apD!.date)} not logged`, urgent: true };
-      if (apD?.status === 'booked') return { text: `Meeting ${formatDate(apD.date)}${apD.time ? `, ${apptTime(apD.time)}` : ''}`, urgent: false };
+      if (apD?.status === 'booked') return { text: `Meeting ${formatDate(apD.date)}${apD.time ? `, ${apptTime(apD.time)}` : ''}: not a discovery until logged`, urgent: false };
       if (!apD) return { text: 'Book or log the meeting', urgent: urgentD };
       if (fu && fu < today) return { text: `Follow-up overdue (${formatDate(fu)})`, urgent: true };
       return { text: fu ? `Follow up ${formatDate(fu)}` : 'Set a follow-up', urgent: urgentD };
@@ -626,6 +630,8 @@ export default function DealsBoard({
       stage: 'discovery',
       discoveryDate: p.discoveryDate || (/^\d{4}-\d{2}-\d{2}/.test(p.requestDate || '') ? p.requestDate.slice(0, 10) : todayIso()),
       requestDate: '', convertedDate: '', convertedAtMs: 0, discoveryClosed: null,
+      // Its logged meeting becomes the discovery meeting (still one Appointment).
+      ...(apptOf(p)?.status === 'held' && p.appointment ? { appointment: { ...p.appointment, discovery: true } } : {}),
       ...(st === 'lost' ? { lostDate: '', lostReason: '', lostNote: '', lostById: '', lostByName: '', lostAt: '' } : {}),
       movedToDiscovery: { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, fromStage: st },
     }, `Moved back to Discovery (was ${STAGE_LABELS[st]})`);
@@ -782,7 +788,9 @@ export default function DealsBoard({
                 {i < 5 && <ChevronRight className="hidden h-3.5 w-3.5 lg:inline" aria-hidden />}
               </span>
               <span className="mt-1 block text-2xl font-bold leading-none text-ink">{stageSummary[st].count}</span>
-              <span className="mt-1 block text-sm text-ink-soft">{st === 'discovery' ? `${stageSummary.discovery.value} became deals` : formatRM(stageSummary[st].value)}</span>
+              <span className="mt-1 block text-sm text-ink-soft">{st === 'discovery'
+                ? `${stageSummary.discovery.value} became deals${stageSummary.appointment.count ? ` · ${stageSummary.appointment.count} meeting${stageSummary.appointment.count === 1 ? '' : 's'} booked` : ''}`
+                : formatRM(stageSummary[st].value)}</span>
               <span className={`mt-1.5 block text-xs font-semibold ${stageMoves[st].week ? 'text-accent' : 'text-ink-soft/70'}`}>
                 {stageMoves[st].week ? `+${stageMoves[st].today} today · +${stageMoves[st].week} this week` : 'No change this week'}
               </span>
@@ -862,7 +870,9 @@ export default function DealsBoard({
                       {showOwner && <span className="block truncate text-sm font-medium text-accent">{personName(dealOwnerId(p))}</span>}
                     </span>
                     <span className="flex flex-wrap items-center gap-2 sm:justify-end">
-                      <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${STAGE_TONE[st]}`}>{STAGE_LABELS[st]}</span>
+                      <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${st === 'discovery' && !discoveryMeetingDate(p) && !discoveryClosed(p) ? 'bg-surface text-ink-soft' : STAGE_TONE[st]}`}>
+                        {st === 'discovery' && !discoveryMeetingDate(p) && !discoveryClosed(p) ? 'Meeting booked' : STAGE_LABELS[st]}
+                      </span>
                       {activeHold(p) && <span className="rounded-md border border-attention/40 px-2 py-0.5 text-xs font-semibold text-attention">On hold</span>}
                       {OPEN_STAGES.includes(st) && <PotentialChip deal={p} />}
                       {p.fundingType && <span className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-soft">{FUNDING_LABELS[p.fundingType as FundingType]}</span>}

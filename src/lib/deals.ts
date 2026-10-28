@@ -170,7 +170,8 @@ export function dealWonDate(p: any): string {
 
 // The date each journey step was reached, shown under the journey line ('' if not recorded).
 export function stageDate(p: any, st: DealStage): string {
-  if (st === 'discovery') return validDate(p?.discoveryDate);
+  // A discovery counts from the day its meeting was logged (Joel, 2026-10-28: booked only isn't a discovery yet).
+  if (st === 'discovery') return p?.appointment?.discovery === true && p.appointment.status === 'held' ? validDate(p?.appointmentDate) : '';
   if (st === 'lead') return validDate(p?.requestDate);
   if (st === 'proposal') return validDate(p?.proposalSentDate);
   if (st === 'agreed') return validDate(p?.agreedDate);

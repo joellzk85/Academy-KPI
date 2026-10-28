@@ -8,7 +8,7 @@
 
 import { dealOwnerId, dealWonDate, dealProposalDate, dealAppointmentDate, dealValue, dealStage, OPEN_STAGES, todayIso, trainingEndDate } from './deals';
 import { followUpAlert, followUpNotes } from './followUps';
-import { discoveryDate, discoveryMeetingDate, isFirstTouch } from './discovery';
+import { discoveryMeetingDate, isFirstTouch } from './discovery';
 import { buildForecast, DEFAULT_FORECAST, ForecastSettings } from './forecast';
 import { DEFAULT_MONEY_SETTINGS, expectedFor, MoneySettings, shortfall } from './money';
 import { MeetingPhoto, photoShare } from './meetingPhotos';
@@ -299,9 +299,10 @@ const MEASURES: Record<string, (c: Ctx) => Measured> = {
     const weeks = byWeek(c.deals.filter(p => dealOwnerId(p) === c.rep.id && discoveryMeetingDate(p) && isFirstTouch(p, c.deals)).map(discoveryMeetingDate), c.prefix);
     return { value: weeks.reduce((a, b) => a + b, 0), weeks };
   },
-  // Of the discoveries made this month, how many have become deals so far.
+  // Of the discoveries whose meeting was logged this month, how many have become deals so far (a meeting only booked
+  // isn't a discovery yet, Joel 2026-10-28).
   discovery_conversion: c => {
-    const made = c.deals.filter(p => dealOwnerId(p) === c.rep.id && discoveryDate(p).startsWith(c.prefix));
+    const made = c.deals.filter(p => dealOwnerId(p) === c.rep.id && discoveryMeetingDate(p).startsWith(c.prefix));
     return { value: made.length ? (made.filter(p => ymd(p.convertedDate)).length / made.length) * 100 : null };
   },
   // Deal closing ratio: deals won ÷ deals decided (won + lost) this month. Discoveries are never lost, so they never count.

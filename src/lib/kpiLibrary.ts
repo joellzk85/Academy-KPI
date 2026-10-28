@@ -61,7 +61,7 @@ export const MEASURE_INFO: Record<string, MeasureInfo> = {
   // Discovery (2026-10-28, lib/discovery.ts)
   discoveries: { label: 'discovery meetings logged, from Discovery', unit: 'count', weekly: true },
   first_touches: { label: 'discovery meetings with a client never met before', unit: 'count', weekly: true },
-  discovery_conversion: { label: 'discoveries made this month that became deals', unit: 'pct' },
+  discovery_conversion: { label: 'discoveries with the meeting logged this month that became deals', unit: 'pct' },
   closing_ratio: { label: 'deals won ÷ deals won or lost this month', unit: 'pct' },
   quote_speed: { label: 'days from client approved to quotation sent', unit: 'days' },
   collect_days: { label: 'days from invoice to payment, client payments received this month', unit: 'days' },
@@ -107,7 +107,7 @@ export const BUILT_IN_KPIS: KpiDef[] = [
   { id: 'win_rate', name: 'Win rate', group: 'sales', description: 'Deals won ÷ proposals sent this month.', measure: 'win_rate', unit: 'pct', ...HI(30, 20, 10) },
   { id: 'discoveries', name: 'Discovery meetings', group: 'sales', description: 'Discovery meetings logged this month (they also count as Appointments).', measure: 'discoveries', unit: 'count', ...T(8) },
   { id: 'first_touches', name: 'First touch points', group: 'sales', description: 'Discovery meetings this month with a client we had never met (no earlier discovery or deal).', measure: 'first_touches', unit: 'count', ...T(4) },
-  { id: 'discovery_conversion', name: 'Discovery to deal', group: 'sales', description: 'Discoveries made this month that became deals (the client asked for something), as %.', measure: 'discovery_conversion', unit: 'pct', ...HI(30, 15, 5) },
+  { id: 'discovery_conversion', name: 'Discovery to deal', group: 'sales', description: 'Discoveries with the meeting logged this month that became deals (the client asked for something), as %. A meeting only booked does not count.', measure: 'discovery_conversion', unit: 'pct', ...HI(30, 15, 5) },
   { id: 'closing_ratio', name: 'Deal closing ratio', group: 'sales', description: 'Deals won ÷ deals won or lost this month. Discoveries never count.', measure: 'closing_ratio', unit: 'pct', ...HI(50, 30, 15) },
   { id: 'new_clients', name: 'New clients won', group: 'sales', description: 'Deals won from clients who never won a deal before.', measure: 'new_clients', unit: 'count', ...T(2) },
   { id: 'quote_speed', name: 'Quotation speed', group: 'sales', description: 'Average days from client approved to quotation sent.', measure: 'quote_speed', unit: 'days', ...LO(2, 5, null) },
