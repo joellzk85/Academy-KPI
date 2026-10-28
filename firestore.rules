@@ -891,6 +891,19 @@ service cloud.firestore {
 
     // Costing estimator (2026-10-21): each person's mock P&Ls. The owner and Admin/Management read, edit and delete;
     // a new one must be owned by whoever creates it.
+    // Public programmes (2026-10-28, src/lib/publicProgrammes.ts): runs on fixed dates that many companies join (each
+    // company is a deal with publicProgrammeId). Everyone reads them; Admin and Management set up, change and cancel
+    // them; the History only grows; only Management erases one.
+    match /public_programmes/{runId} {
+      allow read: if isMember();
+      allow create: if isStaff() && request.resource.data.get('createdById', '') == request.auth.uid;
+      allow update: if isStaff()
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['history'])
+            || (request.resource.data.history is list && request.resource.data.history.size() > resource.data.get('history', []).size()
+                && request.resource.data.history.hasAll(resource.data.get('history', []))));
+      allow delete: if isManagement();
+    }
+
     match /cost_estimates/{estimateId} {
       allow read, update, delete: if isStaff() || (isMember() && resource.data.ownerId == request.auth.uid);
       allow create: if isMember() && request.resource.data.ownerId == request.auth.uid;

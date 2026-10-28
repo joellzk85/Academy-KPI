@@ -28,7 +28,9 @@ export interface TrainingChange {
   status: ChangeStatus;
   newDate?: string;        // date changes only
   newDays?: number;
-  newValue?: number;       // value changes only
+  newRunId?: string;       // a public programme moving its companies to another run (lib/publicProgrammes.ts)
+  newRunTitle?: string;
+  newValue?: number;      // value changes only
   newPax?: number;
   oldValue?: number;
   oldPax?: number;

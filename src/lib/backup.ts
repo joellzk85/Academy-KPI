@@ -10,6 +10,7 @@ export const SKIP_CONFIG_DOCS = ['passwords', 'google_calendar', 'backup_setting
 // Friendly tab names, in the order they appear. Lists not named here (older ones) follow, A to Z.
 export const LIST_NAMES: [string, string][] = [
   ['pipelines', 'Deals'],
+  ['public_programmes', 'Public programmes'],
   ['clients', 'Clients'],
   ['client_touch_points', 'Client touch points'],
   ['quotations', 'Quotations'],

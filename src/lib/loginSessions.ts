@@ -61,7 +61,7 @@ export const ACTIVITY_LABELS: Record<ActivityKind, string> = {
 
 // Records named in plain words (deletes). Others show as "Other record (name)".
 const RECORD_LABELS: Record<string, string> = {
-  pipelines: 'Deal', quotations: 'Quotation', course_outlines: 'Course outline', teambuilding_proposals: 'Teambuilding proposal',
+  pipelines: 'Deal', public_programmes: 'Public programme', quotations: 'Quotation', course_outlines: 'Course outline', teambuilding_proposals: 'Teambuilding proposal',
   clients: 'Client', trainers_directory: 'Trainer', venues_directory: 'Venue', appointments: 'Appointment', tasks: 'To-do task',
   money_out: 'Payment request', money_in: 'Money in', payment_records: 'Payment record', project_pl: 'Project P&L', vendors: 'Vendor',
   programmes: 'Programme', proposal_files: 'Proposal file', checklist_files: 'Checklist file', payment_receipts: 'Payment receipt',

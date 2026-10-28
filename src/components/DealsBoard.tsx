@@ -62,6 +62,8 @@ import { ReferralFields, ReferralLine, raiseReferralFee, useReferrers } from './
 import { DiscoveryForm, DiscoveryPanel } from './DiscoveryParts';
 import { discoveryClosed, discoveryMeetingDate, isOpenDiscovery, moveBackProblem } from '../lib/discovery';
 import { useDiscoverySettings } from '../lib/useDiscoverySettings';
+import PublicProgrammes from './PublicProgrammes';
+import { PublicProgramme, joinProblem, joinableRuns, listValue, runSeats } from '../lib/publicProgrammes';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -112,9 +114,11 @@ const emptyForm = () => ({
   contactName: '',        // …or typed
   contactPhone: '',
   saveContact: true,      // save a typed person to the client's contact list
+  publicMode: false,     // the form's "Public programme" choice
+  publicProgrammeId: '',  // a company joining a public programme (2026-10-28, lib/publicProgrammes.ts)
   programmeId: '',
   courseName: '',
-  enquiryNote: '',        // what they asked for, typed, when the programme isn't known yet
+  enquiryNote: '',       // what they asked for, typed, when the programme isn't known yet
   type: 'Training',
   fundingType: '' as FundingType | '',
   proposalValue: '',
@@ -158,6 +162,8 @@ export default function DealsBoard({
   const [moneyOut, setMoneyOut] = useState<MoneyOut[]>([]);
   const [venues, setVenues] = useState<any[]>([]);
   const [trainers, setTrainers] = useState<any[]>([]);
+  const [runs, setRuns] = useState<PublicProgramme[]>([]);   // public programmes (2026-10-28)
+  const [showRuns, setShowRuns] = useState(false);
   const referrers = useReferrers();
   const moneySettings = useMoneySettings();
   const [loaded, setLoaded] = useState(false);
@@ -204,6 +210,7 @@ export default function DealsBoard({
       onSnapshot(query(collection(db, 'proposal_files')), s => setProposalFiles(s.docs.map(d => ({ ...(d.data() as ProposalFile), id: d.id }))), () => {}),
       onSnapshot(query(collection(db, 'venues_directory')), s => setVenues(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, 'trainers_directory')), s => setTrainers(s.docs.map(d => ({ ...d.data(), id: d.id }))), () => {}),
+      onSnapshot(query(collection(db, 'public_programmes')), s => setRuns(s.docs.map(d => ({ ...(d.data() as PublicProgramme), id: d.id }))), () => {}),
     ];
     // Payouts and costs are for Admin and Management only.
     if (viewer.role !== 'rep') {
@@ -334,12 +341,31 @@ export default function DealsBoard({
   };
 
   // ---------- Create / edit ----------
-  const startNew = () => {
-    setForm({ ...emptyForm(), ownerId: scopeId });
+  // A run given: "Add a company" from a public programme (the run's title, type and dates are filled in).
+  const startNew = (run?: PublicProgramme) => {
+    setForm({ ...emptyForm(), ownerId: scopeId, ...(run ? runFields(run) : {}) });
     setFormError('');
     setEditing('new');
     setOpenId(null);
   };
+  const runFields = (run: PublicProgramme) => ({
+    publicMode: true, publicProgrammeId: run.id, programmeId: run.programmeId, courseName: run.title, enquiryNote: '',
+    type: run.type === 'Teambuilding' ? 'Teambuilding' : 'Training',
+    trainingDate: run.trainingDate || '', trainingDays: trainingDays(run) !== 1 ? String(trainingDays(run)) : '',
+  });
+  const runOfForm = runs.find(r => r.id === form.publicProgrammeId) || null;
+  // Picking a run, or changing the pax on one: the value follows list price × pax while it still is that (or blank).
+  const pickRun = (run: PublicProgramme | null) => setForm(f => {
+    if (!run) return { ...f, publicProgrammeId: '' };
+    return { ...f, ...runFields(run), proposalValue: Number(f.participants) > 0 ? String(listValue(run, Number(f.participants))) : f.proposalValue };
+  });
+  const setPax = (v: string) => setForm(f => {
+    const run = runs.find(r => r.id === f.publicProgrammeId);
+    if (!run) return { ...f, participants: v };
+    const before = listValue(run, Number(f.participants) || 0);
+    const follows = String(f.proposalValue || '').trim() === '' || Math.abs(Number(f.proposalValue) - before) < 0.005;
+    return { ...f, participants: v, proposalValue: follows && Number(v) > 0 ? String(listValue(run, Number(v))) : f.proposalValue };
+  });
 
   const startEdit = (p: any) => {
     setForm({
@@ -348,6 +374,8 @@ export default function DealsBoard({
       contactName: p.contactId ? '' : (p.contactName || ''),
       contactPhone: '',
       saveContact: true,
+      publicMode: !!p.publicProgrammeId,
+      publicProgrammeId: p.publicProgrammeId || '',
       programmeId: p.programmeId && programmes.some(x => x.id === p.programmeId) ? p.programmeId : '',
       courseName: courseOf(p),
       enquiryNote: p.enquiryNote || '',
@@ -403,6 +431,16 @@ export default function DealsBoard({
       return setFormError(`Lowering the value after the proposal is sent is a discount. Open the quotation and click "Request discount"; a manager approves it.`);
     }
     if (!form.requestDate) return setFormError('Enter the date the client asked.');
+    // Public programme (2026-10-28): seats and the list price are checked; the run sets the title and dates.
+    const run = form.publicProgrammeId ? runs.find(r => r.id === form.publicProgrammeId) || null : null;
+    if (form.publicMode && !form.publicProgrammeId && !(existingDeal && valueLocked(existingDeal))) return setFormError('Pick the public programme run the company joins, or choose In-house training.');
+    if (form.publicProgrammeId && !run) return setFormError('That public programme is no longer in the list. Pick another run, or choose In-house training.');
+    if (run && !(existingDeal && valueLocked(existingDeal))) {
+      if (pax <= 0) return setFormError('Enter how many people this company sends to the public programme.');
+      const stillOnIt = existingDeal?.publicProgrammeId === run.id;
+      const problem = joinProblem(run, deals, { id: existingDeal?.id, participants: pax, value, discountApproved: existingDeal?.discountRequest?.status === 'approved' }, viewer.role);
+      if (problem && !(stillOnIt && run.status === 'cancelled')) return setFormError(problem);
+    }
     const days = parseTrainingDays(form.trainingDays);
     if (days === null) return setFormError(TRAINING_DAYS_PROBLEM);
     const newOwner = people.find(r => r.id === form.ownerId) || owner;
@@ -444,6 +482,7 @@ export default function DealsBoard({
         client: client.companyName,
         contactId,
         contactName,
+        publicProgrammeId: run ? run.id : '',
         programmeId: programme ? programme.id : '',
         courseName: programme ? programme.name : legacyCourse,
         enquiryNote: form.enquiryNote.trim(),
@@ -471,12 +510,14 @@ export default function DealsBoard({
         referralFeeValue: refId && String(form.referralFeeValue || '').trim() ? Number(form.referralFeeValue) : 0,
         notes: form.notes.trim(),
       };
+      // A public programme's company trains on the run's dates; they change only with the run.
+      if (run) { data.trainingDate = run.trainingDate || ''; data.trainingDays = trainingDays(run); }
       // A won deal's co-closer and referral fee change only by Management (firestore.rules), like its owner.
       if (existing && dealStage(existing) === 'won' && viewer.role !== 'management') {
         ['coCloserId', 'coCloserName', 'coCloseMode', 'coClosePct', 'referrerId', 'referrerName', 'referralFeeType', 'referralFeeValue'].forEach(k => delete data[k]);
       }
       if (existing && dateLocked(existing)) { delete data.trainingDate; delete data.trainingDays; }
-      if (existing && valueLocked(existing)) { ['programmeId', 'courseName', 'enquiryNote', 'fundingType', 'proposalValue', 'participants'].forEach(k => delete data[k]); }
+      if (existing && valueLocked(existing)) { ['publicProgrammeId', 'programmeId','courseName', 'enquiryNote', 'fundingType', 'proposalValue', 'participants'].forEach(k => delete data[k]); }
       if (!existing) {
         Object.assign(data, {
           stage: 'lead', status: 'Pending', proposalSentDate: 'not yet', creatorId: viewer.id, creatorName: viewer.name,
@@ -712,6 +753,15 @@ export default function DealsBoard({
 
   // ---------- Render ----------
   if (estimating) return <CostEstimator viewer={viewer} people={people} onClose={() => setEstimating(false)} />;
+  if (showRuns && !editing && !openId) {
+    return (
+      <PublicProgrammes runs={runs} deals={deals} programmes={programmes} outlines={outlines} venues={venues} trainers={trainers} clients={clients}
+        people={people.map(r => ({ id: r.id, name: r.name }))} viewer={viewer}
+        onBack={() => setShowRuns(false)}
+        onAddCompany={run => startNew(run)}
+        onOpenDeal={id => { setOpenId(id); setStagePanel(null); setGate(null); setStageError(''); }} />
+    );
+  }
 
   return (
     <div className="space-y-5 font-sans text-ink">
@@ -735,13 +785,16 @@ export default function DealsBoard({
           <button type="button" onClick={() => setEstimating(true)} className={btnSecondary}>
             <Calculator className="h-4 w-4" /> Costing estimator
           </button>
+          <button type="button" onClick={() => setShowRuns(true)} className={btnSecondary}>
+            <Users className="h-4 w-4" /> Public programmes
+          </button>
           {canCreateHere && (
             <button type="button" onClick={() => { setDiscEditing('new'); setOpenId(null); setEditing(null); }} className="inline-flex items-center justify-center gap-2 rounded-lg border border-accent bg-white px-4 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent-soft">
               <Compass className="h-4 w-4" /> Discovery
             </button>
           )}
           {canCreateHere && (
-            <button type="button" onClick={startNew} className={btnPrimary}>
+            <button type="button" onClick={() => startNew()} className={btnPrimary}>
               <Plus className="h-4 w-4" /> New deal
             </button>
           )}
@@ -875,6 +928,7 @@ export default function DealsBoard({
                       </span>
                       {activeHold(p) && <span className="rounded-md border border-attention/40 px-2 py-0.5 text-xs font-semibold text-attention">On hold</span>}
                       {OPEN_STAGES.includes(st) && <PotentialChip deal={p} />}
+                      {p.publicProgrammeId && <span className="rounded-md border border-accent/40 px-2 py-0.5 text-xs font-medium text-accent">Public programme</span>}
                       {p.fundingType && <span className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-soft">{FUNDING_LABELS[p.fundingType as FundingType]}</span>}
                       <span className="w-28 text-right font-semibold tabular-nums">{dealValue(p) ? formatRM(dealValue(p)) : '—'}</span>
                     </span>
@@ -956,6 +1010,12 @@ export default function DealsBoard({
               clientName={clientName(openDeal)}
               client={clientOf(openDeal)}
               clientBadge={<ClientLastTouch client={clientOf(openDeal)} deals={deals} quotes={quotes} />}
+              publicRunText={(() => {
+                const r = runs.find(x => x.id === openDeal.publicProgrammeId);
+                if (!r) return '';
+                const s = runSeats(r, deals);
+                return `${trainingDateText(r, true)}, ${s.companies} compan${s.companies === 1 ? 'y' : 'ies'}, ${s.seats} pax${r.status === 'cancelled' ? ' (run cancelled)' : ''}`;
+              })()}
               ownerName={personName(dealOwnerId(openDeal))}
               personName={personName}
               editable={canEdit(openDeal)}
@@ -1077,8 +1137,44 @@ export default function DealsBoard({
                   This deal is won, so its programme, value, participants and funding type are locked. Value and participants change through "Change date / value / Cancel training" on the deal, which Management approves.
                 </p>
               )}
+              {/* Public programme (2026-10-28): the company joins a run on fixed dates; the run sets the title and dates. */}
               <div className={formValueLocked ? 'pointer-events-none opacity-60' : ''} aria-disabled={formValueLocked || undefined}>
-                <span className={label}>What they asked for</span>
+                <span className={label}>Kind of training</span>
+                <div className="inline-flex rounded-lg border border-line bg-white p-0.5" role="radiogroup" aria-label="Kind of training">
+                  {([[false, 'In-house training'], [true, 'Public programme']] as [boolean, string][]).map(([on, t]) => (
+                    <button key={t} type="button" role="radio" aria-checked={!!form.publicMode === on} disabled={formValueLocked}
+                      onClick={() => setForm(f => ({ ...f, publicMode: on, ...(on ? {} : { publicProgrammeId: '' }) }))}
+                      className={`rounded-md px-3 py-1.5 text-sm font-semibold ${!!form.publicMode === on ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>{t}</button>
+                  ))}
+                </div>
+                {form.publicMode && (() => {
+                  const options = joinableRuns(runs);
+                  const current = runOfForm && !options.some(r => r.id === runOfForm.id) ? [runOfForm] : [];
+                  return (
+                    <div className="mt-2">
+                      {options.length + current.length === 0 ? (
+                        <p className="text-sm text-ink-soft">No upcoming public programmes yet. Admin or Management set them up in Deals → Public programmes.</p>
+                      ) : (
+                        <select value={form.publicProgrammeId} onChange={e => pickRun(runs.find(r => r.id === e.target.value) || null)} className={input} aria-label="Public programme run">
+                          <option value="">Pick the run the company joins</option>
+                          {[...current, ...options].map(r => {
+                            const s = runSeats(r, deals, editing !== 'new' ? editing || '' : '');
+                            return <option key={r.id} value={r.id}>{trainingDateText(r, true)} · {r.title} · {formatRM(r.pricePerPax)}/pax{s.left !== null ? ` · ${s.left} seats left` : ''}{r.status === 'cancelled' ? ' (cancelled)' : ''}</option>;
+                          })}
+                        </select>
+                      )}
+                      {runOfForm && (
+                        <p className="mt-1.5 text-sm text-ink-soft">
+                          {[runOfForm.venueName, runOfForm.trainerName].filter(Boolean).join(' · ')}{runOfForm.venueName || runOfForm.trainerName ? '. ' : ''}
+                          The deal value is {formatRM(runOfForm.pricePerPax)} × its participants. For a bulk or special price, use "Request discount" on the quotation; a manager approves it.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className={formValueLocked || form.publicMode ? 'pointer-events-none opacity-60' : ''} aria-disabled={formValueLocked || form.publicMode || undefined}>
+                <span className={label}>What they asked for{form.publicMode ? <span className="font-normal text-ink-soft"> (set by the public programme)</span> : null}</span>
                 <ProgrammePicker
                   programmes={programmes}
                   value={form.programmeId}
@@ -1114,8 +1210,8 @@ export default function DealsBoard({
                   <input id="d-value" inputMode="decimal" value={form.proposalValue} disabled={formValueLocked} onChange={e => setForm(f => ({ ...f, proposalValue: e.target.value.replace(/[^0-9.]/g, '') }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} placeholder="15000" />
                 </div>
                 <div>
-                  <label htmlFor="d-pax" className={label}>Participants <span className="font-normal text-ink-soft">(needed before Won)</span></label>
-                  <input id="d-pax" inputMode="numeric" value={form.participants || ''} disabled={formValueLocked} onChange={e => setForm(f => ({ ...f, participants: e.target.value.replace(/[^0-9]/g, '') }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} placeholder="e.g. 25" />
+                  <label htmlFor="d-pax" className={label}>Participants <span className="font-normal text-ink-soft">{form.publicMode ? '(this company)' : '(needed before Won)'}</span></label>
+                  <input id="d-pax" inputMode="numeric" value={form.participants || ''} disabled={formValueLocked} onChange={e => setPax(e.target.value.replace(/[^0-9]/g, ''))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} placeholder="e.g. 25" />
                 </div>
               </div>
               <div className={formValueLocked ? 'pointer-events-none opacity-60' : ''} aria-disabled={formValueLocked || undefined}>
@@ -1147,7 +1243,7 @@ export default function DealsBoard({
                 </div>
                 <div>
                   <label htmlFor="d-train" className={label}>Training date</label>
-                  <input id="d-train" type="date" value={form.trainingDate} disabled={formDateLocked} onChange={e => setForm(f => ({ ...f, trainingDate: e.target.value }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} />
+                  <input id="d-train" type="date" value={form.trainingDate} disabled={formDateLocked || !!form.publicMode}onChange={e => setForm(f => ({ ...f, trainingDate: e.target.value }))} className={`${input} disabled:bg-surface disabled:text-ink-soft`} />
                 </div>
                 <div>
                   <label htmlFor="d-fu" className={label}>Next follow-up</label>
@@ -1156,6 +1252,10 @@ export default function DealsBoard({
               </div>
               {formDateLocked ? (
                 <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">This deal is won, so its training date ({trainingDateText(deals.find(p => p.id === editing), true)}) changes through "Change date / Cancel training" on the deal, which Management approves.</p>
+              ) : form.publicMode ? (
+                <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">
+                  {runOfForm ? `Training: ${trainingDateText(runOfForm, true)}, the public programme's dates. They change only when Admin or Management change the run.` : 'The training dates come from the public programme picked.'}
+                </p>
               ) : (
                 <div>
                   <TrainingDaysPicker id="d-days" label="How long is the training?" value={form.trainingDays} onChange={v => setForm(f => ({ ...f, trainingDays: v }))} />
@@ -1277,6 +1377,7 @@ function DealPanel(props: {
   allDeals: any[];
   deal: any; clientName: string; client: any; ownerName: string; personName: (id: string) => string;
   clientBadge?: React.ReactNode;
+  publicRunText?: string;   // the public programme this company joined (2026-10-28)
   editable: boolean; viewer: Viewer; quotes: any[]; outlines: any[]; tbs: any[]; checklist: any | null; busy: boolean;
   dealLinks: any[]; linkSettings: any;
   programme: Programme | undefined; courseName: string; queries: HrdcQuery[]; team: { id: string; name: string }[];
@@ -1609,6 +1710,7 @@ function DealPanel(props: {
         <Fold title="Details" hint={[dealValue(p) ? formatRM(dealValue(p)) : 'No value yet', p.fundingType ? FUNDING_LABELS[p.fundingType as FundingType] : ''].filter(Boolean).join(' · ')} defaultOpen={def === 'details'} id={p.id}>
           <div className="space-y-4">
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[15px]">
+              {props.publicRunText && <Detail term="Public programme" value={props.publicRunText} />}
               <Detail term="Value" value={dealValue(p) ? formatRM(dealValue(p)) : '—'} />
               <Detail term="Paid by" value={p.fundingType ? FUNDING_LABELS[p.fundingType as FundingType] : 'Not set'} />
               <Detail term="Participants" value={Number(p.participants) > 0 ? `${Math.round(Number(p.participants))} pax` : 'Not set'} />

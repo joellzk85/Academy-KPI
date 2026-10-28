@@ -222,6 +222,7 @@ function PendingBox({ deal, change: c, viewer, onDone }: { deal: any; change: Tr
       } else if (c.kind === 'date') {
         batch.update(doc(db, 'pipelines', deal.id), {
           trainingDate: c.newDate, trainingDays: c.newDays,
+          ...(c.newRunId ? { publicProgrammeId: c.newRunId } : {}),
           dateChangeCount: (Number(deal.dateChangeCount) || 0) + 1,
           firstTrainingDate: ymd(deal.firstTrainingDate) || c.oldDate,
           trainingChange: decided, trainingTodo: todo,
