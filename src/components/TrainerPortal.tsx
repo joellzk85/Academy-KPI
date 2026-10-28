@@ -4,7 +4,7 @@ import { User, getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut 
 import { sendPortalPasswordEmail } from '../lib/portalEmail';
 import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
 import {
-  BadgeCheck, BookOpen, CalendarCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Menu, Wallet, Star, Upload, User as UserIcon, Users, X,
+  BadgeCheck, BookOpen, CalendarCheck, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, Eye, FileText, Home, Image as ImageIcon, Landmark, Loader2, LogOut, MapPin, Menu, QrCode, Wallet, Star, Upload, User as UserIcon, Users, X,
 } from 'lucide-react';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { auth as crmAuth, storage as crmStorage } from '../lib/firebase';
@@ -497,6 +497,17 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
     await api('/api/portal/decline-po', { dealId: t.dealId, reason: reason.trim() });
     setDeclining(false); await reload();
   });
+  // Output assessment QR (2026-10-28): a picture opens full screen for participants to scan; a PDF opens in a new tab.
+  const [qrView, setQrView] = useState<{ url: string; name: string } | null>(null);
+  const showQr = (f: any) => run(`qr-${f.id}`, async () => {
+    const res = await fetch('/api/portal/qr', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(await authHeaders()) }, body: JSON.stringify({ dealId: t.dealId, fileId: f.id }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || "The QR couldn't be opened. Try again.");
+    const url = URL.createObjectURL(await res.blob());
+    if (String(f.type).startsWith('image/')) { setQrView({ url, name: f.name }); return; }
+    const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  });
+  const closeQr = () => { if (qrView) URL.revokeObjectURL(qrView.url); setQrView(null); };
   const hasPo = t.po.length > 0 || !!autoPo;
   const allPaid = t.fee.length > 0 && t.fee.every((f: any) => f.status === 'paid');
 
@@ -515,6 +526,35 @@ function TrainingCard({ t, reload, trainerId }: { t: any; reload: () => Promise<
         </span>
       </div>
       {t.cancelled && <p className={alertBox}>{t.internalTrainer ? 'This training was cancelled.' : 'This training was cancelled, so its PO no longer applies. NEXT Academy will contact you about it.'}</p>}
+
+      {/* Output assessment QR uploaded by Admin on the checklist (2026-10-28) */}
+      {t.qr?.length > 0 && (
+        <div className="rounded-xl border border-line p-3">
+          <p className="text-sm font-semibold">Output assessment QR</p>
+          <p className="mt-1 text-sm text-ink-soft">Show it to participants during the training so they can scan it.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {t.qr.map((f: any) => (
+              <button key={f.id} type="button" className={btnPrimary} disabled={!!busy} onClick={() => showQr(f)}>
+                {busy === `qr-${f.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />} {t.qr.length > 1 ? f.name : 'Show QR'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {qrView && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-white" role="dialog" aria-modal="true" aria-label="Output assessment QR">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+            <p className="min-w-0 truncate font-semibold">{t.programme}: output assessment</p>
+            <div className="flex shrink-0 gap-2">
+              <a className={btnSecondary} href={qrView.url} download={qrView.name}><Download className="h-4 w-4" /> Save</a>
+              <button type="button" className={btnSecondary} onClick={closeQr}><X className="h-4 w-4" /> Close</button>
+            </div>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+            <img src={qrView.url} alt="Output assessment QR" className="max-h-full max-w-full object-contain" />
+          </div>
+        </div>
+      )}
 
       {/* Internal trainer (2026-10-25): no PO or fee; they send the photos and the signed T3 here */}
       {t.internalTrainer && !t.cancelled && (

@@ -125,3 +125,10 @@ Script (27 checks: login ids, claim files only from the trainer's own folder for
 - **Title:** in the portal the trainer picks it inside part 1 (titles of that type only; the separate Programme box is gone for outlines; the portal's titles now carry their type). The outline link has no picker: its title is the one the team set.
 - **Saved:** `cleanOutline` keeps `type` (written as `kind` / `skillType`, as the CRM does) and agenda `tag`; an older submission without a type leaves the outline's type alone. Nothing to publish.
 - Tested: script (11 checks: type and tags read from the record and saved back, Technical / Teambuilding switch, bad values dropped, no type = no change, title from the list, stamp stable) and a temporary local page (portal and link: type buttons, titles narrowed by type, teambuilding day agenda with a tag saved, link sends its title and type, Preview). The CRM editor and saving through the real server need the live site.
+
+## Output assessment QR in My trainings (2026-10-28)
+
+- Joel: "the output assessment QR which is uploaded by admin should reflect in the training they conduct, so the trainer can easily access the QR during the training".
+- Each training card in the trainer portal and in an internal trainer's My trainings has an **Output assessment QR** box once Admin uploads a file on the checklist step "Output assessment QR" (`output_qr`; a public programme's run checklist for runs). Lead and co-trainers see it; not on cancelled trainings.
+- **Show QR:** a picture opens full screen (white background, Save and Close) for participants to scan; a PDF or other file opens in a new tab.
+- Server: `trainingDetails` lists the step's files as `qr` (id, name, type); `/api/portal/qr` sends one file only for a training on that trainer's list (`assignedLive`), like `/api/portal/po`. Nothing to publish. Built only (phone check on the live site).

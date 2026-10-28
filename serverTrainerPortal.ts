@@ -31,6 +31,7 @@ import { dealOrRun } from './serverRunDeals';
 const BUCKET = String((firebaseConfig as any).storageBucket || '');
 const nowIso = () => new Date().toISOString();
 const PORTAL = ' (trainer portal)';
+const QR_STEP = 'output_qr';
 // Who did it, for History: "(trainer portal)" for a trainer outside the team; an internal trainer's own name (CRM).
 const byName = (t: any, account: any) => (t.name || 'Trainer') + (account?.internalTrainer ? '' : PORTAL);
 
@@ -225,6 +226,9 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
     // An internal trainer (on the team) has no PO and no fee (Joel, 2026-10-25).
     const lines = internal ? [] : (await feeLines(db, deal.id, task.id, trainerId)).filter(o => o.status !== 'rejected' && feeIsAgreed(o));
     const files = internal ? [] : await poFiles(db, deal.id, task.id);
+    // The Output assessment QR Admin uploads on the checklist (the run's own checklist for a public programme), so the
+    // trainer can show it during the training (2026-10-28). Lead and co-trainers, internal trainers too.
+    const qr = await poFiles(db, deal.id, QR_STEP);
     const start = String(deal.trainingDate || '').slice(0, 10);
     const client = String(clients.docs.find((d: any) => d.id === deal.clientId)?.data().companyName || deal.client || '');
     const venueOn = venue && !(checklist.tasks || []).some((x: any) => x.kind === 'venue' && x.needed === false);
@@ -241,6 +245,7 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
       confirmed: !!task.done,
       coTrainer: isCoTrainer(task),
       po: files.map(f => ({ id: f.id, name: f.name, at: f.at })),
+      qr: cancelled ? [] : qr.map(f => ({ id: f.id, name: f.name, type: f.type || '' })),
       poAuto: !files.length && lines.length && !cancelled
         ? buildPo({ deal: { ...deal, courseName: deal.courseName || programme }, dates: trainingDateText(deal, true), date: today, trainer, client, venue: venueOn ? venue.name : '',
             lines: lines.map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 })), vendor })
@@ -489,6 +494,23 @@ export function registerTrainerPortalRoutes(app: Express) {
   }));
 
   // Download a PO from a training (only that trainer's own trainings).
+  // The Output assessment QR file for one of my trainings (not a cancelled one), shown in the portal.
+  app.post('/api/portal/qr', async (req: Request, res: Response) => {
+    try {
+      const { db, trainerId } = await trainerFrom(req);
+      const { deal } = await assignedLive(db, trainerId, req.body?.dealId);
+      const f = (await poFiles(db, deal.id, QR_STEP)).find(x => x.id === String(req.body?.fileId || ''));
+      if (!f) throw new UserError(404, 'no-file', 'That QR is no longer there. Refresh the page.');
+      const [buf] = await getStorage(getApps()[0]).bucket(BUCKET).file(f.path).download();
+      res.setHeader('Content-Type', f.type || 'application/octet-stream');
+      res.send(buf);
+    } catch (err: any) {
+      const e = err instanceof UserError ? err : new UserError(500, 'server-error', "The QR couldn't be read. Try again in a minute.");
+      if (!(err instanceof UserError)) console.error('[portal] qr', err);
+      res.status(e.status).json({ ok: false, code: e.code, error: e.message });
+    }
+  });
+
   app.post('/api/portal/po', async (req: Request, res: Response) => {
     try {
       const { db, trainerId } = await externalFrom(req);
