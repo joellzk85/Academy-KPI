@@ -155,10 +155,10 @@ service cloud.firestore {
       // 'YYYY-MM-DD' in Malaysia runs from 16:00 UTC the day before to 16:00 UTC; an hour's slack either side
       // (process audit, 2026-10-22: was 36 hours, which let a deal move into the next or previous month).
       function wonDateOk(d) {
-        return isManagement()
-          || (d.get('wonDate', '') is string && d.get('wonDate', '').matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+        return (d.get('wonDate', '') is string && d.get('wonDate', '').matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
               && request.time > timestamp.date(int(d.wonDate.split('-')[0]), int(d.wonDate.split('-')[1]), int(d.wonDate.split('-')[2])) - duration.value(9, 'h')
-              && request.time < timestamp.date(int(d.wonDate.split('-')[0]), int(d.wonDate.split('-')[1]), int(d.wonDate.split('-')[2])) + duration.value(17, 'h'));
+              && request.time < timestamp.date(int(d.wonDate.split('-')[0]), int(d.wonDate.split('-')[1]), int(d.wonDate.split('-')[2])) + duration.value(17, 'h'))
+          || isManagement();
       }
       // Process audit (2026-10-22). The stage is one of the known ones and the old "status" agrees with it, so a
       // deal can't count as won (or lost) through the status alone.
@@ -209,6 +209,34 @@ service cloud.firestore {
               && after.get('status', '') == 'withdrawn' && before.get('byId', '') == request.auth.uid)
           || isSuper();
       }
+      // A manager approving a waiting "Change date" or "Change value / pax" on a won deal (2026-10-28). The full deal
+      // checks below ran over Firestore's 1000-step limit for these saves, so they were refused. This short check
+      // allows only that approval: the request unchanged except its decision, signed by a manager who didn't ask,
+      // exactly the date (and public programme run) or value and pax asked, only the fields the approval writes,
+      // and the History only grows. A cancellation still goes through the full checks (it fits).
+      // Kept to one cheap look for every other save (a deal with no request waiting): winning a deal is close to the limit.
+      function approvalOk() {
+        return resource.data.get('trainingChange', {}).get('status', '') == 'pending' && approvalDetailOk();
+      }
+      function approvalDetailOk() {
+        let before = resource.data.get('trainingChange', {});
+        let after = request.resource.data.get('trainingChange', {});
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let d = request.resource.data;
+        return before.get('status', '') == 'pending' && after.get('status', '') == 'approved'
+          && before.get('kind', '') in ['date', 'value']
+          && after.diff(before).affectedKeys().hasOnly(['status', 'decidedById', 'decidedByName', 'decidedAt'])
+          && after.get('decidedById', '') == request.auth.uid && before.get('byId', '') != request.auth.uid
+          && resource.data.get('stage', '') == 'won' && d.get('stage', '') == 'won' && resource.data.get('deleted', false) != true
+          && isManagement() && historyOk()
+          && ((before.kind == 'date'
+               && changed.hasOnly(['trainingDate', 'trainingDays', 'publicProgrammeId', 'dateChangeCount', 'firstTrainingDate', 'trainingChange', 'trainingTodo', 'history'])
+               && d.get('trainingDate', '') == before.get('newDate', '-') && d.get('trainingDays', 1) == before.get('newDays', 1)
+               && (!changed.hasAny(['publicProgrammeId']) || d.get('publicProgrammeId', '') == before.get('newRunId', '-')))
+              || (before.kind == 'value'
+               && changed.hasOnly(['proposalValue', 'participants', 'valueChanges', 'trainingChange', 'trainingTodo', 'history'])
+               && d.get('proposalValue', null) == before.get('newValue', -1) && d.get('participants', null) == before.get('newPax', -1)));
+      }
       function becomesWon() {
         return request.resource.data.get('stage', '') == 'won' && resource.data.get('stage', '') != 'won';
       }
@@ -236,10 +264,10 @@ service cloud.firestore {
           && wonLockOk()
           && (!changed.hasAny(['integrityChecks', 'dateChangeCount', 'firstTrainingDate', 'valueChanges']) || isManagement())
           // The first win's snapshot stays; a second win doesn't replace it (process audit, 2026-10-22).
-          && (!changed.hasAny(['wonOriginal']) || isManagement() || (becomesWon() && resource.data.get('wonOriginal', null) == null))
+          && (!changed.hasAny(['wonOriginal']) || (becomesWon() && resource.data.get('wonOriginal', null) == null) || isManagement())
           && request.resource.data.get('winCount', 0) >= resource.data.get('winCount', 0)
           // Every win counts one more (a second win shows as a red flag in Deal checks).
-          && (!becomesWon() || isManagement() || request.resource.data.get('winCount', 0) == resource.data.get('winCount', 0) + 1)
+          && (!becomesWon() || request.resource.data.get('winCount', 0) == resource.data.get('winCount', 0) + 1 || isManagement())
           // Only Management undoes a win; a cancellation goes through an approved request (trainingChangeOk).
           && (!(resource.data.get('stage', '') == 'won' && request.resource.data.get('stage', '') != 'won')
               || isManagement() || (request.resource.data.get('stage', '') == 'lost' && changeApproved('cancel')))
@@ -326,7 +354,7 @@ service cloud.firestore {
         && (isStaff()
             || (isMember() && request.resource.data.ownerId == request.auth.uid));
       // The owner override is checked first: these checks are long, and Firestore stops after 1000 steps per save.
-      allow update: if isSuper() || deleteChangeOk() && lostOk() && trainingChangeOk() && integrityOk() && lockOk() && (isStaff()
+      allow update: if isSuper() || approvalOk() || deleteChangeOk() && lostOk() && trainingChangeOk() && integrityOk() && lockOk() && (isStaff()
         || (isMember() && ownerOf(resource.data) == request.auth.uid)
         || (isMember()
             && request.auth.uid in resource.data.get('taggedRepIds', [])
