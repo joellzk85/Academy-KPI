@@ -3,7 +3,7 @@ import { useCloseOnOutside } from '../lib/useCloseOnOutside';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Loader2, Plus, Search, Tag, Trophy, X, XCircle, ClipboardList, Undo2, Hourglass, SkipForward, Repeat2, PartyPopper, Copy,
-  PauseCircle, PlayCircle, Calculator, CalendarDays, MapPin, Users, GraduationCap,
+  PauseCircle, PlayCircle, Calculator, CalendarDays, MapPin, Users, GraduationCap, Compass,
 } from 'lucide-react';
 import ProposalTracking from './ProposalTracking';
 import { seesLink } from '../lib/proposalTracking';
@@ -59,6 +59,9 @@ import { POTENTIAL_LABELS, Potential, forecastMonthLabel, potentialOf } from '..
 import { CoCloseMode, coCloseProblem, coCloseText, coCloser } from '../lib/coClose';
 import { ReferralFeeType, Referrer, referralProblem } from '../lib/referrers';
 import { ReferralFields, ReferralLine, raiseReferralFee, useReferrers } from './Referrers';
+import { DiscoveryForm, DiscoveryPanel } from './DiscoveryParts';
+import { discoveryClosed, isOpenDiscovery, moveBackProblem } from '../lib/discovery';
+import { useDiscoverySettings } from '../lib/useDiscoverySettings';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -93,6 +96,7 @@ const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
 const STAGE_TONE: Record<DealStage, string> = {
+  discovery: 'bg-[#E6F2EF] text-[#0B5A50]',
   lead: 'bg-surface text-ink-soft',
   appointment: 'bg-[#E8EEF8] text-[#2B4A7E]',
   proposal: 'bg-attention-soft text-attention',
@@ -183,6 +187,8 @@ export default function DealsBoard({
   const [lostReason, setLostReason] = useState('');
   const [lostNote, setLostNote] = useState('');
   const [stageError, setStageError] = useState('');
+  const [discEditing, setDiscEditing] = useState<'new' | string | null>(null);   // Discovery form (2026-10-28)
+  const { moveBackHours } = useDiscoverySettings();
 
   useEffect(() => {
     const subs = [
@@ -238,10 +244,16 @@ export default function DealsBoard({
 
   const stageSummary = useMemo(() => {
     const out: Record<DealStage, { count: number; value: number }> = {
-      lead: { count: 0, value: 0 }, appointment: { count: 0, value: 0 }, proposal: { count: 0, value: 0 },
+      discovery: { count: 0, value: 0 }, lead: { count: 0, value: 0 }, appointment: { count: 0, value: 0 }, proposal: { count: 0, value: 0 },
       agreed: { count: 0, value: 0 }, quoted: { count: 0, value: 0 }, won: { count: 0, value: 0 }, lost: { count: 0, value: 0 },
     };
-    myDeals.forEach(p => { const st = journeyStage(dealStage(p)); out[st].count++; out[st].value += dealValue(p); });
+    myDeals.forEach(p => {
+      const st = journeyStage(dealStage(p));
+      // Discovery box: open discoveries; its second line counts discoveries that became deals (value = that count).
+      if (st === 'discovery') { if (isOpenDiscovery(p)) out.discovery.count++; return; }
+      out[st].count++; out[st].value += dealValue(p);
+      if (p.convertedDate) out.discovery.value++;
+    });
     return out;
   }, [myDeals]);
   // Changes for the day / week (Joel, 2026-10-27): deals that reached each stage today and since Monday,
@@ -250,7 +262,7 @@ export default function DealsBoard({
     const today = todayIso();
     const weekStart = addDays(today, -((new Date().getDay() + 6) % 7));
     const out = {} as Record<DealStage, { today: number; week: number }>;
-    (['lead', 'proposal', 'agreed', 'quoted', 'won', 'lost'] as DealStage[]).forEach(st => {
+    (['discovery', 'lead', 'proposal', 'agreed', 'quoted', 'won', 'lost'] as DealStage[]).forEach(st => {
       let t = 0, w = 0;
       myDeals.forEach(p => {
         const d = st === 'lost' ? (dealStage(p) === 'lost' ? String(p.lostDate || '').slice(0, 10) : '') : stageDate(p, st);
@@ -268,7 +280,7 @@ export default function DealsBoard({
       : myDeals.filter(p => (filter === 'open' ? OPEN_STAGES.includes(dealStage(p)) : journeyStage(dealStage(p)) === filter));
     const q = search.trim().toLowerCase();
     const list = q ? base.filter(p => `${clientName(p)} ${courseOf(p)} ${p.enquiryNote || ''}`.toLowerCase().includes(q)) : base;
-    return [...list].sort((a, b) => String(b.requestDate || b.id).localeCompare(String(a.requestDate || a.id)));
+    return [...list].sort((a, b) => String(b.requestDate || b.discoveryDate || b.id).localeCompare(String(a.requestDate || a.discoveryDate || a.id)));
   }, [filter, myDeals, taggedDeals, search, clients, programmes]);
 
   const openDeal = deals.find(p => p.id === openId) || null;
@@ -288,6 +300,17 @@ export default function DealsBoard({
       return { text: `Won ${formatDate(dealWonDate(p))}${pr ? `, admin ${pr.done} of ${pr.total}` : ''}`, urgent: false };
     }
     if (st === 'lost') return { text: p.lostReason ? `Lost: ${p.lostReason}` : 'Lost', urgent: false };
+    if (st === 'discovery') {
+      const cl = discoveryClosed(p);
+      if (cl) return { text: `Closed: ${cl.reason}`, urgent: false };
+      const urgentD = dealNeedsAttention(p, today);
+      const apD = apptOf(p);
+      if (apptOverdue(p, today)) return { text: `Meeting on ${formatDate(apD!.date)} not logged`, urgent: true };
+      if (apD?.status === 'booked') return { text: `Meeting ${formatDate(apD.date)}${apD.time ? `, ${apptTime(apD.time)}` : ''}`, urgent: false };
+      if (!apD) return { text: 'Book or log the meeting', urgent: urgentD };
+      if (fu && fu < today) return { text: `Follow-up overdue (${formatDate(fu)})`, urgent: true };
+      return { text: fu ? `Follow up ${formatDate(fu)}` : 'Set a follow-up', urgent: urgentD };
+    }
     // Red or not comes from dealNeedsAttention, the same check as the red dot on the Deals menu.
     const urgent = dealNeedsAttention(p, today);
     const ap = apptOf(p);
@@ -591,6 +614,23 @@ export default function DealsBoard({
     return writeStage(p, { stage: reachedStage(p), wonDate: '', lostReason: '', lostNote: '', lostById: '', lostByName: '', lostAt: '' }, dealStage(p) === 'won' ? 'Win undone' : p.lostReason ? `Deal reopened (was lost: ${p.lostReason})` : 'Deal reopened');
   };
 
+  // "This was only a discovery" (Joel, 2026-10-28, lib/discovery.ts): the client hadn't asked for anything. Reps only
+  // on their own New deal, before the proposal and within the hours Management set; Management any deal not won.
+  // The deal stops counting as a deal (no requestDate) and a lost one stops counting as lost.
+  const toDiscovery = (p: any) => {
+    const problem = moveBackProblem(p, viewer, moveBackHours);
+    if (problem) return setStageError(problem);
+    if (!window.confirm(`Move ${clientName(p)} back to Discovery?\n\nUse this when the client hadn't asked us for anything yet. It stops counting as a deal.`)) return;
+    const st = dealStage(p);
+    return writeStage(p, {
+      stage: 'discovery',
+      discoveryDate: p.discoveryDate || (/^\d{4}-\d{2}-\d{2}/.test(p.requestDate || '') ? p.requestDate.slice(0, 10) : todayIso()),
+      requestDate: '', convertedDate: '', convertedAtMs: 0, discoveryClosed: null,
+      ...(st === 'lost' ? { lostDate: '', lostReason: '', lostNote: '', lostById: '', lostByName: '', lostAt: '' } : {}),
+      movedToDiscovery: { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, fromStage: st },
+    }, `Moved back to Discovery (was ${STAGE_LABELS[st]})`);
+  };
+
   // Delete a deal (creator or Management). Not allowed once it's won, or with a sent quotation, money, HRDC queries or proposal files.
   // Since 2026-10-18 the deal is kept, marked deleted (who, when, reason) and hidden everywhere; its draft
   // quotations and course outlines are hidden with it. Management can restore it in Management → Lost and deleted.
@@ -690,6 +730,11 @@ export default function DealsBoard({
             <Calculator className="h-4 w-4" /> Costing estimator
           </button>
           {canCreateHere && (
+            <button type="button" onClick={() => { setDiscEditing('new'); setOpenId(null); setEditing(null); }} className="inline-flex items-center justify-center gap-2 rounded-lg border border-accent bg-white px-4 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent-soft">
+              <Compass className="h-4 w-4" /> Discovery
+            </button>
+          )}
+          {canCreateHere && (
             <button type="button" onClick={startNew} className={btnPrimary}>
               <Plus className="h-4 w-4" /> New deal
             </button>
@@ -719,8 +764,9 @@ export default function DealsBoard({
       )}
 
       {/* The journey strip: counts and value per stage, click to filter */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6" role="tablist" aria-label="Filter deals by stage">
-        {(['lead', 'proposal', 'agreed', 'quoted', 'won', 'lost'] as DealStage[]).map((st, i) => {
+      {/* Discovery (2026-10-28) is the top of the funnel, before New: open discoveries, and how many became deals. */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7" role="tablist" aria-label="Filter deals by stage">
+        {(['discovery', 'lead', 'proposal', 'agreed', 'quoted', 'won', 'lost'] as DealStage[]).map((st, i) => {
           const active = filter === st;
           return (
             <button
@@ -733,10 +779,10 @@ export default function DealsBoard({
             >
               <span className="flex items-center gap-1 text-sm font-semibold text-ink-soft">
                 {STAGE_LABELS[st]}
-                {i < 4 && <ChevronRight className="hidden h-3.5 w-3.5 lg:inline" aria-hidden />}
+                {i < 5 && <ChevronRight className="hidden h-3.5 w-3.5 lg:inline" aria-hidden />}
               </span>
               <span className="mt-1 block text-2xl font-bold leading-none text-ink">{stageSummary[st].count}</span>
-              <span className="mt-1 block text-sm text-ink-soft">{formatRM(stageSummary[st].value)}</span>
+              <span className="mt-1 block text-sm text-ink-soft">{st === 'discovery' ? `${stageSummary.discovery.value} became deals` : formatRM(stageSummary[st].value)}</span>
               <span className={`mt-1.5 block text-xs font-semibold ${stageMoves[st].week ? 'text-accent' : 'text-ink-soft/70'}`}>
                 {stageMoves[st].week ? `+${stageMoves[st].today} today · +${stageMoves[st].week} this week` : 'No change this week'}
               </span>
@@ -759,7 +805,7 @@ export default function DealsBoard({
           ))}
         </div>
         {filter !== 'open' && filter !== 'all' && filter !== 'tagged' && filter !== 'on_hold' && (
-          <span className="text-sm text-ink-soft">Showing {STAGE_LABELS[filter as DealStage].toLowerCase()} deals</span>
+          <span className="text-sm text-ink-soft">{filter === 'discovery' ? 'Showing discoveries (not deals yet)' : `Showing ${STAGE_LABELS[filter as DealStage].toLowerCase()} deals`}</span>
         )}
         {filter === 'on_hold' && onHoldDeals.length > 0 && (
           <span className="text-sm text-ink-soft">{formatRM(onHoldDeals.reduce((t, p) => t + dealValue(p), 0))} on hold</span>
@@ -792,7 +838,9 @@ export default function DealsBoard({
                   <button type="button" onClick={() => { setOpenId(p.id); setStagePanel(null); setGate(null); setStageError(''); }} className="flex w-full flex-col gap-1.5 px-5 py-3.5 text-left sm:flex-row sm:items-center sm:gap-4">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{clientName(p)}</span>
-                      <span className="block truncate text-sm text-ink-soft">{askedFor(p) || 'No programme yet'}{p.type ? `, ${dealTypeLabel(p.type).toLowerCase()}` : ''}</span>
+                      <span className="block truncate text-sm text-ink-soft">{st === 'discovery'
+                        ? (courseOf(p) || p.enquiryNote ? `Proposing: ${courseOf(p) || p.enquiryNote}` : 'Discovery: nothing proposed yet')
+                        : `${askedFor(p) || 'No programme yet'}${p.type ? `, ${dealTypeLabel(p.type).toLowerCase()}` : ''}`}</span>
                       {(() => {
                         // Training essentials on the row (Joel, 2026-10-26): only what is filled in.
                         const dq = quotes.filter(q => q.pipelineId === p.id);
@@ -849,8 +897,46 @@ export default function DealsBoard({
         )}
       </div>
 
+      {/* Discovery panel (2026-10-28) */}
+      {openDeal && !editing && !discEditing && dealStage(openDeal) === 'discovery' && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
+          <PanelResizer />
+          <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <DiscoveryPanel
+              deal={openDeal}
+              allDeals={deals}
+              client={clientOf(openDeal)}
+              clientName={clientName(openDeal)}
+              clientBadge={<ClientLastTouch client={clientOf(openDeal)} deals={deals} quotes={quotes} />}
+              ownerName={personName(dealOwnerId(openDeal))}
+              programmes={programmes}
+              outlines={outlines}
+              editable={canEdit(openDeal)}
+              canManage={canManageDeal(openDeal, viewer)}
+              viewer={viewer}
+              onClose={() => setOpenId(null)}
+              onEdit={() => setDiscEditing(openDeal.id)}
+              onConverted={() => flash('Converted to a deal. It is now in New.')}
+              onDone={flash}
+              onDelete={(reason: string) => deleteDeal(openDeal, reason)}
+            />
+            {stageError && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{stageError}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* New discovery / edit */}
+      {discEditing && (
+        <DiscoveryForm
+          existing={discEditing === 'new' ? null : deals.find(p => p.id === discEditing) || null}
+          clients={clients} programmes={programmes} outlines={outlines} people={people} ownerId={scopeId} viewer={viewer}
+          onSaved={(id, msg) => { setDiscEditing(null); setOpenId(id); setStageError(''); flash(msg); }}
+          onCancel={() => setDiscEditing(null)}
+        />
+      )}
+
       {/* Deal panel */}
-      {openDeal && !editing && (
+      {openDeal && !editing && !discEditing && dealStage(openDeal) !== 'discovery' && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
           <PanelResizer />
           <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
@@ -910,6 +996,8 @@ export default function DealsBoard({
               onQuoted={() => toQuoted(openDeal)}
               onLost={() => confirmLost(openDeal)}
               onReopen={() => reopen(openDeal)}
+              canToDiscovery={!moveBackProblem(openDeal, viewer, moveBackHours)}
+              onToDiscovery={() => toDiscovery(openDeal)}
               canManage={canManageDeal(openDeal, viewer)}
               deleteBlocker={() => deleteBlocker(openDeal)}
               onDelete={(reason: string) => deleteDeal(openDeal, reason)}
@@ -1198,6 +1286,7 @@ function DealPanel(props: {
   proposalFiles: ProposalFile[]; onProposalUploaded: (files: ProposalFile[]) => void;
   programmes: Programme[]; onApptDone: (msg: string) => void;
   onLost: () => void; onReopen: () => void;
+  canToDiscovery: boolean; onToDiscovery: () => void;
   canManage: boolean; onDelete: (reason: string) => Promise<boolean>;
   onCreateQuotation: () => void; onAddQuotation: () => void; onOpenQuotation?: (quoteId: string) => void; onCreateOutline: () => void; onOpenOutline?: (outlineId: string) => void; onOpenQuotations: () => void; onOpenOutlines: () => void;
   onCreateTeambuilding?: () => void; onOpenTeambuilding?: (id: string) => void;
@@ -1462,6 +1551,8 @@ function DealPanel(props: {
               {st === 'lost' && (!cancelledTraining(p) || props.viewer.role === 'management') && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Reopen deal</button>}
               {st === 'won' && canUndoWin && <button type="button" disabled={props.busy} className={`${smallLink} text-ink-soft`} onClick={props.onReopen}><Undo2 className="h-3.5 w-3.5" /> Undo win</button>}
               {props.stagePanel !== 'duplicate' && <button type="button" disabled={props.busy} className={`${smallLink} text-accent`} onClick={() => props.setStagePanel('duplicate')}><Copy className="h-3.5 w-3.5" /> Duplicate deal</button>}
+              {/* The client hadn't asked for anything (2026-10-28): reps within the time Management set, Management any time */}
+              {props.canToDiscovery && !props.stagePanel && !props.gate && <button type="button" disabled={props.busy} className={`${smallLink} text-ink-soft`} onClick={props.onToDiscovery}><Compass className="h-3.5 w-3.5" /> This was only a discovery</button>}
             </div>
           </div>
         ) : (
@@ -1693,7 +1784,7 @@ function DealPanel(props: {
 }
 
 // A section that opens on tap. It starts open or closed for the deal's stage, and resets when the deal or stage changes.
-function Fold({ title, hint, defaultOpen, id, children }: { title: string; hint?: string; defaultOpen: boolean; id: string; children: React.ReactNode }) {
+export function Fold({ title, hint, defaultOpen, id, children }: { title: string; hint?: string; defaultOpen: boolean; id: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   useEffect(() => setOpen(defaultOpen), [id, defaultOpen]);
   return (
@@ -1708,7 +1799,7 @@ function Fold({ title, hint, defaultOpen, id, children }: { title: string; hint?
   );
 }
 
-function Detail({ term, value }: { term: string; value: string }) {
+export function Detail({ term, value }: { term: string; value: string }) {
   return (
     <div>
       <dt className="text-sm text-ink-soft">{term}</dt>
@@ -1921,7 +2012,7 @@ function DuplicateBox({ deal, clients, viewer, busy, nQuotes, nOutlines, onCreat
 }
 const STAGE_ORDER_FOR_COPY: DealStage[] = ['agreed', 'quoted', 'won'];
 
-function ClientPicker({ clients, value, legacyName, viewer, onChange }: {
+export function ClientPicker({ clients, value, legacyName, viewer, onChange }: {
   clients: any[]; value: string; legacyName?: string; viewer: Viewer; onChange: (id: string) => void;
 }) {
   const selected = clients.find(c => c.id === value);

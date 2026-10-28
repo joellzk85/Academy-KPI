@@ -10,6 +10,8 @@ import { useContactLimits, useTeamList } from '../lib/useClientHistory';
 import { DEFAULT_CONTACT_LIMITS } from '../lib/touchPoints';
 import { ContactDot } from './ClientContactDot';
 import { useProposalSettings } from '../lib/useProposalSettings';
+import { useDiscoverySettings } from '../lib/useDiscoverySettings';
+import { DEFAULT_MOVE_BACK_HOURS } from '../lib/discovery';
 
 // Management → Follow-up rules (Joel, 2026-10-18). Checkpoints in days per stage, saved in config/follow_up_rules
 // (Management only). When a deal passes a checkpoint with no follow-up note since, it raises an alert.
@@ -125,6 +127,7 @@ export default function FollowUpRulesPage({ viewer }: { viewer: Viewer }) {
       </div>
 
       <ContactColourLimits viewer={viewer} />
+      <DiscoveryMoveBack viewer={viewer} />
       <ProposalTrackingSwitch viewer={viewer} />
     </div>
   );
@@ -171,6 +174,58 @@ function ProposalTrackingSwitch({ viewer }: { viewer: Viewer }) {
         </ul>
       )}
       {msg && <p role={msg.ok ? 'status' : 'alert'} className={`mt-2 rounded-lg px-3 py-2 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</p>}
+    </section>
+  );
+}
+
+// Discovery (Joel, 2026-10-28, lib/discovery.ts): how long a rep may move their own New deal back to Discovery
+// ("This was only a discovery"). Saved in config/discovery_settings (Management only; everyone reads it). 0 = never.
+function DiscoveryMoveBack({ viewer }: { viewer: Viewer }) {
+  const { moveBackHours, meta } = useDiscoverySettings();
+  const [hours, setHours] = useState(String(moveBackHours));
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { if (!dirty) setHours(String(moveBackHours)); }, [moveBackHours, dirty]);
+
+  const save = async () => {
+    setMsg(null);
+    const h = Math.round(Number(hours));
+    if (hours.trim() === '' || !Number.isFinite(h) || h < 0 || h > 720) return setMsg({ ok: false, text: 'Type a number of hours from 0 to 720.' });
+    setBusy(true);
+    try {
+      await setDoc(doc(db, 'config', 'discovery_settings'), { moveBackHours: h, updatedAt: new Date().toISOString(), updatedById: viewer.id, updatedByName: viewer.name });
+      setDirty(false);
+      setMsg({ ok: true, text: h ? `Saved. Reps can move their own new deal back to Discovery within ${h} hours.` : 'Saved. Only Management can move a deal back to Discovery.' });
+    } catch (e) {
+      setMsg({ ok: false, text: friendlyError(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className={`${card} space-y-4`}>
+      <div>
+        <h3 className="font-bold">Discovery: moving a deal back</h3>
+        <p className="text-sm text-ink-soft">
+          If a rep made a deal when the client hadn't asked for anything, they can click "This was only a discovery" on it: only on their own deal, before
+          the proposal is sent, and only within this time after it became a deal. After that only Management can. Type 0 so only Management ever can.
+        </p>
+      </div>
+      <label className="flex flex-wrap items-center gap-2 text-[15px]">
+        Reps can do it within
+        <input inputMode="numeric" value={hours} onChange={e => { setHours(e.target.value.replace(/[^0-9]/g, '')); setDirty(true); setMsg(null); }} className={input} aria-label="Hours a rep has to move a deal back to Discovery" />
+        hours
+      </label>
+      {msg && <p role={msg.ok ? 'status' : 'alert'} className={`rounded-lg px-3 py-2.5 text-sm ${msg.ok ? 'bg-accent-soft text-accent' : 'bg-danger-soft text-danger'}`}>{msg.text}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" disabled={busy || !dirty} className={btnPrimary} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
+        <button type="button" className={btnSecondary} onClick={() => { setHours(String(DEFAULT_MOVE_BACK_HOURS)); setDirty(true); setMsg(null); }}>
+          <RotateCcw className="h-4 w-4" /> Back to {DEFAULT_MOVE_BACK_HOURS} hours
+        </button>
+        {meta?.updatedByName && <span className="text-sm text-ink-soft">Last changed by {meta.updatedByName}, {new Date(meta.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
+      </div>
     </section>
   );
 }

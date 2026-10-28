@@ -11,15 +11,18 @@ import { activeHold, holdDue } from './dealHold';
 // ("Client approved" was "Client agreed" until 2026-10-17; the stored value is still 'agreed'.)
 // (the client signed the quotation). The appointment is optional and can happen at any point before Won;
 // 'appointment' is kept as a stage only for deals that are new but have had a meeting.
-export type DealStage = 'lead' | 'appointment' | 'proposal' | 'agreed' | 'quoted' | 'won' | 'lost';
+// 'discovery' (Joel, 2026-10-28, lib/discovery.ts): the top of the funnel, before New. We met the client and proposed
+// something, but they haven't asked us for anything yet. It isn't a deal: not open, never lost, not in win rates.
+export type DealStage = 'discovery' | 'lead' | 'appointment' | 'proposal' | 'agreed' | 'quoted' | 'won' | 'lost';
 export type FundingType = 'hrdc' | 'direct' | 'hrdc_topup';
 
-export const STAGE_ORDER: DealStage[] = ['lead', 'appointment', 'proposal', 'agreed', 'quoted', 'won', 'lost'];
+export const STAGE_ORDER: DealStage[] = ['discovery', 'lead', 'appointment', 'proposal', 'agreed', 'quoted', 'won', 'lost'];
 export const OPEN_STAGES: DealStage[] = ['lead', 'appointment', 'proposal', 'agreed', 'quoted'];
 // The steps shown on the journey line (appointment is shown separately).
 export const JOURNEY: DealStage[] = ['lead', 'proposal', 'agreed', 'quoted', 'won'];
 
 export const STAGE_LABELS: Record<DealStage, string> = {
+  discovery: 'Discovery',
   lead: 'New',
   appointment: 'New (met)',
   proposal: 'Proposal sent',
@@ -116,6 +119,16 @@ export function statusForStage(stage: DealStage): 'Pending' | 'Won' | 'Lost' {
 // a follow-up date that has passed, or a new deal over 2 days old with nothing planned.
 export function dealNeedsAttention(p: any, today = todayIso()): boolean {
   const st = dealStage(p);
+  // An open discovery has the appointment's requirements (Joel, 2026-10-28): a meeting not logged a day after it,
+  // a follow-up date passed, or nothing booked or logged 2 days after it was made.
+  if (st === 'discovery') {
+    if (isDeletedDeal(p) || p?.discoveryClosed) return false;
+    if (apptOverdue(p, today)) return true;
+    if (apptOf(p)?.status === 'booked') return false;
+    const due = validDate(p?.followUpDate);
+    if (due) return due < today;
+    return !apptOf(p) && !!validDate(p?.discoveryDate) && validDate(p.discoveryDate) < addDays(today, -2);
+  }
   if (!OPEN_STAGES.includes(st) || isDeletedDeal(p)) return false;
   if (apptOverdue(p, today)) return true;
   // On hold (lib/dealHold.ts): quiet until the potential date, then it needs a decision.
@@ -157,6 +170,7 @@ export function dealWonDate(p: any): string {
 
 // The date each journey step was reached, shown under the journey line ('' if not recorded).
 export function stageDate(p: any, st: DealStage): string {
+  if (st === 'discovery') return validDate(p?.discoveryDate);
   if (st === 'lead') return validDate(p?.requestDate);
   if (st === 'proposal') return validDate(p?.proposalSentDate);
   if (st === 'agreed') return validDate(p?.agreedDate);

@@ -50,6 +50,7 @@ import { isSuperManager } from '../lib/superManager';
 import { DELETE_NOUN, DeletableColl, canDecideDelete } from '../lib/docDelete';
 import { useScreensOff } from '../lib/privateScreens';
 import { trainingEndDate } from '../lib/deals';
+import { isOpenDiscovery } from '../lib/discovery';
 import { GpAlert, gpAlerts } from '../lib/gpAlerts';
 import { activeKpiLibrary } from '../lib/kpiLibrary';
 
@@ -987,7 +988,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         }));
       // My deals, and deals where I'm the one following up (Follow-up by, 2026-10-18).
       const soon = c.deals
-        .filter(p => (c.mine(p) || p.followUpById === c.viewer.id) && OPEN_STAGES.includes(dealStage(p)) && ymd(p.followUpDate))
+        .filter(p => (c.mine(p) || p.followUpById === c.viewer.id) && (OPEN_STAGES.includes(dealStage(p)) || isOpenDiscovery(p)) && ymd(p.followUpDate))
         .map(p => ({ p, d: daysUntil(ymd(p.followUpDate), c.today) ?? 99 }))
         .filter(x => x.d <= 7)
         .sort((a, b) => a.d - b.d);

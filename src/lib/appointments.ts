@@ -22,6 +22,7 @@ export interface DealAppointment {
   nextStep?: string;
   loggedAt?: string; loggedById?: string; loggedByName?: string;
   legacy?: boolean;        // ticked under the old "Appointment held" button, no details
+  discovery?: boolean;     // logged while it was a discovery (lib/discovery.ts): the Discovery meetings KPI
 }
 
 const isDate = (v: any) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v);
@@ -64,7 +65,7 @@ export function appointmentEvents(deals: any[], nameOf: (id: string) => string):
       id: `appt_${d.id}`,
       date: a.date.slice(0, 10),
       time: to12h(a.time) || 'All day',
-      title: `Appointment: ${d.client || 'client'}${owner ? ` (${owner})` : ''}${a.status === 'held' ? ' · held' : ''}`,
+      title: `${dealStage(d) === 'discovery' || a.discovery ? 'Discovery' : 'Appointment'}: ${d.client || 'client'}${owner ? ` (${owner})` : ''}${a.status === 'held' ? ' · held' : ''}`,
       color: 'bg-emerald-500',
     });
   });

@@ -39,7 +39,10 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
   const canChangeBooking = canLog && (canManage || (!!a?.bookedById && a.bookedById === viewer.id));
   const canEditLogged = canLog && (canManage || (!!a?.loggedById && a.loggedById === viewer.id));
   const st = dealStage(deal);
-  const open = st === 'lead' || st === 'appointment' || st === 'proposal' || st === 'agreed' || st === 'quoted';   // any time before Won
+  // A discovery's meeting (2026-10-28, lib/discovery.ts) is booked and logged the same way, and stays a discovery.
+  const disc = st === 'discovery';
+  const word = disc ? 'Discovery meeting' : 'Appointment';
+  const open = (disc && !deal.discoveryClosed) || st === 'lead' || st === 'appointment' || st === 'proposal' || st === 'agreed' || st === 'quoted';   // any time before Won
   const [mode, setMode] = useState<null | 'book' | 'log'>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -67,16 +70,16 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
 
   const cancelBooking = () => {
     if (!window.confirm('Cancel this booked appointment?')) return;
-    return write({ appointment: null, history: history(deal, viewer, 'Appointment cancelled') }, 'Appointment cancelled');
+    return write({ appointment: null, history: history(deal, viewer, `${word} cancelled`) }, `${word} cancelled`);
   };
 
   if (mode === 'book') return <BookForm a={a} busy={busy} error={error} onCancel={() => setMode(null)}
     onSave={(v) => write({
       appointment: { ...(deal.appointment || {}), status: 'booked', date: v.date, time: v.time, mode: v.mode, bookedAt: new Date().toISOString(), bookedById: viewer.id, bookedByName: viewer.name },
-      history: history(deal, viewer, `Appointment booked for ${formatDate(v.date)}`),
-    }, 'Appointment booked and added to the calendar')} />;
+      history: history(deal, viewer, `${word} booked for ${formatDate(v.date)}`),
+    }, `${word} booked and added to the calendar`)} title={`Book ${word.toLowerCase()}`} />;
 
-  if (mode === 'log') return <LogForm deal={deal} a={a} client={client} programmes={programmes} viewer={viewer} busy={busy} error={error} photos={photos} onCancel={() => setMode(null)}
+  if (mode === 'log') return <LogForm deal={deal} a={a} disc={disc} word={word} client={client} programmes={programmes} viewer={viewer} busy={busy} error={error} photos={photos} onCancel={() => setMode(null)}
     onSave={(v) => {
       const stage = st === 'lead' ? 'appointment' : st;
       // A won deal's programme, value, pax and funding type are locked (2026-10-22): the log doesn't change them.
@@ -86,6 +89,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
         appointment: {
           ...(deal.appointment || {}), status: 'held', date: v.date, time: v.time, mode: v.mode, metWith: v.metWith.trim(), outcome: v.outcome.trim(), nextStep: v.nextStep.trim(),
           loggedAt: new Date().toISOString(), loggedById: viewer.id, loggedByName: viewer.name,
+          ...(disc ? { discovery: true } : {}),
         },
         appointmentDate: v.date, appointmentTicked: true,
         stage, status: statusForStage(stage as any),
@@ -96,8 +100,8 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
         ...(v.participants && !locked ? { participants: v.participants } : {}),
         ...(v.value && !locked ? { proposalValue: Number(v.value) } : {}),
         ...(v.fundingType && !locked ? { fundingType: v.fundingType } : {}),
-        history: history(deal, viewer, a?.status === 'held' && !a.legacy ? 'Appointment details updated' : `Appointment held on ${formatDate(v.date)}`),
-      }, 'Appointment logged');
+        history: history(deal, viewer, a?.status === 'held' && !a.legacy ? `${word} details updated` : `${word} held on ${formatDate(v.date)}`),
+      }, `${word} logged`);
     }} />;
 
   // Nothing yet
@@ -105,10 +109,10 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
     if (!canLog || !open) return null;
     return (
       <div className="rounded-xl border border-dashed border-line p-3.5">
-        <p className="text-[15px] text-ink-soft">Appointment (optional). Skip it and go straight to "Proposal sent" if there's no meeting.</p>
+        <p className="text-[15px] text-ink-soft">{disc ? 'Book the discovery meeting, or log it if it has happened. It counts as an appointment.' : `Appointment (optional). Skip it and go straight to "Proposal sent" if there's no meeting.`}</p>
         <div className="mt-2 flex flex-wrap gap-2">
-          <button type="button" className={btnSecondary} onClick={() => setMode('book')}><CalendarPlus className="h-4 w-4" /> Book appointment</button>
-          <button type="button" className={btnSecondary} onClick={() => setMode('log')}><NotebookPen className="h-4 w-4" /> Log appointment</button>
+          <button type="button" className={btnSecondary} onClick={() => setMode('book')}><CalendarPlus className="h-4 w-4" /> Book {disc ? 'meeting' : 'appointment'}</button>
+          <button type="button" className={btnSecondary} onClick={() => setMode('log')}><NotebookPen className="h-4 w-4" /> Log {disc ? 'meeting' : 'appointment'}</button>
         </div>
       </div>
     );
@@ -121,7 +125,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
       <div className={`rounded-xl border p-3.5 ${overdue ? 'border-danger/40 bg-danger-soft' : 'border-accent/30 bg-accent-soft'}`}>
         <p className={`flex items-center gap-2 font-semibold ${overdue ? 'text-danger' : 'text-accent'}`}>
           {overdue ? <AlertTriangle className="h-4 w-4" /> : <CalendarClock className="h-4 w-4" />}
-          {overdue ? `Appointment on ${formatDate(a.date)} not logged yet` : `Appointment booked: ${formatDate(a.date)}${a.time ? `, ${apptTime(a.time)}` : ''}`}
+          {overdue ? `${word} on ${formatDate(a.date)} not logged yet` : `${word} booked: ${formatDate(a.date)}${a.time ? `, ${apptTime(a.time)}` : ''}`}
         </p>
         <p className="text-sm text-ink-soft">{MODE_LABELS[a.mode]} · booked by {a.bookedByName || 'someone'} · on the team calendar</p>
         {canLog && (
@@ -142,7 +146,7 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
   return (
     <div className="rounded-xl border border-line bg-surface p-3.5">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="font-semibold">Appointment held {formatDate(a.date)}{a.metWith ? ` with ${a.metWith}` : ''}{a.legacy ? '' : ` · ${MODE_LABELS[a.mode]}`}</p>
+        <p className="font-semibold">{a.discovery ? 'Discovery meeting' : 'Appointment'} held {formatDate(a.date)}{a.metWith ? ` with ${a.metWith}` : ''}{a.legacy ? '' : ` · ${MODE_LABELS[a.mode]}`}</p>
         {canEditLogged && <button type="button" className="text-sm font-semibold text-accent hover:underline" onClick={() => setMode('log')}><Pencil className="mr-1 inline h-3.5 w-3.5" />Edit</button>}
       </div>
       {a.legacy ? (
@@ -172,14 +176,14 @@ function ModePick({ value, onChange }: { value: ApptMode; onChange: (m: ApptMode
   );
 }
 
-function BookForm({ a, busy, error, onCancel, onSave }: {
-  a: DealAppointment | null; busy: boolean; error: string; onCancel: () => void; onSave: (v: { date: string; time: string; mode: ApptMode }) => void;
+function BookForm({ a, busy, error, onCancel, onSave, title = 'Book appointment' }: {
+  a: DealAppointment | null; busy: boolean; error: string; onCancel: () => void; onSave: (v: { date: string; time: string; mode: ApptMode }) => void; title?: string;
 }) {
   const [v, setV] = useState({ date: a?.status === 'booked' ? a.date : '', time: a?.time || '', mode: (a?.mode || 'face') as ApptMode });
   const [err, setErr] = useState('');
   return (
     <div className="space-y-3 rounded-xl border border-accent/30 bg-accent-soft/50 p-4">
-      <p className="font-semibold">Book appointment</p>
+      <p className="font-semibold">{title}</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <div><label className={label} htmlFor="ap-d">Date</label><input id="ap-d" type="date" value={v.date} onChange={e => setV(x => ({ ...x, date: e.target.value }))} className={input} /></div>
         <div><label className={label} htmlFor="ap-t">Time</label><input id="ap-t" type="time" value={v.time} onChange={e => setV(x => ({ ...x, time: e.target.value }))} className={input} /></div>
@@ -194,8 +198,8 @@ function BookForm({ a, busy, error, onCancel, onSave }: {
   );
 }
 
-function LogForm({ deal, a, client, programmes, viewer, busy, error, photos, onCancel, onSave }: {
-  deal: any; a: DealAppointment | null; client: any; programmes: any[]; viewer: Viewer; busy: boolean; error: string; photos: MeetingPhoto[]; onCancel: () => void;
+function LogForm({ deal, a, disc = false, word = 'Appointment', client, programmes, viewer, busy, error, photos, onCancel, onSave }: {
+  deal: any; a: DealAppointment | null; disc?: boolean; word?: string; client: any; programmes: any[]; viewer: Viewer; busy: boolean; error: string; photos: MeetingPhoto[]; onCancel: () => void;
   onSave: (v: any) => void;
 }) {
   const held = a?.status === 'held' && !a.legacy ? a : null;
@@ -222,14 +226,14 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, photos, onC
 
   const submit = () => {
     if (!v.date) return setErr('Enter the date of the meeting.');
-    if (v.date > todayIso()) return setErr('The meeting date is in the future. Use "Book appointment" for upcoming meetings.');
+    if (v.date > todayIso()) return setErr(`The meeting date is in the future. Use "Book ${disc ? 'meeting' : 'appointment'}" for upcoming meetings.`);
     // Month lock (2026-10-22): a meeting date in a locked month, or moving one out of it, is for Management only.
     const oldDate = /^\d{4}-\d{2}-\d{2}/.test(deal.appointmentDate || '') ? deal.appointmentDate.slice(0, 10) : '';
     if (v.date !== oldDate) {
       const locked = lockedDateProblem(v.date, viewer.role) || (oldDate ? lockedDateProblem(oldDate, viewer.role) : '');
       if (locked) return setErr(locked);
     }
-    if (!v.outcome.trim()) return setErr('Write one line on what was agreed.');
+    if (!v.outcome.trim()) return setErr(disc ? 'Write one line on what you proposed and how they reacted.' : 'Write one line on what was agreed.');
     if (!v.nextStep.trim()) return setErr('Write the next step.');
     if (!v.followUpDate) return setErr('Set the follow-up date.');
     if (parseTrainingDays(v.trainingDays) === null) return setErr(TRAINING_DAYS_PROBLEM);
@@ -239,8 +243,8 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, photos, onC
 
   return (
     <div className="space-y-4 rounded-xl border border-accent/30 bg-accent-soft/40 p-4">
-      <p className="font-semibold">Log appointment</p>
-      <DraftBar draft={draft} what="appointment log" />
+      <p className="font-semibold">Log {word.toLowerCase()}</p>
+      <DraftBar draft={draft} what={`${word.toLowerCase()} log`} />
       <div className="grid gap-3 sm:grid-cols-3">
         <div><label className={label} htmlFor="lg-d">Date of meeting</label><input id="lg-d" type="date" value={v.date} min={minOpenDate(viewer.role) || undefined} max={todayIso()} onChange={e => set({ date: e.target.value })} className={input} /></div>
         <div className="sm:col-span-2"><label className={label} htmlFor="lg-m">Met with</label><input id="lg-m" value={v.metWith} onChange={e => set({ metWith: e.target.value })} className={input} placeholder="Contact person" /></div>
@@ -250,7 +254,14 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, photos, onC
         <MeetingPhotos photos={photos} deal={deal} kind="appointment" meetingDate={v.date} viewer={viewer} canAdd online={v.mode === 'online'} />
       )}
 
-      {!valueLocked(deal) && <div className="rounded-xl bg-white p-3.5">
+      {disc && (
+        <div className="rounded-xl bg-white p-3.5">
+          <span className={label}>What we proposed <span className="font-normal text-ink-soft">(optional)</span></span>
+          <ProgrammePicker programmes={programmes} value={v.programmeId} legacyName={!v.programmeId ? deal.courseName : ''} viewer={viewer} startType={deal.type === 'Teambuilding' ? 'teambuilding' : undefined}
+            onChange={(pg, t) => set({ programmeId: pg.id, dealType: t === 'teambuilding' ? 'Teambuilding' : 'Training' })} />
+        </div>
+      )}
+      {!disc && !valueLocked(deal) && <div className="rounded-xl bg-white p-3.5">
         <p className="mb-2 text-sm font-semibold text-ink-soft">What the client wants (saved on the deal)</p>
         <div className="space-y-3">
           <div>
@@ -279,15 +290,15 @@ function LogForm({ deal, a, client, programmes, viewer, busy, error, photos, onC
       </div>}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="sm:col-span-2"><label className={label} htmlFor="lg-o">Outcome: what was agreed</label><input id="lg-o" value={v.outcome} onChange={e => set({ outcome: e.target.value })} className={input} placeholder="e.g. Interested in a 2-day run in November for 20 staff" /></div>
-        <div><label className={label} htmlFor="lg-n">Next step</label><input id="lg-n" value={v.nextStep} onChange={e => set({ nextStep: e.target.value })} className={input} placeholder="e.g. Send proposal by Friday" /></div>
+        <div className="sm:col-span-2"><label className={label} htmlFor="lg-o">{disc ? 'Outcome: what we proposed and how they reacted' : 'Outcome: what was agreed'}</label><input id="lg-o" value={v.outcome} onChange={e => set({ outcome: e.target.value })} className={input} placeholder={disc ? "e.g. Showed our leadership programme; HR will check next year's budget" : 'e.g. Interested in a 2-day run in November for 20 staff'} /></div>
+        <div><label className={label} htmlFor="lg-n">Next step</label><input id="lg-n" value={v.nextStep} onChange={e => set({ nextStep: e.target.value })} className={input} placeholder={disc ? 'e.g. Call HR in two weeks' : 'e.g. Send proposal by Friday'} /></div>
         <div><label className={label} htmlFor="lg-f">Follow-up date</label><input id="lg-f" type="date" value={v.followUpDate} onChange={e => set({ followUpDate: e.target.value })} className={input} /></div>
       </div>
 
       {(err || error) && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{err || error}</p>}
       <div className="flex gap-2">
         <button type="button" className={btnSecondary} onClick={onCancel}>Cancel</button>
-        <button type="button" className={btnPrimary} disabled={busy} onClick={submit}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save appointment</button>
+        <button type="button" className={btnPrimary} disabled={busy} onClick={submit}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save {disc ? 'meeting' : 'appointment'}</button>
       </div>
     </div>
   );

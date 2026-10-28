@@ -24,9 +24,10 @@ const btnPrimary =
 const btnSecondary =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink transition-colors hover:bg-surface disabled:opacity-60';
 
-export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost }: {
+export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost, lostLabel = 'Mark lost' }: {
   deal: any; viewer: Viewer; alert: FollowUpAlert | null;
   onDone: (msg: string) => void; onCancel: () => void; onMarkLost: () => void;
+  lostLabel?: string;   // a discovery is closed, never lost (lib/discovery.ts)
 }) {
   const today = todayIso();
   const decision = !!alert?.decision;
@@ -53,7 +54,7 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
     if (locked) return setErr(locked);
     if (!text.trim()) return setErr('Say what happened.');
     if (decision && !reason.trim()) return setErr('Say why the deal should stay open.');
-    if (!nextDate) return setErr(decision ? 'Pick the next follow-up date.' : 'Pick the next follow-up date, or mark the deal lost.');
+    if (!nextDate) return setErr(decision ? 'Pick the next follow-up date.' : `Pick the next follow-up date, or ${lostLabel.toLowerCase()}.`);
     if (nextDate < today) return setErr('The next follow-up date must be today or later.');
     if (!byId) return setErr('Pick who follows up.');
     const byName = people.find(p => p.id === byId)?.name || (byId === viewer.id ? viewer.name : '');
@@ -125,7 +126,7 @@ export function FollowUpForm({ deal, viewer, alert, onDone, onCancel, onMarkLost
         <div>
           <label htmlFor="fu-next" className={label}>Next follow-up date</label>
           <input id="fu-next" type="date" min={today} value={nextDate} onChange={e => setNextDate(e.target.value)} className={input} />
-          {!decision && <p className="mt-1 text-sm text-ink-soft">Not going ahead? <button type="button" onClick={onMarkLost} className="font-semibold text-danger hover:underline">Mark lost</button> instead.</p>}
+          {!decision && <p className="mt-1 text-sm text-ink-soft">Not going ahead? <button type="button" onClick={onMarkLost} className="font-semibold text-danger hover:underline">{lostLabel}</button> instead.</p>}
         </div>
         <div>
           <label htmlFor="fu-by" className={label}>Follow-up by</label>

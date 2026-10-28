@@ -93,16 +93,16 @@ service cloud.firestore {
       // month_locks (2026-10-22): months Management reopened (Deal checks → Month lock); Management only.
       // one_to_one (2026-10-25): see below.
       // training_report (2026-10-27): the training report questions and HR's / the HOD's copies; Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings']))
                             || (docId in ['checklist_tasks'] && isStaff())
-                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report'] && isManagement())
+                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings'] && isManagement())
                             // one_to_one (2026-10-25): who runs the 1-to-1s and the questions. The owner sets it (owner
                             // override rule); the person who runs them changes the questions, never who runs them.
                             || (docId == 'one_to_one' && isMember() && resource != null
                                 && resource.data.get('coachId', '') == request.auth.uid
                                 && request.resource.data.get('coachId', '') == request.auth.uid);
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report']));
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -163,7 +163,7 @@ service cloud.firestore {
       // Process audit (2026-10-22). The stage is one of the known ones and the old "status" agrees with it, so a
       // deal can't count as won (or lost) through the status alone.
       function stageOk(d) {
-        return d.get('stage', '') in ['lead', 'appointment', 'proposal', 'agreed', 'quoted', 'won', 'lost']
+        return d.get('stage', '') in ['discovery', 'lead', 'appointment', 'proposal', 'agreed', 'quoted', 'won', 'lost']
           && (d.get('status', '') == 'Won') == (d.get('stage', '') == 'won')
           && (d.get('status', '') == 'Lost') == (d.get('stage', '') == 'lost');
       }
@@ -243,7 +243,7 @@ service cloud.firestore {
           // Only Management undoes a win; a cancellation goes through an approved request (trainingChangeOk).
           && (!(resource.data.get('stage', '') == 'won' && request.resource.data.get('stage', '') != 'won')
               || isManagement() || (request.resource.data.get('stage', '') == 'lost' && changeApproved('cancel')))
-          && (!changed.hasAny(['stage', 'status']) || stageOk(request.resource.data))
+          && (!changed.hasAny(['stage', 'status', 'createdAt', 'convertedAtMs']) || (stageOk(request.resource.data) && discoveryOk()))
           && (!(becomesWon() || changed.hasAny(['clientId', 'proposalValue', 'fundingType'])) || wonGateOk(request.resource.data))
           && historyOk() && changeRequestOk() && discountOk();
       }
@@ -271,6 +271,41 @@ service cloud.firestore {
                       && request.resource.data.get('trainingDays', 1) == resource.data.get('trainingDays', 1))
                   || (changeApproved('date')
                       && request.resource.data.get('trainingDate', '') == resource.data.trainingChange.get('newDate', ''))));
+      }
+      // Discovery (2026-10-28, lib/discovery.ts). A deal goes back to Discovery ("This was only a discovery") only if it
+      // was never won: Management any time; the owner (or Admin) only at New, before the proposal, and within the hours
+      // in config/discovery_settings (default 48) of it becoming a deal. The clock (convertedAtMs, createdAt) can't be
+      // reset: convertedAtMs is set only to now when a discovery becomes a deal, or cleared when it goes back.
+      function moveBackHours() {
+        let path = /databases/$(database)/documents/config/discovery_settings;
+        return exists(path) ? get(path).data.get('moveBackHours', 48) : 48;
+      }
+      function dealSinceMs() {
+        let c = resource.data.get('convertedAtMs', 0);
+        return (c is number && c > 0) ? c : resource.data.get('createdAt', 0);
+      }
+      function moveBackOk() {
+        return resource.data.get('stage', '') != 'won' && resource.data.get('winCount', 0) == 0
+          && (isManagement()
+              || (resource.data.get('stage', '') in ['lead', 'appointment']
+                  && !(resource.data.get('proposalSentDate', '') is string && resource.data.get('proposalSentDate', '').matches('[0-9]{4}-[0-9]{2}-[0-9]{2}.*'))
+                  && dealSinceMs() is number && request.time.toMillis() - dealSinceMs() <= moveBackHours() * 3600000));
+      }
+      function convertedOk() {
+        let conv = request.resource.data.get('convertedAtMs', 0);
+        return (request.resource.data.get('stage', '') == 'discovery' && conv == 0)
+          || (resource.data.get('stage', '') == 'discovery' && request.resource.data.get('stage', '') != 'discovery' && conv is number
+              && conv > request.time.toMillis() - 300000 && conv < request.time.toMillis() + 300000);
+      }
+      // Kept short: the deal checks are long and Firestore stops after 1000 steps per save. It runs (from integrityOk)
+      // only when the stage or the clock changes; a save past New (winning, quoting, losing) leaves at the first check.
+      function discoveryOk() {
+        return request.resource.data.get('stage', '') in ['proposal', 'agreed', 'quoted', 'won', 'lost'] || discoveryChangeOk();
+      }
+      function discoveryChangeOk() {
+        return (request.resource.data.get('stage', '') != 'discovery' || resource.data.get('stage', '') == 'discovery' || moveBackOk())
+          && (request.resource.data.get('createdAt', 0) == resource.data.get('createdAt', 0) || isManagement())
+          && (request.resource.data.get('convertedAtMs', 0) == resource.data.get('convertedAtMs', 0) || isManagement() || convertedOk());
       }
       allow read: if isMember();
       // Process audit (2026-10-22): a new deal has a known stage; only Management creates one already won (a new deal

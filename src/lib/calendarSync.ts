@@ -112,7 +112,7 @@ export function buildDesired(s: SyncData): GoogleItem[] {
     if (a && isDate(a.date)) {
       out.push({
         key: `appt:${d.id}`,
-        summary: `Appointment: ${clientName(d)}${owner ? ` (${owner})` : ''}${a.status === 'held' ? ' · held' : ''}`,
+        summary: `${dealStage(d) === 'discovery' || a.discovery ? 'Discovery' : 'Appointment'}: ${clientName(d)}${owner ? ` (${owner})` : ''}${a.status === 'held' ? ' · held' : ''}`,
         description: lines(
           a.mode && `Type: ${(MODE_LABELS as any)[a.mode] || a.mode}`,
           prog && `Programme: ${prog}`,
