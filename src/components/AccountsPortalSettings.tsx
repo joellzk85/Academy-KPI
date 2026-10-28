@@ -18,7 +18,7 @@ const btnSecondary = 'inline-flex items-center justify-center gap-1.5 rounded-lg
 const card = 'rounded-xl border border-line bg-white p-4 sm:p-5';
 
 type Person = { id: string; name: string; active: boolean };
-const LOG_LABELS: Record<PortalLogEntry['action'], string> = { paid: 'Payment made', query: 'Question', slip: 'Bank slip', cleared: 'Question sorted', settings: 'Settings' };
+const LOG_LABELS: Record<PortalLogEntry['action'], string> = { raised: 'Payment raised', unraised: 'Back to To pay', paid: 'Payment done', query: 'Question', slip: 'Bank slip', cleared: 'Question sorted', settings: 'Settings' };
 
 export default function AccountsPortalSettings({ teamMembers }: { teamMembers: TeamMember[] }) {
   const link = `${window.location.origin}/accounts`;
@@ -93,7 +93,7 @@ export default function AccountsPortalSettings({ teamMembers }: { teamMembers: T
     <div className="space-y-4 text-ink">
       <div>
         <h3 className="text-lg font-bold">Accounts portal</h3>
-        <p className="text-sm text-ink-soft">Where accounts pay approved payments, instead of a link per summary. You see the same portal, view only.</p>
+        <p className="text-sm text-ink-soft">Accounts mark approved payments raised once keyed in the bank; a manager releases them and clicks Payment done (here in the portal, or on the Payments out board).</p>
       </div>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       {notice && <p role="status" className="rounded-lg bg-accent-soft px-3 py-2.5 text-sm font-semibold text-accent">{notice}</p>}
@@ -115,15 +115,20 @@ export default function AccountsPortalSettings({ teamMembers }: { teamMembers: T
         ) : (
           <p className="mt-1 text-sm font-semibold text-attention">Nobody yet.</p>
         )}
-        <p className="mt-2 text-sm text-ink-soft">Add, remove or set a password in Management → Team, with the role <strong>Accounts</strong>. They see only this portal, never the rest of the CRM. Management can open it too, view only.</p>
+        <p className="mt-2 text-sm text-ink-soft">Add, remove or set a password in Management → Team, with the role <strong>Accounts</strong>. They see only this portal, never the rest of the CRM. Management opens it too, to release raised payments (Payment done).</p>
       </section>
 
       <section className={`${card} space-y-4`}>
         <h4 className="font-semibold">Settings</h4>
         <label className="flex cursor-pointer items-start gap-3">
           <input type="checkbox" checked={settings.allowPay} onChange={e => setSettings(s => ({ ...s, allowPay: e.target.checked }))} className="mt-1 h-4 w-4 accent-[#0E6E62]" />
-          <span><span className="block font-semibold">Accounts can mark payments made in the portal</span>
+          <span><span className="block font-semibold">Accounts can mark payments raised in the portal</span>
             <span className="block text-sm text-ink-soft">Untick to make it view only for a while (they can still search and download).</span></span>
+        </label>
+        <label className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-semibold">Pending release turns amber after</span>
+          <input type="number" min={1} max={30} value={settings.raisedDays} onChange={e => setSettings(s => ({ ...s, raisedDays: Math.max(1, Math.min(30, Math.round(Number(e.target.value) || 1))) }))} className={`${input} w-20 py-1.5`} aria-label="Working days" />
+          <span>working days (Monday to Friday)</span>
         </label>
 
         <div>
@@ -187,7 +192,7 @@ export default function AccountsPortalSettings({ teamMembers }: { teamMembers: T
       <section className="overflow-hidden rounded-xl border border-line bg-white">
         <div className="space-y-2 p-4 sm:p-5">
           <h4 className="font-semibold">Activity log</h4>
-          <p className="text-sm text-ink-soft">Everything done in the portal: payments made, questions, bank slips, settings (latest 300).</p>
+          <p className="text-sm text-ink-soft">Everything done in the portal: payments raised and done, questions, bank slips, settings (latest 300).</p>
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
             <input value={logSearch} onChange={e => setLogSearch(e.target.value)} className={`${input} pl-9`} placeholder="Search who, receiver, amount, reference" aria-label="Search the log" />

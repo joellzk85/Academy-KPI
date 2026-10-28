@@ -7,9 +7,11 @@
 //   server reads or writes it.
 // - money_out.accountsQuery: { text, at, byId, byName } while a line is sent back with a question; Admin or
 //   Management clear it once sorted (the Payments out board).
-// - Payment made: status 'paid', paidDate, paidAt, paidRef, paidById / paidByName = the accounts person, paidVia 'portal'.
-//   Only a line the portal lists under "To pay" (approved, payable today, bank details checked) can be paid.
-// - Bank slip: saved like any payment receipt (Storage receipts/{id}_{name}, payment_receipts with moneyOutId), so the
+// - Payment raised (accounts): money_out.accountsRaised = { at, byId, byName, ref, note }; only a line under "To pay"
+//   (approved, payable today, bank details checked). It waits under "Raised, pending release".
+// - Payment done (Management only, Joel 2026-10-28): status 'paid', paidDate, paidAt, paidRef, paidById / paidByName = the
+//   manager, paidVia 'portal'. Only a raised line. Back to To pay (accounts or a manager) clears accountsRaised.
+// - Bank slip (Management in the portal; Admin and Management also drop it on the board): saved like any payment receipt (Storage receipts/{id}_{name}, payment_receipts with moneyOutId), so the
 //   board's "Paid, receipt needed" lane clears.
 
 import express from 'express';
@@ -92,8 +94,8 @@ async function loadRows(db: Firestore): Promise<PortalRow[]> {
   return buildPortalRows({ outs, vendors, deals, clients, trainers, trainerPrivate, venues, slipCount, settings, today: todayMY() });
 }
 
-/** The lines asked for, each checked again as it is now: can it be paid today? */
-async function payableNow(db: Firestore, ids: string[]) {
+/** The lines asked for, each checked again as it is now: are they all in this list (To pay, or Raised)? */
+async function linesIn(db: Firestore, ids: string[], want: 'topay' | 'raised') {
   const docs = await Promise.all(ids.map(id => db.collection('money_out').doc(id).get()));
   const outs = docs.filter(d => d.exists).map(d => ({ ...(d.data() as any), id: d.id }) as MoneyOut);
   if (outs.length !== ids.length) throw new UserError(404, 'not-found', 'A payment was not found. Reload the page.');
@@ -102,9 +104,11 @@ async function payableNow(db: Firestore, ids: string[]) {
   for (const o of outs) {
     const deal = o.dealId ? deals.get(o.dealId) : undefined;
     const where = (o.dealId && !deal) || deal?.deleted ? null : sectionOf(o, deal, vendors.get(o.vendorId || ''), todayMY());
-    if (!where || where.section !== 'topay') {
-      const why = !where ? 'it was cancelled' : where.section === 'paid' ? 'it is already paid' : where.wait.charAt(0).toLowerCase() + where.wait.slice(1);
-      throw new UserError(409, 'not-payable', `${o.payee || 'A payment'} (${money(o.amount)}) can't be paid now: ${why}. Nothing was marked. Reload the page.`);
+    if (!where || where.section !== want) {
+      const why = !where ? 'it was cancelled' : where.section === 'paid' ? 'it is already paid'
+        : where.section === 'raised' ? 'it is already raised, waiting for release' : where.section === 'topay' ? 'it was not raised by accounts yet'
+        : where.wait.charAt(0).toLowerCase() + where.wait.slice(1);
+      throw new UserError(409, 'not-payable', `${o.payee || 'A payment'} (${money(o.amount)}) can't be ${want === 'topay' ? 'raised' : 'marked done'} now: ${why}. Nothing was marked. Reload the page.`);
     }
   }
   return outs;
@@ -116,7 +120,8 @@ const cleanIds = (raw: any, max = 200) => (Array.isArray(raw) ? [...new Set(raw.
  *  registered before the general JSON reader (server.ts). */
 export function registerAccountsSlipRoute(app: Express) {
   app.post('/api/accounts/slip', express.json({ limit: '15mb' }), route(async req => {
-    const who = await accountsOnly(req);
+    const caller = await managementFrom(req);
+    const who = { memberId: caller.memberId, name: await nameOf(admin().db, caller.memberId) };
     const ids = cleanIds(req.body?.ids, 50);
     if (!ids.length) throw new UserError(400, 'nothing', 'Choose the payment the slip is for.');
     const name = safeFileName(String(req.body?.name || 'bank-slip'));
@@ -151,40 +156,89 @@ export function registerAccountsPortalRoutes(app: Express) {
     const who = await portalViewer(req);
     const { db } = admin();
     const [rows, settings] = await Promise.all([loadRows(db), readSettings()]);
-    return { viewer: { name: who.name, role: who.role, canPay: who.role === 'accounts' && settings.allowPay }, settings, rows };
+    return { viewer: { name: who.name, role: who.role, canRaise: who.role === 'accounts' && settings.allowPay, canRelease: who.role === 'management' }, settings, rows };
   }));
 
-  // Accounts tick lines and click Payment made (one bank reference for them all).
-  app.post('/api/accounts/paid', route(async req => {
+  // Accounts tick lines they keyed in the bank and click Payment raised (one bank reference and note for them all).
+  // They wait under "Raised, pending release" until a manager releases them in the bank (Payment done, below).
+  app.post('/api/accounts/raise', route(async req => {
     const who = await accountsOnly(req);
     const settings = await readSettings();
-    if (!settings.allowPay) throw new UserError(403, 'paying-off', 'Marking payments made in the portal is switched off by Management.');
+    if (!settings.allowPay) throw new UserError(403, 'raising-off', 'Marking payments raised in the portal is switched off by Management.');
     const ids = cleanIds(req.body?.ids);
     if (!ids.length) throw new UserError(400, 'nothing', 'Tick at least one payment.');
-    const paidRef = String(req.body?.ref || '').trim().slice(0, 80);
+    const ref = String(req.body?.ref || '').trim().slice(0, 80);
+    const note = String(req.body?.note || '').trim().slice(0, 300);
     const { db } = admin();
-    await payableNow(db, ids);
+    await linesIn(db, ids, 'topay');
+    const raised = { at: new Date().toISOString(), byId: who.memberId, byName: who.name, ref, note };
+    const done: MoneyOut[] = [];
+    for (const id of ids) {
+      const docRef = db.collection('money_out').doc(id);
+      const o = await db.runTransaction(async tx => {
+        const cur: any = (await tx.get(docRef)).data();
+        if (!cur || cur.status !== 'approved' || cur.deleted || cur.accountsRaised?.at) return null;   // changed a moment ago
+        tx.update(docRef, { accountsRaised: raised });
+        return { ...cur, id } as MoneyOut;
+      });
+      if (o) done.push(o);
+    }
+    for (const o of done) {
+      if (o.dealId) await addDealHistory(db, o.dealId, who.memberId, who.name,
+        `Payment raised by accounts, pending release: ${o.category} · ${o.payee} (${money(o.amount)})${ref ? `, ref ${ref}` : ''}`);
+    }
+    if (done.length) {
+      await log(db, { byId: who.memberId, byName: who.name, action: 'raised', moneyOutIds: done.map(o => o.id),
+        text: `Payment raised, pending release: ${done.map(o => `${o.payee} ${money(o.amount)}`).join(', ')} (total ${money(done.reduce((t, o) => t + (Number(o.amount) || 0), 0))})${ref ? `, ref ${ref}` : ''}${note ? ` · ${note}` : ''}` });
+    }
+    return { raised: done.map(o => o.id), skipped: ids.length - done.length };
+  }));
+
+  // Back to To pay (the bank rejected it, or it was raised by mistake): accounts or a manager.
+  app.post('/api/accounts/unraise', route(async req => {
+    const who = await portalViewer(req);
+    const id = cleanIds([req.body?.id])[0];
+    const why = String(req.body?.reason || '').trim().slice(0, 300);
+    const { db } = admin();
+    const docRef = id ? db.collection('money_out').doc(id) : null;
+    const o: any = docRef ? (await docRef.get()).data() : null;
+    if (!docRef || !o) throw new UserError(404, 'not-found', 'That payment was not found. Reload the page.');
+    if (o.status !== 'approved' || !o.accountsRaised?.at) throw new UserError(409, 'not-raised', 'This payment is not waiting for release any more. Reload the page.');
+    await docRef.update({ accountsRaised: null });
+    if (o.dealId) await addDealHistory(db, o.dealId, who.memberId, who.name, `Payment back to "to pay" (not released): ${o.payee} (${money(o.amount)})${why ? `: ${why}` : ''}`);
+    await log(db, { byId: who.memberId, byName: who.name, action: 'unraised', moneyOutIds: [id], text: `Back to To pay: ${o.payee} ${money(o.amount)}${why ? ` · ${why}` : ''}` });
+    return {};
+  }));
+
+  // A manager released the raised payments in the bank and clicks Payment done (portal or the Payments out board).
+  app.post('/api/accounts/done', route(async req => {
+    const caller = await managementFrom(req);
+    const ids = cleanIds(req.body?.ids);
+    if (!ids.length) throw new UserError(400, 'nothing', 'Tick at least one payment.');
+    const typedRef = String(req.body?.ref || '').trim().slice(0, 80);
+    const { db } = admin();
+    const byName = await nameOf(db, caller.memberId);
+    await linesIn(db, ids, 'raised');
     const now = new Date().toISOString();
     const paid: MoneyOut[] = [];
     for (const id of ids) {
-      const ref = db.collection('money_out').doc(id);
+      const docRef = db.collection('money_out').doc(id);
       const o = await db.runTransaction(async tx => {
-        const cur: any = (await tx.get(ref)).data();
-        if (!cur || cur.status !== 'approved' || cur.deleted) return null;          // changed a moment ago: left alone
-        const patch = { status: 'paid', paidDate: todayMY(), paidAt: now, paidRef, paidById: who.memberId, paidByName: who.name, paidVia: 'portal' };
-        tx.update(ref, patch);
+        const cur: any = (await tx.get(docRef)).data();
+        if (!cur || cur.status !== 'approved' || cur.deleted || !cur.accountsRaised?.at) return null;   // changed a moment ago
+        const patch = { status: 'paid', paidDate: todayMY(), paidAt: now, paidRef: typedRef || cur.accountsRaised.ref || '', paidById: caller.memberId, paidByName: byName, paidVia: 'portal' };
+        tx.update(docRef, patch);
         return { ...cur, ...patch, id } as MoneyOut;
       });
       if (o) paid.push(o);
     }
     for (const o of paid) {
-      if (o.dealId) await addDealHistory(db, o.dealId, who.memberId, who.name,
-        `Payment made (Accounts portal): ${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${money(o.amount)})${paidRef ? `, ref ${paidRef}` : ''}`);
+      if (o.dealId) await addDealHistory(db, o.dealId, caller.memberId, byName,
+        `Payment done (released): ${o.category} · ${o.payee}${o.description ? ` · ${o.description}` : ''} (${money(o.amount)})${o.paidRef ? `, ref ${o.paidRef}` : ''}`);
     }
     if (paid.length) {
-      const total = paid.reduce((t, o) => t + (Number(o.amount) || 0), 0);
-      await log(db, { byId: who.memberId, byName: who.name, action: 'paid', moneyOutIds: paid.map(o => o.id),
-        text: `Payment made: ${paid.map(o => `${o.payee} ${money(o.amount)}`).join(', ')} (total ${money(total)})${paidRef ? `, ref ${paidRef}` : ''}` });
+      await log(db, { byId: caller.memberId, byName, action: 'paid', moneyOutIds: paid.map(o => o.id),
+        text: `Payment done (released): ${paid.map(o => `${o.payee} ${money(o.amount)}`).join(', ')} (total ${money(paid.reduce((t, o) => t + (Number(o.amount) || 0), 0))})` });
     }
     return { paid: paid.map(o => o.id), skipped: ids.length - paid.length };
   }));
@@ -247,7 +301,8 @@ export function registerAccountsPortalRoutes(app: Express) {
     const byName = await nameOf(db, caller.memberId);
     await SETTINGS().set({ ...next, updatedAt: new Date().toISOString(), updatedByName: byName });
     const changes = [
-      before.allowPay !== next.allowPay ? (next.allowPay ? 'paying in the portal switched on' : 'paying in the portal switched off') : '',
+      before.allowPay !== next.allowPay ? (next.allowPay ? 'raising payments in the portal switched on' : 'raising payments in the portal switched off') : '',
+      before.raisedDays !== next.raisedDays ? `pending release turns amber after ${next.raisedDays} working days` : '',
       JSON.stringify(before.hiddenColumns) !== JSON.stringify(next.hiddenColumns) ? 'columns shown changed' : '',
       JSON.stringify(before.hiddenFields) !== JSON.stringify(next.hiddenFields) ? 'receiver details shown changed' : '',
       JSON.stringify(before.categoryNames) !== JSON.stringify(next.categoryNames) ? 'category names changed' : '',

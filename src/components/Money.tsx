@@ -494,7 +494,10 @@ export function OutRow({ o, viewer, context, docFor, outs = [o], docs = [] }: { 
               <Check className="h-3.5 w-3.5" /> Payment made {dateTimeMY(o.paidAt)} · by accounts (via link){o.paidRef ? ` · ref ${o.paidRef}` : ''}
             </p>
           )}
-          {o.status === 'approved' && o.summaryToken && <p className="text-sm text-accent">On a payment summary sent to accounts</p>}
+          {o.status === 'approved' && o.summaryToken && !o.accountsRaised?.at && <p className="text-sm text-accent">On a payment summary sent to accounts</p>}
+          {o.status === 'approved' && o.accountsRaised?.at && (
+            <p className="text-sm font-semibold text-attention">Raised in the bank by {o.accountsRaised.byName} on {formatDate(o.accountsRaised.at.slice(0, 10))}: pending a manager's release</p>
+          )}
           {o.status === 'pending' && <p className="text-sm font-semibold text-attention">{raisedText(o)}</p>}
           {o.lastUndo && <p className="text-sm text-ink-soft">"Paid" undone by {o.lastUndo.byName} on {formatDate(o.lastUndo.at)} (was paid {formatDate(o.lastUndo.paidDate)})</p>}
         </div>

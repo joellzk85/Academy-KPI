@@ -118,6 +118,7 @@ export interface MoneyOut {
   // theirs), and a question accounts sent back on the payment until Admin or Management mark it sorted.
   paidVia?: 'portal';
   accountsQuery?: { text: string; at: string; byId: string; byName: string } | null;
+  accountsRaised?: { at: string; byId: string; byName: string; ref: string; note: string } | null;   // keyed in the bank, waiting for release
   // Raised from a deal's before-training checklist (2026-10-20): the step it belongs to and the vendor (lib/vendors.ts).
   checklistTaskId?: string;
   vendorId?: string;

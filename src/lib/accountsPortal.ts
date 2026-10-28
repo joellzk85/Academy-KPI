@@ -2,8 +2,12 @@
 // sample: his "Next Academy Payment Request" Google Sheet). Accounts log in at /accounts (Team role Accounts, own
 // staff) and see every approved payment that can be paid now, laid out like the sheet: No., Category, Receiver (the
 // 14 LHDN e-Invoice details), Amount, Bank info, Details, Date of event, Remarks. They tick lines, type the bank
-// reference, add the bank slip and click Payment made, or send a line back with a question. Management sees the same
-// portal, view only, and manages it in Management → Accounts portal.
+// reference and click Payment raised (keyed in the bank), or send a line back with a question. Management sees the same
+// portal and manages it in Management → Accounts portal.
+// Release (Joel, 2026-10-28: "in portal - account will tick raised payment - pending boss release payment; Management will
+// tick when payment is done - either admin or management can upload the payment slip"): a raised payment waits under
+// "Raised, pending release" (money_out.accountsRaised) until a manager releases it in the bank and clicks Payment done
+// (portal or the Payments out board). Amber after raisedDays working days.
 // Pure code, shared by the server (serverAccountsPortal.ts) and the screens. The server builds the rows: accounts
 // logins can't read the database at all (no auth_map record).
 
@@ -36,12 +40,13 @@ export type Receiver = Record<ReceiverField, string>;
 // ---------- Settings (config/accounts_portal, Management → Accounts portal; the server reads and writes it) ----------
 
 export interface PortalSettings {
-  allowPay: boolean;                      // accounts may mark payments made in the portal (off = view only)
+  allowPay: boolean;                      // accounts may mark payments raised in the portal (off = view only)
+  raisedDays: number;                     // working days a raised payment may wait for release before it turns amber
   hiddenColumns: PortalColumn[];
   hiddenFields: ReceiverField[];
   categoryNames: Record<string, string>;  // the CRM's category → the name accounts see (blank = same)
 }
-export const DEFAULT_PORTAL_SETTINGS: PortalSettings = { allowPay: true, hiddenColumns: [], hiddenFields: [], categoryNames: {} };
+export const DEFAULT_PORTAL_SETTINGS: PortalSettings = { allowPay: true, raisedDays: 3, hiddenColumns: [], hiddenFields: [], categoryNames: {} };
 
 export function cleanPortalSettings(d: any): PortalSettings {
   const cols = PORTAL_COLUMNS.map(c => c.key);
@@ -55,6 +60,7 @@ export function cleanPortalSettings(d: any): PortalSettings {
   }
   return {
     allowPay: d?.allowPay !== false,
+    raisedDays: Number.isInteger(Number(d?.raisedDays)) && Number(d.raisedDays) >= 1 && Number(d.raisedDays) <= 30 ? Number(d.raisedDays) : 3,
     hiddenColumns: Array.isArray(d?.hiddenColumns) ? cols.filter(c => d.hiddenColumns.includes(c)) : [],
     hiddenFields: Array.isArray(d?.hiddenFields) ? fields.filter(f => d.hiddenFields.includes(f)) as ReceiverField[] : [],
     categoryNames: names,
@@ -65,7 +71,10 @@ export const categoryName = (category: string, s: PortalSettings) => s.categoryN
 
 // ---------- One line of the sheet ----------
 
-export type PortalSection = 'topay' | 'coming' | 'paid';
+export type PortalSection = 'topay' | 'raised' | 'coming' | 'paid';
+
+/** Accounts keyed it in the bank (Payment raised); it waits for a manager to release it. */
+export interface PortalRaised { at: string; byId: string; byName: string; ref: string; note: string }
 
 export interface PortalQuery { text: string; at: string; byName: string }
 
@@ -98,6 +107,7 @@ export interface PortalRow {
   // Since the last payment to this receiver, its bank details changed (a manager checked them): accounts double-check.
   bankChangedAt: string;
   query: PortalQuery | null;   // accounts sent it back with a question; cleared by Admin or Management
+  raised: PortalRaised | null; // keyed in the bank by accounts, waiting for release (and kept once paid)
   slips: number;               // receipts and bank slips on the payment
 }
 
@@ -148,6 +158,7 @@ export function sectionOf(o: MoneyOut, deal: any, vendor: Vendor | undefined, to
   if (o.status === 'paid') return { section: 'paid', wait: '' };
   if (o.status === 'pending') return { section: 'coming', wait: "Waiting for a manager's approval" };
   if (o.status !== 'approved') return null;
+  if (o.accountsRaised?.at) return { section: 'raised', wait: '' };
   if (waitsForTraining(o, deal, today)) {
     const from = formatDate(payableFrom(o, deal));
     return { section: 'coming', wait: o.partGroup && o.dueDate ? `${o.partLabel || `Part ${o.partNo}`}: due ${from}` : `After the training: payable from ${from}` };
@@ -214,6 +225,7 @@ export function buildPortalRows(inp: PortalInput): PortalRow[] {
       paidRef: clean(o.paidRef),
       bankChangedAt: where.section === 'paid' ? '' : bankChangedSince(v, inp.outs),
       query: o.accountsQuery?.text ? o.accountsQuery : null,
+      raised: o.accountsRaised?.at ? o.accountsRaised : null,
       slips: inp.slipCount.get(o.id) || 0,
     });
   });
@@ -253,4 +265,21 @@ export function receiverLines(r: Pick<PortalRow, 'receiver'>, s: Pick<PortalSett
 
 // ---------- Activity log (accounts_log, written by the server, read by Management) ----------
 
-export interface PortalLogEntry { id: string; at: string; byId: string; byName: string; action: 'paid' | 'query' | 'slip' | 'cleared' | 'settings'; text: string; moneyOutIds?: string[] }
+export interface PortalLogEntry { id: string; at: string; byId: string; byName: string; action: 'raised' | 'unraised' | 'paid' | 'query' | 'slip' | 'cleared' | 'settings'; text: string; moneyOutIds?: string[] }
+
+// ---------- Raised, pending release ----------
+
+/** Working days (Monday to Friday) from the day raised to today, in Malaysia. */
+export function workingDaysSince(iso: string, now = Date.now()): number {
+  const t = Date.parse(iso);
+  if (isNaN(t)) return 0;
+  const day = (ms: number) => new Date(ms + 8 * 3600_000);
+  const d = day(t), end = day(now);
+  d.setUTCHours(0, 0, 0, 0); end.setUTCHours(0, 0, 0, 0);
+  let n = 0;
+  while (d < end) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w !== 0 && w !== 6) n++; }
+  return n;
+}
+
+/** Raised more than `days` working days ago and still not released: amber. */
+export const releaseLate = (raised: { at: string } | null | undefined, days: number, now = Date.now()) => !!raised?.at && workingDaysSince(raised.at, now) > days;

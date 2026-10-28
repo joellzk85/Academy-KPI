@@ -31,7 +31,9 @@ export function sheetCells(r: PortalRow, s: PortalSettings, no: number): Record<
     bank: bankLines(r),
     details: [r.details, r.ref].filter(Boolean),
     eventDate: r.eventDate ? [formatDate(r.eventDate)] : [],
-    remarks: [r.remarks, r.waitReason, ...paid, r.query ? `Question: ${r.query.text}` : ''].filter(Boolean),
+    remarks: [r.remarks, r.waitReason,
+      r.raised ? `Raised by ${r.raised.byName} ${formatDate(r.raised.at.slice(0, 10))}${r.raised.ref ? `, ref ${r.raised.ref}` : ''}${r.section === 'raised' ? ', pending release' : ''}` : '',
+      ...paid, r.query ? `Question: ${r.query.text}` : ''].filter(Boolean),
   };
 }
 

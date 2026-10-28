@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { ArrowRight, Check, ChevronDown, Download, ExternalLink, Link2, Loader2, MessageCircle, Search, Send, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { pdfErrorText } from '../lib/oldTab';
@@ -13,6 +13,7 @@ import { feeIsAgreed } from '../lib/trainerPortal';
 import { Receipt } from '../lib/postTraining';
 import { VendorForm, useTrainersVenues, useVendors } from './VendorsPage';
 import { ReceiptDrop, ReceiptList, useReceipts } from './PaymentReceipts';
+import { DEFAULT_PORTAL_SETTINGS, cleanPortalSettings, releaseLate, workingDaysSince } from '../lib/accountsPortal';
 import PaymentSummaryDocument from './PaymentSummaryDocument';
 import PanelResizer from './PanelResizer';
 import { OutRow, approveMany } from './Money';
@@ -22,7 +23,9 @@ import { OutRow, approveMany } from './Money';
 //   1. Waiting approval   pending requests; a manager approves on the card (never their own), or all at once
 //   2. Ready for accounts approved, not on a summary; ready ones start ticked, blocked ones say why (bank details, date)
 //   3. With accounts      the summaries sent (one card per summary), and older per-payment links
-//   4. Paid, receipt needed paid since receipts came in (2026-10-20) with no receipt yet; drop it on the card
+//   4. Raised, pending release  accounts keyed them in the bank (Accounts portal, 2026-10-28); a manager releases them and
+//                         ticks Payment done (Management only); amber after the working days set in the portal settings
+//   5. Paid, receipt needed paid since receipts came in (2026-10-20) with no receipt yet; drop it on the card
 // "Send N to accounts" makes the summary and its link in one click and copies the approval link for accounts.
 // Under the lanes, History (2026-10-26): paid, approved, rejected, deleted and fully paid summaries, with search, month
 // filter and total, who raised / approved / paid, and a "No receipt" flag.
@@ -79,7 +82,10 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
   const [skipped, setSkipped] = useState<Set<string>>(new Set());   // ready payments unticked (new ones start ticked)
   const [open, setOpen] = useState<Open>(null);
   const [sent, setSent] = useState<{ token: string; copied: boolean } | null>(null);
-  const [busy, setBusy] = useState<'' | 'send' | 'approve'>('');
+  const [busy, setBusy] = useState<'' | 'send' | 'approve' | 'done'>('');
+  const [doneSkipped, setDoneSkipped] = useState<Set<string>>(new Set());   // raised payments unticked for Payment done
+  const [raisedDays, setRaisedDays] = useState(DEFAULT_PORTAL_SETTINGS.raisedDays);
+  useEffect(() => onSnapshot(doc(db, 'config', 'accounts_portal'), d => setRaisedDays(cleanPortalSettings(d.data()).raisedDays), () => {}), []);
   const [error, setError] = useState('');
 
   const dealOf = (o: MoneyOut) => deals.find(d => d.id === o.dealId);
@@ -90,9 +96,12 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
   // A cost paid in parts waits as one card (its first part waiting); approving it approves every part (2026-10-26).
   const pendingCards = pending.filter(o => !o.partGroup || pending.find(x => x.partGroup === o.partGroup) === o);
   const mineInBulk = pendingCards.filter(o => canDecide(o, viewer) && !isTrainerFee(o) && feeIsAgreed(o));
-  const approved = outs.filter(o => o.status === 'approved');
+  // Raised in the Accounts portal (keyed in the bank): their own lane until a manager clicks Payment done.
+  const raised = outs.filter(o => o.status === 'approved' && o.accountsRaised?.at).sort((a, b) => String(a.accountsRaised!.at).localeCompare(String(b.accountsRaised!.at)));
+  const approved = outs.filter(o => o.status === 'approved' && !o.accountsRaised?.at);
   const withAccounts = approved.filter(o => o.summaryToken || o.accountsLink?.token);
   const toSend = approved.filter(o => !o.summaryToken && !o.accountsLink?.token);
+  const doneTicked = raised.filter(o => !doneSkipped.has(o.id));
   const problemOf = (o: MoneyOut) => summaryProblem(o, dealOf(o), vendorOf(o), today);
   const ready = toSend.filter(o => !problemOf(o)).sort((a, b) => String(a.payee).localeCompare(String(b.payee)));
   const blocked = toSend.filter(o => problemOf(o)).sort((a, b) => String(a.payee).localeCompare(String(b.payee)));
@@ -131,6 +140,15 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
     } catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
   };
 
+  // A manager released them in the bank (Joel, 2026-10-28: "Management will tick when payment is done").
+  const markDone = async () => {
+    if (!doneTicked.length) return;
+    if (!window.confirm(`Confirm you have released these ${doneTicked.length} payment${doneTicked.length === 1 ? '' : 's'} (${sen(sum(doneTicked))}) in the bank? They are marked paid.\n\n${doneTicked.map(o => `• ${o.payee}: ${sen(o.amount)}`).join('\n')}`)) return;
+    setBusy('done'); setError('');
+    try { await callServer('/api/accounts/done', { ids: doneTicked.map(o => o.id) }, true); setDoneSkipped(new Set()); }
+    catch (e) { setError(friendlyError(e)); } finally { setBusy(''); }
+  };
+
   const openPay = (o: MoneyOut) => setOpen({ kind: 'pay', id: o.id });
   const openOut = open?.kind === 'pay' ? outs.find(o => o.id === open.id) : undefined;
   const openSummary = open?.kind === 'summary' ? summaries.find(s => s.token === open.token) : undefined;
@@ -151,7 +169,7 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
       )}
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
 
-      <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <Lane n={1} title="Waiting approval" list={pending}
           top={mineInBulk.length > 1 && (
             <button type="button" disabled={!!busy} className={`${btnPrimary} w-full`} onClick={approveAll}>
@@ -204,7 +222,32 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
           ]}
         </Lane>
 
-        <Lane n={4} title="Paid, receipt needed" list={paidNoReceipt} empty="Every payment has its receipt.">
+        <Lane n={4} title="Raised, pending release" list={raised}
+          top={raised.length > 0 && <p className="text-xs text-ink-soft">Keyed in the bank by accounts. {viewer.role === 'management' ? 'Release them in the bank, then click Payment done.' : 'Waiting for a manager to release them.'}</p>}
+          bottom={viewer.role === 'management' && raised.length > 0 && (
+            <button type="button" disabled={!!busy || !doneTicked.length} className={`${btnPrimary} w-full`} onClick={markDone}>
+              {busy === 'done' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              {doneTicked.length ? `Payment done ${doneTicked.length} · ${sen(sum(doneTicked))}` : 'Tick a payment released'}
+            </button>
+          )}
+          empty="Nothing waiting for release.">
+          {raised.map(o => {
+            const late = releaseLate(o.accountsRaised, raisedDays);
+            return (
+              <Card key={o.id} o={o} forText={forText(o)} onOpen={() => openPay(o)}
+                lead={viewer.role === 'management' ? <input type="checkbox" checked={!doneSkipped.has(o.id)} aria-label={`Payment done for ${o.payee}`} className="mt-1 h-4 w-4 accent-[#0E6E62]"
+                  onClick={e => e.stopPropagation()}
+                  onChange={() => setDoneSkipped(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; })} /> : undefined}
+                note={<span className={late ? 'font-semibold text-attention' : 'text-ink-soft'}>
+                  Raised by {o.accountsRaised!.byName}, {formatDate(o.accountsRaised!.at.slice(0, 10))}{o.accountsRaised!.ref ? ` · ref ${o.accountsRaised!.ref}` : ''}
+                  {late ? ` · waiting ${workingDaysSince(o.accountsRaised!.at)} working days` : ''}
+                  {o.accountsRaised!.note && <span className="block font-normal text-ink-soft">{o.accountsRaised!.note}</span>}
+                </span>} />
+            );
+          })}
+        </Lane>
+
+        <Lane n={5} title="Paid, receipt needed" list={paidNoReceipt} empty="Every payment has its receipt.">
           {paidNoReceipt.map(o => (
             <Card key={o.id} o={o} forText={forText(o)} onOpen={() => openPay(o)}
               note={`Paid ${formatDate(paidDay(o))}${o.paidByName ? ` by ${o.paidByName}` : o.paidAt ? ' by accounts' : ''}`}
@@ -429,7 +472,10 @@ function PaymentDetail({ o, viewer, forText, problem, receipts, docs, onOpenDeal
         </div>
       )}
       {editingVendor && v && <VendorForm vendor={v} vendors={vendors} trainers={trainers} venues={venues} viewer={viewer} onSaved={() => setEditingVendor(false)} onCancel={() => setEditingVendor(false)} />}
-      {o.status === 'approved' && <MarkPaid outs={[o]} viewer={viewer} label="Paid another way? Mark it paid" />}
+      {o.status === 'approved' && o.accountsRaised?.at && (
+        <p className="rounded-lg bg-surface px-3 py-2 text-sm">Raised in the bank by {o.accountsRaised.byName}, {formatDate(o.accountsRaised.at.slice(0, 10))}{o.accountsRaised.ref ? ` · ref ${o.accountsRaised.ref}` : ''}: waiting for a manager to release it{viewer.role === 'management' ? ' (tick it in lane 4 and click Payment done)' : ''}.</p>
+      )}
+      {o.status === 'approved' && (!o.accountsRaised?.at || viewer.role === 'management') && <MarkPaid outs={[o]} viewer={viewer} label="Paid another way? Mark it paid" />}
       {o.status === 'paid' && (
         <div className="space-y-2">
           <h4 className="font-bold">Receipt</h4>
@@ -512,7 +558,7 @@ function SummaryDetail({ s, vendors, forText, viewer, onOpenPay, onGone }: {
         ))}
       </ul>
       <div className="flex flex-wrap gap-2">
-        <MarkPaid outs={s.unpaid} viewer={viewer} label={`Paid from the PDF? Mark all ${s.unpaid.length} paid`} />
+        <MarkPaid outs={s.unpaid.filter(o => !o.accountsRaised?.at || viewer.role === 'management')} viewer={viewer} label={`Paid from the PDF? Mark all ${s.unpaid.filter(o => !o.accountsRaised?.at || viewer.role === 'management').length} paid`} />
         {s.unpaid.length > 0 && <button type="button" disabled={!!busy} className={`${btnSecondary} text-danger hover:bg-danger-soft`} onClick={cancel}>{busy === 'cancel' && <Loader2 className="h-4 w-4 animate-spin" />}Cancel summary</button>}
       </div>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
