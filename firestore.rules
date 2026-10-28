@@ -93,16 +93,17 @@ service cloud.firestore {
       // month_locks (2026-10-22): months Management reopened (Deal checks → Month lock); Management only.
       // one_to_one (2026-10-25): see below.
       // training_report (2026-10-27): the training report questions and HR's / the HOD's copies; Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings']))
+      // claim_settings (2026-10-28): staff claim categories, limits and who may raise for others; Management only.
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings']))
                             || (docId in ['checklist_tasks'] && isStaff())
-                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings'] && isManagement())
+                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings'] && isManagement())
                             // one_to_one (2026-10-25): who runs the 1-to-1s and the questions. The owner sets it (owner
                             // override rule); the person who runs them changes the questions, never who runs them.
                             || (docId == 'one_to_one' && isMember() && resource != null
                                 && resource.data.get('coachId', '') == request.auth.uid
                                 && request.resource.data.get('coachId', '') == request.auth.uid);
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings']));
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -519,13 +520,28 @@ service cloud.firestore {
         return d.get('inPL', true) != false || d.get('onBehalf', false) == true
           || (d.get('notInPLReason', '') is string && d.get('notInPLReason', '').size() >= 3);
       }
-      allow read: if isStaff();
-      allow create: if isStaff()
+      // Staff claims (2026-10-28, src/lib/claims.ts): the approved company payment made in the same save as a manager's
+      // approval of the claim: id claim_{claimId}, the claim's person and amount, approved by that manager.
+      function claimPaymentOk() {
+        let n = request.resource.data;
+        let c = getAfter(/databases/$(database)/documents/claims/$(n.get('claimId', '-'))).data;
+        return isManagement() && id == 'claim_' + n.get('claimId', '-')
+          && n.status == 'approved' && n.get('kind', '') == 'company' && n.get('dealId', '') == '' && n.get('category', '') == 'Staff claim'
+          && n.decidedById == request.auth.uid && n.get('decidedTs', null) == request.time
+          && n.get('deleted', false) == false && n.get('feeAgreed', null) == null
+          && c.status == 'approved' && c.decidedById == request.auth.uid && c.get('moneyOutId', '') == id
+          && n.amount == c.amount && n.requestedById == c.memberId && n.payee == c.memberName;
+      }
+      // The person whose claim it is sees its payment (paid or not), nothing else.
+      allow read: if isStaff()
+        || (isMember() && resource.data.get('claimId', '') != '' && resource.data.requestedById == request.auth.uid);
+      allow create: if (isStaff()
         && request.resource.data.status == 'pending'
         && request.resource.data.requestedById == request.auth.uid
         && request.resource.data.get('deleted', false) == false
         && request.resource.data.get('feeAgreed', null) == null
-        && plTickOk(request.resource.data);
+        && plTickOk(request.resource.data))
+        || claimPaymentOk();
       allow update: if isSuper() || isStaff() && (
         // Agree a trainer fee before the PO goes out (full deal test, 2026-10-23): a manager who didn't raise it
         // (the owner override may), for the amount as it is, signed with their id; nothing else changes.
@@ -589,6 +605,51 @@ service cloud.firestore {
       // are marked deleted instead, above).
       allow delete: if isSuper() || resource.data.status in ['pending', 'rejected']
         && (isManagement() || (isStaff() && resource.data.requestedById == request.auth.uid));
+    }
+
+    // Staff claims (2026-10-28, src/lib/claims.ts). Everyone raises their own; people Management ticked in Claims →
+    // Settings (raiseForOthers) and Management also raise them for someone else. A claim waiting or rejected is fixed
+    // (and sent again) by its person or whoever raised it. A manager approves or rejects it, never one that is theirs
+    // or that they raised; approving also makes its company payment (money_out claim_{id}) in the same save.
+    // Read: its person, whoever raised it, Management, and the people allowed to raise for others (for limits).
+    function claimRaiser() {
+      return isManagement() || (exists(/databases/$(database)/documents/config/claim_settings)
+        && request.auth.uid in get(/databases/$(database)/documents/config/claim_settings).data.get('raiseForOthers', []));
+    }
+    match /claims/{claimId} {
+      function mine(d) {
+        return d.memberId == request.auth.uid || d.raisedById == request.auth.uid;
+      }
+      function claimOk(d) {
+        return d.amount is number && d.amount > 0 && d.amount < 1000000
+          && d.date is string && d.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          && d.categoryId is string && d.categoryId != ''
+          && d.files is list && d.files.size() <= 30
+          && d.paymentDetails is string && d.paymentDetails.size() >= 3
+          && (d.get('special', false) != true || (d.get('specialReason', '') is string && d.get('specialReason', '').size() >= 10))
+          && d.status == 'pending' && d.get('decidedById', '') == '' && d.get('decidedTs', null) == null && d.get('moneyOutId', '') == '';
+      }
+      allow read: if isMember() && (mine(resource.data) || claimRaiser());
+      allow create: if isMember() && claimOk(request.resource.data)
+        && request.resource.data.id == claimId
+        && request.resource.data.raisedById == request.auth.uid
+        && (request.resource.data.memberId == request.auth.uid || claimRaiser());
+      allow update: if isSuper() || isMember() && (
+        (resource.data.status in ['pending', 'rejected'] && mine(resource.data)
+          && claimOk(request.resource.data)
+          && request.resource.data.diff(resource.data).unchangedKeys().hasAll(['id', 'memberId', 'memberName', 'raisedById', 'raisedByName', 'submittedAt']))
+        || (isManagement() && resource.data.status == 'pending' && !mine(resource.data)
+          && request.resource.data.decidedById == request.auth.uid
+          && request.resource.data.get('decidedTs', null) == request.time
+          && ((request.resource.data.status == 'rejected'
+                && request.resource.data.get('rejectReason', '') is string && request.resource.data.get('rejectReason', '').size() >= 3
+                && onlyChanged(['status', 'decidedById', 'decidedByName', 'decidedAt', 'decidedTs', 'rejectReason']))
+              || (request.resource.data.status == 'approved'
+                && request.resource.data.get('moneyOutId', '') == 'claim_' + claimId
+                && existsAfter(/databases/$(database)/documents/money_out/$('claim_' + claimId))
+                && onlyChanged(['status', 'decidedById', 'decidedByName', 'decidedAt', 'decidedTs', 'rejectReason', 'moneyOutId']))))
+      );
+      allow delete: if isSuper() || (isMember() && resource.data.status in ['pending', 'rejected'] && (mine(resource.data) || isManagement()));
     }
 
     // Paid on behalf of the client (2026-10-22): reimbursement invoices to the client for costs we paid on their

@@ -192,7 +192,7 @@ export function registerAccountsPortalRoutes(app: Express) {
       const { docs, paths } = await docsForPayment(db, id);
       const d = docs.find(x => x.id === docId);
       const path = d ? paths.get(d.id) || '' : '';
-      if (!d || !/^(receipts|checklist_files)\//.test(path)) throw new UserError(404, 'not-found', 'That document is not on this payment any more. Reload the page.');
+      if (!d || !/^(receipts|checklist_files|claims)\//.test(path)) throw new UserError(404, 'not-found', 'That document is not on this payment any more. Reload the page.');
       let buf: Buffer;
       try { [buf] = await getStorage(getApps()[0]).bucket((firebaseConfig as any).storageBucket).file(path).download(); }
       catch { throw new UserError(404, 'file-missing', `"${d.name}" could not be found in the file storage. Ask Admin to upload it again.`); }

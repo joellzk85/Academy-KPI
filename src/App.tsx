@@ -54,6 +54,8 @@ const LoginLog = React.lazy(() => import('./components/LoginLog'));
 // Accounts portal (2026-10-28): the whole app for an Accounts login; Management opens it at /accounts, view only.
 const AccountsPortal = React.lazy(() => import('./components/AccountsPortal'));
 const AccountsPortalSettings = React.lazy(() => import('./components/AccountsPortalSettings'));
+// Staff claims (2026-10-28): Management → Claims (approve, all claims, settings).
+const ClaimsManager = React.lazy(() => import('./components/ClaimsManager'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
 import { Representative, CalendarEvent, TeamMember, CrmMember, isCrmMember, ROLE_LABELS } from './types';
@@ -272,7 +274,7 @@ function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: Crm
   useKpiLibrary();
   // Login history (Team → Login log): counts this person's active minutes in the CRM.
   useActivityTracker(currentMember.id);
-  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks' | 'accounts'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks' | 'accounts' | 'claims'>('dashboard');
   // A screen moved to the private room leaves the Management menu (lib/privateScreens.ts).
   useEffect(() => { if (screensOff.includes(managementView as MovableScreen)) setManagementView('dashboard'); }, [screensOff, managementView]);
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
@@ -1070,7 +1072,7 @@ function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: Crm
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['accounts', 'Accounts portal'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'KPI & appraisal'], ['data', 'Data tools']] as const).filter(([key]) => !screensOff.includes(key as MovableScreen)).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['claims', 'Claims'], ['accounts', 'Accounts portal'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'KPI & appraisal'], ['data', 'Data tools']] as const).filter(([key]) => !screensOff.includes(key as MovableScreen)).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -1100,6 +1102,9 @@ function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: Crm
                 <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'payments' ? (
                 <PaymentTracking pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }} onOpenDeal={homeNav.openDeal} />
+              ) : managementView === 'claims' ? (
+                <ClaimsManager viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+                  people={teamMembers.filter(m => m.active).map(m => ({ id: m.id, name: m.name, role: m.role }))} deals={pipelinesSync} />
               ) : managementView === 'accounts' ? (
                 <AccountsPortalSettings teamMembers={allMembers} />
               ) : managementView === 'checks' ? (

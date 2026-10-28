@@ -29,6 +29,7 @@ import { isSuperManager } from '../lib/superManager';
 import { waitingOn } from '../lib/oneToOne';
 const InternalTrainerPortal = React.lazy(() => import('./TrainerPortal').then(m => ({ default: m.InternalTrainerPortal })));
 const OneToOnePage = React.lazy(() => import('./OneToOnePage'));
+const MyClaims = React.lazy(() => import('./MyClaims'));
 
 interface RepDetailDashboardProps {
   rep: Representative;
@@ -49,7 +50,7 @@ interface RepDetailDashboardProps {
   onOpenSubTabHandled?: () => void;
 }
 
-type SubTab = 'one_to_one' | 'my_trainings' | 'quotation' | 'kpi' | 'present' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
+type SubTab = 'claims' | 'one_to_one' | 'my_trainings' | 'quotation' | 'kpi' | 'present' | 'client' | 'faci' | 'trainerList' | 'venue' | 'tasks' | 'pl' | 'payment' | 'pipeline' | 'course_outline' | 'teambuilding' | 'admin_record' | 'appointments' | 'client_payments';
 
 
 // Tombstone list of pipeline IDs the user has deleted, so other views
@@ -1345,6 +1346,8 @@ export default function RepDetailDashboard({
     // works with the person's own login).
     ...(myTrainerRecord && (!viewer || viewer.id === rep.id) ? [{ key: 'my_trainings' as const, label: MENU_LABELS.my_trainings }] : []),
     ...(otoMenu ? [{ key: 'one_to_one' as const, label: MENU_LABELS.one_to_one, count: otoWaiting, alert: otoWaiting ? `${otoWaiting} 1-to-1 waiting for you` : undefined }] : []),
+    // Staff claims (2026-10-28): own workspace only (claims are private to the person and Management → Claims).
+    ...(ownSpace ? [{ key: 'claims' as const, label: MENU_LABELS.claims }] : []),
   ];
 
   const getSectionTitle = () => {
@@ -1378,7 +1381,12 @@ export default function RepDetailDashboard({
         {/* Right Side: Active Workspace Section */}
         <div className="min-w-0 flex-1 space-y-5">
           
-          {activeSubTab === 'one_to_one' ? (
+          {activeSubTab === 'claims' ? (
+            ownSpace
+              ? <Suspense fallback={null}><MyClaims key={rep.id} viewer={viewer || { id: rep.id, name: rep.name, role: (rep.role as any) || 'rep' }}
+                  people={reps.map(r => ({ id: r.id, name: r.name, role: r.role }))} deals={pipelines} /></Suspense>
+              : <p className="rounded-2xl border border-line bg-white p-5 text-[15px] text-ink-soft">Claims are private. Management sees everyone's in Management → Claims.</p>
+          ) : activeSubTab === 'one_to_one' ? (
             otoMenu
               ? <Suspense fallback={null}><OneToOnePage key={rep.id} me={viewer || { id: rep.id, name: rep.name, role: (rep.role as any) || 'rep' }} reps={reps} month={selectedMonth} startPersonId={ownSpace ? undefined : rep.id} /></Suspense>
               : <p className="rounded-2xl border border-line bg-white p-5 text-[15px] text-ink-soft">1-to-1 sessions are private to the two people in them.</p>

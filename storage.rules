@@ -64,6 +64,22 @@ service firebase.storage {
       allow delete: if isStaff() && (resource.metadata.uploadedBy == request.auth.uid || isManagement());
     }
 
+    // Staff claim receipts (2026-10-28, src/lib/claims.ts): claims/{memberId}/{claimId}_{n}_{name}. The person uploads
+    // their own; Management and the people ticked in Claims → Settings (raiseForOthers) also upload for someone else.
+    // Read by the person, whoever uploaded it, and Admin / Management (the payment for accounts carries them).
+    match /claims/{memberId}/{fileName} {
+      allow read: if isStaff() || (isMember() && (memberId == request.auth.uid || resource.metadata.uploadedBy == request.auth.uid));
+      allow create: if isMember()
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType.matches('application/(pdf|msword|vnd[.]ms-excel|vnd[.]openxmlformats-officedocument[.](wordprocessingml[.]document|spreadsheetml[.]sheet))|image/(jpeg|png)')
+        && request.resource.metadata.uploadedBy == request.auth.uid
+        && (memberId == request.auth.uid || isManagement()
+            || (firestore.exists(/databases/(default)/documents/config/claim_settings)
+                && request.auth.uid in firestore.get(/databases/(default)/documents/config/claim_settings).data.get('raiseForOthers', [])));
+      allow update: if false;
+      allow delete: if isMember() && (resource.metadata.uploadedBy == request.auth.uid || memberId == request.auth.uid || isManagement());
+    }
+
     // Course outline files on a programme (2026-10-23): programme_files/{programmeId}/{id}_{name}. Admin and
     // Management upload and remove them (Admin work → Programmes); everyone on the team opens them from a deal.
     match /programme_files/{programmeId}/{fileName} {
