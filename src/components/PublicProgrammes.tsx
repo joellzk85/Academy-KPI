@@ -2,14 +2,14 @@
 // Opened from Deals → "Public programmes". Everyone sees the runs and their seats; Admin and Management set up,
 // change, cancel or move a run. Each company is a normal deal: "Add a company" opens the New deal form on this run.
 import React, { useEffect, useMemo, useState } from 'react';
-import { doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { ArrowLeft, CalendarDays, GraduationCap, ListChecks, Loader2, MapPin, Pencil, Plus, Search, Users, X, XCircle } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import {
   FUNDING_LABELS, FundingType, STAGE_LABELS, dealOwnerId, dealStage, dealValue, formatRM, parseTrainingDays, todayIso, trainingDateText, trainingDays,
 } from '../lib/deals';
 import {
-  PublicProgramme, RUN_STATE_LABELS, RunState, cancelProblem, howToMove, joinableRuns, paxOf, runAsDeal, runDeals, runProblem, runSeats, runState, waitingDeals, withRunPicks,
+  PublicProgramme, RUN_STATE_LABELS, RunState, cancelProblem, howToMove, joinableRuns, paxOf, runAsDeal, runDeals, runPL, runProblem, runSeats, runState, waitingDeals, withRunPicks,
 } from '../lib/publicProgrammes';
 import { CANCEL_LOST_REASON, CANCEL_REASONS, TrainingChange } from '../lib/trainingChange';
 import { Programme } from '../lib/programmes';
@@ -21,6 +21,10 @@ import ListPager from './ListPager';
 import { useFormDraft } from '../lib/useFormDraft';
 import { usePaged } from '../lib/listPaging';
 import DealChecklist from './DealChecklist';
+import { useMoneySettings } from './Money';
+import { projectRows } from '../lib/projectPL';
+import { MoneyIn, MoneyOut, inPL } from '../lib/money';
+import { linkedOnly, withoutDeleted } from '../lib/linked';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -536,6 +540,7 @@ function RunPanel({ run, runs, deals, outlines, viewer, today, clientName, perso
 
       {/* Batch 2, part A (2026-10-28): venue, trainer, logistics, costs and training day, once for the whole run */}
       <RunOperations run={run} pax={s.seats} viewer={viewer} />
+      {staff && <RunPL run={run} deals={deals} />}
 
       {Array.isArray(run.history) && run.history.length > 0 && (
         <section>
@@ -548,6 +553,60 @@ function RunPanel({ run, runs, deals, outlines, viewer, today, clientName, perso
         </section>
       )}
     </div>
+  );
+}
+
+// One P&L for the run (part B, 2026-10-28; Admin and Management, it shows costs): the won companies' P&L rows, each with
+// its pax share of the run's costs (projectRows → runCostShares), added up; one line per company.
+function RunPL({ run, deals }: { run: PublicProgramme; deals: any[] }) {
+  const settings = useMoneySettings();
+  const [ins, setIns] = useState<MoneyIn[]>([]);
+  const [outs, setOuts] = useState<MoneyOut[]>([]);
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const [plDocs, setPlDocs] = useState<Record<string, any>>({});
+  const companies = useMemo(() => deals.filter(p => p.publicProgrammeId === run.id && p.deleted !== true && dealStage(p) === 'won'), [deals, run.id]);
+  const ids = companies.map(p => p.id).join(',');
+  useEffect(() => {
+    const want = new Set([run.id, ...ids.split(',').filter(Boolean)]);
+    const subs = [
+      onSnapshot(query(collection(db, 'money_in'), where('dealId', 'in', [...want].slice(0, 30))), s => setIns(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyIn), id: d.id })))), () => setIns([])),
+      onSnapshot(query(collection(db, 'money_out'), where('dealId', 'in', [...want].slice(0, 30))), s => setOuts(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))), () => setOuts([])),
+      onSnapshot(query(collection(db, 'quotations'), where('pipelineId', 'in', [...want].slice(0, 30))), s => setQuotes(linkedOnly(s.docs.map(d => ({ ...d.data(), id: d.id })))), () => setQuotes([])),
+      onSnapshot(query(collection(db, 'project_pl')), s => setPlDocs(Object.fromEntries(s.docs.filter(d => want.has(d.id)).map(d => [d.id, d.data()]))), () => setPlDocs({})),
+    ];
+    return () => subs.forEach(u => u());
+  }, [run.id, ids]);
+  const rows = useMemo(() => projectRows(companies, ins, outs, settings, todayIso(), { quotes, plDocs }), [companies, ins, outs, settings, quotes, plDocs]);
+  const pl = runPL(rows);
+  const runCosts = outs.filter(o => o.dealId === run.id && (o.status === 'approved' || o.status === 'paid') && inPL(o)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  const waiting = outs.filter(o => o.dealId === run.id && o.status === 'pending').reduce((t, o) => t + (Number(o.amount) || 0), 0);
+  if (!companies.length) return null;
+  const tile = (labelText: string, value: string, tone = '') => (
+    <div className="rounded-xl border border-line bg-white px-3 py-2.5"><p className="text-xs font-semibold text-ink-soft">{labelText}</p><p className={`mt-0.5 font-bold tabular-nums ${tone}`}>{value}</p></div>
+  );
+  return (
+    <section>
+      <h4 className="mb-1 font-semibold">P&amp;L for this programme</h4>
+      <p className="mb-2 text-sm text-ink-soft">All won companies together. The programme's costs ({formatRM(runCosts)} approved or paid{waiting ? `, ${formatRM(waiting)} waiting approval` : ''}) are shared out to the companies by pax, so each company's own P&amp;L and its rep's GP % carry their share.</p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {tile(rows.some(r => r.estimate) ? 'Income (some estimated)' : 'Income', formatRM(pl.income))}
+        {tile('SST, HRDC %, commission', formatRM(pl.sst + pl.hrdcFee + pl.commission))}
+        {tile('Costs', formatRM(pl.costs))}
+        {tile(`Profit · GP ${pl.margin.toFixed(1)}%`, formatRM(pl.profit), pl.profit < 0 ? 'text-danger' : 'text-accent')}
+      </div>
+      <div className="mt-2 overflow-hidden rounded-xl border border-line">
+        <ul className="divide-y divide-line text-sm">
+          {rows.map(r => (
+            <li key={r.deal.id} className="flex flex-wrap items-center gap-x-4 gap-y-0.5 px-3.5 py-2">
+              <span className="min-w-0 flex-1 font-semibold">{r.deal.client || 'Company'} <span className="font-normal text-ink-soft">· {paxOf(r.deal)} pax</span></span>
+              <span className="tabular-nums text-ink-soft">Income {formatRM(r.income)}</span>
+              <span className="tabular-nums text-ink-soft">Costs {formatRM(r.costs)}</span>
+              <span className={`w-36 text-right font-semibold tabular-nums ${r.profit < 0 ? 'text-danger' : ''}`}>Profit {formatRM(r.profit)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
   );
 }
 

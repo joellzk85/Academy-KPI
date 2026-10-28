@@ -22,6 +22,7 @@ import { mainQuote } from './checklist';
 import { quoteSst } from './quoteSst';
 import { cancelledTraining } from './trainingChange';
 import { CommissionShare, commissionShares, sharesText, sharesTotal } from './coClose';
+import { runCostShares } from './publicProgrammes';
 
 export type TrainingStatus = 'done' | 'today' | 'upcoming' | 'no_date' | 'cancelled';
 export type MoneyStatus = 'settled' | 'waiting' | 'not_invoiced';
@@ -121,7 +122,9 @@ export function projectRow(deal: any, allIns: MoneyIn[], allOuts: MoneyOut[], al
 }
 
 // Every won deal, newest training first; deals without a date last. Cancelled trainings stay while they have money on them.
-export function projectRows(deals: any[], ins: MoneyIn[], outs: MoneyOut[], s: MoneySettings, today = todayIso(), x: PLExtras = NO_EXTRAS): ProjectRow[] {
+// Public programmes (2026-10-28): each run's costs are shared out to its won companies by pax (runCostShares).
+export function projectRows(deals: any[], ins: MoneyIn[], allOuts: MoneyOut[], s: MoneySettings, today = todayIso(), x: PLExtras = NO_EXTRAS): ProjectRow[] {
+  const outs = [...allOuts, ...runCostShares(deals, allOuts)];
   return deals
     .filter(d => dealStage(d) === 'won' || (cancelledTraining(d) && (ins.some(m => m.dealId === d.id) || outs.some(o => o.dealId === d.id && (o.status === 'approved' || o.status === 'paid') && inPL(o)))))
     .map(d => projectRow(d, ins, outs, s, today, x))

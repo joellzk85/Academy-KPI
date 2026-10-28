@@ -74,7 +74,7 @@ export async function setReportStep(dealId: string, viewer: Viewer, done: boolea
 }
 
 // HR's copy or the head of department's (2026-10-27): only the sections ticked for that copy.
-async function savePdf(r: TrainingReport, h: ReportHeader, settings: ReportSettings, copy: CopyKind = 'hr') {
+export async function savePdf(r: TrainingReport, h: ReportHeader, settings: ReportSettings, copy: CopyKind = 'hr') {
   const [{ default: TrainingReportDocument }, { makeDocumentPdf }] = await Promise.all([import('./TrainingReportDocument'), import('../lib/quotePdf')]);
   const blob = await makeDocumentPdf(React.createElement(TrainingReportDocument, { r: copyOf(r, settings, copy), h }), `Training report ${h.programme}`);
   const url = URL.createObjectURL(blob);

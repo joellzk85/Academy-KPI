@@ -3,7 +3,7 @@ import { collection, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc,
 import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, ClipboardList, FileText, ListChecks, Loader2, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso, trainingDateText, trainingDayList, trainingEndDate } from '../lib/deals';
-import { TrainingReportBox } from './TrainingReportAdmin';
+import { TrainingReportBox, savePdf, useReportSettings, useTrainingReport } from './TrainingReportAdmin';
 import {
   ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS, Picked, applicableTasks, asksNeeded, buildChecklist,
   approvalCodeOf, coTrainerShort, coTrainerText, isLockedStep, effectiveTrainer, isCoTrainer, leadTrainerTask, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
@@ -27,7 +27,8 @@ import { vendorForTrainer } from '../lib/vendors';
 import { askReason } from '../lib/moneyActions';
 import { grantEmployers, groupGrantBlock } from '../lib/grantEmployers';
 import { EmployerList, EmployersEditor, byId, useClientList } from './GrantEmployers';
-import { MIRRORED_STEP, checklistScope, isMirroredStep, isRunDeal, withRunPicks } from '../lib/publicProgrammes';
+import { MIRRORED_STEP, allNames, checklistScope, companyReport, isMirroredStep, isRunDeal, withRunPicks } from '../lib/publicProgrammes';
+import { STATUS_TEXT, dealPax } from '../lib/trainingReport';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -154,6 +155,8 @@ export default function DealChecklist({
   // The T3 form maker on the Attendance list step: HRDC deals, Admin and Management.
   const t3Shown = editable && isHrdc(deal.fundingType);
   const t3 = useT3(deal.id, editable, checklist?.t3);
+  // A public programme's report starts with every company's T3 names (part B, 2026-10-28).
+  const runNames = useRunT3Names(isRunDeal(deal) && editable ? deal.id : '');
   const [nameList, setNameList] = useState<{ files: File[]; at: number } | null>(null);
 
   // Costs raised from the steps (money_out), their receipts, and the vendors: Admin and Management only.
@@ -503,7 +506,7 @@ export default function DealChecklist({
                   return (
                     <TrainingReportBox deal={deal} viewer={viewer} trainerId={tr?.id || ''} trainerName={tr?.name || 'The trainer'} internalIds={trainers.filter(isInternalTrainer).map(x => x.id)}
                       header={{ programme: deal.courseName || '', client: deal.client || '', dates: trainingDateText(deal, true), venue: effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || '', trainer: tr?.name || '', grantNumber: approvalCodeOf(allTasks) }}
-                      names={(t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
+                      names={isRunDeal(deal) ? runNames : (t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
                       onChecked={() => { if (!t.done) patch(t.id, doneBy(), `${t.label}: checked, done`); }}
                       onReopened={() => { if (t.done) patch(t.id, openAgain, `${t.label}: reopened`); }} />
                   );
@@ -521,6 +524,10 @@ export default function DealChecklist({
           </li>
         ))}
       </ul>
+      {/* Public programme (part B): the run's training report, with this company's own HR and HOD copies */}
+      {editable && part !== 'before' && deal.publicProgrammeId && !isRunDeal(deal) && (
+        <CompanyReportBox deal={deal} approvalCode={approvalCodeOf(allTasks)} names={(t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} />
+      )}
 
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
 
@@ -826,6 +833,66 @@ function CodeBox({ id, label, hint, value, busy, onSave }: { id: string; label: 
       <label className={small} htmlFor={id}>{label} <span className="font-normal">({hint})</span></label>
       <input id={id} value={v} disabled={busy} onChange={e => setV(e.target.value)} onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} className={`${input} font-mono`} />
+    </div>
+  );
+}
+
+// ---------- Public programmes, part B (2026-10-28) ----------
+// The names on every company's T3 list (deal_t3, Admin and Management), for the run's training report.
+function useRunT3Names(runId: string): string[] {
+  const [names, setNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (!runId) { setNames([]); return; }
+    let live = true;
+    (async () => {
+      const deals = await getDocs(query(collection(db, 'pipelines'), where('publicProgrammeId', '==', runId)));
+      const lists = await Promise.all(deals.docs.filter(d => (d.data() as any).deleted !== true && (d.data() as any).stage === 'won')
+        .map(d => getDoc(doc(db, 'deal_t3', d.id)).then(s => (((s.data() as any)?.t3?.trainees || []) as any[]).map(x => String(x?.name || ''))).catch(() => [] as string[])));
+      if (live) setNames(allNames(lists));
+    })().catch(() => { if (live) setNames([]); });
+    return () => { live = false; };
+  }, [runId]);
+  return names;
+}
+
+// A company on a public programme: the run's training report (written once by the trainer), with this company's own
+// copies for HR and the HOD, keeping only its people (matched to its T3 list).
+function CompanyReportBox({ deal, approvalCode, names }: { deal: any; approvalCode: string; names: string[] }) {
+  const r = useTrainingReport(deal.publicProgrammeId);
+  const settings = useReportSettings();
+  const [run, setRun] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { getDoc(doc(db, 'public_programmes', deal.publicProgrammeId)).then(s => setRun(s.data() || null)).catch(() => setRun(null)); }, [deal.publicProgrammeId]);
+  if (r === undefined) return null;
+  const pdf = async (copy: 'hr' | 'hod') => {
+    if (!r) return;
+    setBusy(true); setError('');
+    try {
+      await savePdf(companyReport(r, names, dealPax(deal)), {
+        programme: deal.courseName || run?.title || '', client: deal.client || '', dates: trainingDateText(deal, true),
+        venue: run?.venueName || '', trainer: r.trainerName || run?.trainerName || '', grantNumber: approvalCode,
+      }, settings, copy);
+    } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded-xl border border-line bg-white px-3.5 py-3">
+      <p className="font-semibold">Training report <span className="ml-1 rounded bg-surface px-1.5 py-0.5 text-xs font-medium text-ink-soft">From the public programme</span></p>
+      <p className="mt-0.5 text-sm text-ink-soft">
+        {!r ? 'The trainer writes one report for the whole programme; it is checked there.'
+          : r.status === 'checked' ? `Checked${r.checkedByName ? ` by ${r.checkedByName}` : ''}. ${deal.client || 'This company'}'s copies show only its own staff${names.length ? ` (${names.length} on its T3 list)` : ': add its T3 name list on the Attendance list step first, or no person is shown'}.`
+          : `${STATUS_TEXT[r.status]}: HR's copy is ready once the report is checked on the programme.`}
+      </p>
+      {r?.status === 'checked' && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {(['hr', 'hod'] as const).map(c => (
+            <button key={c} type="button" className={btnSecondary} disabled={busy} onClick={() => pdf(c)}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} PDF for {c === 'hr' ? 'HR' : 'HOD'}
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
     </div>
   );
 }

@@ -18,7 +18,7 @@ export function gpAlerts(row: ProjectRow, outs: MoneyOut[], redPct: number, forO
   const dealId = row.deal?.id || '';
   if (!dealId || row.training === 'cancelled') return [];
   const out: GpAlert[] = [];
-  const mine = outs.filter(o => o.dealId === dealId && o.status !== 'rejected' && !(o as any).deleted);
+  const mine = outs.filter(o => o.dealId === dealId && o.status !== 'rejected' && !(o as any).deleted && !(o as any).shareOf);   // a run's cost is flagged once, not per company
   mine.filter(o => !o.onBehalf && !inPL(o)).forEach(o => out.push({
     dealId, kind: 'not_in_pl', level: 'attention',
     text: `Cost left out of the P&L: ${o.category}${forOwner ? '' : ` · ${o.payee} · ${rm(Number(o.amount) || 0)}`}${o.notInPLReason ? ` (${o.notInPLReason})` : ''}`,

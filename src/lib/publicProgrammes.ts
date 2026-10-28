@@ -234,6 +234,75 @@ export function withRunPicks<T extends { id?: string; kind?: string; done?: bool
 /** "Public programme: TITLE" for lists that name the client of a cost or training. */
 export const runLabel = (d: any) => `Public programme: ${d?.publicRunTitle || d?.courseName || ''}`;
 
+// ---------- Batch 2, part B (2026-10-28): each company's share of the run's costs ----------
+// Joel: "Split by pax". A run's costs (money_out with dealId = the run's id) are shared out to its won companies by their
+// pax (4 of 20 pax = 20% of each cost), so each company's P&L, the rep's GP % KPI and the GP alerts are fair. The shares
+// are worked out when the P&L is calculated (never saved): pass deals and costs through runCostShares and add the result
+// to the costs given to projectRow / projectRows. Only for P&L sums: never list them as payments.
+
+/** A run's costs shared out to its won companies by pax (equally when none has pax). Each share is a copy of the cost
+ *  on the company's deal with `shareOf` (the run cost's id) and `sharePct`; the shares of one cost add up to it exactly. */
+export function runCostShares(deals: any[], outs: any[]): any[] {
+  const byRun = new Map<string, any[]>();
+  deals.forEach(p => {
+    if (!p?.publicProgrammeId || p.deleted === true || dealStage(p) !== 'won') return;
+    byRun.set(p.publicProgrammeId, [...(byRun.get(p.publicProgrammeId) || []), p]);
+  });
+  if (!byRun.size) return [];
+  const out: any[] = [];
+  outs.forEach(o => {
+    const companies = byRun.get(o?.dealId);
+    if (!companies?.length || o.shareOf) return;
+    const total = companies.reduce((t, p) => t + paxOf(p), 0);
+    const weights = companies.map(p => (total > 0 ? paxOf(p) / total : 1 / companies.length));
+    const sen = Math.round((Number(o.amount) || 0) * 100);
+    let left = sen;
+    companies.forEach((p, i) => {
+      if (!weights[i]) return;
+      const last = companies.slice(i + 1).every((_, j) => !weights[i + 1 + j]);
+      const part = last ? left : Math.round(sen * weights[i]);
+      left -= part;
+      out.push({ ...o, id: `${o.id}~${p.id}`, dealId: p.id, amount: part / 100, shareOf: o.id, sharePct: Math.round(weights[i] * 1000) / 10 });
+    });
+  });
+  return out;
+}
+
+/** One P&L for the run: the won companies' rows (with their shares) added up. */
+export function runPL(rows: { income: number; sst: number; hrdcFee: number; commission: number; costs: number; profit: number; received: number }[]) {
+  const sum = (k: keyof (typeof rows)[number]) => rows.reduce((t, r) => t + (Number(r[k]) || 0), 0);
+  const income = sum('income'), sst = sum('sst'), profit = sum('profit');
+  return { companies: rows.length, income, sst, hrdcFee: sum('hrdcFee'), commission: sum('commission'), costs: sum('costs'), profit, received: sum('received'),
+    margin: income - sst > 0 ? (profit / (income - sst)) * 100 : 0 };
+}
+
+// ---------- Batch 2, part B: each company's copy of the run's training report ----------
+// The trainer writes one report on the run (training_reports/{runId}). Each company's HR (and HOD) copy keeps only that
+// company's people, matched by name to the company's T3 list: attendance (absent, late), outstanding, needs attention,
+// follow-ups, scores and notes per person; registered = the company's pax. Everything about the training as a whole
+// (summary, objectives, observations, topics, photos, actions) stays. No T3 names: no person is printed.
+
+const normName = (s: any) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+export function companyReport<R extends Record<string, any>>(r: R, names: string[], pax: number): R {
+  const mine = new Set(names.map(normName).filter(Boolean));
+  const keep = (n: any) => mine.has(normName(n));
+  const x: any = { ...r, registered: pax > 0 ? pax : r.registered };
+  x.days = (r.days || []).map((d: any) => ({ ...d, absent: (d.absent || []).filter(keep), late: (d.late || []).filter(keep) }));
+  x.outstanding = (r.outstanding || []).filter((p: any) => keep(p?.name));
+  x.attention = (r.attention || []).filter((p: any) => keep(p?.name));
+  x.followUps = (r.followUps || []).filter((p: any) => keep(p?.name));
+  if (r.scores) x.scores = { ...r.scores, rows: (r.scores.rows || []).filter((p: any) => keep(p?.name)) };
+  if (r.personNotes) x.personNotes = r.personNotes.filter((p: any) => keep(p?.name));
+  return x;
+}
+
+/** Everyone on the companies' T3 lists, once each (the run's report starts with these names). */
+export function allNames(lists: string[][]): string[] {
+  const seen = new Set<string>();
+  return lists.flat().map(n => String(n || '').trim()).filter(n => n && !seen.has(normName(n)) && (seen.add(normName(n)), true));
+}
+
 /** Won deals with a change already waiting for approval. A run isn't moved or cancelled while there are any, so no
  *  company is left behind on the old date. */
 export const waitingDeals = (list: any[], cancel = false): any[] => list.filter(p => howToMove(p, cancel).kind === 'busy');

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { AlertTriangle, Check, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { callServer, db, friendlyError } from '../lib/firebase';
 import { addDays, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
@@ -28,7 +28,7 @@ import { behalfOuts, behalfStatus } from '../lib/onBehalf';
 import { OwedByClients, useClaimBacks } from './ClaimBacks';
 import { useReceipts } from './PaymentReceipts';
 import { useRunDeals } from '../lib/useRunDeals';
-import { isRunDeal, runLabel } from '../lib/publicProgrammes';
+import { isRunDeal, runCostShares, runLabel } from '../lib/publicProgrammes';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -99,7 +99,10 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
   deal: any; viewer: Viewer; ins: MoneyIn[]; outs: MoneyOut[]; settings: MoneySettings; quotes?: any[];
 }) {
   const plDocs = useTypedSst(deal.id);
-  const row = projectRow(deal, ins, outs, settings, todayIso(), { quotes, plDocs });
+  // A public programme's company (2026-10-28): its pax share of the run's costs counts in its P&L.
+  const shares = useRunShares(deal);
+  const row = projectRow(deal, ins, [...outs, ...shares], settings, todayIso(), { quotes, plDocs });
+  const shareTotal = shares.filter(o => o.status === 'approved' || o.status === 'paid').reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const approvable = outs.filter(o => canDecide(o, viewer) && !isTrainerFee(o) && feeIsAgreed(o));
   const behalfTotal = behalfOuts(outs).reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const { busy, error, run } = useRun();
@@ -122,6 +125,11 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
       <p className="text-sm text-ink-soft">
         SST {formatRM(row.sst)}{row.sstTyped ? ' (typed in Project P&L)' : ''} · HRDC {formatRM(row.hrdcFee)} · Commission {row.commissionShares.length > 1 ? '' : `${row.commissionPct}% `}{formatRM(row.commission)} ({row.commissionShares.length > 1 ? `co-closed: ${row.commissionShares.map(x => `${x.id === row.commissionTo ? (deal.ownerName || 'owner') : (deal.coCloserName || 'co-closer')} ${x.label} ${formatRM(x.amount)}`).join(', ')}` : 'sales person'}) · Costs approved or paid {formatRM(row.costs)}
       </p>
+      {deal.publicProgrammeId && (
+        <p className="rounded-lg bg-surface px-3 py-2 text-sm text-ink-soft">
+          Public programme: costs include this company's share of the programme's costs, {formatRM(shareTotal)}{shares[0] ? ` (${(shares[0] as any).sharePct}%, by pax)` : ''}. They are raised and paid once on the programme.
+        </p>
+      )}
       <p className="text-sm text-ink-soft">
         {row.estimate ? 'Expected (nothing invoiced yet)' : 'Invoiced, not paid yet'}: <strong className="text-ink">{formatRM(row.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(row.toPayOut)}</strong>
         {row.pendingApproval > 0 && <> · Waiting for approval (not counted yet): <strong className="text-ink">{formatRM(row.pendingApproval)}</strong></>}
@@ -166,6 +174,22 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
 
 /** The SST amount Management typed for this deal in Project P&L (project_pl/{dealId}), so the deal shows the same
  *  profit. Admin can read it once firestore.rules is published; until then (or if none) the automatic SST is used. */
+// A company's pax share of its public programme's costs (lib/publicProgrammes.ts runCostShares), for its P&L.
+function useRunShares(deal: any): MoneyOut[] {
+  const runId = String(deal?.publicProgrammeId || '');
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [runOuts, setRunOuts] = useState<MoneyOut[]>([]);
+  useEffect(() => {
+    if (!runId) { setCompanies([]); setRunOuts([]); return; }
+    const subs = [
+      onSnapshot(query(collection(db, 'pipelines'), where('publicProgrammeId', '==', runId)), s => setCompanies(s.docs.map(d => ({ ...d.data(), id: d.id }))), () => setCompanies([])),
+      onSnapshot(query(collection(db, 'money_out'), where('dealId', '==', runId)), s => setRunOuts(withoutDeleted(s.docs.map(d => ({ ...(d.data() as MoneyOut), id: d.id })))), () => setRunOuts([])),
+    ];
+    return () => subs.forEach(u => u());
+  }, [runId]);
+  return useMemo(() => runCostShares(companies, runOuts).filter(o => o.dealId === deal?.id), [companies, runOuts, deal?.id]);
+}
+
 function useTypedSst(dealId: string): Record<string, { sstAmount?: number | null }> {
   const [plDocs, setPlDocs] = useState<Record<string, { sstAmount?: number | null }>>({});
   useEffect(() => {

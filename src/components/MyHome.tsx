@@ -54,7 +54,7 @@ import { isOpenDiscovery } from '../lib/discovery';
 import { GpAlert, gpAlerts } from '../lib/gpAlerts';
 import { activeKpiLibrary } from '../lib/kpiLibrary';
 import { useRunDeals } from '../lib/useRunDeals';
-import { isRunDeal } from '../lib/publicProgrammes';
+import { isRunDeal, runCostShares } from '../lib/publicProgrammes';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -1259,10 +1259,12 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       const gpItems: Item[] = [];
       const since = new Date(Date.parse(c.today) - 90 * 864e5).toISOString().slice(0, 10);
       const red = activeKpiLibrary().gpBands.red;
+      // Public programmes (2026-10-28): each company's P&L carries its pax share of the run's costs.
+      const plOuts = [...c.moneyOut, ...runCostShares(c.deals, c.moneyOut)];
       c.wonDeals.forEach(p => {
         const ins = c.moneyIn.filter(m => m.dealId === p.id);
         // The one P&L (projectRow, as in Project P&L and the deal): profit after SST, HRDC's %, commission and costs.
-        const row = projectRow(p, ins, c.moneyOut, c.moneySettings, c.today, { quotes: c.quotes, plDocs: c.plDocs });
+        const row = projectRow(p, ins, plOuts, c.moneySettings, c.today, { quotes: c.quotes, plDocs: c.plDocs });
         if (!row.estimate) toComeIn += row.toComeIn;   // invoices and claims sent, not yet paid
         toPay += row.toPayOut; waiting += row.pendingApproval;
         if (ymd(p.trainingDate).startsWith(month)) profitMonth += row.profit;
