@@ -53,6 +53,8 @@ import { trainingEndDate } from '../lib/deals';
 import { isOpenDiscovery } from '../lib/discovery';
 import { GpAlert, gpAlerts } from '../lib/gpAlerts';
 import { activeKpiLibrary } from '../lib/kpiLibrary';
+import { useRunDeals } from '../lib/useRunDeals';
+import { isRunDeal } from '../lib/publicProgrammes';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -371,6 +373,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
   }, [clients, touchPoints, deals, quotes, viewer.id, today, people]);
 
   // KPI sources for the My KPIs card (same counting as the KPI page).
+  const runDeals = useRunDeals(viewer.role !== 'rep');
   const kpiSources = useKpiSources({
     months: [`${MONTH_ABBR[Number(today.slice(5, 7)) - 1]}-${today.slice(2, 4)}`],
     people: representatives.filter(r => r.id === viewer.id),
@@ -381,7 +384,7 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
     viewer, today, deals, wonDeals, checklists, queries, moneyIn, moneyOut, receipts, claims, programmes, representatives, venues,
     ringPeople: workspaces || representatives,
     checklistSettings, moneySettings, nameOf, clientName, openDeal, nav, mine, notices, shared, clientFollowUps,
-    docLinks,
+    docLinks, runDeals,
     openedLinks: docLinks.filter(l => seesLink(viewer, trackingSettings, l)),
     quotes, plDocs, trainerJobs, reportsToCheck, ownGpAlerts,
     deleteAsks: Object.values(deleteAsks).flat(),
@@ -833,6 +836,7 @@ type CardCtx = {
   quotes: any[]; plDocs: Record<string, any>;   // for the one P&L (SST from the quotation, or typed in Project P&L)
   trainerJobs: TrainerJob[];
   reportsToCheck: string[];
+  runDeals: any[];      // public programmes as deals (lib/useRunDeals.ts): look-ups of costs, checklists and trainer jobs only
   deleteAsks: any[];   // course outlines and teambuilding proposals asked to delete (lib/docDelete.ts)
   ownGpAlerts: GpAlert[];
 };
@@ -842,12 +846,12 @@ type CardCtx = {
 // Co-trainers (2026-10-22) ask for their fee the same way, on their own step.
 function feeRequestItems(c: CardCtx, deal: (p: any) => string): (Item & { dealId: string; taskId: string })[] {
   const out: (Item & { dealId: string; taskId: string })[] = [];
-  c.wonDeals.forEach(p => {
+  [...c.wonDeals, ...c.runDeals.filter(r => r.stage === 'won')].forEach(p => {
     (c.checklists[p.id]?.tasks || []).filter((t: any) => t.kind === 'trainer' && t.trainerId).forEach((task: any) => {
       const flag = claimFlag(c.trainerJobs.find(j => j.id === jobId(p.id, task.trainerId)), c.moneyOut.filter(o => o.dealId === p.id && o.checklistTaskId === task.id), task.trainerName || 'The trainer');
       if (flag) out.push({
         key: `${p.id}_${task.id}_fee`, dealId: p.id, taskId: task.id, title: `${isCoTrainer(task) ? 'Co-trainer' : 'Trainer'} fee · ${deal(p)}`, level: 'attention',
-        sub: flag, onClick: () => c.openDeal(p),
+        sub: flag, onClick: () => (isRunDeal(p) ? c.nav.openAdminWork('queue', p.id) : c.openDeal(p)),
       });
     });
   });
@@ -969,6 +973,8 @@ function Card({ id, ctx, editing, onRemove, stacked }: { id: CardId; ctx: CardCt
 }
 
 const ymd = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : '');
+// The deal behind a cost, or the public programme it was raised on (2026-10-28).
+const dealById = (c: CardCtx, id: string) => c.deals.find(d => d.id === id) || c.runDeals.find(d => d.id === id);
 
 function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; footer?: React.ReactNode } {
   const deal = (p: any) => `${c.clientName(p)} · ${p.courseName || 'No programme'}`;
@@ -1196,7 +1202,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
         key: `${p.id}_pp${i}`, title: deal(p), level: f.level, sub: f.text, onClick: () => c.nav.openAdminWork('queue', p.id),
       })));
       // Approved and payable, not on a payment summary yet: one line (accounts are sent a summary, 2026-10-21).
-      const ready = c.moneyOut.filter(o => o.status === 'approved' && !o.summaryToken && isPayable(o, c.deals.find(d => d.id === o.dealId), c.today));
+      const ready = c.moneyOut.filter(o => o.status === 'approved' && !o.summaryToken && isPayable(o, dealById(c, o.dealId), c.today));
       if (ready.length) items.push({ key: 'ready_for_summary', title: `${ready.length} approved payment${ready.length === 1 ? '' : 's'} to send to accounts`, sub: `${formatRM(ready.reduce((t, o) => t + (Number(o.amount) || 0), 0))} · make a payment summary in Admin work → Money`, onClick: () => c.nav.openAdminWork('money') });
       c.moneyOut.filter(o => o.status === 'rejected' && !o.trainingCancelled && o.requestedById === c.viewer.id).forEach(o => items.push({ key: o.id, title: `Rejected: ${o.payee} ${formatRM(o.amount)}`, sub: o.rejectReason || 'See the reason and send a new request', level: 'attention', onClick: () => c.nav.openAdminWork('money') }));
       // The person who raised a request hears back when it's approved, for 3 days (Joel, 2026-10-23).
@@ -1209,7 +1215,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
       const fees = feeRequestItems(c, deal);
       // Trainer fees (2026-10-23): agreed before the PO (here as "Agree trainer fee"), approved for payment only from the
       // day after the training, so they don't wait here from booking day.
-      const ended = (o: MoneyOut) => { const p = c.deals.find(d => d.id === o.dealId); const end = p ? trainingEndDate(p) : ''; return !!end && end < c.today; };
+      const ended = (o: MoneyOut) => { const p = dealById(c, o.dealId); const end = p ? trainingEndDate(p) : ''; return !!end && end < c.today; };
       const toAgree = c.moneyOut.filter(o => o.status === 'pending' && !feeIsAgreed(o) && c.viewer.role === 'management' && (o.requestedById !== c.viewer.id || isSuperManager(c.viewer)));
       const list = c.moneyOut.filter(o => canDecide(o, c.viewer) && feeIsAgreed(o) && !(isTrainerFee(o) && !ended(o)) && !fees.some(f => f.dealId === o.dealId && f.taskId === o.checklistTaskId));
       // Training date changes and cancellations (2026-10-21) come first: nothing moves until they're decided.
@@ -1222,7 +1228,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
           }),
           ...fees,
           ...toAgree.map(o => {
-            const p = c.deals.find(d => d.id === o.dealId);
+            const p = dealById(c, o.dealId);
             return { key: `${o.id}_agree`, title: `Agree trainer fee · ${o.payee} · ${formatRM(o.amount)}`, level: 'attention' as Item['level'],
               sub: `${p ? deal(p) : 'Deal'} · raised by ${o.requestedByName} · the PO goes to the trainer once agreed`, onClick: p ? () => c.nav.openAdminWork('queue', p.id) : undefined };
           }),
@@ -1239,7 +1245,7 @@ function cardContent(id: CardId, c: CardCtx): { items: Item[]; empty: string; fo
             onClick: () => c.nav.openManagement('lost'),
           })),
           ...list.map(o => {
-            const p = c.deals.find(d => d.id === o.dealId);
+            const p = dealById(c, o.dealId);
             return { key: o.id, title: `${o.category} · ${o.payee} · ${formatRM(o.amount)}`, sub: `${isCompanyPayment(o) ? 'Company payment' : p ? deal(p) : 'Deal'} · raised by ${o.requestedByName}, ${dateTimeMY(o.resubmittedAt || o.requestedAt)}`, onClick: () => c.nav.openAdminWork('money') };
           }),
         ],

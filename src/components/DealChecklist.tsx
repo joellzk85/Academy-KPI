@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { ArrowDown, ArrowUp, Check, CheckCircle2, Circle, ClipboardList, FileText, ListChecks, Loader2, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso, trainingDateText, trainingDayList, trainingEndDate } from '../lib/deals';
@@ -27,6 +27,7 @@ import { vendorForTrainer } from '../lib/vendors';
 import { askReason } from '../lib/moneyActions';
 import { grantEmployers, groupGrantBlock } from '../lib/grantEmployers';
 import { EmployerList, EmployersEditor, byId, useClientList } from './GrantEmployers';
+import { MIRRORED_STEP, checklistScope, isMirroredStep, isRunDeal, withRunPicks } from '../lib/publicProgrammes';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -47,16 +48,53 @@ export function useChecklistSettings(): ChecklistSettings {
 }
 
 // Creates a deal's checklist from the master list, unless it already has one.
+// Public programmes (2026-10-28, lib/publicProgrammes.ts): the run's checklist holds only the shared steps; a company's
+// only its own, with Training delivered copied from the run.
 export async function startChecklist(deal: any, settings: ChecklistSettings, viewer: Viewer, existing?: any) {
   if (existing) return;
+  let tasks = checklistScope(deal, buildChecklist(settings));
+  if (isRunDeal(deal)) tasks = withRunPicks(tasks, { venueId: deal.runVenueId, venueName: deal.runVenueName, trainerId: deal.runTrainerId, trainerName: deal.runTrainerName });
+  if (deal.publicProgrammeId && !isRunDeal(deal)) {
+    const run = await getDoc(doc(db, 'deal_checklists', deal.publicProgrammeId)).catch(() => null);
+    const from = ((run?.data() as any)?.tasks || []).find((t: ChecklistTask) => t.id === MIRRORED_STEP);
+    if (from?.done) tasks = tasks.map(t => (t.id === MIRRORED_STEP ? { ...t, done: true, doneAt: from.doneAt || '', doneById: from.doneById || '', doneByName: from.doneByName || '' } : t));
+  }
   await setDoc(doc(db, 'deal_checklists', deal.id), {
     dealId: deal.id,
-    tasks: buildChecklist(settings),
+    tasks,
     createdAt: Date.now(),
     createdById: viewer.id,
     createdByName: viewer.name,
     history: [{ at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: 'Checklist started' }],
   });
+}
+
+// Ticking (or reopening) Training delivered on a public programme ticks it on every company's deal that has a checklist,
+// so each company's HRDC claim can go ahead. Returns the companies it couldn't change.
+export async function mirrorDelivered(runId: string, step: ChecklistTask, viewer: Viewer): Promise<string[]> {
+  const deals = await getDocs(query(collection(db, 'pipelines'), where('publicProgrammeId', '==', runId)));
+  const failed: string[] = [];
+  for (const d of deals.docs) {
+    const p: any = d.data();
+    if (p.deleted === true) continue;
+    try {
+      const ref = doc(db, 'deal_checklists', d.id);
+      const cl = await getDoc(ref);
+      if (!cl.exists()) continue;
+      const data: any = cl.data();
+      const tasks: ChecklistTask[] = data.tasks || [];
+      const mine = tasks.find(t => t.id === MIRRORED_STEP);
+      if (!mine || !!mine.done === !!step.done) continue;
+      await updateDoc(ref, {
+        tasks: clean(tasks.map(t => (t.id === MIRRORED_STEP ? { ...t, done: !!step.done, doneAt: step.done ? step.doneAt || '' : '', doneById: step.done ? step.doneById || '' : '', doneByName: step.done ? step.doneByName || '' : '' } : t))),
+        updatedAt: Date.now(),
+        history: [...(data.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action: `${mine.label}: ${step.done ? 'done' : 'reopened'} on the public programme` }].slice(-60),
+      });
+    } catch {
+      failed.push(p.client || d.id);
+    }
+  }
+  return failed;
 }
 
 export function ProgressBar({ done, total, label = true }: { done: number; total: number; label?: boolean }) {
@@ -149,6 +187,12 @@ export default function DealChecklist({
         updatedAt: Date.now(),
         history: [...(checklist?.history || []), { at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action }].slice(-60),
       });
+      // A public programme's Training delivered reaches each company's deal (lib/publicProgrammes.ts).
+      const was = allTasks.find(t => t.id === MIRRORED_STEP), now = next.find(t => t.id === MIRRORED_STEP);
+      if (isRunDeal(deal) && now && !!was?.done !== !!now.done) {
+        const failed = await mirrorDelivered(deal.id, now, viewer);
+        if (failed.length) setError(`Saved here, but these companies' deals couldn't be updated: ${failed.join(', ')}. Try again.`);
+      }
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -161,7 +205,7 @@ export default function DealChecklist({
   const added = useRef('');
   const end = trainingEndDate(deal);
   const ended = !!end && end < todayIso();
-  const missingNew = settings.tasks.filter(m => NEW_STEPS.includes(m.id) && !m.retired && !allTasks.some(t => t.id === m.id));
+  const missingNew = checklistScope(deal, settings.tasks).filter(m => NEW_STEPS.includes(m.id) && !m.retired && !allTasks.some(t => t.id === m.id));
   useEffect(() => {
     if (!editable || !checklist || ended || part === 'after' || !missingNew.length || added.current === deal.id) return;
     added.current = deal.id;
@@ -258,7 +302,7 @@ export default function DealChecklist({
     return save([...allTasks, { id: newTaskId(), label, kind: 'basic', appliesTo: 'all', oneOff: true, ...(part === 'after' ? { after: true } : {}), done: false }], `${label}: added`);
   };
 
-  const missing = settings.tasks.filter(m => !m.retired && inPart(m) && !allTasks.some(t => t.id === m.id));
+  const missing = checklistScope(deal, settings.tasks).filter(m => !m.retired && inPart(m) && !allTasks.some(t => t.id === m.id));
   const addMissing = () => save(withSteps(allTasks, missing), `Added from the master list: ${missing.map(m => m.label).join(', ')}`);
   // Optional steps (Certificates) show last, except while arranging (the arrows move the saved order).
   const last = (t: ChecklistTask) => isOptional(t) && !isCoTrainer(t);   // co-trainers stay next to the trainer
@@ -322,9 +366,12 @@ export default function DealChecklist({
         <p className="text-sm text-ink-soft">HRDC-only steps are hidden because this deal isn't HRDC funded.</p>
       )}
 
+      {deal.publicProgrammeId && !isRunDeal(deal) && (
+        <p className="rounded-lg bg-surface px-3 py-2.5 text-sm text-ink-soft">Public programme: the venue, trainer, logistics and training-day steps are done once on the programme (Deals → Public programmes). Training delivered ticks itself from there.</p>
+      )}
       {tasks.length === 0 && <p className="text-[15px] text-ink-soft">No steps here for this deal.</p>}
       <ul className="space-y-2">
-        {part !== 'after' && !arranging && <QuotationRow quotes={quotes} onOpenQuotations={onOpenQuotations} onCreateQuotation={editable ? onCreateQuotation : undefined} />}
+        {part !== 'after' && !arranging && !isRunDeal(deal) && <QuotationRow quotes={quotes} onOpenQuotations={onOpenQuotations} onCreateQuotation={editable ? onCreateQuotation : undefined} />}
         {shown.map((t, i) => (
           <li key={t.id} className={`rounded-xl border px-3.5 py-3 ${t.done ? 'border-accent/25 bg-accent-soft/50' : 'border-line bg-white'}`}>
             <div className="flex items-start gap-3">
@@ -370,6 +417,8 @@ export default function DealChecklist({
                   <button type="button" className={iconBtn} disabled={busy || i === tasks.length - 1} onClick={() => move(t, 1)} aria-label={`Move ${t.label} down`}><ArrowDown className="h-4 w-4" /></button>
                   <button type="button" className={`${iconBtn} hover:text-danger`} disabled={busy} onClick={() => remove(t)} aria-label={`Remove ${t.label}`}><Trash2 className="h-4 w-4" /></button>
                 </span>
+              ) : editable && isMirroredStep(deal, t) ? (
+                <span className="shrink-0 text-xs font-medium text-ink-soft">From the public programme</span>
               ) : editable && (
                 t.done
                   ? <button type="button" disabled={busy} className={`${btnSecondary} shrink-0 py-1.5`} onClick={() => (notNeeded(t) ? answerNeeded(t, true) : undo(t))}><Undo2 className="h-3.5 w-3.5" /> {notNeeded(t) ? 'It is needed' : 'Undo'}</button>
@@ -397,7 +446,7 @@ export default function DealChecklist({
                 )}
 
                 {/* Files: the drop box steps (attendance, QR, JD14...), plus documents on venue, bus, facilitator and the trainer's PO */}
-                {hasFiles(t) && (
+                {hasFiles(t) && !isMirroredStep(deal, t) && (
                   <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable}
                     onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)}
                     onPicked={t.id === 'attendance' && t3Shown ? files => setNameList({ files, at: Date.now() }) : undefined} />
@@ -424,7 +473,7 @@ export default function DealChecklist({
                   <MaterialsList t={t} busy={busy} editable={editable} onChange={(items, action) => setItems(t, items, action)} />
                 )}
 
-                {editable && !t.done && t.kind === 'basic' && (
+                {editable && !t.done && t.kind === 'basic' && !isMirroredStep(deal, t) && (
                   <TaskFields t={t} days={days} busy={busy} venues={venues} trainers={trainers} quotes={quotes} programmeId={deal.programmeId} viewer={viewer}
                     onPatch={(c, a) => patch(t.id, c, a)} />
                 )}

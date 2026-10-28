@@ -27,6 +27,8 @@ import { bankText, hasBank, vendorName } from '../lib/vendors';
 import { behalfOuts, behalfStatus } from '../lib/onBehalf';
 import { OwedByClients, useClaimBacks } from './ClaimBacks';
 import { useReceipts } from './PaymentReceipts';
+import { useRunDeals } from '../lib/useRunDeals';
+import { isRunDeal, runLabel } from '../lib/publicProgrammes';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -723,6 +725,8 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
   const [ins, setIns] = useState<MoneyIn[]>([]);
   const [allOuts, setAllOuts] = useState<MoneyOut[]>([]);
   const outs = useMemo(() => withoutDeleted(allOuts), [allOuts]);
+  // Costs raised on a public programme (2026-10-28) carry the programme's id: looked up here, never counted as deals.
+  const runDeals = useRunDeals(true);
   // Marked deleted (not with a deleted deal), for the Payments out History's Deleted tab (2026-10-26).
   const deletedOuts = useMemo(() => allOuts.filter(o => o.deleted && !(o as any).dealDeleted), [allOuts]);
   const claims = useClaimBacks(true);
@@ -740,8 +744,9 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
 
   const dealLabel = (dealId: string) => {
     if (!dealId) return 'Company payment';
-    const d = deals.find(x => x.id === dealId);
+    const d = deals.find(x => x.id === dealId) || runDeals.find(x => x.id === dealId);
     if (!d) return 'Deal no longer exists';
+    if (isRunDeal(d)) return `${runLabel(d)}${d.trainingDate ? ` · ${formatDate(d.trainingDate)}` : ''}`;
     const c = clients.find(x => x.id === d.clientId)?.companyName || d.client || 'No client';
     return `${c} · ${d.courseName || 'No programme'}${d.trainingDate ? ` · ${formatDate(d.trainingDate)}` : ''}`;
   };
@@ -776,7 +781,7 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
           {/* From the trainer portal (2026-10-21): fee requests with photos and T3, and bank accounts to check */}
           <TrainerFeeRequests outs={outs} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
           <BankRequestsBox viewer={viewer} trainers={[]} />
-          <PaymentsBoard outs={outs} deletedOuts={deletedOuts} deals={deals} viewer={viewer} dealLabel={dealLabel} onOpenDeal={onOpenDeal} />
+          <PaymentsBoard outs={outs} deletedOuts={deletedOuts} deals={[...deals, ...runDeals]} viewer={viewer} dealLabel={dealLabel} onOpenDeal={onOpenDeal ? id => { if (!runDeals.some(r => r.id === id)) onOpenDeal(id); } : undefined} />
         </>
       )}
       {tab === 'company' && <CompanyPayments outs={outs} viewer={viewer} />}

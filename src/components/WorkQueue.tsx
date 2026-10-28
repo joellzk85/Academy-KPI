@@ -35,6 +35,8 @@ import TrainingChangePanel from './TrainingChange';
 import { cancelledTraining, changeFlagText, dateLocked, openTodos, pendingChange } from '../lib/trainingChange';
 import PanelResizer from './PanelResizer';
 import { moveT3Lists } from './T3Maker';
+import { useRunDeals } from '../lib/useRunDeals';
+import { isRunDeal } from '../lib/publicProgrammes';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -160,11 +162,14 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
   };
 
   const won = useMemo(() => deals.filter(p => dealStage(p) === 'won'), [deals]);
+  // Public programmes (2026-10-28): each run's operations checklist is a row too (not a deal: no invoice or claim).
+  const runDeals = useRunDeals(true);
+  const runs = useMemo(() => runDeals.filter(r => r.stage === 'won'), [runDeals]);
   const programmeOf = (p: any) => programmes.find(x => x.id === p.programmeId);
   const courseOf = (p: any) => programmeOf(p)?.name || p.courseName || '';
   const queriesOf = (p: any) => queries.filter(q => q.dealId === p.id);
 
-  const rows = useMemo(() => won.filter(p => checklists[p.id]).map(p => {
+  const rows = useMemo(() => [...won, ...runs].filter(p => checklists[p.id]).map(p => {
     const cl = checklists[p.id];
     const pr = progress(cl.tasks, p.fundingType);
     const open = queriesOf(p).filter(isQueryOpen);
@@ -181,8 +186,8 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     const mOut = moneyOut.filter(m => m.dealId === p.id);
     const rc = receipts.filter(r => r.dealId === p.id);
     // Up to training day: money reminders; from the day after: one after-training journey (lib/postTraining.ts).
-    flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, claims, moneySettings, today, queries));
-    flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
+    if (!isRunDeal(p)) flags.push(...postTrainingFlags(p, cl.tasks, mIn, mOut, rc, claims, moneySettings, today, queries));
+    if (!isRunDeal(p)) flags.push(...moneyFlags(p, mIn, mOut, moneySettings, today));
     flags.push(...prePaymentFlags(p, mOut, settings.flagDays, today));
     flags.push(...partDueFlags(p, mOut, settings.flagDays, today));
     // A trainer asked for their fee in the trainer portal (2026-10-21) and it isn't approved yet.
@@ -203,10 +208,10 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
     if (change) flags.unshift({ level: pendingChange(p) ? 'attention' : 'danger', text: change });
     const post = postTraining(p, cl.tasks, mIn, mOut, rc, claims, today, moneySettings, queries);
     // Case closed: every step done, HRDC queries answered, every payment in with its receipt (2026-10-20).
-    const complete = pr.done === pr.total && open.length === 0 && post.closed;
+    const complete = pr.done === pr.total && open.length === 0 && (isRunDeal(p) ? post.ended : post.closed);
     return { deal: p, pr, overdue: overdue.length > 0, complete, after: post.ended && !complete, post, flags };
-  }), [won, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts, claims, trainerJobs, trainingReports]);
-  const unstarted = useMemo(() => won.filter(p => !checklists[p.id]).sort(byTrainingDate), [won, checklists]);
+  }), [won, runs, checklists, settings, today, queries, programmes, moneyIn, moneyOut, moneySettings, receipts, claims, trainerJobs, trainingReports]);
+  const unstarted = useMemo(() => [...won, ...runs].filter(p => !checklists[p.id]).sort(byTrainingDate), [won, runs, checklists]);
   // Cancelled trainings with things still to wrap up (cancel the grant, the venue, refunds…).
   const cancelled = useMemo(() => deals.filter(p => cancelledTraining(p) && openTodos(p).length > 0), [deals]);
 
@@ -231,7 +236,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
   }, [rows, filter, search, clients, people, programmes]);
 
   const openRow = rows.find(r => r.deal.id === openId);
-  const openDeal = openRow?.deal || won.find(p => p.id === openId) || cancelled.find(p => p.id === openId) || null;
+  const openDeal = openRow?.deal || won.find(p => p.id === openId) || runs.find(p => p.id === openId) || cancelled.find(p => p.id === openId) || null;
   const openCancelled = !!openDeal && !!cancelledTraining(openDeal);
 
   const start = async (p: any) => {
@@ -328,7 +333,7 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
                   </span>
                   <span className="min-w-0 text-sm">
                     <span className="block font-semibold">{whenText(p)}</span>
-                    {p.fundingType && <span className="text-ink-soft">{FUNDING_LABELS[p.fundingType as FundingType]}</span>}
+                    {p.fundingType && !isRunDeal(p) && <span className="text-ink-soft">{FUNDING_LABELS[p.fundingType as FundingType]}</span>}
                   </span>
                   <span className="min-w-0 space-y-1">
                     <ProgressBar done={pr.done} total={pr.total} />
@@ -384,7 +389,24 @@ function Queue({ viewer, people, onOpenQuotations, initialOpenId = '' }: { viewe
         </div>
       )}
 
-      {openDeal && (
+      {openDeal && isRunDeal(openDeal) && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
+          <PanelResizer />
+          <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] space-y-5 overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-accent">Public programme</p>
+                <h3 className="truncate text-lg font-bold">{courseOf(openDeal) || 'No programme'}</h3>
+                <p className="text-[15px] text-ink-soft">{whenText(openDeal)}</p>
+              </div>
+              <button type="button" onClick={() => setOpenId(null)} className="rounded-md p-1 text-ink-soft hover:bg-surface" aria-label="Close"><X className="h-5 w-5" /></button>
+            </div>
+            <p className="rounded-lg bg-surface px-3.5 py-2.5 text-sm text-ink-soft">Operations for every company on this run. Each company's grant, attendance, JD14, T3, invoice and claim are on its own deal (Deals → Public programmes → the run → Companies).</p>
+            <DealChecklist deal={openDeal} checklist={checklists[openDeal.id] || null} quotes={[]} viewer={viewer} />
+          </div>
+        </div>
+      )}
+      {openDeal && !isRunDeal(openDeal) && (
         <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" role="dialog" aria-modal="true" onClick={() => setOpenId(null)}>
           <PanelResizer />
           <div className="h-full w-full md:w-[var(--panel-w,max(50vw,40rem))] md:min-w-[24rem] md:max-w-[95vw] space-y-5 overflow-y-auto bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>

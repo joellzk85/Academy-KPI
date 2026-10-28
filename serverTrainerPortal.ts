@@ -26,6 +26,7 @@ import {
 import { FieldValue } from 'firebase-admin/firestore';
 import { cleanTrainerPart, dealPax, newReport, outlineTopics, reportChanges, reportDates, reportGaps, withDates, withPax } from './src/lib/trainingReport';
 import { readReportSettings } from './src/lib/reportSettings';
+import { dealOrRun } from './serverRunDeals';
 
 const BUCKET = String((firebaseConfig as any).storageBucket || '');
 const nowIso = () => new Date().toISOString();
@@ -122,8 +123,8 @@ async function myTrainings(db: Firestore, trainerId: string) {
     .filter(c => c.task);
   const out: any[] = [];
   for (const c of mine) {
-    const snap = await db.collection('pipelines').doc(c.dealId).get();
-    const deal: any = snap.exists ? { ...snap.data(), id: snap.id } : null;
+    const found = await dealOrRun(db, c.dealId);   // a public programme's run counts as one training (2026-10-28)
+    const deal: any = found ? { ...found, id: c.dealId } : null;
     if (!deal || !ownedByTeam(deal, teamIds)) continue;
     const cancel = cancelledTraining(deal);
     if (dealStage(deal) !== 'won' && !(cancel && Date.now() - Date.parse(cancel.at) < 60 * 86_400_000)) continue;
@@ -176,10 +177,10 @@ export async function autoPoFor(db: Firestore, dealId: string, taskId: string): 
   if ((await poFiles(db, dealId, taskId)).length) return null;
   const trainerId = String(task.trainerId);
   const [dealSnap, tr, priv, jobSnap] = await Promise.all([
-    db.collection('pipelines').doc(dealId).get(), db.collection('trainers_directory').doc(trainerId).get(),
+    dealOrRun(db, dealId), db.collection('trainers_directory').doc(trainerId).get(),
     db.collection('trainer_private').doc(trainerId).get(), db.collection('trainer_jobs').doc(jobId(dealId, trainerId)).get(),
   ]);
-  const deal: any = dealSnap.exists ? { ...dealSnap.data(), id: dealId } : null;
+  const deal: any = dealSnap ? { ...dealSnap, id: dealId } : null;
   if (!deal || !tr.exists || cancelledTraining(deal)) return null;
   const trainer = { ...withPrivate(tr.data() as any, priv.data()), id: trainerId };
   if (trainer.memberId) return null;

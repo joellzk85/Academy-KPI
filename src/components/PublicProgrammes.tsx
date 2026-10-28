@@ -1,15 +1,15 @@
 // Public programmes (Joel, 2026-10-28, lib/publicProgrammes.ts): runs on fixed dates that many companies join.
 // Opened from Deals → "Public programmes". Everyone sees the runs and their seats; Admin and Management set up,
 // change, cancel or move a run. Each company is a normal deal: "Add a company" opens the New deal form on this run.
-import React, { useMemo, useState } from 'react';
-import { doc, setDoc, updateDoc } from 'firebase/firestore';
-import { ArrowLeft, CalendarDays, GraduationCap, Loader2, MapPin, Pencil, Plus, Search, Users, X, XCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { ArrowLeft, CalendarDays, GraduationCap, ListChecks, Loader2, MapPin, Pencil, Plus, Search, Users, X, XCircle } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import {
   FUNDING_LABELS, FundingType, STAGE_LABELS, dealOwnerId, dealStage, dealValue, formatRM, parseTrainingDays, todayIso, trainingDateText, trainingDays,
 } from '../lib/deals';
 import {
-  PublicProgramme, RUN_STATE_LABELS, RunState, cancelProblem, howToMove, joinableRuns, paxOf, runDeals, runProblem, runSeats, runState, waitingDeals,
+  PublicProgramme, RUN_STATE_LABELS, RunState, cancelProblem, howToMove, joinableRuns, paxOf, runAsDeal, runDeals, runProblem, runSeats, runState, waitingDeals, withRunPicks,
 } from '../lib/publicProgrammes';
 import { CANCEL_LOST_REASON, CANCEL_REASONS, TrainingChange } from '../lib/trainingChange';
 import { Programme } from '../lib/programmes';
@@ -20,6 +20,7 @@ import DraftBar from './DraftBar';
 import ListPager from './ListPager';
 import { useFormDraft } from '../lib/useFormDraft';
 import { usePaged } from '../lib/listPaging';
+import DealChecklist from './DealChecklist';
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -205,6 +206,20 @@ export default function PublicProgrammes({ runs, deals, programmes, outlines, ve
         data.history = [...(existing.history || []), entry(viewer, changes.join('. ') || 'Details updated')];
       }
       await setDoc(doc(db, 'public_programmes', id), data, { merge: true });
+      // A changed venue or trainer reaches the run's checklist steps that aren't done yet (typed once).
+      if (existing && (data.venueId !== (existing.venueId || '') || data.trainerId !== (existing.trainerId || ''))) {
+        const cl = await getDoc(doc(db, 'deal_checklists', id)).catch(() => null);
+        const cd: any = cl?.exists() ? cl.data() : null;
+        if (cd) {
+          const next = withRunPicks(cd.tasks || [], data);
+          if (JSON.stringify(next) !== JSON.stringify(cd.tasks || [])) {
+            await updateDoc(doc(db, 'deal_checklists', id), {
+              tasks: next, updatedAt: Date.now(),
+              history: [...(cd.history || []), entry(viewer, 'Venue / trainer updated from the public programme')].slice(-60),
+            });
+          }
+        }
+      }
       let msg = existing ? 'Public programme saved' : 'Public programme set up';
       if (dateMoved && joined.length) {
         const r = await moveDeals(joined, form.trainingDate, days as number, form.moveNote.trim(), null);
@@ -519,6 +534,9 @@ function RunPanel({ run, runs, deals, outlines, viewer, today, clientName, perso
         )}
       </section>
 
+      {/* Batch 2, part A (2026-10-28): venue, trainer, logistics, costs and training day, once for the whole run */}
+      <RunOperations run={run} pax={s.seats} viewer={viewer} />
+
       {Array.isArray(run.history) && run.history.length > 0 && (
         <section>
           <h4 className="mb-2 font-semibold">History</h4>
@@ -530,6 +548,21 @@ function RunPanel({ run, runs, deals, outlines, viewer, today, clientName, perso
         </section>
       )}
     </div>
+  );
+}
+
+// The run's own checklist (deal_checklists/{runId}): the shared steps, with costs raised from them as on a deal.
+// Each company's deal keeps its grant, attendance, JD14, T3, invoice and claim.
+function RunOperations({ run, pax, viewer }: { run: PublicProgramme; pax: number; viewer: Viewer }) {
+  const [checklist, setChecklist] = useState<any | null>(null);
+  useEffect(() => onSnapshot(doc(db, 'deal_checklists', run.id), s => setChecklist(s.exists() ? s.data() : null), () => setChecklist(null)), [run.id]);
+  const deal = useMemo(() => runAsDeal(run, pax), [run, pax]);
+  return (
+    <section>
+      <h4 className="mb-1 flex items-center gap-2 font-semibold"><ListChecks className="h-4 w-4" /> Operations, once for all companies</h4>
+      <p className="mb-2 text-sm text-ink-soft">Venue, trainer (with the PO and fee), bus, facilitator, materials, costs and the training day. Each company's own deal keeps its grant, attendance list, JD14, T3, invoice and claim.</p>
+      <DealChecklist deal={deal} checklist={checklist} quotes={[]} viewer={viewer} />
+    </section>
   );
 }
 

@@ -166,6 +166,74 @@ export function howToMove(p: any, cancel = false): DealMove {
   return { kind: 'request' };
 }
 
+// ---------- Batch 2, part A (2026-10-28): operations once per run ----------
+// The run has its own checklist and costs, stored under the run's id exactly like a deal's (deal_checklists/{runId},
+// money_out.dealId = runId, checklist_files, trainer_jobs), so the checklist, Payments out, the accounts portal and the
+// trainer portal work unchanged. Screens that look up "the deal" behind one of those records use runAsDeal().
+// The run does the shared steps: venue, bus, facilitator, trainer and co-trainers, materials, Output assessment QR,
+// Training delivered, Training report, Output assessment, Certificates. Each company's checklist keeps only its own
+// steps (Grant approved, Attendance list, JD14, T3 and any custom steps) plus "Training delivered", which is ticked
+// from the run (the HRDC claim needs it on the company's deal).
+
+const RUN_KINDS = ['venue', 'bus', 'facilitator', 'trainer', 'materials'];
+const RUN_IDS = ['output_qr', 'delivered', 'training_report', 'output_assessment', 'certificates'];
+export const MIRRORED_STEP = 'delivered';
+
+/** A step done once on the public programme (not on each company's deal). */
+export const isRunStep = (t: { id?: string; kind?: string }) => RUN_KINDS.includes(t.kind || '') || RUN_IDS.includes(t.id || '');
+
+/** The steps a checklist keeps: the run's shared steps on the run; a company's own steps (plus Training delivered,
+ *  ticked from the run) on a company's deal; everything on any other deal. Works on master-list steps and on tasks. */
+export function checklistScope<T extends { id?: string; kind?: string }>(deal: any, steps: T[]): T[] {
+  if (isRunDeal(deal)) return steps.filter(isRunStep);
+  if (deal?.publicProgrammeId) return steps.filter(t => !isRunStep(t) || t.id === MIRRORED_STEP);
+  return steps;
+}
+
+/** A company's step that is ticked from the run, never on the company's deal. */
+export const isMirroredStep = (deal: any, t: { id?: string }) => !!deal?.publicProgrammeId && !isRunDeal(deal) && t.id === MIRRORED_STEP;
+
+/** The run shaped like a won deal, for the checklist, costs, Payments out, the accounts portal and the trainer portal.
+ *  Never written to `pipelines` and never counted in sales or KPIs. Its pax are the companies' pax when given. */
+export function runAsDeal(run: PublicProgramme, pax = 0): any {
+  return {
+    id: run.id,
+    isPublicRun: true,
+    publicRunTitle: run.title,
+    client: 'Public programme',
+    clientId: '',
+    programmeId: run.programmeId,
+    courseName: run.title,
+    type: run.type || 'Training',
+    trainingDate: run.trainingDate || '',
+    trainingDays: run.trainingDays || 1,
+    participants: pax,
+    fundingType: 'direct',
+    stage: run.status === 'cancelled' ? 'lost' : 'won',
+    status: run.status === 'cancelled' ? 'Lost' : 'Won',
+    ownerId: run.createdById,
+    creatorId: run.createdById,
+    runVenueId: run.venueId || '', runVenueName: run.venueName || '',
+    runTrainerId: run.trainerId || '', runTrainerName: run.trainerName || '',
+    ...(run.status === 'cancelled' ? { trainingCancelled: { at: run.history?.[run.history.length - 1]?.at || '', reason: run.cancelReason || '', note: run.cancelNote || '' } } : {}),
+  };
+}
+export const isRunDeal = (d: any) => d?.isPublicRun === true;
+
+/** The run's venue and trainer (picked when it was set up) on its Venue and Trainer steps, while those steps aren't
+ *  done, so they're typed once. */
+export function withRunPicks<T extends { id?: string; kind?: string; done?: boolean; venueId?: string; venueName?: string; trainerId?: string; trainerName?: string; needed?: boolean }>(
+  tasks: T[], run: { venueId?: string; venueName?: string; trainerId?: string; trainerName?: string }): T[] {
+  return tasks.map(t => {
+    if (t.done) return t;
+    if (t.kind === 'venue' && run.venueId) return { ...t, venueId: run.venueId, venueName: run.venueName || '', needed: true };
+    if (t.kind === 'trainer' && t.id === 'trainer' && run.trainerId) return { ...t, trainerId: run.trainerId, trainerName: run.trainerName || '' };
+    return t;
+  });
+}
+/** "Public programme: TITLE" for lists that name the client of a cost or training. */
+export const runLabel = (d: any) => `Public programme: ${d?.publicRunTitle || d?.courseName || ''}`;
+
 /** Won deals with a change already waiting for approval. A run isn't moved or cancelled while there are any, so no
  *  company is left behind on the old date. */
 export const waitingDeals = (list: any[], cancel = false): any[] => list.filter(p => howToMove(p, cancel).kind === 'busy');

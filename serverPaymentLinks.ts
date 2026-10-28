@@ -19,6 +19,7 @@ import { isLinkToken } from './src/lib/docLinks';
 import { ACCOUNTS_PAID_BY, paymentRef } from './src/lib/money';
 import { buildSummary, summaryProblem, summaryRef } from './src/lib/paymentSummary';
 import { COMPANY } from './src/lib/company';
+import { withRuns } from './serverRunDeals';
 
 const hits = new Map<string, { n: number; since: number }>();
 function slowDown(req: Request) {
@@ -158,7 +159,7 @@ async function loadBatch(db: Firestore, link: any) {
   const vendorIds = [...new Set(outs.map(o => o.vendorId).filter(Boolean))] as string[];
   const vendors = (await Promise.all(vendorIds.map(id => db.collection('vendors').doc(id).get()))).filter(d => d.exists).map(d => ({ ...(d.data() as any), id: d.id }));
   const dealIds = [...new Set(outs.map(o => o.dealId).filter(Boolean))] as string[];
-  const deals = new Map((await Promise.all(dealIds.map(id => db.collection('pipelines').doc(id).get()))).filter(d => d.exists).map(d => [d.id, d.data() as any]));
+  const deals = await withRuns(db, new Map((await Promise.all(dealIds.map(id => db.collection('pipelines').doc(id).get()))).filter(d => d.exists).map(d => [d.id, d.data() as any])), dealIds);
   const clientIds = [...new Set([...deals.values()].map(d => d.clientId).filter(Boolean))] as string[];
   const clients = new Map((await Promise.all(clientIds.map(id => db.collection('clients').doc(id).get()))).filter(d => d.exists).map(d => [d.id, d.data() as any]));
   const forText = (o: any) => {
@@ -220,7 +221,7 @@ function registerBatchRoutes(app: Express) {
     // One summary per payment, post-training payments only after the training (2026-10-21), and only with bank
     // details accounts can use (2026-10-23; summaryProblem).
     const dealIds = [...new Set(docs.map(d => (d.data() as any).dealId).filter(Boolean))] as string[];
-    const deals = new Map((await Promise.all(dealIds.map(id => db.collection('pipelines').doc(id).get()))).map(d => [d.id, d.data()]));
+    const deals = await withRuns(db, new Map((await Promise.all(dealIds.map(id => db.collection('pipelines').doc(id).get()))).filter(d => d.exists).map(d => [d.id, d.data() as any])), dealIds);
     const vendorIds = [...new Set(docs.map(d => (d.data() as any).vendorId).filter(Boolean))] as string[];
     const vendors = new Map((await Promise.all(vendorIds.map(id => db.collection('vendors').doc(id).get()))).filter(d => d.exists).map(d => [d.id, { ...(d.data() as any), id: d.id }]));
     for (const d of docs) {

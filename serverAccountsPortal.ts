@@ -28,6 +28,7 @@ import { Vendor } from './src/lib/vendors';
 import { PortalDoc, PortalLogEntry, PortalRow, buildPortalRows, cleanPortalSettings, paymentDocs, sectionOf } from './src/lib/accountsPortal';
 import { autoPoFor } from './serverTrainerPortal';
 import { checklistFileProblem, checklistFileType, safeFileName } from './src/lib/checklistFiles';
+import { dealOrRun, withRuns } from './serverRunDeals';
 
 const todayMY = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
 const money = (n: any) => 'RM ' + (Number(n) || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -83,7 +84,7 @@ async function loadRows(db: Firestore): Promise<PortalRow[]> {
   const files = fileSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }));
   const docsOf = new Map<string, PortalDoc[]>(outs.map(o => [o.id, paymentDocs(o, receipts, files)]));
   const poOf = await posFor(db, outs.filter(o => !o.deleted && o.status !== 'rejected'));
-  const deals = await byIds(db, 'pipelines', outs.map(o => o.dealId));
+  const deals = await withRuns(db, await byIds(db, 'pipelines', outs.map(o => o.dealId)), outs.map(o => o.dealId));
   const [clients, trainers, trainerPrivate, venues] = await Promise.all([
     byIds(db, 'clients', [...deals.values()].map(d => d.clientId)),
     byIds(db, 'trainers_directory', vendors.map(v => v.trainerId || '')),
@@ -111,7 +112,7 @@ async function docsForPayment(db: Firestore, id: string) {
   const o: any = (await db.collection('money_out').doc(id).get()).data();
   if (!o) throw new UserError(404, 'not-found', 'That payment was not found. Reload the page.');
   const out = { ...o, id } as MoneyOut;
-  const deal: any = out.dealId ? (await db.collection('pipelines').doc(out.dealId).get()).data() : undefined;
+  const deal: any = out.dealId ? await dealOrRun(db, out.dealId) : undefined;
   const vendor: any = out.vendorId ? (await db.collection('vendors').doc(out.vendorId).get()).data() : undefined;
   if ((out.dealId && (!deal || deal.deleted)) || !sectionOf(out, deal, vendor, todayMY())) throw new UserError(404, 'not-found', 'That payment is not in the portal any more. Reload the page.');
   const [receipts, files] = await Promise.all([
@@ -128,7 +129,7 @@ async function linesIn(db: Firestore, ids: string[], want: 'topay' | 'raised') {
   const docs = await Promise.all(ids.map(id => db.collection('money_out').doc(id).get()));
   const outs = docs.filter(d => d.exists).map(d => ({ ...(d.data() as any), id: d.id }) as MoneyOut);
   if (outs.length !== ids.length) throw new UserError(404, 'not-found', 'A payment was not found. Reload the page.');
-  const deals = await byIds(db, 'pipelines', outs.map(o => o.dealId));
+  const deals = await withRuns(db, await byIds(db, 'pipelines', outs.map(o => o.dealId)), outs.map(o => o.dealId));
   const vendors = await byIds(db, 'vendors', outs.map(o => o.vendorId || ''));
   for (const o of outs) {
     const deal = o.dealId ? deals.get(o.dealId) : undefined;
