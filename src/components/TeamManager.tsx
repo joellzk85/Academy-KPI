@@ -23,6 +23,7 @@ const ROLE_HELP: Record<TeamRole, string> = {
   rep: 'Works on their own clients and deals.',
   admin: 'Everything a rep can do, plus operations for every deal.',
   management: 'Sees everything, manages the team, approves payments.',
+  accounts: 'Only the Accounts portal: pays approved payments. Sees nothing else in the CRM.',
 };
 
 function TempPasswordField({ value, onChange, id }: { value: string; onChange: (v: string) => void; id: string }) {
@@ -178,7 +179,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
 
   // KPIs per person and the KPI library moved to Management → KPI & appraisal → Settings (Joel, 2026-10-25).
 
-  const roleOrder: Record<TeamRole, number> = { management: 0, admin: 1, rep: 2 };
+  const roleOrder: Record<TeamRole, number> = { management: 0, admin: 1, rep: 2, accounts: 3 };
   const activeMembers = useMemo(
     () => teamMembers.filter(m => m.active).sort((a, b) => roleOrder[a.role] - roleOrder[b.role] || a.name.localeCompare(b.name)),
     [teamMembers]
@@ -383,10 +384,13 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
                       <option value="rep">{ROLE_LABELS.rep}</option>
                       <option value="admin">{ROLE_LABELS.admin}</option>
                       <option value="management">{ROLE_LABELS.management}</option>
+                      <option value="accounts">{ROLE_LABELS.accounts}</option>
                     </select>
+                    {m.role !== 'accounts' && (
                     <button type="button" className={secondaryBtn} onClick={() => openTrainer(m)}>
                       <GraduationCap className="h-3.5 w-3.5" /> Trainer
                     </button>
+                    )}
                     <button type="button" className={secondaryBtn} onClick={() => openEmail(m)}>
                       <Mail className="h-3.5 w-3.5" /> Work email
                     </button>
@@ -446,7 +450,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
             <div>
               <span className={labelClass}>Role</span>
               <div className="space-y-2">
-                {(['rep', 'admin', 'management'] as TeamRole[]).map(r => (
+                {(['rep', 'admin', 'management', 'accounts'] as TeamRole[]).map(r => (
                   <label
                     key={r}
                     className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
@@ -563,7 +567,7 @@ export default function TeamManager({ currentMember, teamMembers }: TeamManagerP
               <label htmlFor="dlg-transfer" className={`${labelClass} mt-3`}>Move them to</label>
               <select id="dlg-transfer" value={transferTo} onChange={e => { setTransferTo(e.target.value); setDialogError(''); }} className={inputClass}>
                 <option value="">Choose a person</option>
-                {activeMembers.filter(m => m.id !== dialog.member.id).map(m => (
+                {activeMembers.filter(m => m.id !== dialog.member.id && m.role !== 'accounts').map(m => (
                   <option key={m.id} value={m.id}>{m.name} ({ROLE_LABELS[m.role]})</option>
                 ))}
               </select>

@@ -163,6 +163,7 @@ export default function PaymentsBoard({ outs, deletedOuts = [], deals, viewer, d
         </Lane>
 
         <Lane n={2} title="Ready for accounts" list={toSend}
+          top={ready.length > 0 && <p className="text-xs text-ink-soft">Ready ones are also in the Accounts portal, where accounts can pay them without a summary.</p>}
           bottom={ready.length > 0 && (
             <button type="button" disabled={!!busy || !ticked.length} className={`${btnPrimary} w-full`} onClick={send}>
               {busy === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -307,8 +308,33 @@ function Card({ o, forText, onOpen, lead, note, extra, muted }: {
       <p className="truncate text-sm text-ink-soft">{o.category}{outWhat(o) ? `: ${outWhat(o)}` : ''}</p>
       <p className="truncate text-sm text-ink-soft">{isCompanyPayment(o) ? 'Company payment' : `${forText} · ${TIMING_LABELS[o.timing] || TIMING_LABELS.after}`}</p>
       {note && <p className="mt-0.5 text-sm">{note}</p>}
+      {o.accountsQuery?.text && <AccountsQuestion o={o} />}
       {extra && <div className="mt-2">{extra}</div>}
     </FoldCard>
+  );
+}
+
+// Accounts sent the payment back with a question from the Accounts portal (2026-10-28): Admin or Management sort it
+// out (fix the bank details, ...) and click Sorted, with an optional note that goes in the deal's History.
+function AccountsQuestion({ o }: { o: MoneyOut }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const sorted = async () => {
+    const reply = window.prompt(`Accounts asked: "${o.accountsQuery!.text}"
+
+What was done? (optional, goes in the History)`, '');
+    if (reply === null) return;
+    setBusy(true); setError('');
+    try { await callServer('/api/accounts/query-clear', { id: o.id, reply }, true); } catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-1.5 rounded-lg bg-attention-soft px-2 py-1.5 text-sm text-attention" onClick={e => e.stopPropagation()}>
+      <p><span className="font-semibold">Accounts asked ({o.accountsQuery!.byName}):</span> {o.accountsQuery!.text}</p>
+      <button type="button" disabled={busy} onClick={sorted} className="mt-1 inline-flex items-center gap-1 rounded-md border border-attention/40 bg-white px-2 py-0.5 text-xs font-semibold text-attention hover:bg-attention-soft disabled:opacity-60">
+        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Sorted
+      </button>
+      {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
+    </div>
   );
 }
 

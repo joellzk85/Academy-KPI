@@ -30,6 +30,16 @@ export interface Vendor {
   accountNo?: string;
   ssmNo?: string;          // company registration (optional)
   tin?: string;            // tax identification number (LHDN); a trainer types it in the trainer portal (2026-10-21)
+  // The receiver's details accounts need for LHDN e-Invoice (Accounts portal, 2026-10-28; lib/accountsPortal.ts).
+  // A trainer's IC and address come from trainer_private when these are blank, a venue's address from Venues.
+  nric?: string;
+  address?: string;
+  sstNo?: string;
+  msic?: string;           // MSIC code
+  business?: string;       // business activities
+  taxRegNo?: string;
+  gstNo?: string;          // previous GST registration no.
+  picPhone?: string;       // the person in charge's mobile (contactName is their name)
   notes?: string;
   createdAt?: string;
   createdById?: string;

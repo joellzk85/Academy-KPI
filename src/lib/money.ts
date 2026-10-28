@@ -114,6 +114,10 @@ export interface MoneyOut {
   // Link for accounts (Joel, 2026-10-20): accounts open it without logging in and click "Payment made".
   accountsLink?: { token: string; at: string; byName: string } | null;
   paidAt?: string;         // exact time accounts clicked "Payment made" (ISO); with an empty paidById
+  // Accounts portal (2026-10-28, lib/accountsPortal.ts): paid there by the accounts person (paidById / paidByName are
+  // theirs), and a question accounts sent back on the payment until Admin or Management mark it sorted.
+  paidVia?: 'portal';
+  accountsQuery?: { text: string; at: string; byId: string; byName: string } | null;
   // Raised from a deal's before-training checklist (2026-10-20): the step it belongs to and the vendor (lib/vendors.ts).
   checklistTaskId?: string;
   vendorId?: string;

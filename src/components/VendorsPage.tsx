@@ -49,12 +49,15 @@ export function useTrainersVenues(): { trainers: any[]; venues: any[] } {
   return { trainers, venues };
 }
 
-type Draft = { name: string; type: VendorType; trainerId: string; venueId: string; contactName: string; phone: string; email: string; bankName: string; accountName: string; accountNo: string; ssmNo: string; tin: string; notes: string };
+type Draft = { name: string; type: VendorType; trainerId: string; venueId: string; contactName: string; phone: string; email: string; bankName: string; accountName: string; accountNo: string; ssmNo: string; tin: string; notes: string;
+  nric: string; address: string; sstNo: string; msic: string; business: string; taxRegNo: string; gstNo: string; picPhone: string };
 
 const toDraft = (v: Partial<Vendor>): Draft => ({
   name: v.name || '', type: v.type || 'other', trainerId: v.trainerId || '', venueId: v.venueId || '',
   contactName: v.contactName || '', phone: v.phone || '', email: v.email || '', bankName: v.bankName || '',
   accountName: v.accountName || '', accountNo: v.accountNo || '', ssmNo: v.ssmNo || '', tin: v.tin || '', notes: v.notes || '',
+  nric: v.nric || '', address: v.address || '', sstNo: v.sstNo || '', msic: v.msic || '', business: v.business || '',
+  taxRegNo: v.taxRegNo || '', gstNo: v.gstNo || '', picPhone: v.picPhone || '',
 });
 
 /** Add or edit a vendor. `start` prefills a new one (e.g. a trainer picked on a checklist). Calls onSaved with the record. */
@@ -81,6 +84,8 @@ export function VendorForm({ vendor, start, vendors, trainers, venues, viewer, o
       contactName: f.contactName.trim(), phone: f.phone.trim(), email: f.email.trim(),
       bankName: f.bankName.trim(), accountName: f.accountName.trim(), accountNo: f.accountNo.replace(/[^0-9A-Za-z -]/g, '').trim(),
       ssmNo: f.ssmNo.trim(), tin: (f.tin || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), notes: f.notes.trim(),
+      nric: (f.nric || '').trim(), address: (f.address || '').trim(), sstNo: (f.sstNo || '').trim(), msic: (f.msic || '').trim(),
+      business: (f.business || '').trim(), taxRegNo: (f.taxRegNo || '').trim(), gstNo: (f.gstNo || '').trim(), picPhone: (f.picPhone || '').trim(),
       ...(vendor ? {} : { createdAt: new Date().toISOString(), createdById: viewer.id, createdByName: viewer.name }),
       updatedAt: new Date().toISOString(), updatedByName: viewer.name,
     };
@@ -129,7 +134,7 @@ export function VendorForm({ vendor, start, vendors, trainers, venues, viewer, o
         <div><label className={small} htmlFor="vd-cp">Contact person</label><input id="vd-cp" value={f.contactName} onChange={e => set('contactName', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="vd-ph">Phone</label><input id="vd-ph" value={f.phone} onChange={e => set('phone', e.target.value)} className={input} inputMode="tel" /></div>
         <div><label className={small} htmlFor="vd-em">Email</label><input id="vd-em" value={f.email} onChange={e => set('email', e.target.value)} className={input} inputMode="email" /></div>
-        <div><label className={small} htmlFor="vd-ssm">SSM / company no. (optional)</label><input id="vd-ssm" value={f.ssmNo} onChange={e => set('ssmNo', e.target.value)} className={input} /></div>
+        <div><label className={small} htmlFor="vd-ssm">Registration no., old and new (SSM, optional)</label><input id="vd-ssm" value={f.ssmNo} onChange={e => set('ssmNo', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="vd-tin">Tax number, TIN (optional)</label><input id="vd-tin" value={f.tin || ''} onChange={e => set('tin', e.target.value)} className={input} placeholder="e.g. IG12345678090" /></div>
       </div>
       <div className="rounded-lg border border-line bg-white p-3">
@@ -141,6 +146,20 @@ export function VendorForm({ vendor, start, vendors, trainers, venues, viewer, o
           <div><label className={small} htmlFor="vd-an">Account name</label><input id="vd-an" value={f.accountName} onChange={e => set('accountName', e.target.value)} className={input} /></div>
         </div>
       </div>
+      <details className="rounded-lg border border-line bg-white p-3" open={!!(f.nric || f.address || f.sstNo || f.msic || f.business || f.taxRegNo || f.gstNo || f.picPhone)}>
+        <summary className="cursor-pointer text-sm font-semibold">e-Invoice details, for accounts (optional)</summary>
+        <p className="mt-1 text-sm text-ink-soft">Shown to accounts in the Accounts portal; blank shows "-". Left blank, a trainer's IC and address and a venue's address are used.</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <div><label className={small} htmlFor="vd-nric">NRIC (for a person)</label><input id="vd-nric" value={f.nric} onChange={e => set('nric', e.target.value)} className={input} placeholder="e.g. 850101-14-5678" /></div>
+          <div><label className={small} htmlFor="vd-pic">PIC mobile (H/P no.)</label><input id="vd-pic" value={f.picPhone} onChange={e => set('picPhone', e.target.value)} className={input} inputMode="tel" /></div>
+          <div className="sm:col-span-2"><label className={small} htmlFor="vd-addr">Address</label><input id="vd-addr" value={f.address} onChange={e => set('address', e.target.value)} className={input} /></div>
+          <div><label className={small} htmlFor="vd-sst">SST registration no.</label><input id="vd-sst" value={f.sstNo} onChange={e => set('sstNo', e.target.value)} className={input} /></div>
+          <div><label className={small} htmlFor="vd-msic">MSIC code</label><input id="vd-msic" value={f.msic} onChange={e => set('msic', e.target.value)} className={input} placeholder="e.g. 85494" /></div>
+          <div className="sm:col-span-2"><label className={small} htmlFor="vd-biz">Business activities</label><input id="vd-biz" value={f.business} onChange={e => set('business', e.target.value)} className={input} placeholder="e.g. Corporate training" /></div>
+          <div><label className={small} htmlFor="vd-taxreg">Tax reg. no.</label><input id="vd-taxreg" value={f.taxRegNo} onChange={e => set('taxRegNo', e.target.value)} className={input} /></div>
+          <div><label className={small} htmlFor="vd-gst">Previous GST reg. no.</label><input id="vd-gst" value={f.gstNo} onChange={e => set('gstNo', e.target.value)} className={input} /></div>
+        </div>
+      </details>
       <div><label className={small} htmlFor="vd-notes">Notes (optional)</label><input id="vd-notes" value={f.notes} onChange={e => set('notes', e.target.value)} className={input} placeholder="e.g. 50% deposit, balance 7 days before" /></div>
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-danger">{error}</p>}
       <div className="flex gap-2">

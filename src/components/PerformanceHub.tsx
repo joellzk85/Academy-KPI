@@ -9,7 +9,7 @@ import { ItemsForm, useRatingItems } from './Rating360';
 import { Fold, SkillsForm, useScorecard, WeightsForm } from './Scorecard';
 import { db } from '../lib/firebase';
 import { defaultTemplateIdFor, hasKpis, metricsFor, RepLike, templateById } from '../lib/kpi';
-import { TeamMember } from '../types';
+import { CrmMember as TeamMember } from '../types';
 
 // KPI & appraisal (Joel, 2026-10-25): one Management tab for everything about KPIs and the appraisal. It starts
 // in the private room (owner only); the owner can untick it there to bring it back to Management (lib/privateScreens.ts).

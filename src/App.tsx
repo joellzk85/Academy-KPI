@@ -51,9 +51,12 @@ import type { AdminView } from './components/WorkQueue';
 const MyHome = React.lazy(() => import('./components/MyHome'));
 const PrivateRoom = React.lazy(() => import('./components/PrivateRoom'));
 const LoginLog = React.lazy(() => import('./components/LoginLog'));
+// Accounts portal (2026-10-28): the whole app for an Accounts login; Management opens it at /accounts, view only.
+const AccountsPortal = React.lazy(() => import('./components/AccountsPortal'));
+const AccountsPortalSettings = React.lazy(() => import('./components/AccountsPortalSettings'));
 import { LoadingScreen, SetupScreen, LoginForm, ForcedPasswordChangeScreen, NoAccessScreen, ChangePasswordForm } from './components/LoginScreen';
 import { INITIAL_CALENDAR_EVENTS, INITIAL_NOTICES, MOTIVATIONAL_QUOTES } from './initialData';
-import { Representative, CalendarEvent, TeamMember, ROLE_LABELS } from './types';
+import { Representative, CalendarEvent, TeamMember, CrmMember, isCrmMember, ROLE_LABELS } from './types';
 import { hasKpis, metricsFor } from './lib/kpi';
 import { KpiSetItem } from './lib/kpiLibrary';
 import { useKpiLibrary } from './lib/useKpiLibrary';
@@ -194,19 +197,30 @@ export default function App() {
   if (!authReady || !teamLoaded || setupDone === null) return <LoadingScreen />;
   if (!setupDone) return <SetupScreen />;
   if (!authUser) return <LoginForm members={teamMembers} />;
+
+  // An Accounts login has no auth_map record (the database gives it nothing): it only ever sees the portal.
+  const accountsMember = teamMembers.find(m => m.id === authUser.uid && m.active && m.role === 'accounts');
+  if (accountsMember) {
+    if (accountsMember.mustChangePassword) return <ForcedPasswordChangeScreen member={accountsMember} />;
+    return <React.Suspense fallback={<LoadingScreen />}><AccountsPortal member={accountsMember} /></React.Suspense>;
+  }
   if (linkedMemberId === undefined) return <LoadingScreen message="Checking your access…" />;
 
   const currentMember = teamMembers.find(m => m.id === linkedMemberId && m.active);
-  if (!currentMember) return <NoAccessScreen />;
+  if (!currentMember || !isCrmMember(currentMember)) return <NoAccessScreen />;
   if (currentMember.mustChangePassword) return <ForcedPasswordChangeScreen member={currentMember} />;
+  if (currentMember.role === 'management' && /^\/accounts\/?$/.test(window.location.pathname)) {
+    return <React.Suspense fallback={<LoadingScreen />}><AccountsPortal member={currentMember} /></React.Suspense>;
+  }
 
-  return <CrmApp key={currentMember.id} currentMember={currentMember} teamMembers={teamMembers} />;
+  // Accounts people are never in the CRM's lists (owners, KPIs, pickers): only in Team.
+  return <CrmApp key={currentMember.id} currentMember={currentMember} teamMembers={teamMembers.filter(isCrmMember)} allMembers={teamMembers} />;
 }
 
 // ============================================================
 // The CRM itself (only runs after a successful login).
 // ============================================================
-function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; teamMembers: TeamMember[] }) {
+function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: CrmMember; teamMembers: CrmMember[]; allMembers: TeamMember[] }) {
   // Old records not linked to a Team member yet are hidden everywhere (lib/linked.ts).
   setLinkedTeam(teamMembers.map(m => m.id));
   const isManagement = currentMember.role === 'management';
@@ -258,7 +272,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
   useKpiLibrary();
   // Login history (Team → Login log): counts this person's active minutes in the CRM.
   useActivityTracker(currentMember.id);
-  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks'>('dashboard');
+  const [managementView, setManagementView] = useState<'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks' | 'accounts'>('dashboard');
   // A screen moved to the private room leaves the Management menu (lib/privateScreens.ts).
   useEffect(() => { if (screensOff.includes(managementView as MovableScreen)) setManagementView('dashboard'); }, [screensOff, managementView]);
   const [teamFollowUpPerson, setTeamFollowUpPerson] = useState('');   // My home's Team follow-ups card: one person, or '__quiet'
@@ -841,7 +855,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
       setCurrentTab('admin');
       setSelectedRepId(null);
     },
-    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks') => {
+    openManagement: (view?: 'dashboard' | 'team_followups' | 'pl' | 'payments' | 'links' | 'followups' | 'lost' | 'team' | 'appraisal' | 'data' | 'checks' | 'accounts') => {
       if (!isManagement) return;
       if (view) setManagementView(view);
       handleSwitchTab('management');
@@ -1056,7 +1070,7 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               transition={{ duration: 0.25 }}
             >
               <div className="mb-5 inline-flex max-w-full flex-wrap rounded-xl border border-line bg-white p-1" role="tablist">
-                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'KPI & appraisal'], ['data', 'Data tools']] as const).filter(([key]) => !screensOff.includes(key as MovableScreen)).map(([key, label]) => (
+                {([['dashboard', 'Dashboard'], ['team_followups', 'Team follow-ups'], ['checks', 'Deal checks'], ['pl', 'Project P&L'], ['payments', 'Payment tracking'], ['accounts', 'Accounts portal'], ['links', 'Client links'], ['followups', 'Follow-up rules'], ['lost', 'Lost and deleted'], ['team', 'Team'], ['appraisal', 'KPI & appraisal'], ['data', 'Data tools']] as const).filter(([key]) => !screensOff.includes(key as MovableScreen)).map(([key, label]) => (
                   <button
                     key={key}
                     role="tab"
@@ -1079,13 +1093,15 @@ function CrmApp({ currentMember, teamMembers }: { currentMember: TeamMember; tea
               ) : managementView === 'lost' ? (
                 <LostDeletedPage viewer={{ id: currentMember.id, name: currentMember.name }} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} />
               ) : managementView === 'team' ? (
-                <TeamManager currentMember={currentMember} teamMembers={teamMembers} />
+                <TeamManager currentMember={currentMember} teamMembers={allMembers} />
               ) : managementView === 'appraisal' ? (
                 appraisalScreen
               ) : managementView === 'data' ? (
                 <DataTools teamMembers={teamMembers} viewer={{ id: currentMember.id, name: currentMember.name }} />
               ) : managementView === 'payments' ? (
                 <PaymentTracking pipelinesSync={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }} onOpenDeal={homeNav.openDeal} />
+              ) : managementView === 'accounts' ? (
+                <AccountsPortalSettings teamMembers={allMembers} />
               ) : managementView === 'checks' ? (
                 <DealChecksPage deals={pipelinesSync} people={teamMembers.map(m => ({ id: m.id, name: m.name }))} viewer={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }} onOpenDeal={homeNav.openDeal} />
               ) : managementView === 'pl' ? (

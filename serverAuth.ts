@@ -16,9 +16,11 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import firebaseConfig from './firebase-applet-config.json';
 import { logActivity, recordFailedLogin, recordLogin } from './serverActivity';
 
-type Role = 'rep' | 'admin' | 'management';
-const ROLES: Role[] = ['rep', 'admin', 'management'];
-const ROLE_NAMES: Record<Role, string> = { rep: 'Rep', admin: 'Admin', management: 'Management' };
+// Accounts (2026-10-28): own staff who use only the Accounts portal. They get NO auth_map record, so the database
+// rules give them nothing; serverAccountsPortal.ts checks their role on team/{id} (written only here).
+type Role = 'rep' | 'admin' | 'management' | 'accounts';
+const ROLES: Role[] = ['rep', 'admin', 'management', 'accounts'];
+const ROLE_NAMES: Record<Role, string> = { rep: 'Rep', admin: 'Admin', management: 'Management', accounts: 'Accounts' };
 const MIN_PASSWORD = 6;
 const DEFAULT_TARGETS = { salesFigure: 30000, proposals: 2, preview: 1 };
 const EMPTY_KPI = { salesFigure: [0, 0, 0, 0, 0], proposals: [0, 0, 0, 0, 0], preview: [0, 0, 0, 0, 0] };
@@ -141,6 +143,24 @@ export async function callerFrom(req: Request) {
   return { memberId: uid, role: data.role as Role, superManager: (await db.collection('owner_access').doc(uid).get()).exists };
 }
 
+/** An Accounts login (team role 'accounts', active), or any CRM login. Accounts logins have no auth_map record. */
+export async function memberFrom(req: Request): Promise<{ memberId: string; role: Role; name: string; superManager: boolean }> {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token) throw new UserError(401, 'not-logged-in', 'You are logged out. Log in again.');
+  const { auth, db } = admin();
+  let uid: string;
+  try {
+    uid = (await auth.verifyIdToken(token, true)).uid;
+  } catch {
+    throw new UserError(401, 'not-logged-in', 'Your login has expired. Log in again.');
+  }
+  const member: any = (await db.collection('team').doc(uid).get()).data();
+  if (member?.active && member.role === 'accounts') return { memberId: uid, role: 'accounts', name: String(member.name || ''), superManager: false };
+  const caller = await callerFrom(req);
+  return { ...caller, name: String(member?.name || '') };
+}
+
 export async function managementFrom(req: Request) {
   const caller = await callerFrom(req);
   if (caller.role !== 'management') throw new UserError(403, 'management-only', 'Only Management can do this.');
@@ -244,7 +264,7 @@ export function registerAuthRoutes(app: Express) {
 
   // Anyone: change my own password.
   app.post('/api/auth/change-password', route(async req => {
-    const caller = await callerFrom(req);
+    const caller = await memberFrom(req);   // Accounts logins too
     const current = req.body?.currentPassword;
     const next = validatePassword(req.body?.newPassword);
     if (typeof current !== 'string' || !current) throw new UserError(400, 'no-password', 'Enter your current password.');
@@ -282,9 +302,11 @@ export function registerAuthRoutes(app: Express) {
     batch.set(db.collection('team').doc(memberId), {
       name, role, active: true, mustChangePassword: mustChange, createdAt: now, createdById: caller.memberId,
     });
-    batch.set(db.collection('auth_map').doc(memberId), { memberId, role, active: true });
     batch.set(db.collection('secrets').doc(memberId), { hash, salt, updatedAt: now });
-    batch.set(db.collection('reps').doc(memberId), { kpi: EMPTY_KPI, targets: DEFAULT_TARGETS }, { merge: true });
+    if (role !== 'accounts') {
+      batch.set(db.collection('auth_map').doc(memberId), { memberId, role, active: true });
+      batch.set(db.collection('reps').doc(memberId), { kpi: EMPTY_KPI, targets: DEFAULT_TARGETS }, { merge: true });
+    }
     await batch.commit();
     await logActivity(caller.memberId, req, 'team', `Added ${name} (${ROLE_NAMES[role]})`);
     return { memberId };
@@ -304,8 +326,17 @@ export function registerAuthRoutes(app: Express) {
     }
     const batch = db.batch();
     batch.update(db.collection('team').doc(member.id), { role });
-    batch.set(db.collection('auth_map').doc(member.id), { memberId: member.id, role, active: true }, { merge: true });
+    // Accounts: no auth_map record, so the database gives them nothing (they use the portal through the server).
+    if (role === 'accounts') batch.delete(db.collection('auth_map').doc(member.id));
+    else batch.set(db.collection('auth_map').doc(member.id), { memberId: member.id, role, active: true }, { merge: true });
+    if (member.role === 'accounts' && role !== 'accounts') {
+      batch.set(db.collection('reps').doc(member.id), { kpi: EMPTY_KPI, targets: DEFAULT_TARGETS }, { merge: true });
+    }
     await batch.commit();
+    // Moving into or out of Accounts: log them out, so their next login opens the right screen.
+    if (role === 'accounts' || member.role === 'accounts') {
+      try { await admin().auth.revokeRefreshTokens(member.id); } catch { /* never logged in yet */ }
+    }
     await logActivity(caller.memberId, req, 'team', `Changed ${member.name}'s role to ${ROLE_NAMES[role]}`);
   }));
 
@@ -372,7 +403,7 @@ export function registerAuthRoutes(app: Express) {
     const { hash, salt } = await hashPassword(password);
     const batch = db.batch();
     batch.update(db.collection('team').doc(member.id), { active: true, mustChangePassword: mustChange, removedAt: null });
-    batch.set(db.collection('auth_map').doc(member.id), { memberId: member.id, role: member.role, active: true });
+    if (member.role !== 'accounts') batch.set(db.collection('auth_map').doc(member.id), { memberId: member.id, role: member.role, active: true });
     batch.set(db.collection('secrets').doc(member.id), { hash, salt, updatedAt: Date.now() });
     await batch.commit();
     await logActivity(caller.memberId, req, 'team', `Gave ${member.name} access again`);

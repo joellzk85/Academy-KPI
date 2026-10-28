@@ -21,6 +21,7 @@ import { registerBlueprintRoutes } from "./serverBlueprint";
 import { registerKpiRoutes } from "./serverKpi";
 import { registerOneToOneRoutes } from "./serverOneToOne";
 import { registerActivityRoutes } from "./serverActivity";
+import { registerAccountsPortalRoutes, registerAccountsSlipRoute } from "./serverAccountsPortal";
 
 // Load environment variables
 dotenv.config();
@@ -40,6 +41,9 @@ async function startServer() {
 
   // Import from the Blueprint spreadsheet (Management): reads the Excel file, also bigger than 100 KB.
   registerBlueprintRoutes(app);
+
+  // Accounts portal: the bank slip upload (a file, bigger than 100 KB).
+  registerAccountsSlipRoute(app);
 
   app.use(express.json());
 
@@ -74,6 +78,8 @@ async function startServer() {
 
   // Payment links for accounts: open a payment request without logging in and click "Payment made" (/pay/<token>)
   registerPaymentLinkRoutes(app);
+  // Accounts portal (/accounts, 2026-10-28): accounts staff pay approved payments; Management views and manages it
+  registerAccountsPortalRoutes(app);
 
   // Referrers: their own link for bank details (/ref/<token>), accepting it, and the referral fee raised when a deal is won
   registerReferrerRoutes(app);

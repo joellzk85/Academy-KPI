@@ -448,7 +448,10 @@ export interface AdminRecord {
 // ---- Team & login (Phase 1) ----
 // The Team list is the ONE place people's names and roles live.
 // Every other screen reads names from here.
-export type TeamRole = 'rep' | 'admin' | 'management';
+// Accounts (2026-10-28): own staff who only use the Accounts portal (/accounts, lib/accountsPortal.ts). They have no
+// auth_map record, so the database rules give them nothing; the server serves the portal. Never in the CRM's lists.
+export type CrmRole = 'rep' | 'admin' | 'management';
+export type TeamRole = CrmRole | 'accounts';
 
 export interface TeamMember {
   id: string;               // also this person's login ID (never shown)
@@ -461,8 +464,13 @@ export interface TeamMember {
   removedAt?: number | null;
 }
 
+/** A person who uses the CRM itself (not Accounts): what every CRM screen receives. */
+export type CrmMember = TeamMember & { role: CrmRole };
+export const isCrmMember = (m: TeamMember): m is CrmMember => m.role !== 'accounts';
+
 export const ROLE_LABELS: Record<TeamRole, string> = {
   rep: 'Sales rep',
   admin: 'Admin',
   management: 'Management',
+  accounts: 'Accounts',
 };
