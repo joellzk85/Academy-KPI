@@ -166,6 +166,41 @@ async function poFiles(db: Firestore, dealId: string, taskId: string) {
   return snap.docs.map(d => ({ ...(d.data() as any), id: d.id })).filter(f => f.taskId === taskId);
 }
 
+/** A Trainer step's PO made automatically, for the Accounts portal (2026-10-28), the same one the trainer sees: none when
+ *  PO files are uploaded on the step (accounts get those with the step's files), the copy the trainer accepted, else the
+ *  PO from the agreed fee lines. null for other steps, internal trainers, cancelled trainings or no agreed fee yet. */
+export async function autoPoFor(db: Firestore, dealId: string, taskId: string): Promise<any | null> {
+  const checklist: any = (await db.collection('deal_checklists').doc(dealId).get()).data();
+  const task = (checklist?.tasks || []).find((t: any) => t.id === taskId);
+  if (!task || task.kind !== 'trainer' || !task.trainerId) return null;
+  if ((await poFiles(db, dealId, taskId)).length) return null;
+  const trainerId = String(task.trainerId);
+  const [dealSnap, tr, priv, jobSnap] = await Promise.all([
+    db.collection('pipelines').doc(dealId).get(), db.collection('trainers_directory').doc(trainerId).get(),
+    db.collection('trainer_private').doc(trainerId).get(), db.collection('trainer_jobs').doc(jobId(dealId, trainerId)).get(),
+  ]);
+  const deal: any = dealSnap.exists ? { ...dealSnap.data(), id: dealId } : null;
+  if (!deal || !tr.exists || cancelledTraining(deal)) return null;
+  const trainer = { ...withPrivate(tr.data() as any, priv.data()), id: trainerId };
+  if (trainer.memberId) return null;
+  const job: any = jobSnap.data() || {};
+  const moved = lastMove(deal);
+  if (job.po && job.poAcceptedAt && !(moved && moved.at > job.poAcceptedAt)) return job.po;
+  const lines = (await feeLines(db, dealId, taskId, trainerId)).filter(o => o.status !== 'rejected' && feeIsAgreed(o));
+  if (!lines.length) return null;
+  const [progs, venues, quotes, client, vendor] = await Promise.all([
+    deal.programmeId ? db.collection('programmes').doc(deal.programmeId).get() : null,
+    db.collection('venues_directory').get(), db.collection('quotations').where('pipelineId', '==', dealId).get(),
+    deal.clientId ? db.collection('clients').doc(deal.clientId).get() : null, trainerVendor(db, trainerId).then(d => d?.data() || null),
+  ]);
+  const venue = effectiveVenue((checklist.tasks || []).find((x: any) => x.kind === 'venue'), quotes.docs.map(d => ({ ...d.data(), id: d.id })), venues.docs.map(d => ({ ...d.data(), id: d.id })));
+  const venueOn = venue && !(checklist.tasks || []).some((x: any) => x.kind === 'venue' && x.needed === false);
+  const programme = String(progs?.data()?.name || '').trim() || deal.courseName || 'Training';
+  return buildPo({ deal: { ...deal, courseName: deal.courseName || programme }, dates: trainingDateText(deal, true), date: todayIso(), trainer,
+    client: String(client?.data()?.companyName || deal.client || ''), venue: venueOn ? venue.name : '',
+    lines: lines.map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 })), vendor });
+}
+
 // Everything the portal shows about each training (My trainings, My calendar and the calendar link).
 // The PO: files uploaded on the Trainer step if any; else, once there's a fee line, the PO made automatically
 // (poAuto); once accepted, the copy kept on trainer_jobs.po.

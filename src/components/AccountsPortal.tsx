@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { signOut } from 'firebase/auth';
-import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Clock, Download, FileSpreadsheet, KeyRound, Loader2, LogOut, MessageCircleQuestion, Paperclip, RefreshCw, Search, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Clock, Download, FileSpreadsheet, FolderDown, KeyRound, Loader2, LogOut, MessageCircleQuestion, Paperclip, RefreshCw, Search, X } from 'lucide-react';
 import { auth, callServer, friendlyError } from '../lib/firebase';
 import { TeamMember } from '../types';
 import { formatDate } from '../lib/deals';
@@ -10,6 +10,8 @@ import { usePaged } from '../lib/listPaging';
 import ListPager, { listSelect } from './ListPager';
 import { ChangePasswordForm } from './LoginScreen';
 import AccountsSheetDocument, { sheetExcel } from './AccountsSheet';
+import { DocList, docBytes, docCount, docsZip } from './AccountsDocs';
+import { sizeText } from '../lib/checklistFiles';
 import { blobToBase64, downloadBlob, makeDocumentPdf } from '../lib/quotePdf';
 import { CHECKLIST_FILE_ACCEPT, CHECKLIST_FILE_KINDS } from '../lib/checklistFiles';
 import logoUrl from '../assets/outline/next-logo.png';
@@ -67,6 +69,7 @@ export default function AccountsPortal({ member }: { member: TeamMember }) {
   const [payNote, setPayNote] = useState('');
   const [slip, setSlip] = useState<File | null>(null);
   const [busy, setBusy] = useState('');
+  const [zipProgress, setZipProgress] = useState('');
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [asking, setAsking] = useState<PortalRow | null>(null);
   const [slipFor, setSlipFor] = useState<PortalRow | null>(null);
@@ -158,6 +161,32 @@ export default function AccountsPortal({ member }: { member: TeamMember }) {
     }
   };
 
+  // One line straight from its own Payment raised button (the bar does several at once).
+  const raiseOne = async (r: PortalRow) => {
+    const ref = window.prompt(`Payment raised: ${r.receiver.name}, ${sen(r.amount)}${r.accountNo ? ` to ${r.bankName} ${r.accountNo}` : ''}.${r.bankChangedAt ? '\n\nCAREFUL: the bank details changed since the last payment. Check the account.' : ''}\n\nBank reference (optional):`, '');
+    if (ref === null) return;
+    setBusy('pay');
+    try {
+      await callServer('/api/accounts/raise', { ids: [r.id], ref }, true);
+      flash('ok', `${r.receiver.name} raised, pending release.`);
+      setTicked(t => t.filter(x => x !== r.id));
+      await load(true);
+    } catch (e) { flash('error', friendlyError(e)); await load(true); } finally { setBusy(''); }
+  };
+
+  // Every document of the ticked payments (or of the list shown) in one ZIP.
+  const bulkDocs = async () => {
+    const list = (tickedRows.length ? tickedRows : shown).filter(r => docCount(r));
+    if (!list.length) return flash('error', 'No documents on these payments yet.');
+    const n = list.reduce((t, r) => t + docCount(r), 0);
+    if (!window.confirm(`Download ${n} document${n === 1 ? '' : 's'} of ${list.length} payment${list.length === 1 ? '' : 's'} (about ${sizeText(docBytes(list))}) as one ZIP file, a folder per payment?`)) return;
+    setBusy('zip'); setZipProgress('');
+    try {
+      const sec = SECTIONS.find(x => x.key === section)!;
+      downloadBlob(await docsZip(list, setZipProgress), `NEXT Academy payment documents ${month ? monthLabel(month) : sec.label}`.replace(/[^\w .-]/g, '') + '.zip');
+    } catch (e: any) { flash('error', e?.message || friendlyError(e)); } finally { setBusy(''); setZipProgress(''); }
+  };
+
   // Back to To pay: the bank rejected it, or it was raised by mistake.
   const unraise = async (r: PortalRow) => {
     const reason = window.prompt(`Put ${r.receiver.name} (${sen(r.amount)}) back to To pay? Why (optional), e.g. the bank rejected it:`, '');
@@ -240,6 +269,9 @@ export default function AccountsPortal({ member }: { member: TeamMember }) {
               ))}
             </div>
             <p className="text-sm text-ink-soft">{SECTIONS.find(s => s.key === section)!.hint}</p>
+            {!isAccounts && section === 'topay' && (
+              <p className="rounded-lg bg-surface px-3 py-2 text-sm">Accounts mark these raised once keyed in the bank. You release them under <strong>Raised, pending release</strong> (Payment done).</p>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <label className="relative min-w-[14rem] flex-1">
@@ -263,6 +295,10 @@ export default function AccountsPortal({ member }: { member: TeamMember }) {
               </button>
               <button type="button" className={btnSecondary} disabled={!shown.length || !!busy} onClick={() => download('xlsx')}>
                 {busy === 'xlsx' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />} Excel
+              </button>
+              <button type="button" className={btnSecondary} disabled={!shown.some(r => docCount(r)) || !!busy} onClick={bulkDocs}
+                title={ticked.length ? 'The documents of the ticked payments, as one ZIP' : 'The documents of every payment in this list, as one ZIP'}>
+                {busy === 'zip' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderDown className="h-4 w-4" />} {busy === 'zip' && zipProgress ? zipProgress : ticked.length ? `Documents (${ticked.length} ticked)` : 'Documents'}
               </button>
             </div>
 
@@ -307,10 +343,10 @@ export default function AccountsPortal({ member }: { member: TeamMember }) {
                           {col('receiver') && <td className="min-w-[18rem] px-3 py-3"><ReceiverBlock r={r} fields={fields} /></td>}
                           <td className="whitespace-nowrap px-3 py-3 text-right font-semibold">{sen(r.amount).replace('RM ', '')}</td>
                           {col('bank') && <td className="min-w-[10rem] px-3 py-3"><BankBlock r={r} /></td>}
-                          {col('details') && <td className="min-w-[10rem] px-3 py-3">{r.details}<span className="block font-mono text-xs text-ink-soft">{r.ref}</span></td>}
+                          {col('details') && <td className="min-w-[10rem] px-3 py-3">{r.details}<span className="block font-mono text-xs text-ink-soft">{r.ref}</span><div className="mt-2"><DocList r={r} onError={t => flash('error', t)} /></div></td>}
                           {col('eventDate') && <td className="whitespace-nowrap px-3 py-3">{r.eventDate ? formatDate(r.eventDate) : '—'}</td>}
-                          {col('remarks') && <td className="min-w-[12rem] px-3 py-3"><Remarks r={r} lateDays={settings.raisedDays} /><div className="mt-2"><RowActions r={r} isAccounts={isAccounts} onAsk={() => setAsking(r)} onSlip={() => setSlipFor(r)} onUnraise={() => unraise(r)} /></div></td>}
-                          {!col('remarks') && <td className="px-3 py-3"><RowActions r={r} isAccounts={isAccounts} onAsk={() => setAsking(r)} onSlip={() => setSlipFor(r)} onUnraise={() => unraise(r)} /></td>}
+                          {col('remarks') && <td className="min-w-[12rem] px-3 py-3"><Remarks r={r} lateDays={settings.raisedDays} /><div className="mt-2"><RowActions r={r} isAccounts={isAccounts} onAsk={() => setAsking(r)} onSlip={() => setSlipFor(r)} onUnraise={() => unraise(r)} onRaise={viewer?.canRaise && r.section === 'topay' ? () => raiseOne(r) : undefined} /></div></td>}
+                          {!col('remarks') && <td className="px-3 py-3"><RowActions r={r} isAccounts={isAccounts} onAsk={() => setAsking(r)} onSlip={() => setSlipFor(r)} onUnraise={() => unraise(r)} onRaise={viewer?.canRaise && r.section === 'topay' ? () => raiseOne(r) : undefined} /></td>}
                         </tr>
                       ))}
                     </tbody>
@@ -335,11 +371,12 @@ export default function AccountsPortal({ member }: { member: TeamMember }) {
                       </div>
                       {col('bank') && <BankBlock r={r} />}
                       {col('details') && <p className="text-sm">{r.details} <span className="font-mono text-xs text-ink-soft">{r.ref}</span></p>}
+                      <DocList r={r} onError={t => flash('error', t)} />
                       {col('remarks') && <Remarks r={r} lateDays={settings.raisedDays} />}
                       {col('receiver') && fields.length > 0 && (
                         <details className="text-sm"><summary className="cursor-pointer font-semibold text-accent">Receiver's details</summary><ReceiverBlock r={r} fields={fields} hideName /></details>
                       )}
-                      <RowActions r={r} isAccounts={isAccounts} onAsk={() => setAsking(r)} onSlip={() => setSlipFor(r)} onUnraise={() => unraise(r)} />
+                      <RowActions r={r} isAccounts={isAccounts} onAsk={() => setAsking(r)} onSlip={() => setSlipFor(r)} onUnraise={() => unraise(r)} onRaise={viewer?.canRaise && r.section === 'topay' ? () => raiseOne(r) : undefined} />
                     </li>
                   ))}
                 </ul>
@@ -351,12 +388,14 @@ export default function AccountsPortal({ member }: { member: TeamMember }) {
       </main>
 
       {/* The bar: accounts raise ticked lines (bank reference, note); a manager marks raised ones done (reference, slip). */}
-      {tickable && tickedRows.length > 0 && (
+      {tickable && (tickedRows.length > 0 || (section === 'topay' && shown.length > 0)) && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
           <div className="mx-auto flex max-w-7xl flex-wrap items-end gap-3 px-4 py-3">
             <div className="min-w-[10rem]">
-              <p className="text-sm text-ink-soft">{tickedRows.length} ticked</p>
-              <p className="text-lg font-bold">{sen(rowsTotal(tickedRows))}</p>
+              {tickedRows.length ? <>
+                <p className="text-sm text-ink-soft">{tickedRows.length} ticked</p>
+                <p className="text-lg font-bold">{sen(rowsTotal(tickedRows))}</p>
+              </> : <p className="max-w-[16rem] text-sm text-ink-soft">Tick the payments you keyed in the bank, or click Payment raised on a line.</p>}
             </div>
             <label className="min-w-[12rem] flex-1">
               <span className="mb-1 block text-sm font-medium text-ink-soft">Bank reference (optional)</span>
@@ -374,8 +413,8 @@ export default function AccountsPortal({ member }: { member: TeamMember }) {
             </label>
             )}
             <div className="flex gap-2">
-              <button type="button" className={btnSecondary} onClick={() => setTicked([])}>Untick</button>
-              <button type="button" className={btnPrimary} onClick={act} disabled={busy === 'pay'}>
+              {tickedRows.length > 0 && <button type="button" className={btnSecondary} onClick={() => setTicked([])}>Untick</button>}
+              <button type="button" className={btnPrimary} onClick={act} disabled={busy === 'pay' || !tickedRows.length}>
                 {busy === 'pay' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {section === 'topay' ? 'Payment raised' : 'Payment done'}
               </button>
             </div>
@@ -461,9 +500,12 @@ function Remarks({ r, lateDays }: { r: PortalRow; lateDays: number }) {
 
 // Accounts: ask a question, put a raised one back to To pay. A manager: put a raised one back, add the bank slip once paid
 // (Joel: Admin or Management upload the slip; Admin does it on the Payments out board).
-function RowActions({ r, isAccounts, onAsk, onSlip, onUnraise }: { r: PortalRow; isAccounts: boolean; onAsk: () => void; onSlip: () => void; onUnraise: () => void }) {
+function RowActions({ r, isAccounts, onAsk, onSlip, onUnraise, onRaise }: { r: PortalRow; isAccounts: boolean; onAsk: () => void; onSlip: () => void; onUnraise: () => void; onRaise?: () => void }) {
   return (
     <div className="flex flex-wrap gap-1.5">
+      {onRaise && (
+        <button type="button" className={`${btnPrimary} px-2 py-1 text-xs`} onClick={onRaise}><Check className="h-3.5 w-3.5" /> Payment raised</button>
+      )}
       {isAccounts && r.section !== 'paid' && !r.query && (
         <button type="button" className={`${btnSecondary} px-2 py-1 text-xs`} onClick={onAsk}><MessageCircleQuestion className="h-3.5 w-3.5" /> Ask a question</button>
       )}

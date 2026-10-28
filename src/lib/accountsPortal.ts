@@ -11,7 +11,8 @@
 // Pure code, shared by the server (serverAccountsPortal.ts) and the screens. The server builds the rows: accounts
 // logins can't read the database at all (no auth_map record).
 
-import { MoneyOut, outWhat, payableFrom, paymentRef } from './money';
+import { MoneyOut, groupKey, outWhat, payableFrom, paymentRef } from './money';
+import type { PoInput } from './trainerPortal';
 import { formatDate } from './deals';
 import { payToProblem, waitsForTraining } from './paymentSummary';
 import { Vendor, bankChecked, hasBank } from './vendors';
@@ -109,6 +110,8 @@ export interface PortalRow {
   query: PortalQuery | null;   // accounts sent it back with a question; cleared by Admin or Management
   raised: PortalRaised | null; // keyed in the bank by accounts, waiting for release (and kept once paid)
   slips: number;               // receipts and bank slips on the payment
+  docs: PortalDoc[];           // every file Admin attached to it (Joel, 2026-10-28), downloaded through the server
+  po: PoInput | null;          // a trainer fee's PO made automatically (when no PO file is uploaded on the step)
 }
 
 export interface PortalInput {
@@ -119,7 +122,8 @@ export interface PortalInput {
   trainers: Map<string, any>;
   trainerPrivate: Map<string, any>;
   venues: Map<string, any>;
-  slipCount: Map<string, number>;
+  docsOf: Map<string, PortalDoc[]>;
+  poOf: Map<string, PoInput | null>;
   settings: PortalSettings;
   today: string;
 }
@@ -226,7 +230,9 @@ export function buildPortalRows(inp: PortalInput): PortalRow[] {
       bankChangedAt: where.section === 'paid' ? '' : bankChangedSince(v, inp.outs),
       query: o.accountsQuery?.text ? o.accountsQuery : null,
       raised: o.accountsRaised?.at ? o.accountsRaised : null,
-      slips: inp.slipCount.get(o.id) || 0,
+      slips: (inp.docsOf.get(o.id) || []).filter(d => d.kind === 'receipt').length,
+      docs: inp.docsOf.get(o.id) || [],
+      po: inp.poOf.get(o.id) || null,
     });
   });
   return rows;
@@ -283,3 +289,42 @@ export function workingDaysSince(iso: string, now = Date.now()): number {
 
 /** Raised more than `days` working days ago and still not released: amber. */
 export const releaseLate = (raised: { at: string } | null | undefined, days: number, now = Date.now()) => !!raised?.at && workingDaysSince(raised.at, now) > days;
+
+// ---------- Documents on each payment (Joel, 2026-10-28: "documents attached by admin for each payment should also appear in
+// the portal for accounts to download"; "all that require payment and payment approval should receive the uploaded
+// document and PO") ----------
+
+export type PortalDocKind = 'invoice' | 'support' | 'receipt' | 'step';
+export interface PortalDoc {
+  id: string;
+  source: 'receipt' | 'checklist';   // payment_receipts or checklist_files
+  kind: PortalDocKind;
+  label: string;
+  name: string;
+  size: number;
+  type: string;
+  at: string;
+}
+const DOC_ORDER: PortalDocKind[] = ['step', 'invoice', 'support', 'receipt'];
+
+/** A payment's files: those on its checklist step (the PO, the venue's quotation, ...), the vendor's invoices on its cost
+ *  (shared by every part), the documents attached to a company payment, and the payment receipts once paid. */
+export function paymentDocs(o: MoneyOut, receipts: any[], checklistFiles: any[]): PortalDoc[] {
+  const doc = (r: any, source: PortalDoc['source'], kind: PortalDocKind, label: string): PortalDoc =>
+    ({ id: String(r.id), source, kind, label, name: String(r.name || 'file'), size: Number(r.size) || 0, type: String(r.type || ''), at: String(r.at || '') });
+  const out: PortalDoc[] = [];
+  if (o.dealId && o.checklistTaskId) {
+    checklistFiles.filter(f => f.dealId === o.dealId && f.taskId === o.checklistTaskId)
+      .forEach(f => out.push(doc(f, 'checklist', 'step', f.taskLabel ? `Checklist: ${f.taskLabel}` : 'Checklist file')));
+  }
+  receipts.forEach(r => {
+    if (r.kind === 'invoice' && r.vendorInvoiceFor === groupKey(o) && (!o.dealId || r.dealId === o.dealId)) out.push(doc(r, 'receipt', 'invoice', `Vendor invoice${r.invoiceNo ? ` ${r.invoiceNo}` : ''}`));
+    else if (r.moneyOutId === o.id && r.kind === 'support') out.push(doc(r, 'receipt', 'support', 'Supporting document'));
+    else if (r.moneyOutId === o.id && !r.kind) out.push(doc(r, 'receipt', 'receipt', 'Payment receipt'));
+  });
+  return out.sort((a, b) => DOC_ORDER.indexOf(a.kind) - DOC_ORDER.indexOf(b.kind) || a.at.localeCompare(b.at));
+}
+
+/** "PR-20261022-1 Ahmad Zaki": the folder for one payment in a bulk download (safe on Windows). */
+export const docFolder = (r: Pick<PortalRow, 'ref' | 'receiver'>) => `${r.ref} ${r.receiver.name}`.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+export const MAX_BULK_BYTES = 100 * 1024 * 1024;

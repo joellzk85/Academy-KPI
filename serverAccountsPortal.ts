@@ -25,7 +25,8 @@ import { admin, UserError, callerFrom, memberFrom, route } from './serverAuth';
 import { addDealHistory } from './serverDocLinks';
 import { MoneyOut } from './src/lib/money';
 import { Vendor } from './src/lib/vendors';
-import { PortalLogEntry, PortalRow, buildPortalRows, cleanPortalSettings, sectionOf } from './src/lib/accountsPortal';
+import { PortalDoc, PortalLogEntry, PortalRow, buildPortalRows, cleanPortalSettings, paymentDocs, sectionOf } from './src/lib/accountsPortal';
+import { autoPoFor } from './serverTrainerPortal';
 import { checklistFileProblem, checklistFileType, safeFileName } from './src/lib/checklistFiles';
 
 const todayMY = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
@@ -72,18 +73,16 @@ const byIds = async (db: Firestore, col: string, ids: string[]) => new Map(
 
 /** Every line of the portal, worked out from the live records. */
 async function loadRows(db: Firestore): Promise<PortalRow[]> {
-  const [outSnap, vendorSnap, receiptSnap, settings] = await Promise.all([
+  const [outSnap, vendorSnap, receiptSnap, fileSnap, settings] = await Promise.all([
     db.collection('money_out').get(), db.collection('vendors').get(),
-    db.collection('payment_receipts').where('moneyOutId', '!=', '').get(), readSettings(),
+    db.collection('payment_receipts').get(), db.collection('checklist_files').get(), readSettings(),
   ]);
   const outs = outSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as MoneyOut);
   const vendors = vendorSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as Vendor);
-  const slipCount = new Map<string, number>();
-  receiptSnap.docs.forEach(d => {
-    const r: any = d.data();
-    if (r.kind) return;                                   // vendor invoices and copies are not proof of payment
-    slipCount.set(r.moneyOutId, (slipCount.get(r.moneyOutId) || 0) + 1);
-  });
+  const receipts = receiptSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }));
+  const files = fileSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }));
+  const docsOf = new Map<string, PortalDoc[]>(outs.map(o => [o.id, paymentDocs(o, receipts, files)]));
+  const poOf = await posFor(db, outs.filter(o => !o.deleted && o.status !== 'rejected'));
   const deals = await byIds(db, 'pipelines', outs.map(o => o.dealId));
   const [clients, trainers, trainerPrivate, venues] = await Promise.all([
     byIds(db, 'clients', [...deals.values()].map(d => d.clientId)),
@@ -91,7 +90,37 @@ async function loadRows(db: Firestore): Promise<PortalRow[]> {
     byIds(db, 'trainer_private', vendors.map(v => v.trainerId || '')),
     byIds(db, 'venues_directory', vendors.map(v => v.venueId || '')),
   ]);
-  return buildPortalRows({ outs, vendors, deals, clients, trainers, trainerPrivate, venues, slipCount, settings, today: todayMY() });
+  return buildPortalRows({ outs, vendors, deals, clients, trainers, trainerPrivate, venues, docsOf, poOf, settings, today: todayMY() });
+}
+
+/** Trainer fees: the PO made automatically on their Trainer step (one per step, shared by its fee lines). */
+async function posFor(db: Firestore, outs: MoneyOut[]) {
+  const byStep = new Map<string, any>();
+  const out = new Map<string, any>();
+  for (const o of outs) {
+    if (o.category !== 'Trainer' || !o.dealId || !o.checklistTaskId) continue;
+    const key = `${o.dealId}/${o.checklistTaskId}`;
+    if (!byStep.has(key)) byStep.set(key, await autoPoFor(db, o.dealId, o.checklistTaskId).catch(() => null));
+    out.set(o.id, byStep.get(key));
+  }
+  return out;
+}
+
+/** One payment's documents, as the portal lists them; only for a payment the portal shows. */
+async function docsForPayment(db: Firestore, id: string) {
+  const o: any = (await db.collection('money_out').doc(id).get()).data();
+  if (!o) throw new UserError(404, 'not-found', 'That payment was not found. Reload the page.');
+  const out = { ...o, id } as MoneyOut;
+  const deal: any = out.dealId ? (await db.collection('pipelines').doc(out.dealId).get()).data() : undefined;
+  const vendor: any = out.vendorId ? (await db.collection('vendors').doc(out.vendorId).get()).data() : undefined;
+  if ((out.dealId && (!deal || deal.deleted)) || !sectionOf(out, deal, vendor, todayMY())) throw new UserError(404, 'not-found', 'That payment is not in the portal any more. Reload the page.');
+  const [receipts, files] = await Promise.all([
+    db.collection('payment_receipts').get().then(q => q.docs.map(d => ({ ...(d.data() as any), id: d.id }))),
+    out.dealId ? db.collection('checklist_files').where('dealId', '==', out.dealId).get().then(q => q.docs.map(d => ({ ...(d.data() as any), id: d.id }))) : Promise.resolve([]),
+  ]);
+  const docs = paymentDocs(out, receipts, files);
+  const paths = new Map<string, string>([...receipts, ...files].map((r: any) => [`${r.id}`, String(r.path || '')]));
+  return { docs, paths };
 }
 
 /** The lines asked for, each checked again as it is now: are they all in this list (To pay, or Raised)? */
@@ -151,6 +180,31 @@ export function registerAccountsSlipRoute(app: Express) {
 }
 
 export function registerAccountsPortalRoutes(app: Express) {
+  // One document of a payment (Joel, 2026-10-28): accounts can't read Storage, so the server checks and sends the file.
+  app.post('/api/accounts/file', async (req, res) => {
+    try {
+      await portalViewer(req);
+      const id = cleanIds([req.body?.id])[0];
+      const docId = String(req.body?.docId || '');
+      if (!id || !docId) throw new UserError(400, 'nothing', 'Choose a document.');
+      const { db } = admin();
+      const { docs, paths } = await docsForPayment(db, id);
+      const d = docs.find(x => x.id === docId);
+      const path = d ? paths.get(d.id) || '' : '';
+      if (!d || !/^(receipts|checklist_files)\//.test(path)) throw new UserError(404, 'not-found', 'That document is not on this payment any more. Reload the page.');
+      let buf: Buffer;
+      try { [buf] = await getStorage(getApps()[0]).bucket((firebaseConfig as any).storageBucket).file(path).download(); }
+      catch { throw new UserError(404, 'file-missing', `"${d.name}" could not be found in the file storage. Ask Admin to upload it again.`); }
+      res.set('Content-Type', d.type || 'application/octet-stream');
+      res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(d.name)}`);
+      res.send(buf);
+    } catch (err: any) {
+      const e = err instanceof UserError ? err : new UserError(500, 'server-error', 'Something went wrong on the server. Try again in a minute.');
+      if (!(err instanceof UserError)) console.error('[accounts file]', err);
+      res.status(e.status).json({ ok: false, code: e.code, error: e.message });
+    }
+  });
+
   // Everything the portal shows.
   app.post('/api/accounts/portal', route(async req => {
     const who = await portalViewer(req);
