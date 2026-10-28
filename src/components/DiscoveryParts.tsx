@@ -5,7 +5,8 @@ import { db, friendlyError } from '../lib/firebase';
 import { Representative } from '../types';
 import { dealOwnerId, formatDate, lostNoteProblem, todayIso } from '../lib/deals';
 import { DISCOVERY_CLOSE_REASONS, discoveryClosed, discoveryDate, isFirstTouch } from '../lib/discovery';
-import { apptOf } from '../lib/appointments';
+import { ApptMode, MODE_LABELS, apptOf } from '../lib/appointments';
+import { lockedDateProblem, minOpenDate } from '../lib/monthLock';
 import { clientContacts, dealContact, mainContactFields, newContactId } from '../lib/contacts';
 import { followUpNotes } from '../lib/followUps';
 import { useFormDraft } from '../lib/useFormDraft';
@@ -34,6 +35,24 @@ const smallLink = 'inline-flex items-center gap-1 text-sm font-semibold hover:un
 
 const entry = (viewer: Viewer, action: string) => ({ at: new Date().toISOString(), byId: viewer.id, byName: viewer.name, action });
 
+// The meeting part of a new discovery: what's missing, or '' (the same rules as logging or booking an appointment).
+function meetingProblem(f: { when: string; mode: string; date: string; outcome: string; nextStep: string; followUpDate: string; contactId: string; contactName: string }, role: string): string {
+  if (!f.when) return 'Say whether the meeting has happened (log it) or is coming up (book it). A discovery always has a meeting.';
+  if (!f.mode) return 'Choose the type of meeting: face-to-face, online or phone call.';
+  if (!f.date) return 'Enter the date of the meeting.';
+  const today = todayIso();
+  if (f.when === 'booked') return f.date < today ? 'A booked meeting is today or later. If it has happened, choose "It has happened".' : '';
+  if (f.date > today) return `The meeting date is in the future. Choose "It's coming up" to book it.`;
+  const locked = lockedDateProblem(f.date, role);
+  if (locked) return locked;
+  if (!f.contactId && !f.contactName.trim()) return 'Say who we met.';
+  if (!f.outcome.trim()) return 'Write one line on what you proposed and how they reacted.';
+  if (!f.nextStep.trim()) return 'Write the next step.';
+  if (!f.followUpDate) return 'Set the follow-up date.';
+  if (f.followUpDate < today) return 'The follow-up date must be today or later.';
+  return '';
+}
+
 // ---------- New discovery / edit ----------
 export function DiscoveryForm({ existing, clients, programmes, outlines, people, ownerId, viewer, onSaved, onCancel }: {
   existing: any | null; clients: any[]; programmes: any[]; outlines: any[]; people: Representative[]; ownerId: string; viewer: Viewer;
@@ -50,6 +69,14 @@ export function DiscoveryForm({ existing, clients, programmes, outlines, people,
     enquiryNote: existing?.enquiryNote || '',
     ownerId: existing ? dealOwnerId(existing) : ownerId,
     notes: existing?.notes || '',
+    // The meeting is a must (Joel, 2026-10-28): logged if it has happened, else booked. New discoveries only.
+    when: '' as '' | 'held' | 'booked',
+    mode: '' as ApptMode | '',
+    date: '',
+    time: '',
+    outcome: '',
+    nextStep: '',
+    followUpDate: '',
   }));
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -70,6 +97,8 @@ export function DiscoveryForm({ existing, clients, programmes, outlines, people,
     const owner = people.find(r => r.id === form.ownerId) || people.find(r => r.id === ownerId);
     if (!owner) return setErr('Choose who owns this discovery.');
     if (viewer.role === 'rep' && owner.id !== viewer.id && !existing) return setErr('You can only make discoveries for yourself.');
+    const meetProblem = existing ? '' : meetingProblem(form, viewer.role);
+    if (meetProblem) return setErr(meetProblem);
     setBusy(true);
     try {
       // Who we meet: one of the client's contact persons, or typed (and, if ticked, added to the client's list).
@@ -96,10 +125,20 @@ export function DiscoveryForm({ existing, clients, programmes, outlines, people,
       if (existing) {
         data.history = [...(existing.history || []), entry(viewer, dealOwnerId(existing) !== owner.id ? `Owner changed to ${owner.name}` : 'Discovery details updated')];
       } else {
+        const at = new Date().toISOString();
+        const metWith = contactId ? contacts.find(x => x.id === contactId)?.name || typed : typed;
+        const held = form.when === 'held';
         Object.assign(data, {
-          stage: 'discovery', status: 'Pending', discoveryDate: todayIso(), proposalSentDate: 'not yet', followUpDate: 'TBD',
-          creatorId: viewer.id, creatorName: viewer.name, completedTags: [], taggedRepIds: [], appointmentTicked: false, createdAt: Date.now(),
-          history: [entry(viewer, 'Discovery made')],
+          stage: 'discovery', status: 'Pending', discoveryDate: todayIso(), proposalSentDate: 'not yet',
+          creatorId: viewer.id, creatorName: viewer.name, completedTags: [], taggedRepIds: [], createdAt: Date.now(),
+          appointment: held
+            ? { status: 'held', date: form.date, time: form.time, mode: form.mode, metWith, outcome: form.outcome.trim(), nextStep: form.nextStep.trim(),
+                loggedAt: at, loggedById: viewer.id, loggedByName: viewer.name, discovery: true }
+            : { status: 'booked', date: form.date, time: form.time, mode: form.mode, bookedAt: at, bookedById: viewer.id, bookedByName: viewer.name },
+          appointmentTicked: held,
+          ...(held ? { appointmentDate: form.date } : {}),
+          followUpDate: held ? form.followUpDate : 'TBD',
+          history: [entry(viewer, 'Discovery made'), entry(viewer, held ? `Discovery meeting held on ${formatDate(form.date)}` : `Discovery meeting booked for ${formatDate(form.date)}`)],
         });
       }
       await setDoc(doc(db, 'pipelines', id), data, { merge: true });
@@ -161,6 +200,60 @@ export function DiscoveryForm({ existing, clients, programmes, outlines, people,
                 placeholder="Or a short note, e.g. our leadership and teambuilding range" aria-label="What we'll propose (short note)" />
             )}
           </div>
+          {!existing && (
+            <div className="space-y-3 rounded-xl border border-accent/30 bg-accent-soft/40 p-4">
+              <p className="font-semibold">The meeting <span className="font-normal text-ink-soft">(required: a discovery is always a meeting)</span></p>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Has the meeting happened?">
+                {([['held', 'It has happened: log it'], ['booked', "It's coming up: book it"]] as const).map(([k, t]) => (
+                  <button key={k} type="button" role="radio" aria-checked={form.when === k} onClick={() => setForm(f => ({ ...f, when: k, date: f.date || (k === 'held' ? todayIso() : '') }))}
+                    className={`rounded-full border px-3 py-1 text-sm font-medium ${form.when === k ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{t}</button>
+                ))}
+              </div>
+              {form.when && (
+                <>
+                  <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Type of meeting">
+                    {(Object.keys(MODE_LABELS) as ApptMode[]).map(m => (
+                      <button key={m} type="button" role="radio" aria-checked={form.mode === m} onClick={() => setForm(f => ({ ...f, mode: m }))}
+                        className={`rounded-full border px-3 py-1 text-sm font-medium ${form.mode === m ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`}>{MODE_LABELS[m]}</button>
+                    ))}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor="ds-date" className={label}>{form.when === 'held' ? 'Date of meeting' : 'Date'}</label>
+                      <input id="ds-date" type="date" value={form.date} className={input}
+                        min={form.when === 'booked' ? todayIso() : minOpenDate(viewer.role) || undefined} max={form.when === 'held' ? todayIso() : undefined}
+                        onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label htmlFor="ds-time" className={label}>Time <span className="font-normal text-ink-soft">(optional)</span></label>
+                      <input id="ds-time" type="time" value={form.time} className={input} onChange={e => setForm(f => ({ ...f, time: e.target.value }))} />
+                    </div>
+                  </div>
+                  {form.when === 'held' ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="sm:col-span-2">
+                        <label htmlFor="ds-out" className={label}>Outcome: what we proposed and how they reacted</label>
+                        <input id="ds-out" value={form.outcome} onChange={e => setForm(f => ({ ...f, outcome: e.target.value }))} className={input} placeholder="e.g. Showed our leadership programme; HR will check next year's budget" />
+                      </div>
+                      <div>
+                        <label htmlFor="ds-next" className={label}>Next step</label>
+                        <input id="ds-next" value={form.nextStep} onChange={e => setForm(f => ({ ...f, nextStep: e.target.value }))} className={input} placeholder="e.g. Call HR in two weeks" />
+                      </div>
+                      <div>
+                        <label htmlFor="ds-fu" className={label}>Follow-up date</label>
+                        <input id="ds-fu" type="date" value={form.followUpDate} min={todayIso()} onChange={e => setForm(f => ({ ...f, followUpDate: e.target.value }))} className={input} />
+                      </div>
+                      {(form.mode === 'face' || form.mode === 'online') && (
+                        <p className="sm:col-span-2 text-sm text-ink-soft">After you save, add the meeting {form.mode === 'online' ? 'screenshot' : 'photo'} in the Meeting box (it counts in your KPI).</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-ink-soft">It goes on the team calendar. Log what happened after the meeting; it turns red if it isn't logged a day later.</p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           {viewer.role !== 'rep' && (
             <div>
               <label htmlFor="ds-owner" className={label}>Owner</label>
@@ -226,6 +319,7 @@ export function DiscoveryPanel({ deal: p, allDeals, client, clientName, clientBa
 
   // The client asked for something: the same record becomes a New deal (New, met if the meeting was logged).
   const convert = () => {
+    if (ap?.status !== 'held') return setErr('Log the discovery meeting first. A discovery becomes a deal only after the meeting.');
     const prog = programmes.find(x => x.id === asked.programmeId);
     if (!prog && !asked.note.trim()) return setErr('Say what the client asked for: pick the programme, or type a short note.');
     if (!asked.date || asked.date > todayIso()) return setErr("Enter the day the client asked (today or earlier).");
@@ -275,16 +369,17 @@ export function DiscoveryPanel({ deal: p, allDeals, client, clientName, clientBa
           </>
         ) : (
           <>
-            <p className="font-bold">{ap ? 'Next step: has the client asked us for something?' : 'Next step: book or log the discovery meeting'}</p>
+            <p className="font-bold">{ap?.status === 'held' ? 'Next step: has the client asked us for something?' : ap ? 'Next step: hold the meeting, then log it' : 'Next step: book or log the discovery meeting'}</p>
             <p className="mt-0.5 text-sm text-ink-soft">
-              {ap ? 'When the client asks for a training, a proposal or a quotation, convert this to a deal. Until then keep following up, or close it if there is no interest.'
+              {ap?.status === 'held' ? 'When the client asks for a training, a proposal or a quotation, convert this to a deal. Until then keep following up, or close it if there is no interest.'
+                : ap ? 'Log what happened in the Meeting box below. It can become a deal once the meeting is logged. If the date changes, move it; if the meeting never happens, close the discovery.'
                 : 'Use the Meeting box below: book it, or log it if it has happened. It counts as an appointment.'}
             </p>
             {editable ? (
               <div className="mt-3 space-y-3">
                 {!box && (
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={busy} className={btnPrimary} onClick={() => { setBox('convert'); setErr(''); }}><ArrowRight className="h-4 w-4" /> Client asked: convert to deal</button>
+                    {ap?.status === 'held' && <button type="button" disabled={busy} className={btnPrimary} onClick={() => { setBox('convert'); setErr(''); }}><ArrowRight className="h-4 w-4" /> Client asked: convert to deal</button>}
                     <button type="button" disabled={busy} className={btnSecondary} onClick={() => { setBox('followup'); setErr(''); }}><Plus className="h-4 w-4" /> Log follow-up</button>
                     <button type="button" disabled={busy} className={btnSecondary} onClick={() => { setBox('close'); setErr(''); }}><XCircle className="h-4 w-4 text-ink-soft" /> No interest: close</button>
                   </div>

@@ -132,7 +132,8 @@ export default function DealAppointmentBox({ deal, viewer, canLog, canManage, pr
           <div className="mt-2 flex flex-wrap gap-2">
             <button type="button" className={btnPrimary} onClick={() => setMode('log')}><NotebookPen className="h-4 w-4" /> Log what happened</button>
             {canChangeBooking && <button type="button" className={btnSecondary} onClick={() => setMode('book')}>Change</button>}
-            {canChangeBooking && <button type="button" className={btnSecondary} disabled={busy} onClick={cancelBooking}><X className="h-4 w-4" /> Cancel</button>}
+            {/* A discovery always has its meeting (2026-10-28): it is moved, never cancelled; if it never happens, the discovery is closed. */}
+            {canChangeBooking && !disc && <button type="button" className={btnSecondary} disabled={busy} onClick={cancelBooking}><X className="h-4 w-4" /> Cancel</button>}
           </div>
         )}
         {photoBox}

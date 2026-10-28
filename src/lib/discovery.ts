@@ -12,10 +12,18 @@
 // - "This was only a discovery": a New deal goes back to Discovery. Reps only on their own, before the proposal
 //   and within the hours Management sets (config/discovery_settings, Follow-up rules page); Management any time
 //   on any deal that isn't won. firestore.rules checks the same.
+// - The meeting is a must (Joel, 2026-10-28): a discovery is made with its meeting logged or booked, the meeting is
+//   moved but never cancelled, and it becomes a deal only once the meeting is logged.
 
 import { dealStage, isDeletedDeal } from './deals';
 
-export const DISCOVERY_CLOSE_REASONS = ['No training need now', 'No budget', 'Uses another provider', 'No response', 'Other'];
+export const DISCOVERY_CLOSE_REASONS = ['No training need now', 'No budget', 'Uses another provider', 'No response', "Meeting didn't happen", 'Other'];
+
+// A discovery always has its meeting, booked or logged (Joel, 2026-10-28); firestore.rules checks the same.
+export function hasMeeting(p: any): boolean {
+  const a = p?.appointment;
+  return !!a && (a.status === 'booked' || a.status === 'held') && ['face', 'online', 'call'].includes(a.mode) && /^\d{4}-\d{2}-\d{2}/.test(a.date || '');
+}
 
 export const DEFAULT_MOVE_BACK_HOURS = 48;
 
@@ -68,6 +76,7 @@ export function moveBackProblem(p: any, viewer: { id: string; role: string }, ho
   const st = dealStage(p);
   if (st === 'discovery' || isDeletedDeal(p)) return 'This is already a discovery.';
   if (st === 'won' || Number(p?.winCount) > 0 || p?.trainingCancelled) return 'A deal that was won stays a deal.';
+  if (!hasMeeting(p)) return 'A discovery is always a meeting: book or log the appointment on this deal first.';
   if (viewer.role === 'management') return '';
   if (st !== 'lead' && st !== 'appointment') return 'Only Management can do this once the proposal is sent.';
   if (ymd(p?.proposalSentDate)) return 'Only Management can do this once the proposal is sent.';
