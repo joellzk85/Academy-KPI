@@ -791,6 +791,7 @@ function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: Crm
   // The calendar and notices on My home reuse the old home page's parts.
   const homeDashboardProps = {
     reps: representatives,
+    people: workspacePeople,
     events: allCalendarEvents,
     notices: [...notices, ...getOverduePipelineNotices()],
     onSelectRep: handleSelectRep,

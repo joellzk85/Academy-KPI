@@ -29,6 +29,8 @@ interface HomeDashboardProps {
   // The shared Google Calendar bar (2026-10-17)
   canManageCalendar?: boolean;
   onCalendarChanged?: () => void;
+  // Everyone who can be tagged on an event, Management without KPIs included (2026-10-29). Falls back to reps.
+  people?: Representative[];
 }
 
 // Deals come only from the live database (no sample data).
@@ -173,6 +175,7 @@ const getRepAlertStatus = (
 
 export default function HomeDashboard({
   reps,
+  people,
   events,
   notices,
   onSelectRep,
@@ -758,7 +761,7 @@ export default function HomeDashboard({
                           <div className="flex items-center gap-1 mt-1 flex-wrap">
                             <span className="text-[8px] font-bold text-slate-400 mr-0.5">Invited:</span>
                             {ev.attendees.map(repId => {
-                              const repName = reps.find(r => r.id === repId)?.name || repId;
+                              const repName = (people || reps).find(r => r.id === repId)?.name || repId;
                               return (
                                 <span key={repId} className="text-[8px] font-bold bg-slate-100 text-slate-600 px-1 py-0.5 rounded border border-slate-200">
                                   {repName}
@@ -976,7 +979,7 @@ export default function HomeDashboard({
                   Tag teammates (their names go on the Google Calendar event)
                 </label>
                 <div className="grid grid-cols-2 gap-1.5 max-h-24 overflow-y-auto border border-slate-200 rounded p-2">
-                  {reps.map(rep => (
+                  {(people || reps).map(rep => (
                     <label key={rep.id} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer hover:bg-slate-50 p-1 rounded">
                       <input 
                         type="checkbox"
