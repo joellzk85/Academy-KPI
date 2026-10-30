@@ -9,6 +9,9 @@ import crypto from 'crypto';
 import { admin } from './serverAuth';
 import { siteSnapshot } from './serverWebsite';
 import { ENQUIRIES, ROTATION_DOC, checkForm, nextInTurn } from './src/lib/websiteEnquiries';
+import { STATS, STATS_TEST, campaignTag, sourceOf } from './src/lib/websiteStats';
+import { todayMY } from './src/lib/websiteData';
+import { FieldValue } from 'firebase-admin/firestore';
 
 let key: Buffer | null = null;
 /** The key that signs each form's time stamp (kept in server_secrets, so every server agrees). */
@@ -76,6 +79,13 @@ export function registerWebsiteFormRoutes(app: Express) {
       if (f.kind === 'register' && !run) return problem('That training date is no longer open. Please pick another date.');
       const prog = snap.data.programmes.find(p => p.name === f.programme || (run && p.slug === run.titleSlug));
 
+      // Where this visitor came from at the start of their visit (the page script puts it in the form; Batch 4).
+      const own = (snap.settings.domains || []).map(d => String(d).toLowerCase());
+      const came = {
+        source: sourceOf(String(body.src_r || '').slice(0, 300), String(body.src_us || '').slice(0, 60), own) || 'Typed in or bookmark',
+        campaign: campaignTag(String(body.src_uc || '')),
+        landing: String(body.src_l || '').slice(0, 120),
+      };
       const { db } = admin();
       const reps = (await db.collection('team').where('active', '==', true).where('role', '==', 'rep').get()).docs.map(d => ({ id: d.id, name: String(d.data().name || '') }));
       const rotRef = db.collection('config').doc(ROTATION_DOC);
@@ -93,9 +103,11 @@ export function registerWebsiteFormRoutes(app: Express) {
           assignedTo: rep?.id || '',
           assignedName: rep?.name || '',
           status: 'new',
+          came,
         });
         if (rep) tx.set(rotRef, { lastId: rep.id, at: Date.now() });
       });
+      db.collection(base ? STATS_TEST : STATS).doc(todayMY()).set({ day: todayMY(), forms: { [f.kind]: FieldValue.increment(1) } }, { merge: true }).catch(() => { /* only a count */ });
       res.redirect(303, `${base}/thank-you?k=${f.kind}`);
     } catch (err) {
       console.error('Website form could not be saved', err);

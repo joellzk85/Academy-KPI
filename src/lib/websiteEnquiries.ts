@@ -38,6 +38,7 @@ export type SiteEnquiry = {
   handledByName?: string;
   handledAt?: string;
   reassigned?: { at: string; byName: string; from: string; to: string }[];
+  came?: { source: string; campaign: string; landing: string };   // where the visitor came from (Batch 4)
 };
 
 export const STATUS_LABELS: Record<EnquiryStatus, string> = { new: 'New', deal: 'Made a deal', question: 'Only a question', not_real: 'Not real' };

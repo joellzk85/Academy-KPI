@@ -14,6 +14,7 @@ import DraftBar from './DraftBar';
 import { refreshSite, useSiteSettings } from '../lib/useWebsite';
 
 const WebsiteEditor = React.lazy(() => import('./WebsiteEditor'));
+const WebsiteVisitors = React.lazy(() => import('./WebsiteVisitors'));
 
 type Viewer = { id: string; name: string; role: string };
 type Person = { id: string; name: string; role: string; active?: boolean };
@@ -295,7 +296,7 @@ function SettingsTab({ settings, people, me }: { settings: SiteSettings; people:
 }
 
 export default function WebsiteStudio({ me, owner, people, onClose }: { me: Viewer; owner: boolean; people: Person[]; onClose: () => void }) {
-  const [tab, setTab] = useState<'pages' | 'media' | 'menu' | 'settings'>('pages');
+  const [tab, setTab] = useState<'pages' | 'media' | 'menu' | 'visitors' | 'settings'>('pages');
   const [editId, setEditId] = useState('');
   const [pages, setPages] = useState<SitePage[] | null>(null);
   const [menu, setMenu] = useState<SiteMenu>({ items: [] });
@@ -313,7 +314,7 @@ export default function WebsiteStudio({ me, owner, people, onClose }: { me: View
   }, [editId, onClose]);
 
   const editing = editId && pages ? pages.find(p => p.id === editId) : null;
-  const tabs = ([['pages', 'Pages'], ['media', 'Media'], ['menu', 'Menu'], ...(owner ? [['settings', 'Settings']] : [])] as [typeof tab, string][]);
+  const tabs = ([['pages', 'Pages'], ['media', 'Media'], ['menu', 'Menu'], ...(me.role === 'management' ? [['visitors', 'Visitors']] : []), ...(owner ? [['settings', 'Settings']] : [])] as [typeof tab, string][]);
 
   return (
     <div className="fixed inset-0 z-[200] flex flex-col bg-surface font-sans text-ink" role="dialog" aria-label="Website">
@@ -339,6 +340,7 @@ export default function WebsiteStudio({ me, owner, people, onClose }: { me: View
               : tab === 'pages' ? <PagesTab pages={pages} me={me} owner={owner} onEdit={setEditId} />
               : tab === 'media' ? <div className="flex min-h-[70vh] flex-col"><MediaLibrary me={me} owner={owner} pages={pages} /></div>
               : tab === 'menu' ? <MenuTab menu={menu} pages={pages} owner={owner} me={me} />
+              : tab === 'visitors' && me.role === 'management' ? <React.Suspense fallback={<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}><WebsiteVisitors settings={settings} pages={pages} /></React.Suspense>
               : owner ? <SettingsTab settings={settings} people={people} me={me} /> : null}
           </div>
         </>

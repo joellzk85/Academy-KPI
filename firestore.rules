@@ -1452,6 +1452,17 @@ service cloud.firestore {
       allow create, delete: if false;
     }
 
+    // Website visitors (Batch 4, 2026-10-30): one record a day, counted by the CRM server only; Management reads them
+    // (Website → Visitors). site_stats_test holds visits to the test address.
+    match /site_stats/{day} {
+      allow read: if isManagement();
+      allow write: if false;
+    }
+    match /site_stats_test/{day} {
+      allow read: if isManagement();
+      allow write: if false;
+    }
+
     // Owner override: read and write anything, except the login records the CRM server keeps and owner_access itself.
     match /{coll}/{path=**} {
       allow read, write: if isSuper() && !(coll in ['secrets', 'server_secrets', 'team', 'auth_map', 'owner_access']);

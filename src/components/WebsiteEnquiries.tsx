@@ -86,7 +86,7 @@ function DealForm({ e, viewer, clients, deals, onDone }: { e: SiteEnquiry; viewe
         enquiryNote: note, fundingType: f.funding, proposalValue: run ? listValue(run, pax) : 0, participants: run ? pax : (pax || 0),
         requestDate: todayIso(), followUpDate: 'TBD', ownerId: e.assignedTo || viewer.id, ownerName: e.assignedName || viewer.name,
         taggedRepIds: [], notes: '', stage: 'lead', status: 'Pending', proposalSentDate: 'not yet', creatorId: viewer.id, creatorName: viewer.name,
-        completedTags: [], appointmentTicked: false, createdAt: now, source: WEBSITE_SOURCE, websiteEnquiryId: e.id,
+        completedTags: [], appointmentTicked: false, createdAt: now, source: WEBSITE_SOURCE, websiteEnquiryId: e.id, websiteCame: e.came?.source || '', websiteCampaign: e.came?.campaign || '',
         history: [{ at, byId: viewer.id, byName: viewer.name, action: 'Deal created from a website ' + (e.kind === 'register' ? 'registration' : 'enquiry') }],
       });
       batch.update(doc(db, ENQUIRIES, e.id), { status: 'deal', dealId: id, handledById: viewer.id, handledByName: viewer.name, handledAt: at });
@@ -183,6 +183,7 @@ function EnquiryPanel({ e, viewer, people, clients, deals, openDeal, onClose }: 
           {row('Programme', e.kind === 'enquiry' && (e.programme || 'Not sure yet'))}
           {row('Message', e.message && <span className="whitespace-pre-line">{e.message}</span>)}
           {row('Sent from', e.page)}
+          {row('Came from', e.came && [e.came.source, e.came.campaign && `campaign ${e.came.campaign}`].filter(Boolean).join(' · '))}
         </div>
 
         {staff && (

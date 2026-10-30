@@ -7,6 +7,7 @@
 //   CRM's runs, titles and trainers (src/lib/websiteData.ts); /training-calendar, /programmes and /trainers are made
 //   automatically unless the owner made an edited page with that address.
 import type { Express, Request, Response, NextFunction } from 'express';
+import express from 'express';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { admin, callerFrom, route } from './serverAuth';
@@ -14,6 +15,9 @@ import { AUTO_PAGES, SitePageView, SiteCtx, SiteLink, SiteSpecial } from './src/
 import { MEDIA, MENU_DOC, PAGES, PageData, SETTINGS_DOC, SITE_CSS, SiteMedia, SiteMenu, SitePage, SiteSettings, escapeHtml } from './src/lib/website';
 import { EMPTY_SITE_DATA, SiteData, buildSiteData, todayMY } from './src/lib/websiteData';
 import { formStamp } from './serverWebsiteForms';
+import { STATS, STATS_TEST, hitScript, isRobot, pageKeyOf, sourceOf } from './src/lib/websiteStats';
+import crypto from 'crypto';
+import { FieldValue } from 'firebase-admin/firestore';
 
 type Snapshot = {
   at: number;
@@ -84,6 +88,25 @@ async function load(): Promise<Snapshot> {
 /** The website as it is now (pages, menu, settings, runs, programmes, trainers), for the forms. */
 export const siteSnapshot = () => load();
 
+// Visit counting helpers: one person counted once a day (in memory, on this server), and a cap per connection.
+const seen = new Map<string, Set<string>>();
+function seenToday(day: string, who: string): boolean {
+  if (!seen.has(day)) { seen.clear(); seen.set(day, new Set()); }
+  const set = seen.get(day)!;
+  if (set.has(who)) return true;
+  if (set.size < 200000) set.add(who);
+  return false;
+}
+const hitLog = new Map<string, number[]>();
+function hitsTooMany(ip: string): boolean {
+  const now = Date.now();
+  const list = (hitLog.get(ip) || []).filter(t => now - t < 60_000);
+  list.push(now);
+  hitLog.set(ip, list);
+  if (hitLog.size > 20000) hitLog.clear();
+  return list.length > 60;
+}
+
 const hostsOf = (s: SiteSettings) => (s.domains || []).map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean);
 
 function menuLinks(snap: Snapshot, base: string): SiteLink[] {
@@ -119,6 +142,7 @@ ${opts.description ? `<meta property="og:description" content="${escapeHtml(opts
 </head>
 <body>
 ${body}
+<script>${hitScript(opts.base)}</script>
 </body>
 </html>`;
 }
@@ -223,6 +247,38 @@ export function registerWebsiteRefresh(app: Express) {
     await callerFrom(req);
     cache = null;
   }));
+  /** A page was opened on the website (Batch 4): add to the day's counts. Nothing about the visitor is kept. */
+  app.post('/api/site/hit', express.json({ limit: '4kb', type: () => true }), async (req, res) => {
+    res.status(204).end();
+    try {
+      const ua = String(req.headers['user-agent'] || '');
+      if (isRobot(ua)) return;
+      const b = (req.body || {}) as Record<string, any>;
+      const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+      if (hitsTooMany(ip)) return;
+      const snap = await load();
+      const slug = String(b.p || '').replace(/^\/+|\/+$/g, '').toLowerCase().slice(0, 200);
+      const known = slug === 'thank-you' || !!pageFor(snap, slug);
+      if (!known) return;
+      const day = todayMY();
+      const first = b.f === 1 || b.f === '1';
+      const source = first ? sourceOf(String(b.r || '').slice(0, 300), String(b.us || '').slice(0, 60), hostsOf(snap.settings)) : '';
+      const campaign = first ? String(b.uc || '').toLowerCase().replace(/[^a-z0-9 _-]/g, '').slice(0, 40) : '';
+      const who = crypto.createHash('sha256').update(`${day}|${ip}|${ua}`).digest('hex').slice(0, 20);
+      const newVisitor = first && !seenToday(day, who);
+      const inc = (n = 1) => FieldValue.increment(n);
+      const data: any = { views: inc(), pages: { [pageKeyOf(slug)]: inc() }, day };
+      if (first) {
+        data.visits = inc();
+        data.devices = { [b.d === 'phone' ? 'phone' : 'computer']: inc() };
+        if (source) data.sources = { [source]: inc() };
+        if (campaign) data.campaigns = { [campaign]: inc() };
+      }
+      if (newVisitor) data.visitors = inc();
+      const { db } = admin();
+      await db.collection(b.t ? STATS_TEST : STATS).doc(day).set(data, { merge: true });
+    } catch (err) { console.error('Website visit not counted', err); }
+  });
   /** The calendar, programmes and trainers as the website shows them, for the page editor's preview. */
   app.post('/api/site/data', route(async (req) => {
     await callerFrom(req);
