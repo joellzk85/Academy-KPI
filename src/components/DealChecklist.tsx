@@ -5,7 +5,7 @@ import { db, friendlyError } from '../lib/firebase';
 import { formatDate, todayIso, trainingDateText, trainingDayList, trainingEndDate } from '../lib/deals';
 import { TrainingReportBox, savePdf, useReportSettings, useTrainingReport } from './TrainingReportAdmin';
 import {
-  ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS, Picked, applicableTasks, asksNeeded, buildChecklist,
+  ChecklistSettings, ChecklistTask, DEFAULT_SETTINGS, MaterialItem, NEW_STEPS, Picked, StepLink, applicableTasks, asksNeeded, buildChecklist,
   approvalCodeOf, coTrainerShort, coTrainerText, isLockedStep, effectiveTrainer, isCoTrainer, leadTrainerTask, effectiveVenue, hasCosts, hasFiles, isHrdc, isOptional, materialItems, newTaskId, notNeeded, progress, readSettings, taskGate,
   upgradeTasks, withSteps,
 } from '../lib/checklist';
@@ -13,7 +13,7 @@ import { ChecklistFile } from '../lib/checklistFiles';
 import { MoneyOut } from '../lib/money';
 import { withoutDeleted } from '../lib/linked';
 import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
-import StepFiles from './ChecklistFiles';
+import StepFiles, { StepLinks } from './ChecklistFiles';
 import SaveVenueButton from './SaveVenueButton';
 import T3Maker, { useT3 } from './T3Maker';
 import StepCosts, { CostPrefill, VendorHint } from './StepCosts';
@@ -268,11 +268,27 @@ export default function DealChecklist({
     if (now.done || !ticksByFile(t)) return save(allTasks, `${t.label}: ${what}`);
     return patch(t.id, doneBy(), `${t.label}: ${what}, done`);
   };
+  const reportChecked = async (t: ChecklistTask) =>
+    t.id === 'training_report' && (await getDoc(doc(db, 'training_reports', deal.id)).catch(() => null))?.data()?.status === 'checked';
   const lastFileRemoved = async (t: ChecklistTask) => {
     const now = allTasks.find(x => x.id === t.id);
-    const reportChecked = t.id === 'training_report' && (await getDoc(doc(db, 'training_reports', deal.id)).catch(() => null))?.data()?.status === 'checked';
-    if (now?.done && ticksByFile(t) && !reportChecked) return patch(t.id, openAgain, `${t.label}: last file deleted, reopened`);
+    if (now?.done && ticksByFile(t) && !now.links?.length && !(await reportChecked(t))) return patch(t.id, openAgain, `${t.label}: last file deleted, reopened`);
     return save(allTasks, `${t.label}: file deleted`);
+  };
+  // Links on the Training report step (Joel, 2026-10-30): adding one ticks it like a file; the last one gone (no files,
+  // report not checked) reopens it.
+  const addLink = (t: ChecklistTask, link: StepLink) => {
+    const now = allTasks.find(x => x.id === t.id);
+    if (!now) return;
+    const what = `link "${link.name || link.url}" added`;
+    return patch(t.id, { links: [...(now.links || []), link], ...(now.done ? {} : doneBy()) }, `${t.label}: ${what}${now.done ? '' : ', done'}`);
+  };
+  const removeLink = async (t: ChecklistTask, link: StepLink) => {
+    const now = allTasks.find(x => x.id === t.id);
+    if (!now) return;
+    const links = (now.links || []).filter(l => l.id !== link.id);
+    const reopen = now.done && !links.length && !filesOf(t).length && !(await reportChecked(t));
+    return patch(t.id, { links, ...(reopen ? openAgain : {}) }, `${t.label}: link "${link.name || link.url}" deleted${reopen ? ', reopened' : ''}`);
   };
 
   const move = (t: ChecklistTask, dir: -1 | 1) => {
@@ -512,15 +528,17 @@ export default function DealChecklist({
                       header={{ programme: deal.courseName || '', client: deal.client || '', dates: trainingDateText(deal, true), venue: effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || '', trainer: tr?.name || '', grantNumber: approvalCodeOf(allTasks) }}
                       names={isRunDeal(deal) ? runNames : (t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
                       onChecked={() => { if (!t.done) patch(t.id, doneBy(), `${t.label}: checked, done`); }}
-                      onReopened={() => { if (t.done && !filesOf(t).length) patch(t.id, openAgain, `${t.label}: reopened`); }} />
+                      onReopened={() => { if (t.done && !filesOf(t).length && !t.links?.length) patch(t.id, openAgain, `${t.label}: reopened`); }} />
                   );
                 })()}
                 {/* Training report files (Joel, 2026-10-30): the report or screenshots of it, several; uploading ticks the step */}
                 {t.id === 'training_report' && !hasFiles(t) && (
                   <div className="mt-3">
-                    <p className="text-sm font-semibold">Training report files</p>
+                    <p className="text-sm font-semibold">Training report files and links</p>
                     <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable} what="training report or screenshots"
                       onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)} />
+                    <StepLinks links={t.links || []} viewer={viewer} editable={editable} busy={busy}
+                      onAdd={link => addLink(t, link)} onRemove={link => removeLink(t, link)} />
                   </div>
                 )}
                 {/* Trainer portal (2026-10-21): rating, PO accepted or declined, the trainer's fee request */}

@@ -27,6 +27,8 @@ export interface TaskTemplate {
   retired?: boolean;      // hidden from new checklists, kept for the record
 }
 
+export interface StepLink { id: string; url: string; name: string; at: string; byId: string; byName: string }
+
 export interface ChecklistTask {
   id: string;
   label: string;
@@ -35,6 +37,7 @@ export interface ChecklistTask {
   after?: boolean;        // done after training day
   oneOff?: boolean;       // added for this deal only
   files?: boolean;        // has a file drop box (lib/checklistFiles.ts)
+  links?: StepLink[];     // links pasted on the step (Training report, 2026-10-30); adding one ticks it like a file
   optional?: boolean;     // not needed for "Case closed" (lib/postTraining.ts)
   done: boolean;
   doneAt?: string;
@@ -354,7 +357,7 @@ export function dealVenue(checklist: any | null, quotes: any[], venues: any[]): 
 export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = '', hasVenue = !!t.venueId, hasTrainer = !!t.trainerId, fileCount = 0): string {
   if (hasFiles(t) && fileCount === 0) return `Upload the ${t.label} file first (drop it in the box).`;
   // Ticked only when the training report is checked (process audit, 2026-10-22: no tick without a report).
-  if (t.id === 'training_report') return 'This is ticked when the training report is checked, ready for HR (in the training report box), or when a training report file is uploaded.';
+  if (t.id === 'training_report') return 'This is ticked when the training report is checked, ready for HR (in the training report box), or when a training report file or link is added.';
   if (t.kind === 'grant' && grantBlock) return grantBlock;
   if (asksNeeded(t) && t.needed === undefined) return 'Answer "Needed for this training?" first.';
   if (notNeeded(t)) return '';

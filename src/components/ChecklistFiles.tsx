@@ -1,12 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { deleteObject, ref, uploadBytesResumable } from 'firebase/storage';
-import { ExternalLink, Loader2, Trash2, Upload } from 'lucide-react';
+import { ExternalLink, Link2, Loader2, Trash2, Upload } from 'lucide-react';
 import { db, storage } from '../lib/firebase';
 import { formatDate } from '../lib/deals';
 import {
   CHECKLIST_FILE_ACCEPT, CHECKLIST_FILE_KINDS, ChecklistFile, checklistFileProblem, checklistFileType, safeFileName, sizeText,
 } from '../lib/checklistFiles';
+import type { StepLink } from '../lib/checklist';
 import { openProposalFile, storageError } from './ProposalFiles';
 import DownloadButton from './DownloadButton';
 import { PASTE_HINT, usePaste } from './PaymentReceipts';
@@ -161,6 +162,73 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
       )}
       <input ref={input} type="file" accept={CHECKLIST_FILE_ACCEPT} multiple className="hidden" onChange={e => { upload(e.target.files); e.target.value = ''; }} />
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+    </div>
+  );
+}
+
+// Links pasted on a step (Training report, Joel 2026-10-30): e.g. a Google Drive or OneDrive link to the report.
+// Saved on the step itself (deal_checklists); adding one ticks the step like a file.
+export function StepLinks({ links, viewer, editable, busy, onAdd, onRemove }: {
+  links: StepLink[];
+  viewer: Viewer;
+  editable: boolean;
+  busy: boolean;
+  onAdd: (link: StepLink) => void;
+  onRemove: (link: StepLink) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const add = () => {
+    const u = url.trim();
+    const full = /^https?:\/\//i.test(u) ? u : `https://${u}`;
+    try { if (!u || !new URL(full).hostname.includes('.')) throw new Error(); } catch { return setError('Paste a full link, e.g. https://drive.google.com/...'); }
+    onAdd({ id: `ln_${Date.now().toString(36)}`, url: full, name: name.trim(), at: new Date().toISOString(), byId: viewer.id, byName: viewer.name });
+    setUrl(''); setName(''); setError(''); setOpen(false);
+  };
+  const canDelete = (l: StepLink) => editable && (l.byId === viewer.id || viewer.role === 'management');
+  const sorted = [...links].sort((a, b) => b.at.localeCompare(a.at));
+  return (
+    <div className="mt-2 space-y-2">
+      {sorted.length > 0 && (
+        <ul className="divide-y divide-line rounded-lg border border-line bg-white">
+          {sorted.map(l => (
+            <li key={l.id} className="flex items-center gap-2 px-3 py-2">
+              <a href={l.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-[15px] font-medium text-accent hover:underline">
+                  <Link2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{l.name || l.url}</span><ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                </span>
+                <span className="block text-sm text-ink-soft">{l.byName} · {formatDate(l.at)}{l.name ? ` · ${new URL(l.url).hostname}` : ''}</span>
+              </a>
+              {canDelete(l) && (
+                <button type="button" disabled={busy} onClick={() => window.confirm(`Delete the link "${l.name || l.url}"?`) && onRemove(l)}
+                  className="rounded-md p-1.5 text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Delete ${l.name || l.url}`}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {editable && (open ? (
+        <div className="space-y-2 rounded-lg border border-line bg-white p-3">
+          <input autoFocus value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="Paste the link"
+            className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15" />
+          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="Name (optional), e.g. Training report on Google Drive"
+            className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15" />
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          <div className="flex gap-2">
+            <button type="button" disabled={busy} onClick={add} className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#0B5A50] disabled:opacity-60">Add link</button>
+            <button type="button" onClick={() => { setOpen(false); setError(''); }} className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" disabled={busy} onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-line px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface">
+          <Link2 className="h-3.5 w-3.5 text-accent" /> Add a link
+        </button>
+      ))}
     </div>
   );
 }

@@ -97,7 +97,7 @@ both HR and the head of department (HOD). Built from Claude's suggestions, all a
   keys locked for internal trainers' reports; `checkin` / `checkinAnswer` refused from the CRM. Tested with a logic
   script (copies, gaps, cleaning, changes, older reports) and a local page (settings, preview, phone width).
 
-## Training report files (2026-10-30)
+## Training report files and links (2026-10-30)
 
 Joel asked for an upload slot on the after-training Training report step (Admin work → After training, and the deal's checklist).
 - "Training report files" box under the training report box: several files at once, drop, click to choose, or paste a screenshot (Ctrl+V while the mouse is over the box). Stored as checklist files on the step (`checklist_files`, taskId `training_report`).
@@ -106,3 +106,4 @@ Joel asked for an upload slot on the after-training Training report step (Admin 
 - The files stay in the CRM: they are not part of HR's or the HOD's PDF or link.
 - Every checklist upload box now takes a pasted screenshot (Ctrl+V), reusing `usePaste` from `PaymentReceipts.tsx`.
 - Nothing to publish.
+- Links too (same day, Joel): "Add a link" in the same box (link plus an optional name, several), saved on the step (`links` on the task in `deal_checklists`), opens in a new tab. Adding one ticks the step like a file; the step reopens only when no file or link is left and the written report isn't checked. Nothing to publish.
