@@ -13,6 +13,7 @@ import DraftBar from './DraftBar';
 import PanelResizer from './PanelResizer';
 import ProgrammeLinks, { ProgrammeLinkedInfo, linkOutline } from './ProgrammeLinks';
 import { StatusChip, TYPE_TAB_LABELS } from './Programmes';
+import { TitleWebsiteBox } from './WebsiteShowBox';
 import { OutlineType, outlineTypeOf, programmeTypeOf, programmesFor } from '../lib/outlineTb';
 import ListPager from './ListPager';
 import { DeleteAction, pendingDelete } from '../lib/docDelete';
@@ -670,6 +671,8 @@ function TitlePanel({ kind, docWord, group, programmes, deals, trainers, outline
                 <input id="tt-code" value={form.hrdcCode} onChange={e => setForm(f => ({ ...f, hrdcCode: e.target.value }))} className={input} placeholder="From the HRDC portal, once given" />
               </div>
               {p && <ProgrammeLinks programme={p} programmes={programmes} outlines={outlines} deals={deals} trainers={trainers} viewer={viewer} />}
+              {p && <TitleWebsiteBox key={p.id} programme={p as any} viewer={viewer}
+                outlines={docWord === 'outline' ? group.docs.filter(d => !d.raw?.deleted).map(d => ({ id: d.id, label: [d.company || 'General', d.ref, d.date].filter(Boolean).join(' · ') })) : []} />}
               <div>
                 <label htmlFor="tt-notes" className={label}>Notes</label>
                 <textarea id="tt-notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className={`${input} min-h-[80px]`} />

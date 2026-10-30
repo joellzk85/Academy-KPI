@@ -3,12 +3,13 @@
 // - The owner builds pages: add, drag, resize columns, delete blocks, and Publish.
 // - Everyone else allowed to edit changes the words, photos and settings of the blocks already there, then
 //   "Ask to publish": the change waits for approval (never named on screen who approves).
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Puck, useGetPuck } from '@puckeditor/core';
 import '@puckeditor/core/puck.css';
 import { addDoc, collection, doc, updateDoc } from 'firebase/firestore';
 import { ArrowLeft, CheckCircle2, Clock, ImageIcon, Loader2, Send, Undo2 } from 'lucide-react';
-import { db, friendlyError } from '../lib/firebase';
+import { callServer, db, friendlyError } from '../lib/firebase';
+import { SiteData } from '../lib/websiteData';
 import { refreshSite } from '../lib/useWebsite';
 import { useAutoSave } from '../lib/useAutoSave';
 import { PAGES, PageData, SITE_CSS, SiteMedia, SiteMenu, SitePage, SiteSettings, emptyPage } from '../lib/website';
@@ -111,7 +112,11 @@ export default function WebsiteEditor({ page, me, owner, pages, media, menu, set
     p.dispatch({ type: 'replace', destinationIndex: sel.index, destinationZone: sel.zone, data: { ...item, props: { ...item.props, split } } });
   }, []);
 
-  const ctx = useMemo(() => ({ media: mediaById, menu: links, settings, editing: true, inlineCss: SITE_CSS, onResizeColumns }), [mediaById, links, settings, onResizeColumns]);
+  // The calendar, programmes and trainers exactly as the website shows them (the server works them out).
+  const [siteData, setSiteData] = useState<SiteData | undefined>(undefined);
+  useEffect(() => { callServer<{ data: SiteData }>('/api/site/data', {}, true).then(r => setSiteData(r.data)).catch(() => setSiteData(undefined)); }, []);
+
+  const ctx = useMemo(() => ({ media: mediaById, menu: links, settings, data: siteData, editing: true, inlineCss: SITE_CSS, onResizeColumns }), [mediaById, links, settings, siteData, onResizeColumns]);
 
   const leave = async () => { if (await save.flush()) onBack(); };
 

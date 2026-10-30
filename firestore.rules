@@ -722,10 +722,11 @@ service cloud.firestore {
       }
       allow read: if isMember();
       // Internal trainer (2026-10-25): memberId links the record to a team member; only Management sets it (Team).
-      allow create: if isMember() && (isStaff() || !request.resource.data.keys().hasAny(privateKeys()))
+      allow create: if isMember() && (isStaff() || !request.resource.data.keys().hasAny(privateKeys().concat(['website'])))
         && (isManagement() || !('memberId' in request.resource.data));
+      // Website (2026-10-30): only Admin and Management tick a trainer onto the public website.
       allow update: if isMember()
-        && (isStaff() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(privateKeys()))
+        && (isStaff() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(privateKeys().concat(['website'])))
         && (isManagement() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['memberId']));
       allow delete: if isManagement();
     }

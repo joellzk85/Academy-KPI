@@ -41,9 +41,20 @@ Joel, 2026-10-30. The WordPress site at nextacademy.my is replaced by a website 
 
 Owner: start the homepage, upload a photo (2400 px shrunk to 1600), pick it for the hero, drag in a Columns block, drag its line 50/50 → 70/30, publish; /site shows the page in Archivo on computer and phone (no sideways scroll). Admin: no Settings, New page or blocks list; change the hero's small line, Ask to publish: live page unchanged. Owner: Website button shows 1, "Check and approve" with "Aina changed this page…", Approve and publish: live at once, 2 versions kept. Menu with a page, the homepage and a "Talk to us" button. With nextacademy.my in Settings: `/`, `/training-calendar`, `/training-calendar/` → 301, unknown page → 404, robots.txt, sitemap.xml, canonical link; the CRM's own address still shows the CRM.
 
+## Batch 2 (2026-10-30): calendar, programmes and trainers from the CRM
+
+Joel: the calendar shows **price and seats left**; **Admin and Management** tick titles and trainers onto the website (live straight away, no approval). `src/lib/websiteData.ts` (`buildSiteData`) decides what leaves the CRM; the server (`serverWebsite.ts`) works it out every 30 seconds and the editor's preview gets the same through `/api/site/data`.
+
+- **Calendar:** every upcoming public programme run that isn't cancelled (Malaysia date), with dates, title (linked to its programme page when shown), venue and area, days, **RM price per pax**, **HRD Corp claimable** (title HRDC approved) and **seats left** counted exactly as Public programmes counts them ("Full" with a waiting-list link). Block settings: which type, how many (more go to `/training-calendar`).
+- **Register** opens WhatsApp (Settings → WhatsApp number; email when none) with the message written ("I'd like to register for … on …") until the form in Batch 3.
+- **Titles:** Course outlines / Teambuilding proposal → By title → Title details → **Website** box (Admin, Management): Show on the website, Name on the website (else the CRM's capitals in normal case, acronyms like HR, KPI, DISC kept), the course outline the page uses (only its overview, objectives, who it's for, modules, methods and length; never the client, refs or prices), short description. Page `/programmes/<name>` with the title's upcoming dates and its ticked trainers. Renaming the website name changes the address.
+- **Trainers:** Trainers → a trainer → **Website** box (Admin, Management): "<name> agreed to be shown" must be ticked before Show on the website (PDPA); one line under the name. Page `/trainers/<name>`: photo, name, line, bio, years, qualifications (and academic), certifications, languages, titles they teach. Never phone, email, IC, rate, address or past clients (checked: none of them reach the page).
+- **Automatic pages:** `/training-calendar`, `/programmes`, `/trainers` exist without editing; an edited page with the same address wins (then put the matching block on it). All go in the sitemap.
+- Rules: `trainers_directory.website` is changed only by Admin and Management (titles already were). 44 website rule checks pass, plus the 122 older ones.
+- Tested (test copy): run with 20 seats and two companies (9 pax) shows "11 seats left", RM 1,500.00, HRD Corp claimable, Register → WhatsApp text; programme page with outline content and no client name; a deleted outline is left out; a trainer not agreed stays hidden (404); both Website boxes save and the pages change at once.
+
 ## Still to do
 
-- **Batch 2:** calendar from Public programmes runs (dates, seats left, register), programme pages from titles ("Show on website" tick, public description), trainers from the Trainers list.
 - **Batch 3:** enquiry and registration forms that create a lead / booking and assign a rep.
 - **Batch 4:** visitor tracking (pages, where from, website leads → won RM).
 - **Domain switch:** list the WordPress addresses (`/training-calendar/`, `/training-courses/`, `/training-courses-esg/`, `/our-trainers/`, `/contact-us/`, `/privacynotice`) and make pages or forwards for each; add the domain in Firebase App Hosting; copy the WordPress content (text, logos, testimonials, privacy notice); keep WordPress hosting a month.

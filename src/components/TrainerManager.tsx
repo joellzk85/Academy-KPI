@@ -28,6 +28,7 @@ import ListPager, { SortSelect, listSelect } from './ListPager';
 import { sortList, usePaged, type ListSort } from '../lib/listPaging';
 import { useSearchPrefill } from './GlobalSearch';
 import DownloadButton from './DownloadButton';
+import { TrainerWebsiteBox } from './WebsiteShowBox';
 
 // Trainers (redesigned 2026-10-17, like Clients): one shared list, the same details as before.
 // Topics are free text (was a fixed list of made-up options). Status is only Available / On leave:
@@ -608,6 +609,7 @@ export default function TrainerManager({ rep, reps, viewer }: TrainerManagerProp
               onEdit={() => startEdit(openTrainer)}
               onDelete={() => remove(openTrainer)}
             />
+            {isStaff && <TrainerWebsiteBox key={openTrainer.id} trainer={openTrainer as any} viewer={viewer} />}
             <section className="mt-6 space-y-2 rounded-xl border border-line p-4">
               <h4 className="text-sm font-semibold text-ink-soft">Profile link</h4>
               <p className="text-sm text-ink-soft">Send {openTrainer.name} a private link to fill in or update their own profile. You review it before anything changes.</p>

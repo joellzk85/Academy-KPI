@@ -196,6 +196,16 @@ export const SITE_CSS = `
 .nw-run-body{flex:1 1 auto;min-width:0;padding:20px 22px;display:flex;flex-direction:column;gap:8px}
 .nw-run-title{font-size:19px;line-height:1.3;font-weight:700}
 .nw-chip{display:inline-block;font-size:13px;font-weight:700;background:#E3F4EE;color:${BRAND.black};padding:3px 10px}
+.nw-chip-full{background:#FDE8E7;color:#8A1C14}
+.nw-link{font-weight:700;text-decoration:none}
+.nw-row-link{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:56px;padding:8px 0;border-bottom:1px solid #E4E4E1;color:inherit!important;text-decoration:none;font-size:18px;font-weight:700}
+.nw-row-link:hover>span:first-child{color:${BRAND.blue}}
+.nw-bg-dark .nw-row-link:hover>span:first-child,.nw-bg-black .nw-row-link:hover>span:first-child{color:${BRAND.teal}}
+.nw-list{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:6px}
+.nw-modules{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:20px}
+.nw-modules>li{display:flex;gap:20px;border-top:1px solid #E4E4E1;padding-top:18px}
+.nw-person{color:inherit!important;text-decoration:none}
+.nw-person:hover h3{color:${BRAND.blue}}
 .nw-sample{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:#FFF3C4;color:#5B4A00;padding:3px 8px}
 .nw-people{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:24px}
 .nw-person-photo{aspect-ratio:4/5;background:${BRAND.paper};border:1px solid #E4E4E1;display:flex;align-items:center;justify-content:center;color:${BRAND.body};font-size:14px;overflow:hidden}
@@ -252,7 +262,7 @@ export function starterHome(): PageData {
     content: [
       { type: 'Hero', props: { id: id('Hero'), eyebrow: 'HRD Corp registered training provider', headline: 'The path to leadership is', highlight: 'practice.', headlineEnd: '', text: "Behind every great employee is a trainer who didn't use 100 slides. Personalised, practical training and coaching for teams across Malaysia.", button1Label: 'See the training calendar', button1Link: '/training-calendar', button2Label: 'Plan a training with us', button2Link: '#contact', image: '', imageStyle: 'frame', background: 'dark' } },
       { type: 'LogoStrip', props: { id: id('LogoStrip'), label: 'Trusted by teams at', items: [{ name: 'HLA Garment', image: '' }, { name: 'Impiana Hotel KLCC', image: '' }, { name: 'Trinitium', image: '' }] } },
-      { type: 'Calendar', props: { id: id('Calendar'), eyebrow: '01 / Training calendar', heading: 'Upcoming public programmes', text: 'Open to everyone. Most are HRD Corp claimable.', background: 'white' } },
+      { type: 'Calendar', props: { id: id('Calendar'), eyebrow: '01 / Training calendar', heading: 'Upcoming public programmes', text: 'Open to everyone. Most are HRD Corp claimable.', only: 'all', count: 6, background: 'white' } },
       { type: 'Points', props: { id: id('Points'), eyebrow: '02 / Why Next Academy', heading: 'Designed to be seen, read,', highlight: 'remembered.', background: 'light', items: [
         { title: 'Personalised', text: 'Every programme is tailored to your goals, industry and where your team is heading.' },
         { title: 'Purpose-driven', text: 'Growth anchored in integrity and real impact, for your people and your business.' },
@@ -260,7 +270,7 @@ export function starterHome(): PageData {
       ] } },
       { type: 'Programmes', props: { id: id('Programmes'), eyebrow: '03 / Programmes', heading: 'Training that moves people.', text: 'In-house for your team or public for individuals. Classroom, team building and technical skills.', background: 'white' } },
       { type: 'Quote', props: { id: id('Quote'), quote: '[A line or two from a happy client goes here.]', name: 'Julie and Jonathan, HLA Garment', media: '', background: 'dark' } },
-      { type: 'Trainers', props: { id: id('Trainers'), eyebrow: '04 / Our trainers', heading: 'Become the person', highlight: 'they look up to.', background: 'white' } },
+      { type: 'Trainers', props: { id: id('Trainers'), eyebrow: '04 / Our trainers', heading: 'Become the person', highlight: 'they look up to.', count: 4, background: 'white' } },
       { type: 'ValuesBand', props: { id: id('ValuesBand'), label: 'Our HEART values', items: [{ word: 'Humility' }, { word: 'Expertise' }, { word: 'Accountability' }, { word: 'Remarkable' }, { word: 'Trustworthiness' }], background: 'blue' } },
       { type: 'Contact', props: { id: id('Contact'), eyebrow: '05 / Talk to us', heading: 'Schedule a session with our training experts.', text: 'Tell us about your team. We reply within one working day.', background: 'light' } },
     ],

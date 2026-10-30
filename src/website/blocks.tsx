@@ -5,6 +5,8 @@ import React, { createContext, useContext, useRef } from 'react';
 import type { Config, Field } from '@puckeditor/core';
 import { COMPANY, COMPANY_ADDRESS } from '../lib/company';
 import { PageData, SiteMedia, SiteSettings, cleanRichText, safeHref } from '../lib/website';
+import { formatRM } from '../lib/deals';
+import { SiteData, WEB_TYPE_LABELS, WebProgramme, WebRun, WebTrainer, WebType, daysText, runDates, runDay, runMonth, seatsText } from '../lib/websiteData';
 
 export type SiteLink = { label: string; href: string; button?: boolean };
 
@@ -12,6 +14,7 @@ export type SiteCtx = {
   media: Record<string, SiteMedia>;
   menu: SiteLink[];
   settings: SiteSettings;
+  data?: SiteData;                                          // runs, programmes and trainers from the CRM
   editing: boolean;
   inlineCss?: string;                                       // the editor's preview carries the style sheet itself
   onResizeColumns?: (id: string, split: number) => void;    // dragging the line between two columns (editor only)
@@ -156,57 +159,241 @@ const Quote = (p: any) => {
   );
 };
 
-// Training calendar, programmes and trainers come from the CRM in Batch 2. Until then they show samples, marked so.
-const SAMPLE_RUNS = [
-  { day: '12', mon: 'Nov', title: '[Public programme title]', where: '[Venue] · 2 days', seats: '6 seats left' },
-  { day: '19', mon: 'Nov', title: '[Public programme title]', where: '[Venue] · 1 day', seats: '10 seats left' },
-  { day: '03', mon: 'Dec', title: '[Public programme title]', where: '[Venue] · 2 days', seats: '4 seats left' },
-];
-const Calendar = (p: any) => (
-  <section id="calendar" className={bandClass(p.background)}>
-    <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
-      <div className="nw-stack" style={{ gap: 14 }}><Heading eyebrow={p.eyebrow} heading={p.heading} text={p.text} /></div>
-      <p><span className="nw-sample">Sample</span> <span className="nw-muted" style={{ fontSize: 14 }}>Real dates and seats come from Deals → Public programmes.</span></p>
-      <div className="nw-cards">
-        {SAMPLE_RUNS.map((r, i) => (
-          <article className="nw-run" key={i}>
-            <div className="nw-run-date"><span className="nw-run-day">{r.day}</span><span className="nw-run-mon">{r.mon}</span></div>
-            <div className="nw-run-body"><h3 className="nw-run-title">{r.title}</h3><p className="nw-muted" style={{ fontSize: 15 }}>{r.where}</p><span className="nw-chip" style={{ alignSelf: 'flex-start' }}>{r.seats}</span></div>
-          </article>
-        ))}
-      </div>
-    </div>
-  </section>
-);
+// ---------- From the CRM (Batch 2): calendar, programmes, trainers (lib/websiteData.ts) ----------
 
-const Programmes = (p: any) => (
-  <section id="programmes" className={bandClass(p.background)}>
-    <div className="nw-wrap nw-split" style={{ alignItems: 'flex-start' }}>
-      <div className="nw-stack"><Heading eyebrow={p.eyebrow} heading={p.heading} text={p.text} /></div>
-      <div className="nw-stack" style={{ gap: 10 }}>
-        <p><span className="nw-sample">Sample</span> <span className="nw-muted" style={{ fontSize: 14 }}>Programmes come from your titles marked for the website.</span></p>
-        {[1, 2, 3, 4].map(i => <div key={i} style={{ minHeight: 56, borderBottom: '1px solid #E4E4E1', display: 'flex', alignItems: 'center', fontWeight: 700, fontSize: 18 }}>[Programme title]</div>)}
-      </div>
-    </div>
-  </section>
-);
+/** WhatsApp (or email) with the message already written, until the registration form (Batch 3). */
+function registerHref(settings: SiteSettings, text: string): string {
+  const wa = (settings.whatsapp || '').replace(/[^0-9]/g, '');
+  return wa ? `https://wa.me/${wa}?text=${encodeURIComponent(text)}` : `mailto:${COMPANY.email}?subject=${encodeURIComponent(text)}`;
+}
 
-const Trainers = (p: any) => (
-  <section id="trainers" className={bandClass(p.background)}>
-    <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
-      <div className="nw-stack" style={{ gap: 14 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} /></div>
-      <p><span className="nw-sample">Sample</span> <span className="nw-muted" style={{ fontSize: 14 }}>Photos and roles come from the Trainers list.</span></p>
-      <div className="nw-people">
-        {[1, 2, 3, 4].map(i => (
-          <div className="nw-stack" style={{ gap: 12 }} key={i}>
-            <div className="nw-person-photo">[Trainer photo]</div>
-            <div><h3 style={{ fontSize: 19 }}>[Trainer name]</h3><p className="nw-muted" style={{ fontSize: 15 }}>[Role]</p></div>
+function RunCard({ r }: { r: WebRun }) {
+  const { settings } = useSite();
+  const seats = seatsText(r);
+  const full = r.seatsLeft !== null && r.seatsLeft <= 0;
+  const where = [r.venue, r.area && !r.venue.toLowerCase().includes(r.area.toLowerCase()) ? r.area : '', daysText(r.days)].filter(Boolean).join(' · ');
+  return (
+    <article className="nw-run">
+      <div className="nw-run-date"><span className="nw-run-day">{runDay(r)}</span><span className="nw-run-mon">{runMonth(r)}</span></div>
+      <div className="nw-run-body">
+        <h3 className="nw-run-title">{r.titleSlug ? <a href={`/programmes/${r.titleSlug}`} style={{ color: 'inherit', textDecoration: 'none' }}>{r.title}</a> : r.title}</h3>
+        <p className="nw-muted" style={{ fontSize: 15 }}>{runDates(r)}{where ? ` · ${where}` : ''}</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {r.price > 0 && <span className="nw-chip">{formatRM(r.price)} per pax</span>}
+          {r.hrdc && <span className="nw-chip">HRD Corp claimable</span>}
+          {seats && <span className={`nw-chip${full ? ' nw-chip-full' : ''}`}>{seats}</span>}
+        </div>
+        <div style={{ marginTop: 'auto', paddingTop: 6 }}>
+          {full
+            ? <a className="nw-link" href={registerHref(settings, `Hi Next Academy, ${r.title} on ${runDates(r)} is full. Please put me on the waiting list.`)} target="_blank" rel="noopener">Join the waiting list →</a>
+            : <a className="nw-link" href={registerHref(settings, `Hi Next Academy, I'd like to register for ${r.title} on ${runDates(r)}.`)} target="_blank" rel="noopener">Register →</a>}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function RunList({ runs, empty }: { runs: WebRun[]; empty?: string }) {
+  const { settings } = useSite();
+  if (!runs.length) {
+    return <p className="nw-muted">{empty || 'New dates are coming soon. '}<a href={registerHref(settings, "Hi Next Academy, I'd like to know your next training dates.")} target="_blank" rel="noopener">Ask us about the next dates</a>.</p>;
+  }
+  return <div className="nw-cards">{runs.map(r => <RunCard key={r.id} r={r} />)}</div>;
+}
+
+const Calendar = (p: any) => {
+  const { data } = useSite();
+  const all = (data?.runs || []).filter(r => !p.only || p.only === 'all' || r.type === p.only);
+  const n = Number(p.count) || 0;
+  const runs = n > 0 ? all.slice(0, n) : all;
+  return (
+    <section id="calendar" className={bandClass(p.background)}>
+      <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
+        <div className="nw-stack" style={{ gap: 14 }}><Heading eyebrow={p.eyebrow} heading={p.heading} text={p.text} /></div>
+        <RunList runs={runs} />
+        {n > 0 && all.length > n && <a className="nw-link" href="/training-calendar">See all {all.length} dates →</a>}
+      </div>
+    </section>
+  );
+};
+
+function ProgrammeLinks({ list }: { list: WebProgramme[] }) {
+  return (
+    <div className="nw-stack" style={{ gap: 0 }}>
+      {list.map(x => (
+        <a key={x.id} href={`/programmes/${x.slug}`} className="nw-row-link">
+          <span>{x.name}{x.hrdc && <span className="nw-chip" style={{ marginLeft: 10, verticalAlign: 'middle' }}>HRD Corp claimable</span>}</span>
+          <span aria-hidden="true" style={{ color: '#2B6AA2' }}>→</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+const Programmes = (p: any) => {
+  const { data } = useSite();
+  const list = (data?.programmes || []).filter(x => !p.only || p.only === 'all' || x.type === p.only);
+  const groups = (['soft', 'technical', 'teambuilding'] as WebType[]).map(t => ({ t, items: list.filter(x => x.type === t) })).filter(g => g.items.length);
+  return (
+    <section id="programmes" className={bandClass(p.background)}>
+      <div className="nw-wrap nw-split" style={{ alignItems: 'flex-start' }}>
+        <div className="nw-stack"><Heading eyebrow={p.eyebrow} heading={p.heading} text={p.text} /></div>
+        <div className="nw-stack" style={{ gap: 28 }}>
+          {groups.length === 0 && <p className="nw-muted">Programmes appear here once they are ticked "Show on the website" in the CRM.</p>}
+          {groups.map(g => (
+            <div key={g.t} className="nw-stack" style={{ gap: 4 }}>
+              {groups.length > 1 && <h3 className="nw-eyebrow" style={{ color: 'inherit', opacity: 0.75 }}>{WEB_TYPE_LABELS[g.t]}</h3>}
+              <ProgrammeLinks list={g.items} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+};
+
+function TrainerCard({ t }: { t: WebTrainer }) {
+  return (
+    <a href={`/trainers/${t.slug}`} className="nw-stack nw-person" style={{ gap: 12 }}>
+      <div className="nw-person-photo">{t.photo ? <img src={t.photo} alt={t.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>{t.name}</span>}</div>
+      <div><h3 style={{ fontSize: 19 }}>{t.name}</h3>{t.headline && <p className="nw-muted" style={{ fontSize: 15 }}>{t.headline}</p>}</div>
+    </a>
+  );
+}
+
+const Trainers = (p: any) => {
+  const { data } = useSite();
+  const all = data?.trainers || [];
+  const n = Number(p.count) || 0;
+  const list = n > 0 ? all.slice(0, n) : all;
+  return (
+    <section id="trainers" className={bandClass(p.background)}>
+      <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
+        <div className="nw-stack" style={{ gap: 14 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} /></div>
+        {list.length === 0 && <p className="nw-muted">Trainers appear here once they agree and are ticked "Show on the website" in the CRM.</p>}
+        <div className="nw-people">{list.map(t => <TrainerCard key={t.id} t={t} />)}</div>
+        {n > 0 && all.length > n && <a className="nw-link" href="/trainers">Meet all {all.length} trainers →</a>}
+      </div>
+    </section>
+  );
+};
+
+// ---------- Pages made from the CRM (no editing needed): calendar, a programme, a trainer, and their lists ----------
+
+const Bullets = ({ items }: { items: string[] }) => <ul className="nw-list">{items.map((x, i) => <li key={i}>{x}</li>)}</ul>;
+
+export function ProgrammePage({ slug }: { slug: string }) {
+  const { data, settings } = useSite();
+  const x = data?.programmes.find(p => p.slug === slug);
+  if (!x) return null;
+  const runs = (data?.runs || []).filter(r => r.titleSlug === slug);
+  const people = (data?.trainers || []).filter(t => x.trainerSlugs.includes(t.slug));
+  const facts = [WEB_TYPE_LABELS[x.type], daysText(x.days), x.hrdc ? 'HRD Corp claimable' : ''].filter(Boolean);
+  return (
+    <>
+      <section className={bandClass('dark', 'l')}>
+        <div className="nw-wrap nw-stack" style={{ gap: 24, maxWidth: 980, marginLeft: 'auto', marginRight: 'auto' }}>
+          <p className="nw-eyebrow"><a href="/programmes" style={{ color: 'inherit', textDecoration: 'none' }}>Programmes</a>{x.category ? ` / ${x.category}` : ''}</p>
+          <h1 className="nw-h1" style={{ fontSize: 'clamp(36px, 5vw, 60px)' }}>{x.name}</h1>
+          {(x.summary || x.overview) && <p className="nw-lead">{x.summary || x.overview}</p>}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{facts.map(f => <span key={f} className="nw-chip">{f}</span>)}</div>
+          <div className="nw-btns">
+            {runs.length > 0 && <a className="nw-btn nw-btn-teal" href="#dates">See the dates</a>}
+            <a className="nw-btn nw-btn-outline" href={registerHref(settings, `Hi Next Academy, I'd like to know more about ${x.name}${runs.length ? '' : ' for my team'}.`)} target="_blank" rel="noopener">{runs.length ? 'Ask a question' : 'Bring it to your team'}</a>
           </div>
-        ))}
-      </div>
-    </div>
-  </section>
-);
+        </div>
+      </section>
+      <section className={bandClass('white')}>
+        <div className="nw-wrap nw-stack" style={{ gap: 48, maxWidth: 980, marginLeft: 'auto', marginRight: 'auto' }}>
+          {x.summary && x.overview && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">About this programme</h2><p className="nw-muted" style={{ whiteSpace: 'pre-line' }}>{x.overview}</p></div>}
+          {x.outcomes.length > 0 && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">What you'll be able to do</h2><Bullets items={x.outcomes} /></div>}
+          {x.audience.length > 0 && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">Who it's for</h2><Bullets items={x.audience} /></div>}
+          {x.modules.length > 0 && (
+            <div className="nw-stack" style={{ gap: 16 }}>
+              <h2 className="nw-h3">What it covers</h2>
+              <ol className="nw-modules">
+                {x.modules.map((m, i) => (
+                  <li key={i}>
+                    <span className="nw-point-n" style={{ fontSize: 28 }}>{String(i + 1).padStart(2, '0')}</span>
+                    <div className="nw-stack" style={{ gap: 6 }}><strong style={{ fontSize: 19 }}>{m.title}</strong>{m.topics.length > 0 && <Bullets items={m.topics} />}</div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {x.methods.length > 0 && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">How it's taught</h2><Bullets items={x.methods} /></div>}
+        </div>
+      </section>
+      <section id="dates" className={bandClass('light')}>
+        <div className="nw-wrap nw-stack" style={{ gap: 28 }}>
+          <h2 className="nw-h2" style={{ fontSize: 'clamp(28px, 3.4vw, 40px)' }}>Upcoming dates</h2>
+          <RunList runs={runs} empty="No public dates right now. We also run it in-house for your team. " />
+        </div>
+      </section>
+      {people.length > 0 && (
+        <section className={bandClass('white')}>
+          <div className="nw-wrap nw-stack" style={{ gap: 28 }}>
+            <h2 className="nw-h2" style={{ fontSize: 'clamp(28px, 3.4vw, 40px)' }}>Trainers</h2>
+            <div className="nw-people">{people.map(t => <TrainerCard key={t.id} t={t} />)}</div>
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+export function TrainerPage({ slug }: { slug: string }) {
+  const { data, settings } = useSite();
+  const t = data?.trainers.find(x => x.slug === slug);
+  if (!t) return null;
+  const teaches = (data?.programmes || []).filter(p => t.programmeSlugs.includes(p.slug));
+  return (
+    <>
+      <section className={bandClass('dark', 'l')}>
+        <div className="nw-wrap nw-split">
+          <div style={{ flex: '0 1 340px' }}>
+            <div className="nw-frame"><div className="nw-person-photo" style={{ border: 0 }}>{t.photo ? <img src={t.photo} alt={t.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}</div></div>
+          </div>
+          <div className="nw-stack" style={{ gap: 20 }}>
+            <p className="nw-eyebrow"><a href="/trainers" style={{ color: 'inherit', textDecoration: 'none' }}>Our trainers</a></p>
+            <h1 className="nw-h1" style={{ fontSize: 'clamp(36px, 5vw, 60px)' }}>{t.name}</h1>
+            {t.headline && <p className="nw-lead">{t.headline}</p>}
+            {t.years > 0 && <span className="nw-chip" style={{ alignSelf: 'flex-start' }}>{t.years}+ years' experience</span>}
+            <div className="nw-btns"><a className="nw-btn nw-btn-teal" href={registerHref(settings, `Hi Next Academy, I'd like to arrange a training with ${t.name}.`)} target="_blank" rel="noopener">Work with {t.name}</a></div>
+          </div>
+        </div>
+      </section>
+      <section className={bandClass('white')}>
+        <div className="nw-wrap nw-stack" style={{ gap: 44, maxWidth: 980, marginLeft: 'auto', marginRight: 'auto' }}>
+          {t.bio && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">About</h2><p className="nw-muted" style={{ whiteSpace: 'pre-line' }}>{t.bio}</p></div>}
+          {t.qualifications.length > 0 && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">Qualifications</h2><Bullets items={t.qualifications} /></div>}
+          {t.certifications.length > 0 && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">Certifications</h2><Bullets items={t.certifications} /></div>}
+          {t.languages && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">Languages</h2><p className="nw-muted">{t.languages}</p></div>}
+          {teaches.length > 0 && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">Programmes</h2><ProgrammeLinks list={teaches} /></div>}
+        </div>
+      </section>
+    </>
+  );
+}
+
+/** The site's own lists, used when no edited page has these addresses. */
+export const AUTO_PAGES: Record<string, { title: string; description: string; content: any[] }> = {
+  'training-calendar': {
+    title: 'Training calendar',
+    description: 'Upcoming public training programmes by Next Academy: dates, venues, prices and seats left. Most are HRD Corp claimable.',
+    content: [{ type: 'Calendar', props: { id: 'auto-cal', eyebrow: 'Training calendar', heading: 'Upcoming public programmes', text: 'Open to everyone. Most are HRD Corp claimable.', background: 'white', only: 'all', count: 0 } }],
+  },
+  programmes: {
+    title: 'Programmes',
+    description: 'Training programmes by Next Academy: soft skills, technical skills and team building, in-house or public.',
+    content: [{ type: 'Programmes', props: { id: 'auto-prog', eyebrow: 'Programmes', heading: 'Training that moves people.', text: 'In-house for your team or public for individuals.', background: 'white', only: 'all' } }],
+  },
+  trainers: {
+    title: 'Our trainers',
+    description: "Meet Next Academy's trainers.",
+    content: [{ type: 'Trainers', props: { id: 'auto-tr', eyebrow: 'Our trainers', heading: 'Become the person', highlight: 'they look up to.', background: 'white', count: 0 } }],
+  },
+};
 
 const Contact = (p: any) => {
   const { settings } = useSite();
@@ -385,6 +572,8 @@ const link = (label: string): Field => ({ type: 'text', label: `${label} (a page
 
 export type MediaFieldMaker = (label: string, kind: 'image' | 'video') => Field;
 
+const ONLY_FIELD: Field = { type: 'select', label: 'Show', options: [{ label: 'All types', value: 'all' }, { label: 'Soft skills', value: 'soft' }, { label: 'Technical skills', value: 'technical' }, { label: 'Team building', value: 'teambuilding' }] };
+
 /** The editor and the public site use the same blocks; the editor adds its photo / video pickers. */
 export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
   const photo: MediaFieldMaker = mediaField || ((label) => ({ type: 'text', label }));
@@ -437,20 +626,29 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
       },
       Calendar: {
         label: 'Training calendar',
-        fields: { eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'), background: bg() },
-        defaultProps: { eyebrow: 'Training calendar', heading: 'Upcoming public programmes', text: '', background: 'white' },
+        fields: {
+          eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'),
+          only: ONLY_FIELD,
+          count: { type: 'number', label: 'How many dates (0 = all; more go to the Training calendar page)', min: 0, max: 60 },
+          background: bg(),
+        },
+        defaultProps: { eyebrow: 'Training calendar', heading: 'Upcoming public programmes', text: '', only: 'all', count: 6, background: 'white' },
         render: Calendar,
       },
       Programmes: {
         label: 'Programmes',
-        fields: { eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'), background: bg() },
-        defaultProps: { eyebrow: 'Programmes', heading: 'Training that moves people.', text: '', background: 'white' },
+        fields: { eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'), only: ONLY_FIELD, background: bg() },
+        defaultProps: { eyebrow: 'Programmes', heading: 'Training that moves people.', text: '', only: 'all', background: 'white' },
         render: Programmes,
       },
       Trainers: {
         label: 'Trainers',
-        fields: { eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'), background: bg() },
-        defaultProps: { eyebrow: 'Our trainers', heading: 'Meet our trainers', highlight: '', background: 'white' },
+        fields: {
+          eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'),
+          count: { type: 'number', label: 'How many trainers (0 = all)', min: 0, max: 40 },
+          background: bg(),
+        },
+        defaultProps: { eyebrow: 'Our trainers', heading: 'Meet our trainers', highlight: '', count: 4, background: 'white' },
         render: Trainers,
       },
       Quote: {
@@ -565,13 +763,17 @@ function renderItems(config: Config, items: any[] | undefined): React.ReactNode 
   });
 }
 
-/** A published page, ready for renderToString on the server. */
-export function SitePageView({ data, ctx }: { data: PageData; ctx: SiteCtx }) {
+/** A published page (or a programme / trainer page made from the CRM), ready for renderToString on the server. */
+export function SitePageView({ data, ctx, special }: { data: PageData; ctx: SiteCtx; special?: { kind: 'programme' | 'trainer'; slug: string } }) {
   const config = makeSiteConfig();
   const Root = (config.root as any).render;
   return (
     <SiteProvider value={ctx}>
-      <Root>{renderItems(config, data.content)}</Root>
+      <Root>
+        {special?.kind === 'programme' && <ProgrammePage slug={special.slug} />}
+        {special?.kind === 'trainer' && <TrainerPage slug={special.slug} />}
+        {renderItems(config, data.content)}
+      </Root>
     </SiteProvider>
   );
 }

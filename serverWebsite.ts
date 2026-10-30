@@ -3,12 +3,16 @@
 // - Test address: <CRM address>/site and /site/<page> (hidden from Google).
 // - The real address: when a visitor comes in on one of the website's own addresses (Website → Settings), the
 //   homepage is / and pages are /<page>. Everything else on those addresses stays the CRM's (logos, API).
+// - Batch 2: the calendar, programme pages (/programmes/<name>) and trainer pages (/trainers/<name>) come from the
+//   CRM's runs, titles and trainers (src/lib/websiteData.ts); /training-calendar, /programmes and /trainers are made
+//   automatically unless the owner made an edited page with that address.
 import type { Express, Request, Response, NextFunction } from 'express';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { admin, callerFrom, route } from './serverAuth';
-import { SitePageView, SiteCtx, SiteLink } from './src/website/blocks';
+import { AUTO_PAGES, SitePageView, SiteCtx, SiteLink } from './src/website/blocks';
 import { MEDIA, MENU_DOC, PAGES, PageData, SETTINGS_DOC, SITE_CSS, SiteMedia, SiteMenu, SitePage, SiteSettings, escapeHtml } from './src/lib/website';
+import { EMPTY_SITE_DATA, SiteData, buildSiteData, todayMY } from './src/lib/websiteData';
 
 type Snapshot = {
   at: number;
@@ -16,21 +20,51 @@ type Snapshot = {
   media: Record<string, SiteMedia>;
   menu: SiteMenu;
   settings: SiteSettings;
+  data: SiteData;
 };
 let cache: Snapshot | null = null;
 let loading: Promise<Snapshot> | null = null;
-const FRESH_MS = 30_000;   // a published change shows on the website within half a minute
+const FRESH_MS = 30_000;   // a change in the CRM shows on the website within half a minute
+
+/** Firestore takes up to 30 values in an "in" search, so long lists are asked in parts. */
+async function inChunks<T>(ids: string[], ask: (part: string[]) => Promise<T[]>): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += 30) out.push(...await ask(ids.slice(i, i + 30)));
+  return out;
+}
+
+async function loadData(): Promise<SiteData> {
+  const { db } = admin();
+  const today = todayMY();
+  const [runsSnap, progSnap, trainerSnap] = await Promise.all([
+    db.collection('public_programmes').where('trainingDate', '>=', today).get(),
+    db.collection('programmes').get(),
+    db.collection('trainers_directory').where('website.show', '==', true).get(),
+  ]);
+  const runs = runsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter(r => r.status !== 'cancelled');
+  const programmes = progSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+  const trainers = trainerSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+  const outlineIds = [...new Set(programmes.filter(p => p.website?.show && p.website?.outlineId).map(p => String(p.website.outlineId)))];
+  const venueIds = [...new Set(runs.map(r => String(r.venueId || '')).filter(Boolean))];
+  const [deals, outlines, venues] = await Promise.all([
+    inChunks(runs.map(r => r.id), async part => (await db.collection('pipelines').where('publicProgrammeId', 'in', part).get()).docs.map(d => ({ id: d.id, ...(d.data() as any) }))),
+    outlineIds.length ? db.getAll(...outlineIds.map(id => db.collection('course_outlines').doc(id))).then(s => s.filter(d => d.exists).map(d => ({ id: d.id, ...(d.data() as any) }))) : Promise.resolve([]),
+    venueIds.length ? db.getAll(...venueIds.map(id => db.collection('venues_directory').doc(id))).then(s => s.filter(d => d.exists).map(d => ({ id: d.id, ...(d.data() as any) }))) : Promise.resolve([]),
+  ]);
+  return buildSiteData({ runs, deals, programmes, trainers, outlines, venues, today });
+}
 
 async function load(): Promise<Snapshot> {
   if (cache && Date.now() - cache.at < FRESH_MS) return cache;
   if (loading) return loading;
   loading = (async () => {
     const { db } = admin();
-    const [pages, media, menu, settings] = await Promise.all([
+    const [pages, media, menu, settings, data] = await Promise.all([
       db.collection(PAGES).get(),
       db.collection(MEDIA).get(),
       db.collection('config').doc(MENU_DOC).get(),
       db.collection('config').doc(SETTINGS_DOC).get(),
+      loadData().catch(err => { console.error('Website: CRM data could not be read', err); return EMPTY_SITE_DATA; }),
     ]);
     const snap: Snapshot = {
       at: Date.now(),
@@ -38,6 +72,7 @@ async function load(): Promise<Snapshot> {
       media: Object.fromEntries(media.docs.map(d => [d.id, { id: d.id, ...(d.data() as any) }])),
       menu: (menu.data() as SiteMenu) || { items: [] },
       settings: (settings.data() as SiteSettings) || {},
+      data,
     };
     cache = snap;
     return snap;
@@ -56,9 +91,9 @@ function menuLinks(snap: Snapshot, base: string): SiteLink[] {
   }).filter((l): l is SiteLink => !!l && !!l.label);
 }
 
-function pageHtml(opts: { data: PageData; title: string; description: string; snap: Snapshot; base: string; canonical?: string; hidden: boolean }) {
-  const ctx: SiteCtx = { media: opts.snap.media, menu: menuLinks(opts.snap, opts.base), settings: opts.snap.settings, editing: false };
-  let body = renderToString(React.createElement(SitePageView, { data: opts.data, ctx }));
+function pageHtml(opts: { data: PageData; title: string; description: string; snap: Snapshot; base: string; canonical?: string; hidden: boolean; special?: { kind: 'programme' | 'trainer'; slug: string } }) {
+  const ctx: SiteCtx = { media: opts.snap.media, menu: menuLinks(opts.snap, opts.base), settings: opts.snap.settings, data: opts.snap.data, editing: false };
+  let body = renderToString(React.createElement(SitePageView, { data: opts.data, ctx, special: opts.special }));
   // On the test address every link inside the site gets /site in front, so clicking around stays on the test pages.
   if (opts.base) body = body.replace(/href="\/(?!site-assets\/|site\/|site"|\/)/g, `href="${opts.base}/`);
   return `<!doctype html>
@@ -84,27 +119,53 @@ ${body}
 </html>`;
 }
 
+const cut = (s: string, n = 155) => (s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s);
+
+/** What a page address shows: an edited page, a page made from the CRM, or nothing (404). */
+function pageFor(snap: Snapshot, slug: string): null | { data: PageData; title: string; description: string; special?: { kind: 'programme' | 'trainer'; slug: string }; lastmod?: string } {
+  const page = snap.pages.find(p => (p.slug || '') === slug);
+  if (page?.published) {
+    const root = page.published.root?.props || {};
+    return { data: page.published, title: String(root.pageTitle || `${page.title} | Next Academy`), description: String(root.description || ''), lastmod: page.publishedAt };
+  }
+  const auto = AUTO_PAGES[slug];
+  if (auto) return { data: { root: { props: {} }, content: auto.content }, title: `${auto.title} | Next Academy`, description: auto.description };
+  const m = slug.match(/^(programmes|trainers)\/([a-z0-9-]+)$/);
+  if (m?.[1] === 'programmes') {
+    const x = snap.data.programmes.find(p => p.slug === m[2]);
+    if (x) return { data: { root: { props: {} }, content: [] }, special: { kind: 'programme', slug: x.slug }, title: `${x.name} | Next Academy`, description: cut(x.summary || x.overview || `${x.name}: training by Next Academy.`) };
+  }
+  if (m?.[1] === 'trainers') {
+    const t = snap.data.trainers.find(p => p.slug === m[2]);
+    if (t) return { data: { root: { props: {} }, content: [] }, special: { kind: 'trainer', slug: t.slug }, title: `${t.name} | Next Academy trainer`, description: cut(t.headline || t.bio || `${t.name}, trainer at Next Academy.`) };
+  }
+  return null;
+}
+
 async function sendPage(req: Request, res: Response, slug: string, base: string, hidden: boolean) {
   const snap = await load();
-  const page = snap.pages.find(p => (p.slug || '') === slug);
-  const host = req.hostname;
+  const found = pageFor(snap, slug);
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Cache-Control', hidden ? 'no-store' : 'public, max-age=60');
-  if (!page?.published) {
+  if (!found) {
     const html = pageHtml({
       data: { root: { props: {} }, content: [{ type: 'HeadingBlock', props: { id: 'nf', eyebrow: 'Page not found', heading: "We couldn't find that page.", highlight: '', size: 'medium' } }, { type: 'ButtonBlock', props: { id: 'nfb', label: 'Go to the homepage', link: '/', look: 'blue' } }].map(b => ({ type: 'Section', props: { id: `s-${b.props.id}`, background: 'white', spacing: 'l', content: [b] } })) },
       title: 'Page not found | Next Academy', description: '', snap, base, hidden: true,
     });
     return res.status(404).type('html').send(html);
   }
-  const root = page.published.root?.props || {};
-  res.type('html').send(pageHtml({
-    data: page.published,
-    title: String(root.pageTitle || `${page.title} | Next Academy`),
-    description: String(root.description || ''),
-    snap, base, hidden,
-    canonical: hidden ? undefined : `https://${host}/${page.slug || ''}`,
-  }));
+  res.type('html').send(pageHtml({ ...found, snap, base, hidden, canonical: hidden ? undefined : `https://${req.hostname}/${slug}` }));
+}
+
+function sitemap(snap: Snapshot, host: string): string {
+  const h = escapeHtml(host);
+  const slugs = new Set<string>(snap.pages.map(p => p.slug || ''));
+  Object.keys(AUTO_PAGES).forEach(s => slugs.add(s));
+  snap.data.programmes.forEach(p => slugs.add(`programmes/${p.slug}`));
+  snap.data.trainers.forEach(t => slugs.add(`trainers/${t.slug}`));
+  const lastmod = (s: string) => snap.pages.find(p => (p.slug || '') === s)?.publishedAt?.slice(0, 10);
+  const urls = [...slugs].map(s => `<url><loc>https://${h}/${escapeHtml(s)}</loc>${lastmod(s) ? `<lastmod>${lastmod(s)}</lastmod>` : ''}</url>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`;
 }
 
 const slugFromPath = (p: string) => decodeURIComponent(p.replace(/^\/+|\/+$/g, '')).toLowerCase();
@@ -129,10 +190,7 @@ export function registerWebsiteRoutes(app: Express) {
     if (!hosts.includes(req.hostname.toLowerCase())) return next();
     try {
       if (req.path === '/robots.txt') return res.type('text/plain').send(`User-agent: *\nAllow: /\nSitemap: https://${req.hostname}/sitemap.xml\n`);
-      if (req.path === '/sitemap.xml') {
-        const urls = snap.pages.map(p => `<url><loc>https://${escapeHtml(req.hostname)}/${escapeHtml(p.slug || '')}</loc>${p.publishedAt ? `<lastmod>${p.publishedAt.slice(0, 10)}</lastmod>` : ''}</url>`).join('');
-        return res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
-      }
+      if (req.path === '/sitemap.xml') return res.type('application/xml').send(sitemap(snap, req.hostname));
       // Old WordPress addresses end in "/": send them to the same address without it.
       if (req.path.length > 1 && req.path.endsWith('/')) return res.redirect(301, req.path.replace(/\/+$/, '') + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''));
       await sendPage(req, res, slugFromPath(req.path), '', false);
@@ -140,10 +198,15 @@ export function registerWebsiteRoutes(app: Express) {
   });
 }
 
-/** Clears the saved copy so a publish shows straight away on this server (the CRM calls it after publishing). */
 export function registerWebsiteRefresh(app: Express) {
+  /** Clears the saved copy so a publish shows straight away on this server (the CRM calls it after publishing). */
   app.post('/api/site/refresh', route(async (req) => {
     await callerFrom(req);
     cache = null;
+  }));
+  /** The calendar, programmes and trainers as the website shows them, for the page editor's preview. */
+  app.post('/api/site/data', route(async (req) => {
+    await callerFrom(req);
+    return { data: (await load()).data };
   }));
 }
