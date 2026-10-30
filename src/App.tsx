@@ -21,6 +21,7 @@ import {
   KeyRound,
   UserCircle2,
   ArrowLeft,
+  Globe,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -33,6 +34,9 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import Logo from './components/Logo';
 // The big screens load only when first opened, so the login page appears faster.
 const HomeDashboard = React.lazy(() => import('./components/HomeDashboard'));
+const WebsiteStudio = React.lazy(() => import('./components/WebsiteStudio'));
+import { useSiteSettings, useWaitingPages } from './lib/useWebsite';
+import { canEditSite } from './lib/website';
 const RepDetailDashboard = React.lazy(() => import('./components/RepDetailDashboard'));
 const ManagementDashboard = React.lazy(() => import('./components/ManagementDashboard'));
 const ProjectPL = React.lazy(() => import('./components/ProjectPL'));
@@ -239,6 +243,11 @@ function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: Crm
   }, [currentMember.id, isManagement]);
   const isRep = currentMember.role === 'rep';
   const isStaff = !isRep; // Admin or Management
+  // The public website (components/WebsiteStudio.tsx).
+  const siteSettings = useSiteSettings();
+  const canEditWebsite = canEditSite(currentMember, siteSettings);
+  const [websiteOpen, setWebsiteOpen] = useState(false);
+  const websiteWaiting = useWaitingPages(ownerOverride);
 
   // Per-person KPI settings (template + targets) keyed by team member id.
   const [repDocs, setRepDocs] = useState<Record<string, { targets?: Representative['targets']; kpiTemplate?: string; kpiSet?: { items?: KpiSetItem[] }; salesRing?: Representative['salesRing'] }>>({});
@@ -950,6 +959,15 @@ function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: Crm
               >
                 Management
               </button>)}
+              {canEditWebsite && (
+                <button
+                  onClick={() => setWebsiteOpen(true)}
+                  className="relative px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer text-slate-500 hover:text-slate-800"
+                >
+                  Website
+                  {websiteWaiting > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-attention px-1.5 text-[10px] font-bold text-white" aria-label={`${websiteWaiting} waiting for approval`}>{websiteWaiting}</span>}
+                </button>
+              )}
             </div>
           </div>
 
@@ -984,6 +1002,11 @@ function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: Crm
                     <p className="text-sm font-semibold text-ink">{currentMember.name}</p>
                     <p className="text-xs text-ink-soft">{ROLE_LABELS[currentMember.role]}</p>
                   </div>
+                  {canEditWebsite && (
+                    <button role="menuitem" onClick={() => { setShowUserMenu(false); setWebsiteOpen(true); }} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface md:hidden">
+                      <Globe className="h-4 w-4 text-ink-soft" /> Website{websiteWaiting > 0 ? ` (${websiteWaiting} waiting)` : ''}
+                    </button>
+                  )}
                   <button role="menuitem" onClick={() => { setShowUserMenu(false); setShowChangePassword(true); }} className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface">
                     <KeyRound className="h-4 w-4 text-ink-soft" /> Change my password
                   </button>
@@ -1232,6 +1255,18 @@ function CrmApp({ currentMember, teamMembers, allMembers }: { currentMember: Crm
             />
           </div>
         </div>
+      )}
+
+      {/* The public website (2026-10-30): Admin, Management and people ticked in Website → Settings */}
+      {websiteOpen && canEditWebsite && (
+        <React.Suspense fallback={null}>
+          <WebsiteStudio
+            me={{ id: currentMember.id, name: currentMember.name, role: currentMember.role }}
+            owner={ownerOverride}
+            people={teamMembers.map(m => ({ id: m.id, name: m.name, role: m.role, active: m.active }))}
+            onClose={() => setWebsiteOpen(false)}
+          />
+        </React.Suspense>
       )}
 
       {/* 6. Private room (owner only) */}

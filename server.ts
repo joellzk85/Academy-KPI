@@ -22,6 +22,7 @@ import { registerKpiRoutes } from "./serverKpi";
 import { registerOneToOneRoutes } from "./serverOneToOne";
 import { registerActivityRoutes } from "./serverActivity";
 import { registerAccountsPortalRoutes, registerAccountsSlipRoute } from "./serverAccountsPortal";
+import { registerWebsiteRefresh, registerWebsiteRoutes } from "./serverWebsite";
 
 // Load environment variables
 dotenv.config();
@@ -46,6 +47,11 @@ async function startServer() {
   registerAccountsSlipRoute(app);
 
   app.use(express.json());
+
+  // The public website (2026-10-30): its own addresses and the test pages at /site. Before everything else, so a
+  // visitor on the website's address never sees the CRM.
+  registerWebsiteRoutes(app);
+  registerWebsiteRefresh(app);
 
   // Login and team management (passwords are checked here, on the server)
   registerAuthRoutes(app);

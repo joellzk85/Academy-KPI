@@ -29,6 +29,23 @@ service firebase.storage {
       allow read, delete: if isSuper();
     }
 
+    // The public website's photos and short clips (2026-10-30): site_media/{id}.{ext}. Admin, Management and people
+    // ticked in Website → Settings upload; photos are shrunk first, clips up to 60 MB (longer videos go on YouTube).
+    // Visitors load them through each file's download link, which these rules don't affect.
+    function isSiteEditor() {
+      return isStaff() || (isMember() && firestore.exists(/databases/(default)/documents/config/site_settings)
+        && request.auth.uid in firestore.get(/databases/(default)/documents/config/site_settings).data.get('editors', []));
+    }
+    match /site_media/{fileName} {
+      allow read: if isMember();
+      allow create: if isSiteEditor()
+        && request.resource.size < 60 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png)|video/(mp4|webm|quicktime)')
+        && request.resource.metadata.uploadedBy == request.auth.uid;
+      allow update: if false;
+      allow delete: if isSiteEditor() && resource.metadata.uploadedBy == request.auth.uid;
+    }
+
     match /proposals/{dealId}/{fileName} {
       allow read: if isMember();
       allow create: if isMember()

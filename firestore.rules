@@ -94,7 +94,7 @@ service cloud.firestore {
       // one_to_one (2026-10-25): see below.
       // training_report (2026-10-27): the training report questions and HR's / the HOD's copies; Management only.
       // claim_settings (2026-10-28): staff claim categories, limits and who may raise for others; Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings', 'site_settings', 'site_menu']))
                             || (docId in ['checklist_tasks'] && isStaff())
                             || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings'] && isManagement())
                             // one_to_one (2026-10-25): who runs the 1-to-1s and the questions. The owner sets it (owner
@@ -1409,6 +1409,33 @@ service cloud.firestore {
     }
     match /login_live/{memberId} {
       allow read, write: if false;
+    }
+
+    // The public website (2026-10-30, src/lib/website.ts). Admin, Management and people ticked in Website → Settings
+    // (config/site_settings.editors) edit. Only the owner (owner override below) makes, renames or deletes pages, publishes,
+    // keeps the history (site_pages/{id}/versions), sets the menu and settings (config/site_menu, site_settings).
+    function isSiteEditor() {
+      return isStaff() || (isMember() && exists(/databases/$(database)/documents/config/site_settings)
+        && request.auth.uid in get(/databases/$(database)/documents/config/site_settings).data.get('editors', []));
+    }
+    // Editors change only the draft: saved as theirs ('draft') or sent for approval ('waiting'); or throw their changes
+    // away (back to exactly what's published). Visitors only ever see `published`, which only the owner writes.
+    match /site_pages/{pageId} {
+      allow read: if isSiteEditor();
+      allow update: if isSiteEditor()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['draft', 'draftBy', 'draftByName', 'draftAt', 'status', 'note'])
+        && ((request.resource.data.status in ['draft', 'waiting'] && request.resource.data.draftBy == request.auth.uid)
+            || (request.resource.data.status == 'live' && request.resource.data.draft == resource.data.get('published', null)));
+    }
+    // Photos, clips and YouTube links. The uploader may rename, describe, tag and delete their own; replacing a file
+    // everywhere is the owner's (it changes the live site at once).
+    match /site_media/{mediaId} {
+      allow read: if isSiteEditor();
+      allow create: if isSiteEditor() && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.kind in ['image', 'video', 'youtube'];
+      allow update: if isSiteEditor() && resource.data.createdBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'alt', 'folder', 'tags', 'focusX', 'focusY']);
+      allow delete: if isSiteEditor() && resource.data.createdBy == request.auth.uid;
     }
 
     // Owner override: read and write anything, except the login records the CRM server keeps and owner_access itself.

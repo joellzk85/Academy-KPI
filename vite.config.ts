@@ -35,6 +35,8 @@ export default defineConfig(() => {
             // The T3 form maker's readers and PDF filler load only when it's used (src/lib/t3Names.ts, t3Pdf.ts).
             if (/[\\/]node_modules[\\/](exceljs|mammoth|pdf-lib|@pdf-lib|pdfjs-dist)[\\/]/.test(id)) return undefined;
             if (/[\\/]node_modules[\\/](jspdf|html2canvas|html2canvas-pro|canvg|fflate|fast-png|iobuffer|pako|dompurify|core-js|@babel[\\/]runtime|regenerator-runtime|raf|performance-now|rgbcolor|stackblur-canvas|svg-pathdata|css-line-break|text-segmentation|utrie|base64-arraybuffer)[\\/]/.test(id)) return undefined;
+            // The website's drag-and-drop editor (2026-10-30) loads only when someone opens a page to edit it.
+            if (/[\\/]node_modules[\\/](@puckeditor|@tiptap|@dnd-kit|prosemirror-[a-z-]+|@radix-ui|@floating-ui|@tanstack|linkifyjs|orderedmap|rope-sequence|w3c-keyname|markdown-it|mdurl|uc\.micro|entities|punycode\.js|use-debounce|react-hotkeys-hook|deep-diff|flat|fast-equals|object-hash|zustand|react-remove-scroll[a-z-]*|react-style-singleton|use-callback-ref|use-sidecar|aria-hidden|get-nonce|detect-node-es)[\\/]/.test(id)) return undefined;
             return 'vendor';
           },
         },
