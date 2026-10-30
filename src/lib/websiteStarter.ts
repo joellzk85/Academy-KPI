@@ -4,6 +4,7 @@
 // Website → Media on loading, so they can be replaced like any other photo. Company details are never typed here:
 // the Contact block and the footer print them from lib/company.ts.
 import type { MenuItem, PageData } from './website';
+import { COMPANY } from './company';
 
 export type StarterPhoto = { id: string; file: string; name: string; folder: string; alt: string; tags: string[]; focusX?: number; focusY?: number };
 export type StarterVideo = { id: string; youtubeId: string; name: string };
@@ -232,6 +233,43 @@ function contactPage(): PageData {
     ]);
 }
 
+// Careers (Joel, 2026-10-30): the old /career and /internship-opportunity pages were empty, so this is new copy built
+// on the HEART values. No openings are listed; people send their CV to the company email (lib/company.ts).
+function careers(): PageData {
+  const mail = (subject: string) => `mailto:${COMPANY.email}?subject=${encodeURIComponent(subject)}`;
+  const cv = `<a href="${mail('Career at Next Academy')}">${COMPANY.email}</a>`;
+  return page('Careers | Next Academy',
+    'Work with Next Academy: careers and internships at a Malaysian HRD Corp training provider. Send us your CV.', [
+      block('Hero', {
+        eyebrow: 'Careers', headline: 'Help people go to work', highlight: 'inspired.', headlineEnd: '',
+        text: "We're a growing Malaysian training provider. If you like people, learning and getting things done, we'd like to hear from you.",
+        button1Label: 'Send us your CV', button1Link: mail('Career at Next Academy'), button2Label: 'About us', button2Link: '/about-us',
+        image: 'starter-team-work', imageStyle: 'tinted', background: 'dark',
+      }),
+      block('Points', {
+        eyebrow: 'Who we look for', heading: 'People who live our', highlight: 'HEART values.', look: 'squares', background: 'white', edge: 'torn',
+        items: [
+          { title: 'Humility', text: 'You listen first and learn from everyone in the room.' },
+          { title: 'Expertise', text: 'You are good at what you do, and keep getting better.' },
+          { title: 'Accountability', text: 'You own the result, not just the task.' },
+          { title: 'Remarkable', text: 'You care about doing work people talk about for the right reasons.' },
+          { title: 'Trustworthiness', text: 'You do what you say, and keep what is shared with you safe.' },
+        ],
+      }),
+      block('Tiles', {
+        eyebrow: 'Ways to join', heading: 'Find your', highlight: 'place with us.', background: 'light', edge: 'torn',
+        items: [
+          { image: 'starter-workshop-group', eyebrow: 'Careers', title: 'Join the team', tags: 'Sales, Training operations, Admin and accounts', linkLabel: 'Send us your CV', link: mail('Career at Next Academy') },
+          { image: 'starter-trainer-stage', eyebrow: 'Internships', title: 'Internships', tags: 'Hands-on projects, Real training days, A mentor who cares', linkLabel: 'Apply for an internship', link: mail('Internship at Next Academy') },
+        ],
+      }),
+      section('dark', [
+        heading('How to apply', 'Send us your CV and a few lines', 'about you.'),
+        text(`<p>Email ${cv} with the role or internship you're interested in, when you can start and what you'd like to learn with us. We read every message and reply to the ones that fit what we need now.</p>`),
+      ], 'narrow', 'torn'),
+    ]);
+}
+
 function privacy(): PageData {
   return page('Privacy notice | Next Academy', 'How Next Academy collects, uses and protects your personal data under the Personal Data Protection Act 2010.', [
     section('white', [
@@ -260,6 +298,7 @@ export function starterPages(): { title: string; slug: string; data: PageData }[
     { title: 'Training programmes (ESG)', slug: 'training-courses-esg', data: esg() },
     { title: 'Training programmes (Professional skills)', slug: 'training-courses', data: skills() },
     { title: 'Contact us', slug: 'contact-us', data: contactPage() },
+    { title: 'Careers', slug: 'career', data: careers() },
     { title: 'Privacy notice', slug: 'privacynotice', data: privacy() },
   ];
 }

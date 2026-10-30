@@ -100,6 +100,15 @@ Joel: "study my photos (Facebook), come up with a nicer layout and design". The 
 - HR insights link to Facebook for now; the website has no article pages of its own yet.
 - Nothing to publish (no rules change).
 
+## Ready for the domain switch (2026-10-30)
+
+- **What was found:** nextacademy.my is managed at MSC Hosting (name servers `ns137/ns138.mschosting.cloud`); WordPress runs on their server (103.6.198.76). **Email is Microsoft 365** (MX `nextacademy-my.mail.protection.outlook.com`, backup MX `mail.nextacademy.my` on the same MSC server): **never change the MX or mail lines** when switching; only the website's lines for `nextacademy.my` and `www`.
+- **Old addresses forwarded** (`serverWebsite.ts` `OLD_ADDRESSES`, only on the website's own addresses; a published page with the old address wins): our-trainers → /trainers; mission-vision, testimonial → /about-us; sales-marketing → /training-courses; shop, cart, checkout, my-account → /training-calendar; internship-opportunity → /career. Addresses ending in "/" still go to the same address without it.
+- **nextacademy.my → www.nextacademy.my** (301) when both are in Website → Settings: the address Google already knows.
+- **Careers page** (Joel: "on the new site"): `/career` in the designed pages (the old /career and /internship-opportunity pages were empty): HEART values as mint squares, Join the team and Internships tiles, How to apply (email the CV to the company email from `lib/company.ts`; no openings listed). Not in the menu unless added in Website → Menu.
+- Tested: 15 checks of the forwards and the www rule pass; the Careers page drawn on computer.
+- Steps for Joel: publish the pages; Website → Settings → both addresses; Firebase App Hosting → nextacademy2 → Settings → Domains → Add custom domain (both); send a screenshot of MSC Hosting's Zone Editor before changing anything; change only the lines Firebase gives; keep WordPress hosting a month.
+
 ## Still to do
 
 - **Domain switch:** list the WordPress addresses (`/training-calendar/`, `/training-courses/`, `/training-courses-esg/`, `/our-trainers/`, `/contact-us/`, `/privacynotice`) and make pages or forwards for each; add the domain in Firebase App Hosting; copy the WordPress content (text, logos, testimonials, privacy notice); keep WordPress hosting a month.

@@ -168,7 +168,7 @@ function PagesTab({ pages, menu, me, owner, onEdit }: { pages: SitePage[]; menu:
       {owner && live.length === 0 && (
         <div className="rounded-xl border border-line bg-white p-5">
           <p className="font-semibold text-ink">No pages yet.</p>
-          <p className="mt-1 text-sm text-ink-soft">Load the designed website above (homepage, About us, both programme pages, Contact us and the privacy notice, with copy and photos), start with the homepage from the mock-up, or make an empty page.</p>
+          <p className="mt-1 text-sm text-ink-soft">Load the designed website above (homepage, About us, both programme pages, Contact us, Careers and the privacy notice, with copy and photos), start with the homepage from the mock-up, or make an empty page.</p>
           <button type="button" onClick={() => create('Home', '', starterHome())} className="mt-3 min-h-10 rounded-lg bg-accent px-4 text-sm font-semibold text-white">Start with the homepage</button>
         </div>
       )}

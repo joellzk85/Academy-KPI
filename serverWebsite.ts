@@ -213,6 +213,29 @@ function sitemap(snap: Snapshot, host: string): string {
 
 const slugFromPath = (p: string) => decodeURIComponent(p.replace(/^\/+|\/+$/g, '')).toLowerCase();
 
+// The old WordPress pages with no page of the same address (Joel, 2026-10-30): forwarded to the closest new page so
+// Google and old links keep working. A published page with the old address always wins.
+export const OLD_ADDRESSES: Record<string, string> = {
+  'our-trainers': 'trainers',
+  'mission-vision': 'about-us',
+  'testimonial': 'about-us',
+  'sales-marketing': 'training-courses',
+  'shop': 'training-calendar', 'cart': 'training-calendar', 'checkout': 'training-calendar', 'my-account': 'training-calendar',
+  'internship-opportunity': 'career',
+};
+
+/** Where an old address goes ('' = it isn't one, or a published page has it). */
+export function oldAddressTarget(slug: string, publishedSlugs: string[]): string {
+  const to = OLD_ADDRESSES[slug];
+  return to && !publishedSlugs.includes(slug) ? to : '';
+}
+
+/** nextacademy.my → www.nextacademy.my when both are the website's addresses (the address Google already knows). */
+export function wwwTarget(host: string, hosts: string[]): string {
+  const h = host.toLowerCase();
+  return !h.startsWith('www.') && hosts.includes(`www.${h}`) ? `www.${h}` : '';
+}
+
 export function registerWebsiteRoutes(app: Express) {
   // Test address on the CRM: /site and /site/<page>, never shown to Google.
   app.get(['/site', '/site/*'], async (req, res, next) => {
@@ -232,6 +255,11 @@ export function registerWebsiteRoutes(app: Express) {
     const hosts = hostsOf(snap.settings);
     if (!hosts.includes(req.hostname.toLowerCase())) return next();
     try {
+      const www = wwwTarget(req.hostname, hosts);
+      if (www) return res.redirect(301, `https://${www}${req.originalUrl}`);
+      const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      const old = oldAddressTarget(slugFromPath(req.path), snap.pages.filter(p => p.published).map(p => p.slug || ''));
+      if (old) return res.redirect(301, `/${old}${query}`);
       if (req.path === '/robots.txt') return res.type('text/plain').send(`User-agent: *\nAllow: /\nSitemap: https://${req.hostname}/sitemap.xml\n`);
       if (req.path === '/sitemap.xml') return res.type('application/xml').send(sitemap(snap, req.hostname));
       // Old WordPress addresses end in "/": send them to the same address without it.
