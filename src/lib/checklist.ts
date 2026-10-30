@@ -354,7 +354,7 @@ export function dealVenue(checklist: any | null, quotes: any[], venues: any[]): 
 export function taskGate(t: ChecklistTask, dealQuoteCount: number, grantBlock = '', hasVenue = !!t.venueId, hasTrainer = !!t.trainerId, fileCount = 0): string {
   if (hasFiles(t) && fileCount === 0) return `Upload the ${t.label} file first (drop it in the box).`;
   // Ticked only when the training report is checked (process audit, 2026-10-22: no tick without a report).
-  if (t.id === 'training_report') return 'This is ticked when the training report is checked, ready for HR (in the training report box).';
+  if (t.id === 'training_report') return 'This is ticked when the training report is checked, ready for HR (in the training report box), or when a training report file is uploaded.';
   if (t.kind === 'grant' && grantBlock) return grantBlock;
   if (asksNeeded(t) && t.needed === undefined) return 'Answer "Needed for this training?" first.';
   if (notNeeded(t)) return '';

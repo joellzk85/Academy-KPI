@@ -258,16 +258,20 @@ export default function DealChecklist({
   };
 
   // Uploading a file on a step with a drop box ticks it (Joel, 2026-10-19); deleting its last file reopens it.
+  // Training report (Joel, 2026-10-30): uploaded files also tick it, with or without the trainer's written report;
+  // deleting the last file leaves it ticked while the written report is checked.
+  const ticksByFile = (t: ChecklistTask) => hasFiles(t) || t.id === 'training_report';
   const fileUploaded = (t: ChecklistTask, list: ChecklistFile[]) => {
     const what = list.length === 1 ? `"${list[0].name}" uploaded` : `${list.length} files uploaded`;
     const now = allTasks.find(x => x.id === t.id);
     if (!now) return;
-    if (now.done || !hasFiles(t)) return save(allTasks, `${t.label}: ${what}`);
+    if (now.done || !ticksByFile(t)) return save(allTasks, `${t.label}: ${what}`);
     return patch(t.id, doneBy(), `${t.label}: ${what}, done`);
   };
-  const lastFileRemoved = (t: ChecklistTask) => {
+  const lastFileRemoved = async (t: ChecklistTask) => {
     const now = allTasks.find(x => x.id === t.id);
-    if (now?.done && hasFiles(t)) return patch(t.id, openAgain, `${t.label}: last file deleted, reopened`);
+    const reportChecked = t.id === 'training_report' && (await getDoc(doc(db, 'training_reports', deal.id)).catch(() => null))?.data()?.status === 'checked';
+    if (now?.done && ticksByFile(t) && !reportChecked) return patch(t.id, openAgain, `${t.label}: last file deleted, reopened`);
     return save(allTasks, `${t.label}: file deleted`);
   };
 
@@ -508,9 +512,17 @@ export default function DealChecklist({
                       header={{ programme: deal.courseName || '', client: deal.client || '', dates: trainingDateText(deal, true), venue: effectiveVenue(allTasks.find(x => x.kind === 'venue'), quotes, venues)?.name || '', trainer: tr?.name || '', grantNumber: approvalCodeOf(allTasks) }}
                       names={isRunDeal(deal) ? runNames : (t3?.trainees || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean)} outputFiles={outputFiles}
                       onChecked={() => { if (!t.done) patch(t.id, doneBy(), `${t.label}: checked, done`); }}
-                      onReopened={() => { if (t.done) patch(t.id, openAgain, `${t.label}: reopened`); }} />
+                      onReopened={() => { if (t.done && !filesOf(t).length) patch(t.id, openAgain, `${t.label}: reopened`); }} />
                   );
                 })()}
+                {/* Training report files (Joel, 2026-10-30): the report or screenshots of it, several; uploading ticks the step */}
+                {t.id === 'training_report' && !hasFiles(t) && (
+                  <div className="mt-3">
+                    <p className="text-sm font-semibold">Training report files</p>
+                    <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable} what="training report or screenshots"
+                      onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)} />
+                  </div>
+                )}
                 {/* Trainer portal (2026-10-21): rating, PO accepted or declined, the trainer's fee request */}
                 {t.kind === 'trainer' && t.trainerId && (
                   <TrainerJobBox deal={deal} task={t} trainerName={effectiveTrainer(t, quotes, trainers)?.name || 'The trainer'} viewer={viewer} outs={outs}

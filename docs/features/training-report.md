@@ -96,3 +96,13 @@ both HR and the head of department (HOD). Built from Claude's suggestions, all a
 - **Rules:** `firestore.rules`: `config/training_report` Management only; `showToHod` Management only; the new trainer
   keys locked for internal trainers' reports; `checkin` / `checkinAnswer` refused from the CRM. Tested with a logic
   script (copies, gaps, cleaning, changes, older reports) and a local page (settings, preview, phone width).
+
+## Training report files (2026-10-30)
+
+Joel asked for an upload slot on the after-training Training report step (Admin work → After training, and the deal's checklist).
+- "Training report files" box under the training report box: several files at once, drop, click to choose, or paste a screenshot (Ctrl+V while the mouse is over the box). Stored as checklist files on the step (`checklist_files`, taskId `training_report`).
+- Uploading ticks the step done, whether or not the trainer wrote the report; files can be added after the trainer filled it in too.
+- Reopening the written report (on the deal or in Trainers → Training reports, `setReportStep`) leaves the step ticked while files are there; deleting the last file leaves it ticked while the written report is checked.
+- The files stay in the CRM: they are not part of HR's or the HOD's PDF or link.
+- Every checklist upload box now takes a pasted screenshot (Ctrl+V), reusing `usePaste` from `PaymentReceipts.tsx`.
+- Nothing to publish.

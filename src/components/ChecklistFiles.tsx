@@ -9,9 +9,11 @@ import {
 } from '../lib/checklistFiles';
 import { openProposalFile, storageError } from './ProposalFiles';
 import DownloadButton from './DownloadButton';
+import { PASTE_HINT, usePaste } from './PaymentReceipts';
 
 // The file drop box and file list on a checklist step that has "Has a file upload" (lib/checklistFiles.ts).
 // Admin and Management upload; everyone sees the list and can open the files.
+// A screenshot can be pasted (Ctrl+V) into the box under the mouse or focused (Joel, 2026-10-30).
 
 type Viewer = { id: string; name: string; role: 'rep' | 'admin' | 'management' };
 
@@ -102,9 +104,10 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
   };
   const canDelete = (f: ChecklistFile) => editable && (f.byId === viewer.id || viewer.role === 'management');
   const pick = () => !busy && input.current?.click();
+  const paste = usePaste(f => { if (editable) upload(f); }, false);
 
   return (
-    <div className="mt-2 space-y-2">
+    <div className="mt-2 space-y-2" {...(editable ? paste : {})}>
       {sorted.length > 0 && (
         <ul className="divide-y divide-line rounded-lg border border-line bg-white">
           {sorted.map((f, i) => (
@@ -129,7 +132,7 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
       {!editable && !files.length && <p className="text-sm text-ink-soft">No file uploaded yet.</p>}
       {editable && (
         sorted.length > 0 ? (
-          <button type="button" disabled={busy} onClick={pick}
+          <button type="button" disabled={busy} onClick={pick} title={`Drop a file, ${PASTE_HINT}, or click to choose`}
             onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
             onDrop={e => { e.preventDefault(); setOver(false); upload(e.dataTransfer.files); }}
             className={`inline-flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-1.5 text-sm font-semibold transition-colors ${over ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink hover:bg-surface'}`}>
@@ -150,7 +153,7 @@ export default function StepFiles({ dealId, task, files, viewer, editable, onUpl
             ) : (
               <>
                 <span className="flex items-center gap-2 text-[15px] font-semibold text-ink"><Upload className="h-4 w-4 text-accent" /> Drop the {what || `${task.label} file`} here, or click to choose</span>
-                <span className="text-sm text-ink-soft">{CHECKLIST_FILE_KINDS}, up to 100 MB.{ticks ? ' Uploading marks this step done.' : ' You can add several.'}</span>
+                <span className="text-sm text-ink-soft">{CHECKLIST_FILE_KINDS}, up to 100 MB, {PASTE_HINT}.{ticks ? ' Uploading marks this step done.' : ' You can add several.'}</span>
               </>
             )}
           </div>

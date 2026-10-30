@@ -38,7 +38,7 @@ function onPaste(e: ClipboardEvent) {
   take(named);
 }
 /** Lets a box take a pasted file: while hovered or focused, or (picker) as the newest open form's box. */
-function usePaste(take: PasteTaker, picker: boolean) {
+export function usePaste(take: PasteTaker, picker: boolean) {
   const latest = useRef(take);
   latest.current = take;
   const me = useRef<PasteTaker>(f => latest.current(f)).current;
@@ -51,7 +51,7 @@ function usePaste(take: PasteTaker, picker: boolean) {
   const off = () => { if (hovered === me) hovered = null; };
   return { onMouseEnter: on, onMouseLeave: off, onFocus: on, onBlur: off };
 }
-const PASTE_HINT = 'or paste a screenshot (Ctrl+V)';
+export const PASTE_HINT = 'or paste a screenshot (Ctrl+V)';
 
 /** Receipts, live: one deal's, or (no dealId) all of them. Only Admin and Management may read them. */
 export function useReceipts(enabled: boolean, dealId?: string): Receipt[] {

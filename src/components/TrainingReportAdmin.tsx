@@ -65,6 +65,8 @@ export async function setReportStep(dealId: string, viewer: Viewer, done: boolea
   const cl: any = (await getDoc(ref)).data();
   const t = (cl?.tasks || []).find((x: any) => x.id === 'training_report');
   if (!t || !!t.done === done) return;
+  // Files uploaded on the step (2026-10-30) keep it ticked when the written report is reopened.
+  if (!done && (await getDocs(query(collection(db, 'checklist_files'), where('dealId', '==', dealId)))).docs.some(d => d.data().taskId === t.id)) return;
   const changes = done ? { done: true, doneAt: todayIso(), doneById: viewer.id, doneByName: viewer.name } : { done: false, doneAt: '', doneById: '', doneByName: '' };
   await updateDoc(ref, {
     tasks: clean(cl.tasks.map((x: any) => (x.id === t.id ? { ...x, ...changes } : x))),
