@@ -94,7 +94,7 @@ service cloud.firestore {
       // one_to_one (2026-10-25): see below.
       // training_report (2026-10-27): the training report questions and HR's / the HOD's copies; Management only.
       // claim_settings (2026-10-28): staff claim categories, limits and who may raise for others; Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings', 'site_settings', 'site_menu']))
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings', 'site_settings', 'site_menu', 'site_rotation']))
                             || (docId in ['checklist_tasks'] && isStaff())
                             || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings'] && isManagement())
                             // one_to_one (2026-10-25): who runs the 1-to-1s and the questions. The owner sets it (owner
@@ -103,7 +103,7 @@ service cloud.firestore {
                                 && resource.data.get('coachId', '') == request.auth.uid
                                 && request.resource.data.get('coachId', '') == request.auth.uid);
       allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings']));
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings', 'site_settings', 'site_menu', 'site_rotation']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -1437,6 +1437,19 @@ service cloud.firestore {
       allow update: if isSiteEditor() && resource.data.createdBy == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'alt', 'folder', 'tags', 'focusX', 'focusY']);
       allow delete: if isSiteEditor() && resource.data.createdBy == request.auth.uid;
+    }
+
+    // Website enquiries and registrations (Batch 3, 2026-10-30): only the CRM server makes them (it gives each to the
+    // next rep in turn, config/site_rotation). The rep it was given to, Admin and Management read it and close it as a
+    // deal, only a question or not real; only Admin and Management give it to someone else.
+    match /site_enquiries/{enquiryId} {
+      allow read: if isStaff() || (isMember() && resource.data.assignedTo == request.auth.uid);
+      allow update: if (isStaff() || (isMember() && resource.data.assignedTo == request.auth.uid))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'note', 'dealId', 'handledById', 'handledByName', 'handledAt', 'assignedTo', 'assignedName', 'reassigned'])
+        && (isStaff() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assignedTo', 'assignedName', 'reassigned']))
+        && request.resource.data.status in ['new', 'deal', 'question', 'not_real']
+        && (request.resource.data.status == 'new' || request.resource.data.handledById == request.auth.uid);
+      allow create, delete: if false;
     }
 
     // Owner override: read and write anything, except the login records the CRM server keeps and owner_access itself.

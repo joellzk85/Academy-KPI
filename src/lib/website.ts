@@ -196,6 +196,20 @@ export const SITE_CSS = `
 .nw-run-body{flex:1 1 auto;min-width:0;padding:20px 22px;display:flex;flex-direction:column;gap:8px}
 .nw-run-title{font-size:19px;line-height:1.3;font-weight:700}
 .nw-chip{display:inline-block;font-size:13px;font-weight:700;background:#E3F4EE;color:${BRAND.black};padding:3px 10px}
+.nw-card-box{background:#fff;border:1px solid #E4E4E1;padding:32px;color:${BRAND.black}}
+.nw-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.nw-field{display:flex;flex-direction:column;gap:6px;font-size:15px;font-weight:700;color:${BRAND.black};min-width:0}
+.nw-field input:not([type=radio]):not([type=checkbox]),.nw-field select,.nw-field textarea{font:inherit;font-weight:400;font-size:16px;min-height:48px;border:1px solid ${BRAND.grey};border-radius:2px;padding:10px 12px;background:#fff;color:${BRAND.black};width:100%}
+.nw-field textarea{resize:vertical}
+.nw-field input:not([type=radio]):not([type=checkbox]):focus,.nw-field select:focus,.nw-field textarea:focus{outline:2px solid ${BRAND.blue};outline-offset:1px}
+.nw-radios{border:0;margin:0;padding:0}
+.nw-radios legend{padding:0;margin-bottom:6px}
+.nw-radios label{display:flex;align-items:center;gap:8px;font-weight:400;min-height:32px}
+.nw-radios input{width:18px;height:18px;margin:0}
+.nw-wide{grid-column:1/-1}
+.nw-consent{display:flex;gap:10px;align-items:flex-start;font-size:14px;color:${BRAND.body}}
+.nw-consent input{margin-top:3px;width:18px;height:18px;flex:0 0 auto}
+.nw-trap{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
 .nw-chip-full{background:#FDE8E7;color:#8A1C14}
 .nw-link{font-weight:700;text-decoration:none}
 .nw-row-link{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:56px;padding:8px 0;border-bottom:1px solid #E4E4E1;color:inherit!important;text-decoration:none;font-size:18px;font-weight:700}
@@ -250,6 +264,8 @@ export const SITE_CSS = `
   .nw-menu-toggle:checked~.nw-nav{display:flex}
   .nw-frame{box-shadow:8px 8px 0 ${BRAND.blue};padding:8px}
   .nw-cards{grid-template-columns:1fr}
+  .nw-form{grid-template-columns:1fr}
+  .nw-card-box{padding:20px}
 }
 `;
 

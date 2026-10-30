@@ -23,6 +23,7 @@ import { registerOneToOneRoutes } from "./serverOneToOne";
 import { registerActivityRoutes } from "./serverActivity";
 import { registerAccountsPortalRoutes, registerAccountsSlipRoute } from "./serverAccountsPortal";
 import { registerWebsiteRefresh, registerWebsiteRoutes } from "./serverWebsite";
+import { registerWebsiteFormRoutes } from "./serverWebsiteForms";
 
 // Load environment variables
 dotenv.config();
@@ -52,6 +53,8 @@ async function startServer() {
   // visitor on the website's address never sees the CRM.
   registerWebsiteRoutes(app);
   registerWebsiteRefresh(app);
+  // Website forms (2026-10-30): Talk to us and Register, each given to the next rep in turn.
+  registerWebsiteFormRoutes(app);
 
   // Login and team management (passwords are checked here, on the server)
   registerAuthRoutes(app);

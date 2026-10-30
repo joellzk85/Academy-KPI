@@ -53,9 +53,21 @@ Joel: the calendar shows **price and seats left**; **Admin and Management** tick
 - Rules: `trainers_directory.website` is changed only by Admin and Management (titles already were). 44 website rule checks pass, plus the 122 older ones.
 - Tested (test copy): run with 20 seats and two companies (9 pax) shows "11 seats left", RM 1,500.00, HRD Corp claimable, Register → WhatsApp text; programme page with outline content and no client name; a deleted outline is left out; a trainer not agreed stays hidden (404); both Website boxes save and the pages change at once.
 
+## Batch 3 (2026-10-30): forms into the CRM
+
+Joel: **reps take turns**; a registration **holds seats only once a rep makes the deal**. Defaults kept for later (Joel: "keep those optional for later"): everyone active with the Rep role is in the turn (by name), 24 hours before Management sees it as not touched, the form questions below.
+
+- **Forms** (`src/website/blocks.tsx` `FormGuts`): the Contact us block and the bottom of every programme and trainer page have **Talk to us** (name, company, mobile, email optional, programme from the ticked titles or "not sure", message); each calendar date's Register goes to `/register/<run>` (the date's details and the form: name, company, mobile, email, how many people, HRD Corp claimable yes / no / not sure, anything to know). A full date offers the waiting list. A PDPA consent tick is required. Plain forms (no JavaScript needed); after sending, `/thank-you` (or `/form-problem` with a link back).
+- **Robots, no puzzle** (`serverWebsiteForms.ts`): a hidden box people never see (filled = dropped quietly), a signed time stamp in every form (sent within 3 seconds or after 2 days = refused; key in `server_secrets/site_forms`), at most 6 forms an hour from one visitor.
+- **Reps take turns:** `nextInTurn` gives each one to the next active rep after the one in `config/site_rotation` (server only), in a transaction. No reps = nobody yet (Admin and Management see it).
+- **My home → Website enquiries** (`WebsiteEnquiries.tsx`): shows only when something waits. A rep sees their own new ones; Admin and Management see all new ones, the ones waiting over 24 hours first in red, and can **Give to** someone else (kept in `reassigned`). Open one: details, call / WhatsApp / email links, then
+  - **Make it a deal:** pick the matching client (similar names offered) or add a new one (company, contact, mobile, email from the form; Found by the person making it); funding and pax. A New deal owned by the rep it was given to, `source: 'website'`, `websiteEnquiryId`, the form in the enquiry note. A registration joins its public programme run at list price (seats and the run's rules checked as in Add a company): its seats are held from then.
+  - **Only a question** or **Not real**: with a note (required).
+- Rules: `site_enquiries` made only by the server; read by the rep it was given to, Admin and Management; reps change only the status and note (as themselves), only Admin and Management give it to someone else; nobody deletes (owner override aside). `config/site_rotation` server only; **fixed: members could delete `config/site_settings` and `site_menu`** (now not). 58 website rule checks pass, plus the 122 older ones.
+- Tested (test copy): a registration (3 pax) and two enquiries went Alif, Zara, Alif in turn; robot box, a made-up and a too-fast stamp and a missing consent were refused; Alif saw only his own, made the registration a deal (new client, RM 4,500, HRDC, on the run, "website"): the site went from 11 to 8 seats left; Not real needed a reason; the box went away when empty; Joel saw all and gave Zara's to Alif.
+
 ## Still to do
 
-- **Batch 3:** enquiry and registration forms that create a lead / booking and assign a rep.
 - **Batch 4:** visitor tracking (pages, where from, website leads → won RM).
 - **Domain switch:** list the WordPress addresses (`/training-calendar/`, `/training-courses/`, `/training-courses-esg/`, `/our-trainers/`, `/contact-us/`, `/privacynotice`) and make pages or forwards for each; add the domain in Firebase App Hosting; copy the WordPress content (text, logos, testimonials, privacy notice); keep WordPress hosting a month.
 - "OK for website" tick on training-day photos.

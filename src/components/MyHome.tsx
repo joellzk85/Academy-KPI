@@ -55,6 +55,7 @@ import { GpAlert, gpAlerts } from '../lib/gpAlerts';
 import { activeKpiLibrary } from '../lib/kpiLibrary';
 import { useRunDeals } from '../lib/useRunDeals';
 import { isRunDeal, runCostShares } from '../lib/publicProgrammes';
+import WebsiteEnquiriesBox from './WebsiteEnquiries';
 
 type Role = 'rep' | 'admin' | 'management';
 type Viewer = { id: string; name: string; role: Role };
@@ -392,6 +393,8 @@ export default function MyHome({ viewer, people, representatives, workspaces, de
 
   return (
     <div className="space-y-6 font-sans text-ink">
+      {/* Website enquiries and registrations waiting (2026-10-30): shows only when something waits */}
+      <WebsiteEnquiriesBox viewer={viewer} people={people} clients={clients} deals={deals} openDeal={openDeal} />
       {/* Shortcuts: each person's own choice, limited to what their role can open */}
       <div className="flex flex-wrap items-center gap-2">
         {shortcuts.map((id, i) => {

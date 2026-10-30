@@ -6,15 +6,19 @@ import type { Config, Field } from '@puckeditor/core';
 import { COMPANY, COMPANY_ADDRESS } from '../lib/company';
 import { PageData, SiteMedia, SiteSettings, cleanRichText, safeHref } from '../lib/website';
 import { formatRM } from '../lib/deals';
+import { CONSENT_TEXT } from '../lib/websiteEnquiries';
 import { SiteData, WEB_TYPE_LABELS, WebProgramme, WebRun, WebTrainer, WebType, daysText, runDates, runDay, runMonth, seatsText } from '../lib/websiteData';
 
 export type SiteLink = { label: string; href: string; button?: boolean };
+/** Pages made from the CRM: a programme, a trainer, Register on a date, and the messages after a form. */
+export type SiteSpecial = { kind: 'programme' | 'trainer' | 'register' | 'message' | 'problem'; slug: string };
 
 export type SiteCtx = {
   media: Record<string, SiteMedia>;
   menu: SiteLink[];
   settings: SiteSettings;
   data?: SiteData;                                          // runs, programmes and trainers from the CRM
+  form?: { stamp: string; base: string; page: string; programme?: string; back?: string };   // the website's forms (Batch 3; server only)
   editing: boolean;
   inlineCss?: string;                                       // the editor's preview carries the style sheet itself
   onResizeColumns?: (id: string, split: number) => void;    // dragging the line between two columns (editor only)
@@ -185,8 +189,8 @@ function RunCard({ r }: { r: WebRun }) {
         </div>
         <div style={{ marginTop: 'auto', paddingTop: 6 }}>
           {full
-            ? <a className="nw-link" href={registerHref(settings, `Hi Next Academy, ${r.title} on ${runDates(r)} is full. Please put me on the waiting list.`)} target="_blank" rel="noopener">Join the waiting list →</a>
-            : <a className="nw-link" href={registerHref(settings, `Hi Next Academy, I'd like to register for ${r.title} on ${runDates(r)}.`)} target="_blank" rel="noopener">Register →</a>}
+            ? <a className="nw-link" href={`/register/${r.id}`}>Join the waiting list →</a>
+            : <a className="nw-link" href={`/register/${r.id}`}>Register →</a>}
         </div>
       </div>
     </article>
@@ -299,7 +303,7 @@ export function ProgrammePage({ slug }: { slug: string }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{facts.map(f => <span key={f} className="nw-chip">{f}</span>)}</div>
           <div className="nw-btns">
             {runs.length > 0 && <a className="nw-btn nw-btn-teal" href="#dates">See the dates</a>}
-            <a className="nw-btn nw-btn-outline" href={registerHref(settings, `Hi Next Academy, I'd like to know more about ${x.name}${runs.length ? '' : ' for my team'}.`)} target="_blank" rel="noopener">{runs.length ? 'Ask a question' : 'Bring it to your team'}</a>
+            <a className="nw-btn nw-btn-outline" href="#contact">{runs.length ? 'Ask a question' : 'Bring it to your team'}</a>
           </div>
         </div>
       </section>
@@ -338,6 +342,7 @@ export function ProgrammePage({ slug }: { slug: string }) {
           </div>
         </section>
       )}
+      <ContactSection eyebrow="Talk to us" heading={runs.length ? 'Questions about this programme?' : 'Bring this programme to your team.'} text="Tell us about your team. We reply within one working day." background="light" programme={x.name} />
     </>
   );
 }
@@ -359,7 +364,7 @@ export function TrainerPage({ slug }: { slug: string }) {
             <h1 className="nw-h1" style={{ fontSize: 'clamp(36px, 5vw, 60px)' }}>{t.name}</h1>
             {t.headline && <p className="nw-lead">{t.headline}</p>}
             {t.years > 0 && <span className="nw-chip" style={{ alignSelf: 'flex-start' }}>{t.years}+ years' experience</span>}
-            <div className="nw-btns"><a className="nw-btn nw-btn-teal" href={registerHref(settings, `Hi Next Academy, I'd like to arrange a training with ${t.name}.`)} target="_blank" rel="noopener">Work with {t.name}</a></div>
+            <div className="nw-btns"><a className="nw-btn nw-btn-teal" href="#contact">Work with {t.name}</a></div>
           </div>
         </div>
       </section>
@@ -372,6 +377,7 @@ export function TrainerPage({ slug }: { slug: string }) {
           {teaches.length > 0 && <div className="nw-stack" style={{ gap: 12 }}><h2 className="nw-h3">Programmes</h2><ProgrammeLinks list={teaches} /></div>}
         </div>
       </section>
+      <ContactSection eyebrow="Talk to us" heading={`Plan a training with ${t.name}.`} text="Tell us about your team. We reply within one working day." background="light" message={`I'd like to arrange a training with ${t.name}.`} />
     </>
   );
 }
@@ -395,28 +401,131 @@ export const AUTO_PAGES: Record<string, { title: string; description: string; co
   },
 };
 
-const Contact = (p: any) => {
+// ---------- Forms (Batch 3): "Talk to us" and Register on a date. Plain web forms sent to the CRM's server
+// (serverWebsiteForms.ts), which gives each one to the next rep in turn. ----------
+
+function FormGuts({ kind, runId, programme, message, full }: { kind: 'enquiry' | 'register'; runId?: string; programme?: string; message?: string; full?: boolean }) {
+  const { form, data, editing } = useSite();
+  const programmes = data?.programmes || [];
+  const preset = programme || form?.programme || '';
+  const fieldId = (n: string) => `nw-${kind}-${n}`;
+  return (
+    <form className="nw-form" method="post" action="/api/site/enquiry">
+      <fieldset disabled={editing} style={{ border: 0, margin: 0, padding: 0, display: 'contents' }}>
+        <input type="hidden" name="kind" value={kind} />
+        <input type="hidden" name="stamp" value={form?.stamp || ''} />
+        <input type="hidden" name="base" value={form?.base || ''} />
+        <input type="hidden" name="page" value={form?.page || ''} />
+        {runId && <input type="hidden" name="runId" value={runId} />}
+        {/* People never see or fill this box; robots do. */}
+        <div aria-hidden="true" className="nw-trap"><label>Leave this empty<input type="text" name="website" tabIndex={-1} autoComplete="off" /></label></div>
+        <label className="nw-field" htmlFor={fieldId('name')}>Your name<input id={fieldId('name')} name="name" required maxLength={80} autoComplete="name" /></label>
+        <label className="nw-field" htmlFor={fieldId('company')}>Company<input id={fieldId('company')} name="company" required maxLength={120} autoComplete="organization" /></label>
+        <label className="nw-field" htmlFor={fieldId('mobile')}>Mobile<input id={fieldId('mobile')} name="mobile" type="tel" required maxLength={30} autoComplete="tel" placeholder="e.g. 012 345 6789" /></label>
+        <label className="nw-field" htmlFor={fieldId('email')}>Email <span className="nw-muted" style={{ fontWeight: 400 }}>(optional)</span><input id={fieldId('email')} name="email" type="email" maxLength={120} autoComplete="email" /></label>
+        {kind === 'register' ? (
+          <>
+            <label className="nw-field" htmlFor={fieldId('pax')}>How many people<input id={fieldId('pax')} name="pax" type="number" min={1} max={200} required defaultValue={1} /></label>
+            <fieldset className="nw-field nw-radios">
+              <legend>HRD Corp claimable?</legend>
+              <label><input type="radio" name="hrdc" value="yes" defaultChecked /> Yes</label>
+              <label><input type="radio" name="hrdc" value="no" /> No, we pay directly</label>
+              <label><input type="radio" name="hrdc" value="not_sure" /> Not sure</label>
+            </fieldset>
+          </>
+        ) : (
+          <label className="nw-field nw-wide" htmlFor={fieldId('programme')}>Programme you're interested in
+            <select id={fieldId('programme')} name="programme" defaultValue={programmes.some(p => p.name === preset) ? preset : ''}>
+              <option value="">Not sure yet / something else</option>
+              {programmes.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+            </select>
+          </label>
+        )}
+        <label className="nw-field nw-wide" htmlFor={fieldId('message')}>{kind === 'register' ? 'Anything we should know' : 'Tell us about your team'} <span className="nw-muted" style={{ fontWeight: 400 }}>(optional)</span>
+          <textarea id={fieldId('message')} name="message" rows={4} maxLength={2000} defaultValue={message || ''} />
+        </label>
+        <label className="nw-consent nw-wide"><input type="checkbox" name="consent" value="yes" required /> <span>{CONSENT_TEXT}</span></label>
+        <button type="submit" className="nw-btn nw-btn-dark nw-wide" style={{ justifyContent: 'center' }}>{kind === 'register' ? (full ? 'Join the waiting list' : 'Register') : 'Send message'}</button>
+      </fieldset>
+    </form>
+  );
+}
+
+function ContactSection({ eyebrow, heading, text, background, programme, message }: { eyebrow?: any; heading?: any; text?: any; background?: Bg; programme?: string; message?: string }) {
   const { settings } = useSite();
   const wa = (settings.whatsapp || '').replace(/[^0-9]/g, '');
   return (
-    <section id="contact" className={bandClass(p.background || 'light')}>
+    <section id="contact" className={bandClass(background || 'light')}>
       <div className="nw-wrap nw-split" style={{ alignItems: 'flex-start' }}>
-        <div className="nw-stack"><Heading eyebrow={p.eyebrow} heading={p.heading} text={p.text} /></div>
-        <div className="nw-stack" style={{ background: '#fff', border: '1px solid #E4E4E1', padding: 32, gap: 18 }}>
-          <div className="nw-contact">
+        <div className="nw-stack">
+          <Heading eyebrow={eyebrow} heading={heading} text={text} />
+          <div className="nw-contact" style={{ marginTop: 8 }}>
             <span><strong>Phone</strong> <a href={`tel:+6${COMPANY.phone.replace(/[^0-9]/g, '')}`}>{COMPANY.phone}</a></span>
             <span><strong>Email</strong> <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a></span>
             <span><strong>Address</strong> {COMPANY_ADDRESS}</span>
-          </div>
-          <div className="nw-btns">
-            {wa && <a className="nw-btn nw-btn-teal" href={`https://wa.me/${wa}`} target="_blank" rel="noopener">WhatsApp us</a>}
-            <a className="nw-btn nw-btn-dark" href={`mailto:${COMPANY.email}`}>Email us</a>
+            {wa && <span><strong>WhatsApp</strong> <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener">Message us</a></span>}
           </div>
         </div>
+        <div className="nw-card-box"><FormGuts kind="enquiry" programme={programme} message={message} /></div>
       </div>
     </section>
   );
-};
+}
+
+const Contact = (p: any) => <ContactSection eyebrow={p.eyebrow} heading={p.heading} text={p.text} background={p.background} />;
+
+/** /register/<run>: the date's details and the Register form (seats are held once a rep confirms). */
+export function RegisterPage({ runId }: { runId: string }) {
+  const { data } = useSite();
+  const r = data?.runs.find(x => x.id === runId);
+  if (!r) return null;
+  const full = r.seatsLeft !== null && r.seatsLeft <= 0;
+  const facts = [runDates(r), [r.venue, r.area].filter(Boolean).join(', '), daysText(r.days)].filter(Boolean);
+  return (
+    <section className={bandClass('light', 'l')}>
+      <div className="nw-wrap nw-split" style={{ alignItems: 'flex-start' }}>
+        <div className="nw-stack" style={{ gap: 18 }}>
+          <p className="nw-eyebrow">{full ? 'Waiting list' : 'Register'}</p>
+          <h1 className="nw-h1" style={{ fontSize: 'clamp(32px, 4.4vw, 52px)' }}>{r.title}</h1>
+          <p className="nw-lead">{facts.join(' · ')}</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {r.price > 0 && <span className="nw-chip">{formatRM(r.price)} per pax</span>}
+            {r.hrdc && <span className="nw-chip">HRD Corp claimable</span>}
+            {seatsText(r) && <span className={`nw-chip${full ? ' nw-chip-full' : ''}`}>{seatsText(r)}</span>}
+          </div>
+          <p className="nw-muted">{full ? "This date is full. Leave your details and we'll tell you when a seat opens or the next date is set." : "We'll call you to confirm your seats within one working day. Seats are held once confirmed."}</p>
+          {r.titleSlug && <a className="nw-link" href={`/programmes/${r.titleSlug}`}>About this programme →</a>}
+        </div>
+        <div className="nw-card-box"><FormGuts kind="register" runId={r.id} full={full} /></div>
+      </div>
+    </section>
+  );
+}
+
+/** After a form: thank you, or what to fix. */
+export function FormMessage({ kind, text }: { kind: 'message' | 'problem'; text: string }) {
+  const back = useSite().form?.back || '/';
+  return (
+    <section className={bandClass('white', 'l')}>
+      <div className="nw-wrap nw-narrow nw-stack" style={{ gap: 20 }}>
+        {kind === 'message' ? (
+          <>
+            <p className="nw-eyebrow">{text === 'register' ? 'Registration received' : 'Message received'}</p>
+            <h1 className="nw-h2">Thank you. <span className="nw-mark">We'll be in touch.</span></h1>
+            <p className="nw-lead">{text === 'register' ? 'We will call you within one working day to confirm your seats.' : 'One of our training experts will reply within one working day.'}</p>
+          </>
+        ) : (
+          <>
+            <p className="nw-eyebrow">Please check the form</p>
+            <h1 className="nw-h2">{text}</h1>
+            <p className="nw-lead">Go back, fix it and send it again.</p>
+          </>
+        )}
+        <div className="nw-btns"><a className="nw-btn nw-btn-blue" href={kind === 'message' ? '/' : back}>{kind === 'message' ? 'Back to the homepage' : 'Go back to the form'}</a></div>
+      </div>
+    </section>
+  );
+}
 
 // ---------- Blocks (inside a Section or Columns, or on their own) ----------
 
@@ -764,7 +873,7 @@ function renderItems(config: Config, items: any[] | undefined): React.ReactNode 
 }
 
 /** A published page (or a programme / trainer page made from the CRM), ready for renderToString on the server. */
-export function SitePageView({ data, ctx, special }: { data: PageData; ctx: SiteCtx; special?: { kind: 'programme' | 'trainer'; slug: string } }) {
+export function SitePageView({ data, ctx, special }: { data: PageData; ctx: SiteCtx; special?: SiteSpecial }) {
   const config = makeSiteConfig();
   const Root = (config.root as any).render;
   return (
@@ -772,6 +881,8 @@ export function SitePageView({ data, ctx, special }: { data: PageData; ctx: Site
       <Root>
         {special?.kind === 'programme' && <ProgrammePage slug={special.slug} />}
         {special?.kind === 'trainer' && <TrainerPage slug={special.slug} />}
+        {special?.kind === 'register' && <RegisterPage runId={special.slug} />}
+        {(special?.kind === 'message' || special?.kind === 'problem') && <FormMessage kind={special.kind} text={special.slug} />}
         {renderItems(config, data.content)}
       </Root>
     </SiteProvider>

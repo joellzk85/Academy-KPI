@@ -10,9 +10,10 @@ import type { Express, Request, Response, NextFunction } from 'express';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { admin, callerFrom, route } from './serverAuth';
-import { AUTO_PAGES, SitePageView, SiteCtx, SiteLink } from './src/website/blocks';
+import { AUTO_PAGES, SitePageView, SiteCtx, SiteLink, SiteSpecial } from './src/website/blocks';
 import { MEDIA, MENU_DOC, PAGES, PageData, SETTINGS_DOC, SITE_CSS, SiteMedia, SiteMenu, SitePage, SiteSettings, escapeHtml } from './src/lib/website';
 import { EMPTY_SITE_DATA, SiteData, buildSiteData, todayMY } from './src/lib/websiteData';
+import { formStamp } from './serverWebsiteForms';
 
 type Snapshot = {
   at: number;
@@ -80,6 +81,9 @@ async function load(): Promise<Snapshot> {
   return loading;
 }
 
+/** The website as it is now (pages, menu, settings, runs, programmes, trainers), for the forms. */
+export const siteSnapshot = () => load();
+
 const hostsOf = (s: SiteSettings) => (s.domains || []).map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean);
 
 function menuLinks(snap: Snapshot, base: string): SiteLink[] {
@@ -91,8 +95,8 @@ function menuLinks(snap: Snapshot, base: string): SiteLink[] {
   }).filter((l): l is SiteLink => !!l && !!l.label);
 }
 
-function pageHtml(opts: { data: PageData; title: string; description: string; snap: Snapshot; base: string; canonical?: string; hidden: boolean; special?: { kind: 'programme' | 'trainer'; slug: string } }) {
-  const ctx: SiteCtx = { media: opts.snap.media, menu: menuLinks(opts.snap, opts.base), settings: opts.snap.settings, data: opts.snap.data, editing: false };
+function pageHtml(opts: { data: PageData; title: string; description: string; snap: Snapshot; base: string; canonical?: string; hidden: boolean; special?: SiteSpecial; form?: SiteCtx['form'] }) {
+  const ctx: SiteCtx = { media: opts.snap.media, menu: menuLinks(opts.snap, opts.base), settings: opts.snap.settings, data: opts.snap.data, editing: false, form: opts.form };
   let body = renderToString(React.createElement(SitePageView, { data: opts.data, ctx, special: opts.special }));
   // On the test address every link inside the site gets /site in front, so clicking around stays on the test pages.
   if (opts.base) body = body.replace(/href="\/(?!site-assets\/|site\/|site"|\/)/g, `href="${opts.base}/`);
@@ -122,7 +126,7 @@ ${body}
 const cut = (s: string, n = 155) => (s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s);
 
 /** What a page address shows: an edited page, a page made from the CRM, or nothing (404). */
-function pageFor(snap: Snapshot, slug: string): null | { data: PageData; title: string; description: string; special?: { kind: 'programme' | 'trainer'; slug: string }; lastmod?: string } {
+function pageFor(snap: Snapshot, slug: string): null | { data: PageData; title: string; description: string; special?: SiteSpecial; lastmod?: string } {
   const page = snap.pages.find(p => (p.slug || '') === slug);
   if (page?.published) {
     const root = page.published.root?.props || {};
@@ -139,12 +143,25 @@ function pageFor(snap: Snapshot, slug: string): null | { data: PageData; title: 
     const t = snap.data.trainers.find(p => p.slug === m[2]);
     if (t) return { data: { root: { props: {} }, content: [] }, special: { kind: 'trainer', slug: t.slug }, title: `${t.name} | Next Academy trainer`, description: cut(t.headline || t.bio || `${t.name}, trainer at Next Academy.`) };
   }
+  // Register on a calendar date (Batch 3): /register/<run>
+  const r = slug.match(/^register\/([a-z0-9_-]+)$/);
+  if (r) {
+    const run = snap.data.runs.find(x => x.id.toLowerCase() === r[1]);
+    if (run) return { data: { root: { props: {} }, content: [] }, special: { kind: 'register', slug: run.id }, title: `Register: ${run.title} | Next Academy`, description: '' };
+  }
   return null;
 }
 
 async function sendPage(req: Request, res: Response, slug: string, base: string, hidden: boolean) {
   const snap = await load();
-  const found = pageFor(snap, slug);
+  const q = (k: string) => String(req.query[k] || '').slice(0, 300);
+  // After a form: thank you, or what to fix (Batch 3).
+  const found = slug === 'thank-you'
+    ? { data: { root: { props: {} }, content: [] }, special: { kind: 'message' as const, slug: q('k') === 'register' ? 'register' : 'enquiry' }, title: 'Thank you | Next Academy', description: '' }
+    : slug === 'form-problem'
+      ? { data: { root: { props: {} }, content: [] }, special: { kind: 'problem' as const, slug: q('e') || 'Something is missing on the form.' }, title: 'Please check the form | Next Academy', description: '' }
+      : pageFor(snap, slug);
+  const form = { stamp: await formStamp().catch(() => ''), base, page: req.originalUrl.slice(0, 200), programme: q('programme'), back: /^\/[^/]/.test(q('back')) ? q('back') : '' };
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Cache-Control', hidden ? 'no-store' : 'public, max-age=60');
   if (!found) {
@@ -154,7 +171,9 @@ async function sendPage(req: Request, res: Response, slug: string, base: string,
     });
     return res.status(404).type('html').send(html);
   }
-  res.type('html').send(pageHtml({ ...found, snap, base, hidden, canonical: hidden ? undefined : `https://${req.hostname}/${slug}` }));
+  const quiet = !!found.special && ['register', 'message', 'problem'].includes(found.special.kind);
+  if (quiet) res.set('Cache-Control', 'no-store');
+  res.type('html').send(pageHtml({ ...found, snap, base, hidden: hidden || quiet, form, canonical: hidden || quiet ? undefined : `https://${req.hostname}/${slug}` }));
 }
 
 function sitemap(snap: Snapshot, host: string): string {
