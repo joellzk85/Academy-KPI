@@ -32,8 +32,29 @@ const useSite = () => useContext(SiteContext);
 const has = (v: unknown) => v !== undefined && v !== null && v !== '';
 
 type Bg = 'white' | 'light' | 'dark' | 'black' | 'blue' | 'teal';
-const bandClass = (bg: Bg | undefined, pad: 's' | 'm' | 'l' = 'm', grid = true) =>
-  `nw-band nw-bg-${bg || 'white'} nw-pad-${pad}${grid && (bg === 'dark' || bg === 'light') ? ' nw-grid' : ''}`;
+// `edge` 'torn': the band's top edge is ripped paper over the band above (Facebook posts look, 2026-10-30).
+const bandClass = (bg: Bg | undefined, pad: 's' | 'm' | 'l' = 'm', grid = true, edge?: string) =>
+  `nw-band nw-bg-${bg || 'white'} nw-pad-${pad}${grid && (bg === 'dark' || bg === 'light' || bg === 'black') ? ' nw-grid' : ''}${edge === 'torn' ? ' nw-tear' : ''}`;
+
+/** Highlights each of the words (separated by |) in mint, as on the Facebook posts. */
+function markWords(line: string, words: string): React.ReactNode {
+  const list = String(words || '').split('|').map(w => w.trim()).filter(Boolean);
+  if (!list.length) return line;
+  const esc = list.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return String(line || '').split(new RegExp(`(${esc.join('|')})`, 'g')).map((part, i) => list.includes(part) ? <span key={i} className="nw-mark">{part}</span> : part);
+}
+
+/** A white review card (Google review style) with the name in mint. */
+function ReviewCard({ name, role, text, source }: { name?: any; role?: any; text?: any; source?: any }) {
+  return (
+    <div className="nw-review">
+      {has(name) && <strong>{name}</strong>}
+      {has(role) && <small>{role}</small>}
+      {has(text) && <p>"{text}"</p>}
+      {has(source) && <span className="nw-review-src">{source}<b aria-label="5 stars">★★★★★</b></span>}
+    </div>
+  );
+}
 
 function Heading({ eyebrow, heading, highlight, headingEnd, level = 2, text }: { eyebrow?: any; heading?: any; highlight?: any; headingEnd?: any; level?: 1 | 2 | 3; text?: any }) {
   const Tag = (`h${level}` as 'h1' | 'h2' | 'h3');
@@ -79,9 +100,14 @@ function MediaVideo({ id }: { id?: string }) {
 }
 
 const PhotoWithStyle = ({ id, look, height, alt }: { id?: string; look?: string; height?: number; alt?: string }) => {
+  if (look === 'tinted') {
+    return <div className="nw-tint nw-torn"><MediaImage id={id} className="nw-photo" style={{ height: height || 380 }} fallbackAlt={alt} /></div>;
+  }
   const img = <MediaImage id={id} className={`nw-photo${look === 'torn' ? ' nw-torn' : ''}`} style={{ height: height || 380 }} fallbackAlt={alt} />;
   return look === 'frame' ? <div className="nw-frame">{img}</div> : img;
 };
+
+const LOOK_OPTIONS = [{ label: 'Plain', value: 'plain' }, { label: 'Frame', value: 'frame' }, { label: 'Torn paper', value: 'torn' }, { label: 'Torn paper, mint tint', value: 'tinted' }];
 
 // ---------- Ready-made sections ----------
 
@@ -98,22 +124,39 @@ const Hero = (p: any) => {
           {has(p.button2Label) && <a className="nw-btn nw-btn-outline" href={safeHref(p.button2Link)}>{p.button2Label}</a>}
         </div>
       </div>
-      {(p.image || editing) && <div><PhotoWithStyle id={p.image} look={p.imageStyle} /></div>}
+      {(p.image || editing) && (
+        <div className="nw-hero-pic">
+          <PhotoWithStyle id={p.image} look={p.imageStyle} height={440} />
+          {(has(p.reviewName) || has(p.reviewText)) && <ReviewCard name={p.reviewName} role={p.reviewRole} text={p.reviewText} source={p.reviewSource} />}
+        </div>
+      )}
     </div>
   </section>
   );
 };
 
-const Section = ({ background, spacing, width, texture, content: Content }: any) => (
-  <section className={bandClass(background, spacing || 'm', texture !== 'no')}>
+const Section = ({ background, spacing, width, texture, edge, content: Content }: any) => (
+  <section className={bandClass(background, spacing || 'm', texture !== 'no', edge)}>
     <div className={`nw-wrap${width === 'narrow' ? ' nw-narrow' : ''}`}>
       <Content className="nw-stack" />
     </div>
   </section>
 );
 
-const Points = (p: any) => (
-  <section className={bandClass(p.background)}>
+const Points = (p: any) => p.look === 'squares' ? (
+  // The Facebook checklist: heading on the left, mint squares with a bold line and a smaller line on the right.
+  <section className={bandClass(p.background, 'm', true, p.edge)}>
+    <div className="nw-wrap nw-split" style={{ alignItems: 'flex-start' }}>
+      <div className="nw-stack" style={{ gap: 14 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} /></div>
+      <ul className="nw-squares">
+        {(p.items || []).map((it: any, i: number) => (
+          <li key={i}><div><strong>{it.title}</strong>{has(it.text) && <span className="nw-muted">{it.text}</span>}</div></li>
+        ))}
+      </ul>
+    </div>
+  </section>
+) : (
+  <section className={bandClass(p.background, 'm', true, p.edge)}>
     <div className="nw-wrap nw-stack" style={{ gap: 48 }}>
       <div className="nw-stack" style={{ gap: 14, maxWidth: 760 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} /></div>
       <div className="nw-points">
@@ -139,7 +182,7 @@ const LogoStrip = (p: any) => (
 );
 
 const ValuesBand = (p: any) => (
-  <section className={bandClass(p.background || 'blue', 's', false)}>
+  <section className={bandClass(p.background || 'blue', 's', false, p.edge)}>
     <div className="nw-wrap nw-values">
       {has(p.label) && <span className="nw-eyebrow" style={{ fontSize: 13 }}>{p.label}</span>}
       {(p.items || []).map((it: any, i: number) => <span key={i}>{it.word}</span>)}
@@ -147,10 +190,71 @@ const ValuesBand = (p: any) => (
   </section>
 );
 
+/** Reviews wall: black-and-white training photos with white review cards on top. */
+const ReviewWall = (p: any) => (
+  <section className={bandClass(p.background, 'm', true, p.edge)}>
+    <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
+      <div className="nw-stack" style={{ gap: 14, maxWidth: 760 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} /></div>
+      <div className="nw-wall">
+        {(p.photos || []).slice(0, 4).map((ph: any, i: number) => <div key={i}><MediaImage id={ph.image} /></div>)}
+        <div className="nw-wall-cards">
+          {(p.reviews || []).slice(0, 3).map((r: any, i: number) => <ReviewCard key={i} name={r.name} role={r.role} text={r.text} source={r.source} />)}
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
+/** Tiles: a photo on top, words on black under a torn edge (the programme tracks). */
+const Tiles = (p: any) => (
+  <section className={bandClass(p.background, 'm', true, p.edge)}>
+    <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
+      <div className="nw-stack" style={{ gap: 14, maxWidth: 760 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} /></div>
+      <div className="nw-tiles">
+        {(p.items || []).map((it: any, i: number) => (
+          <a key={i} className="nw-tile" href={safeHref(it.link)}>
+            <MediaImage id={it.image} />
+            <div className="nw-tile-body">
+              {has(it.eyebrow) && <p className="nw-eyebrow">{it.eyebrow}</p>}
+              <h3 className="nw-h3">{it.title}</h3>
+              {has(it.tags) && <div className="nw-tags">{String(it.tags).split(',').map((t: string) => t.trim()).filter(Boolean).map((t: string) => <span key={t}>{t}</span>)}</div>}
+              {has(it.linkLabel) && <span className="nw-tile-go">{it.linkLabel} →</span>}
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+);
+
+/** HR insights: the Facebook posts as square cards, each opening the post (or a page). */
+const Insights = (p: any) => (
+  <section className={bandClass(p.background || 'black', 'm', true, p.edge)}>
+    <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
+      <div className="nw-btns" style={{ justifyContent: 'space-between', alignItems: 'flex-end', gap: 20 }}>
+        <div className="nw-stack" style={{ gap: 14, maxWidth: 680 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} text={p.text} /></div>
+        {has(p.moreLabel) && <a className="nw-btn nw-btn-outline" href={safeHref(p.moreLink)} target={/^https?:/.test(p.moreLink || '') ? '_blank' : undefined} rel="noopener">{p.moreLabel}</a>}
+      </div>
+      <div className="nw-posts">
+        {(p.items || []).map((it: any, i: number) => {
+          const out = /^https?:/.test(it.link || '');
+          return (
+            <a key={i} className={`nw-post${it.image ? ' nw-has-pic' : ''}`} href={safeHref(it.link)} target={out ? '_blank' : undefined} rel={out ? 'noopener' : undefined}>
+              <h3>{markWords(it.title, it.highlight)}</h3>
+              <div className="nw-post-meta"><span>{it.topic}</span><span>{it.note}</span></div>
+              {it.image && <div className="nw-post-pic"><div className="nw-tint nw-torn" style={{ height: '100%' }}><MediaImage id={it.image} /></div></div>}
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  </section>
+);
+
 const Quote = (p: any) => {
   const { editing } = useSite();
   return (
-  <section className={bandClass(p.background || 'dark', 'l')}>
+  <section className={bandClass(p.background || 'dark', 'l', true, p.edge)}>
     <div className="nw-wrap nw-split">
       <div className="nw-stack" style={{ gap: 24 }}>
         <svg className="nw-quote-mark" viewBox="0 0 56 56" aria-hidden="true"><path d="M0 0H56V30C56 46 44 56 24 56H0V40C14 40 22 36 24 28H0Z" fill="#5BC0A0" /></svg>
@@ -211,7 +315,7 @@ const Calendar = (p: any) => {
   const n = Number(p.count) || 0;
   const runs = n > 0 ? all.slice(0, n) : all;
   return (
-    <section id="calendar" className={bandClass(p.background)}>
+    <section id="calendar" className={bandClass(p.background, 'm', true, p.edge)}>
       <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
         <div className="nw-stack" style={{ gap: 14 }}><Heading eyebrow={p.eyebrow} heading={p.heading} text={p.text} /></div>
         <RunList runs={runs} />
@@ -239,7 +343,7 @@ const Programmes = (p: any) => {
   const list = (data?.programmes || []).filter(x => !p.only || p.only === 'all' || x.type === p.only);
   const groups = (['soft', 'technical', 'teambuilding'] as WebType[]).map(t => ({ t, items: list.filter(x => x.type === t) })).filter(g => g.items.length);
   return (
-    <section id="programmes" className={bandClass(p.background)}>
+    <section id="programmes" className={bandClass(p.background, 'm', true, p.edge)}>
       <div className="nw-wrap nw-split" style={{ alignItems: 'flex-start' }}>
         <div className="nw-stack"><Heading eyebrow={p.eyebrow} heading={p.heading} text={p.text} /></div>
         <div className="nw-stack" style={{ gap: 28 }}>
@@ -271,7 +375,7 @@ const Trainers = (p: any) => {
   const n = Number(p.count) || 0;
   const list = n > 0 ? all.slice(0, n) : all;
   return (
-    <section id="trainers" className={bandClass(p.background)}>
+    <section id="trainers" className={bandClass(p.background, 'm', true, p.edge)}>
       <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
         <div className="nw-stack" style={{ gap: 14 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} /></div>
         {list.length === 0 && <p className="nw-muted">Trainers appear here once they agree and are ticked "Show on the website" in the CRM.</p>}
@@ -451,11 +555,11 @@ function FormGuts({ kind, runId, programme, message, full }: { kind: 'enquiry' |
   );
 }
 
-function ContactSection({ eyebrow, heading, text, background, programme, message }: { eyebrow?: any; heading?: any; text?: any; background?: Bg; programme?: string; message?: string }) {
+function ContactSection({ eyebrow, heading, text, background, programme, message, edge }: { eyebrow?: any; heading?: any; text?: any; background?: Bg; programme?: string; message?: string; edge?: string }) {
   const { settings } = useSite();
   const wa = (settings.whatsapp || '').replace(/[^0-9]/g, '');
   return (
-    <section id="contact" className={bandClass(background || 'light')}>
+    <section id="contact" className={bandClass(background || 'light', 'm', true, edge)}>
       <div className="nw-wrap nw-split" style={{ alignItems: 'flex-start' }}>
         <div className="nw-stack">
           <Heading eyebrow={eyebrow} heading={heading} text={text} />
@@ -472,7 +576,7 @@ function ContactSection({ eyebrow, heading, text, background, programme, message
   );
 }
 
-const Contact = (p: any) => <ContactSection eyebrow={p.eyebrow} heading={p.heading} text={p.text} background={p.background} />;
+const Contact = (p: any) => <ContactSection eyebrow={p.eyebrow} heading={p.heading} text={p.text} background={p.background} edge={p.edge} />;
 
 /** /register/<run>: the date's details and the Register form (seats are held once a rep confirms). */
 export function RegisterPage({ runId }: { runId: string }) {
@@ -620,7 +724,7 @@ function SiteHeader() {
   return (
     <header className="nw-head" style={editing ? { position: 'relative', pointerEvents: 'none' } : undefined}>
       <div className="nw-wrap nw-head-in">
-        <a className="nw-logo" href="/" aria-label="Next Academy home"><img src="/site-assets/logo-light.png" alt="Next Academy" width={97} height={46} /></a>
+        <a className="nw-logo" href="/" aria-label="Next Academy home"><img src="/site-assets/logo-dark.png" alt="Next Academy" width={97} height={46} /></a>
         <input type="checkbox" id="nw-menu" className="nw-menu-toggle" />
         <label htmlFor="nw-menu" className="nw-menu-btn">Menu</label>
         <nav className="nw-nav" aria-label="Main">
@@ -678,6 +782,7 @@ const BG_OPTIONS = [
 const bg = (label = 'Background'): Field => ({ type: 'select', label, options: BG_OPTIONS });
 const text = (label: string, editOnPage = true): Field => ({ type: 'text', label, contentEditable: editOnPage } as Field);
 const area = (label: string): Field => ({ type: 'textarea', label, contentEditable: true } as Field);
+const edge: Field = { type: 'radio', label: 'Top edge', options: [{ label: 'Straight', value: 'straight' }, { label: 'Torn paper', value: 'torn' }] };
 const link = (label: string): Field => ({ type: 'text', label: `${label} (a page like /training-calendar, #contact, or a web address)` });
 
 export type MediaFieldMaker = (label: string, kind: 'image' | 'video') => Field;
@@ -689,7 +794,7 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
   const photo: MediaFieldMaker = mediaField || ((label) => ({ type: 'text', label }));
   return {
     categories: {
-      sections: { title: 'Ready-made sections', components: ['Hero', 'Section', 'Points', 'Calendar', 'Programmes', 'Trainers', 'Quote', 'LogoStrip', 'ValuesBand', 'Contact'] },
+      sections: { title: 'Ready-made sections', components: ['Hero', 'Section', 'Points', 'Calendar', 'Programmes', 'Trainers', 'Tiles', 'ReviewWall', 'Insights', 'Quote', 'LogoStrip', 'ValuesBand', 'Contact'] },
       blocks: { title: 'Blocks', components: ['HeadingBlock', 'TextBlock', 'ImageBlock', 'VideoBlock', 'ButtonBlock', 'Columns', 'SpacerBlock'] },
     },
     root: {
@@ -706,10 +811,12 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
           eyebrow: text('Small line above'), headline: area('Headline'), highlight: text('Highlighted words (teal)'), headlineEnd: text('Words after the highlight'),
           text: area('Text'), button1Label: text('Main button'), button1Link: link('Main button goes to'), button2Label: text('Second button'), button2Link: link('Second button goes to'),
           image: photo('Photo', 'image'),
-          imageStyle: { type: 'radio', label: 'Photo look', options: [{ label: 'Frame', value: 'frame' }, { label: 'Torn paper', value: 'torn' }, { label: 'Plain', value: 'plain' }] },
+          imageStyle: { type: 'radio', label: 'Photo look', options: LOOK_OPTIONS },
+          reviewName: text('Review card on the photo: name (empty = no card)', false), reviewRole: text('Review card: who they are', false),
+          reviewText: { type: 'textarea', label: 'Review card: what they said' }, reviewSource: text('Review card: where it is from (e.g. Google review)', false),
           background: bg(),
         },
-        defaultProps: { eyebrow: 'HRD Corp registered training provider', headline: 'Your headline', highlight: 'highlight.', headlineEnd: '', text: '', button1Label: 'See the training calendar', button1Link: '/training-calendar', button2Label: '', button2Link: '', image: '', imageStyle: 'frame', background: 'dark' },
+        defaultProps: { eyebrow: 'HRD Corp registered training provider', headline: 'Your headline', highlight: 'highlight.', headlineEnd: '', text: '', button1Label: 'See the training calendar', button1Link: '/training-calendar', button2Label: '', button2Link: '', image: '', imageStyle: 'tinted', reviewName: '', reviewRole: '', reviewText: '', reviewSource: 'Google review', background: 'dark' },
         render: Hero,
       },
       Section: {
@@ -719,19 +826,21 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
           spacing: { type: 'radio', label: 'Space above and below', options: [{ label: 'Small', value: 's' }, { label: 'Medium', value: 'm' }, { label: 'Large', value: 'l' }] },
           width: { type: 'radio', label: 'Width', options: [{ label: 'Normal', value: 'normal' }, { label: 'Narrow', value: 'narrow' }] },
           texture: { type: 'radio', label: 'Grid texture', options: [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }] },
-          content: { type: 'slot', disallow: ['Hero', 'Section', 'Points', 'Calendar', 'Programmes', 'Trainers', 'Quote', 'LogoStrip', 'ValuesBand', 'Contact'] },
+          edge,
+          content: { type: 'slot', disallow: ['Hero', 'Section', 'Points', 'Calendar', 'Programmes', 'Trainers', 'Tiles', 'ReviewWall', 'Insights', 'Quote', 'LogoStrip', 'ValuesBand', 'Contact'] },
         },
         defaultProps: { background: 'white', spacing: 'm', width: 'normal', texture: 'yes', content: [] },
         render: Section,
       },
       Points: {
-        label: 'Numbered points',
+        label: 'Points (numbered or mint squares)',
         fields: {
           eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'),
+          look: { type: 'radio', label: 'Look', options: [{ label: 'Numbered', value: 'numbers' }, { label: 'Mint squares', value: 'squares' }] },
           items: { type: 'array', label: 'Points', arrayFields: { title: { type: 'text', label: 'Title' }, text: { type: 'textarea', label: 'Text' } }, defaultItemProps: { title: 'Point', text: '' }, getItemSummary: (it: any) => it.title || 'Point' } as Field,
-          background: bg(),
+          background: bg(), edge,
         },
-        defaultProps: { eyebrow: '', heading: 'Why Next Academy', highlight: '', items: [{ title: 'Point one', text: '' }, { title: 'Point two', text: '' }, { title: 'Point three', text: '' }], background: 'light' },
+        defaultProps: { eyebrow: '', heading: 'Why Next Academy', highlight: '', look: 'squares', items: [{ title: 'Point one', text: '' }, { title: 'Point two', text: '' }, { title: 'Point three', text: '' }], background: 'dark', edge: 'straight' },
         render: Points,
       },
       Calendar: {
@@ -740,14 +849,14 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
           eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'),
           only: ONLY_FIELD,
           count: { type: 'number', label: 'How many dates (0 = all; more go to the Training calendar page)', min: 0, max: 60 },
-          background: bg(),
+          background: bg(), edge,
         },
         defaultProps: { eyebrow: 'Training calendar', heading: 'Upcoming public programmes', text: '', only: 'all', count: 6, background: 'white' },
         render: Calendar,
       },
       Programmes: {
         label: 'Programmes',
-        fields: { eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'), only: ONLY_FIELD, background: bg() },
+        fields: { eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'), only: ONLY_FIELD, background: bg(), edge },
         defaultProps: { eyebrow: 'Programmes', heading: 'Training that moves people.', text: '', only: 'all', background: 'white' },
         render: Programmes,
       },
@@ -756,14 +865,55 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
         fields: {
           eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'),
           count: { type: 'number', label: 'How many trainers (0 = all)', min: 0, max: 40 },
-          background: bg(),
+          background: bg(), edge,
         },
         defaultProps: { eyebrow: 'Our trainers', heading: 'Meet our trainers', highlight: '', count: 4, background: 'white' },
         render: Trainers,
       },
+      Tiles: {
+        label: 'Photo tiles (programme tracks)',
+        fields: {
+          eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'),
+          items: { type: 'array', label: 'Tiles', arrayFields: {
+            image: photo('Photo', 'image'), eyebrow: { type: 'text', label: 'Small line above' }, title: { type: 'text', label: 'Title' },
+            tags: { type: 'text', label: 'Tags (separate with commas)' }, linkLabel: { type: 'text', label: 'Link words' }, link: { type: 'text', label: 'Goes to (a page like /training-courses, or a web address)' },
+          }, defaultItemProps: { image: '', eyebrow: '', title: 'Title', tags: '', linkLabel: 'See more', link: '' }, getItemSummary: (it: any) => it.title || 'Tile' } as Field,
+          background: bg(), edge,
+        },
+        defaultProps: { eyebrow: 'Programmes', heading: 'Two tracks. One goal:', highlight: 'people who perform.', items: [], background: 'light', edge: 'straight' },
+        render: Tiles,
+      },
+      ReviewWall: {
+        label: 'Reviews on photos',
+        fields: {
+          eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'),
+          photos: { type: 'array', label: 'Photos (up to 4, shown black and white)', arrayFields: { image: photo('Photo', 'image') }, defaultItemProps: { image: '' }, getItemSummary: (_: any, i?: number) => `Photo ${(i ?? 0) + 1}` } as Field,
+          reviews: { type: 'array', label: 'Review cards (up to 3)', arrayFields: {
+            name: { type: 'text', label: 'Name' }, role: { type: 'text', label: 'Who they are' }, text: { type: 'textarea', label: 'What they said' }, source: { type: 'text', label: 'Where it is from (e.g. Google review)' },
+          }, defaultItemProps: { name: '', role: 'Participant', text: '', source: 'Google review' }, getItemSummary: (it: any) => it.name || 'Review' } as Field,
+          background: bg(), edge,
+        },
+        defaultProps: { eyebrow: 'What participants say', heading: 'Real rooms.', highlight: 'Real reviews.', photos: [], reviews: [], background: 'light', edge: 'straight' },
+        render: ReviewWall,
+      },
+      Insights: {
+        label: 'HR insights (post cards)',
+        fields: {
+          eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'), text: area('Text'),
+          moreLabel: text('Button words (empty = no button)', false), moreLink: link('Button goes to'),
+          items: { type: 'array', label: 'Posts', arrayFields: {
+            title: { type: 'textarea', label: 'Headline' }, highlight: { type: 'text', label: 'Words to highlight in mint (separate with |)' },
+            topic: { type: 'text', label: 'Topic' }, note: { type: 'text', label: 'Small note (e.g. 2 min read)' },
+            image: photo('Photo at the bottom (optional)', 'image'), link: { type: 'text', label: 'Opens (the Facebook post, or a page)' },
+          }, defaultItemProps: { title: 'Headline', highlight: '', topic: '', note: '', image: '', link: '' }, getItemSummary: (it: any) => it.title || 'Post' } as Field,
+          background: bg(), edge,
+        },
+        defaultProps: { eyebrow: 'HR insights', heading: 'Spot the', highlight: 'signs early.', text: '', moreLabel: '', moreLink: '', items: [], background: 'black', edge: 'straight' },
+        render: Insights,
+      },
       Quote: {
         label: 'Client quote and video',
-        fields: { quote: area('Quote'), name: text('Who said it'), media: photo('Video or photo', 'video'), background: bg() },
+        fields: { quote: area('Quote'), name: text('Who said it'), media: photo('Video or photo', 'video'), background: bg(), edge },
         defaultProps: { quote: 'A line or two from a happy client.', name: '', media: '', background: 'dark' },
         render: Quote,
       },
@@ -781,14 +931,14 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
         fields: {
           label: text('Label'),
           items: { type: 'array', label: 'Words', arrayFields: { word: { type: 'text', label: 'Word' } }, defaultItemProps: { word: 'Value' }, getItemSummary: (it: any) => it.word || 'Value' } as Field,
-          background: bg(),
+          background: bg(), edge,
         },
         defaultProps: { label: 'Our values', items: [{ word: 'Humility' }], background: 'blue' },
         render: ValuesBand,
       },
       Contact: {
         label: 'Contact us',
-        fields: { eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'), background: bg() },
+        fields: { eyebrow: text('Small line above'), heading: area('Heading'), text: area('Text'), background: bg(), edge },
         defaultProps: { eyebrow: 'Talk to us', heading: 'Schedule a session with our training experts.', text: '', background: 'light' },
         render: Contact,
       },
@@ -812,7 +962,7 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
         label: 'Photo',
         fields: {
           image: photo('Photo', 'image'), caption: text('Caption'),
-          look: { type: 'radio', label: 'Look', options: [{ label: 'Plain', value: 'plain' }, { label: 'Frame', value: 'frame' }, { label: 'Torn paper', value: 'torn' }] },
+          look: { type: 'radio', label: 'Look', options: LOOK_OPTIONS },
           height: { type: 'radio', label: 'Height', options: [{ label: 'Short', value: 'short' }, { label: 'Medium', value: 'medium' }, { label: 'Tall', value: 'tall' }] },
         },
         defaultProps: { image: '', caption: '', look: 'plain', height: 'medium' },

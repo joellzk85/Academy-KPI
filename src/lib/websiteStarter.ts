@@ -39,11 +39,12 @@ const photo = (image: string, look = 'plain', height = 'medium', caption = '') =
 const button = (label: string, link: string, look = 'blue') => block('ButtonBlock', { label, link, look, align: 'left' });
 const video = (v: StarterVideo) => block('VideoBlock', { video: v.id, caption: v.name });
 const columns = (split: number, col1: any[], col2: any[], col3: any[] = []) => block('Columns', { count: col3.length ? '3' : '2', split, col1, col2, col3 });
-const section = (background: string, content: any[], width = 'normal') => block('Section', { background, spacing: 'l', width, texture: background === 'white' ? 'no' : 'yes', content });
+const section = (background: string, content: any[], width = 'normal', edge = 'straight') => block('Section', { background, spacing: 'l', width, texture: background === 'white' ? 'no' : 'yes', edge, content });
 const page = (pageTitle: string, description: string, content: any[]): PageData => ({ root: { props: { pageTitle, description } }, content });
 const list = (items: string[]) => `<ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>`;
 
-const contact = (eyebrow: string, heading: string, text: string, background = 'light') => block('Contact', { eyebrow, heading, text, background });
+const contact = (eyebrow: string, heading: string, text: string, background = 'black', edge = 'torn') => block('Contact', { eyebrow, heading, text, background, edge });
+const reviewOnHero = (r: { name: string; role: string; text: string; source: string }) => ({ reviewName: r.name, reviewRole: r.role, reviewText: r.text, reviewSource: r.source });
 const CONTACT_TEXT = "Tell us about your team and what you'd like to change. We'll come back with a programme that fits, and show you how to claim it through HRD Corp.";
 
 type Category = { title: string; intro: string; courses: string[]; image: string };
@@ -55,12 +56,23 @@ function categorySections(cats: Category[]) {
       text(`<p>${c.intro}</p>${list(c.courses)}`),
       button('Ask about these programmes', '#contact', i % 2 ? 'dark' : 'blue'),
     ];
-    const pic = [photo(c.image, i % 2 ? 'torn' : 'frame', 'medium')];
+    const pic = [photo(c.image, i % 2 ? 'torn' : 'tinted', 'medium')];
     // Photo left, then right: easier on the eye down a long page. Phones show both one under the other.
-    return section(i % 2 ? 'light' : 'white', [i % 2 ? columns(55, words, pic) : columns(45, pic, words)]);
+    return section(i % 2 ? 'light' : 'white', [i % 2 ? columns(55, words, pic) : columns(45, pic, words)], 'normal', 'torn');
   });
 }
 
+// Next Academy's Facebook page: the HR insight cards link to it until the website has its own articles.
+const FACEBOOK = 'https://www.facebook.com/profile.php?id=61571126980855';
+
+// Real Google reviews, as Next Academy already shows them on its Facebook posts.
+const REVIEWS = [
+  { name: 'Suzanna Yip', role: 'Participant', text: 'Good training and good venue with good food.', source: 'Google review' },
+  { name: 'Rakumaran Pannirselvam', role: 'Participant', text: 'The activities was fun and very engaging. Had good understanding of the training content.', source: 'Google review' },
+];
+
+// Home follows the look of the Facebook posts (Joel, 2026-10-30): black grid bands with mint highlights for the
+// statements, white bands for the facts, torn paper where they meet, review cards on training photos.
 function home(): PageData {
   const [hla, impiana, trinitium] = STARTER_VIDEOS;
   return page('Next Academy | HRD Corp claimable training and coaching in Malaysia',
@@ -68,44 +80,47 @@ function home(): PageData {
       block('Hero', {
         eyebrow: 'HRD Corp registered training provider',
         headline: "Behind every great employee is a trainer who didn't use", highlight: '100 slides.', headlineEnd: '',
-        text: 'Practical, personalised training and coaching for Malaysian teams. Less lecturing, more doing, so new habits show up at work the very next day.',
-        button1Label: 'See the training calendar', button1Link: '/training-calendar', button2Label: 'Plan a training with us', button2Link: '#contact',
-        image: 'starter-hero', imageStyle: 'frame', background: 'dark',
+        text: 'Practical, HRD Corp claimable training for Malaysian teams. Leadership, service, ESG and safety, shaped around your people and run by trainers who have done the work.',
+        button1Label: 'See training dates', button1Link: '/training-calendar', button2Label: 'Plan in-house training', button2Link: '#contact',
+        image: 'starter-trainer-stage', imageStyle: 'tinted', ...reviewOnHero(REVIEWS[1]), background: 'dark',
       }),
-      block('LogoStrip', { label: 'Trusted by teams at', items: [{ name: 'HLA Garment', image: '' }, { name: 'Impiana Hotel KLCC', image: '' }, { name: 'Trinitium', image: '' }] }),
-      section('white', [columns(50,
-        [photo('starter-workshop-group', 'torn', 'tall')],
-        [
-          heading('01 / Who we are', "More than a training provider. We're your", 'growth partner.'),
-          text('<p>Next Academy is registered with HRD Corp Malaysia. We connect the right trainers with the right training, so every programme fits your people, your industry and where your business is heading.</p><p>Our promise is in our tagline: <strong>Unlocking Talents</strong>. We help good teams become remarkable ones, and help leaders build businesses that do good and last.</p>'),
-          button('More about us', '/about-us', 'dark'),
-        ])]),
+      block('Calendar', { eyebrow: 'Training calendar', heading: 'Public classes, open for seats.', text: 'Join a public class with people from other companies. Most programmes are HRD Corp claimable.', only: 'all', count: 4, background: 'white', edge: 'torn' }),
       block('Points', {
-        eyebrow: '02 / Why Next Academy', heading: 'Training that sticks, because it is', highlight: 'built around you.', background: 'light',
+        eyebrow: 'Why Next Academy', heading: "Training that sticks, because it's", highlight: 'built around you.', look: 'squares', background: 'dark', edge: 'torn',
         items: [
-          { title: 'Personalised', text: 'No two teams are the same. We shape every programme around your goals, your industry and your people, so the learning lands where it matters.' },
-          { title: 'Purpose-driven', text: 'Everything we teach is anchored in integrity and real impact. Your people grow, and so does the good your business does.' },
-          { title: 'Holistic', text: 'Skills are only the start. We build ethical leadership, fresh thinking and a habit of learning that keeps going after the training day.' },
+          { title: 'Personalised', text: 'Shaped around your goals, your industry and your people.' },
+          { title: 'Purpose-driven', text: 'Anchored in integrity and real impact, not slide counts.' },
+          { title: 'Holistic', text: 'Ethical leadership, fresh thinking and a habit of learning.' },
+          { title: 'Claims made simple', text: 'We run the training and handle the HRD Corp paperwork with you.' },
         ],
       }),
-      block('Calendar', { eyebrow: '03 / Training calendar', heading: 'Upcoming public programmes', text: 'Join a public class with people from other companies. Most programmes are HRD Corp claimable.', only: 'all', count: 6, background: 'white' }),
-      section('dark', [
-        heading('04 / Programmes', 'Two tracks. One goal:', 'people who perform.'),
-        columns(50,
-          [photo('starter-esg-environment', 'plain', 'short'), heading('', 'ESG programmes', '', 'small'),
-            text('<p>Environmental, social and governance skills for companies building a sustainable business: from composting workshops to the Employment Act and anti-bribery.</p>'),
-            button('See ESG programmes', '/training-courses-esg', 'teal')],
-          [photo('starter-skills-leadership', 'plain', 'short'), heading('', 'Professional skills', '', 'small'),
-            text('<p>Leadership, customer service, business efficiency and workplace safety, tailored to your industry and run in-house or as public classes.</p>'),
-            button('See professional programmes', '/training-courses', 'teal')]),
-      ]),
+      block('Tiles', {
+        eyebrow: 'Programmes', heading: 'Two tracks. One goal:', highlight: 'people who perform.', background: 'light', edge: 'torn',
+        items: [
+          { image: 'starter-esg-environment', eyebrow: 'Track 01', title: 'ESG programmes', tags: 'Environment, Social & human rights, Governance & ethics, Team engagement', linkLabel: 'See ESG programmes', link: '/training-courses-esg' },
+          { image: 'starter-skills-leadership', eyebrow: 'Track 02', title: 'Professional skills', tags: 'Leadership, Customer service, Business & AI, Operations & safety', linkLabel: 'See professional skills', link: '/training-courses' },
+        ],
+      }),
+      block('ReviewWall', {
+        eyebrow: 'What participants say', heading: 'Real rooms.', highlight: 'Real reviews.', background: 'light',
+        photos: [{ image: 'starter-workshop-group' }, { image: 'starter-team-work' }, { image: 'starter-trainer-stage' }, { image: 'starter-hero' }],
+        reviews: REVIEWS,
+      }),
       section('white', [
-        heading('05 / What our clients say', 'Hear it from the people we', 'trained.'),
+        heading('Client stories', 'Hear it from the teams we', 'trained.'),
         columns(50, [video(hla)], [video(impiana)], [video(trinitium)]),
-      ]),
-      block('Trainers', { eyebrow: '06 / Our trainers', heading: 'Learn from people who have', highlight: 'done the work.', count: 4, background: 'light' }),
-      block('ValuesBand', { label: 'Our HEART values', items: [{ word: 'Humility' }, { word: 'Expertise' }, { word: 'Accountability' }, { word: 'Remarkable' }, { word: 'Trustworthiness' }], background: 'blue' }),
-      contact('07 / Talk to us', 'Schedule a session with our training experts.', CONTACT_TEXT),
+      ], 'normal', 'torn'),
+      block('Insights', {
+        eyebrow: 'HR insights', heading: 'Spot the', highlight: 'signs early.', text: 'Short reads for HR and managers, from our Facebook page.',
+        moreLabel: 'Follow us on Facebook', moreLink: FACEBOOK, background: 'black', edge: 'torn',
+        items: [
+          { title: 'Resignations rarely come from nowhere. They signal.', highlight: 'Resignations|They signal.', topic: 'Retention', note: 'Read on Facebook', image: '', link: FACEBOOK },
+          { title: '4 Signs your team is about to resign.', highlight: '4 Signs', topic: 'Retention', note: 'Read on Facebook', image: 'starter-team-work', link: FACEBOOK },
+          { title: 'Top performers rarely quit overnight. They drift.', highlight: 'Top performers|They drift.', topic: 'Engagement', note: 'Read on Facebook', image: '', link: FACEBOOK },
+        ],
+      }),
+      block('Trainers', { eyebrow: 'Our trainers', heading: 'Learn from people who have', highlight: 'done the work.', count: 4, background: 'white', edge: 'torn' }),
+      contact('Talk to us', "Let's plan your team's next training.", CONTACT_TEXT, 'black', 'torn'),
     ]);
 }
 
@@ -116,19 +131,19 @@ function about(): PageData {
         eyebrow: 'About Next Academy', headline: 'We help people go to work', highlight: 'inspired.', headlineEnd: '',
         text: 'Next Academy is a Malaysian training provider registered with HRD Corp. Through personalised training and coaching, we help people and organisations lead with integrity, grow sustainably and take real action.',
         button1Label: 'See our programmes', button1Link: '/training-courses', button2Label: 'Talk to us', button2Link: '#contact',
-        image: 'starter-trainer-stage', imageStyle: 'torn', background: 'light',
+        image: 'starter-trainer-stage', imageStyle: 'tinted', background: 'dark',
       }),
       section('white', [columns(50,
         [heading('Our vision', 'A world where people are inspired to go to work every day.')],
-        [heading('Our mission', 'Helping organisations achieve unity by being purpose-driven and taking real action.')])]),
+        [heading('Our mission', 'Helping organisations achieve unity by being purpose-driven and taking real action.')])], 'normal', 'torn'),
       section('light', [columns(45,
-        [photo('starter-team-work', 'frame', 'tall')],
+        [photo('starter-team-work', 'tinted', 'tall')],
         [
           heading('What we believe', 'Doing good should be the', 'golden standard.'),
           text('<p>We put ESG values (environmental, social and governance) at the heart of every decision, action and ambition. Not as a report to file, but as the way a good business runs.</p><p>So every programme we design starts with one question: what will your people do differently at work next week, and who benefits?</p>'),
-        ])]),
+        ])], 'normal', 'torn'),
       block('Points', {
-        eyebrow: 'Our HEART values', heading: 'Five values that shape', highlight: 'how we work.', background: 'white',
+        eyebrow: 'Our HEART values', heading: 'Five values that shape', highlight: 'how we work.', look: 'squares', background: 'dark', edge: 'torn',
         items: [
           { title: 'Humility', text: "We listen first. Every team knows things we don't, and the best training starts from there." },
           { title: 'Expertise', text: 'Our trainers are HRD Corp accredited and bring real industry experience into the room.' },
@@ -137,13 +152,13 @@ function about(): PageData {
           { title: 'Trustworthiness', text: 'We do what we say, protect what you share with us and keep our promises.' },
         ],
       }),
-      section('dark', [columns(50,
+      section('white', [columns(50,
         [
           heading('Unlocking Talents', 'The right trainer for the', 'right training.'),
           text("<p>We match each programme with a trainer who has done the job, not just studied it. Then we tailor the content to your industry, your people and your goals, and make the HRD Corp claim simple.</p>"),
-          button('Meet our trainers', '/trainers', 'teal'),
+          button('Meet our trainers', '/trainers', 'dark'),
         ],
-        [photo('starter-workshop-group', 'plain', 'medium')])]),
+        [photo('starter-workshop-group', 'torn', 'medium')])], 'normal', 'torn'),
       contact('Talk to us', 'Schedule a session with our training experts.', CONTACT_TEXT),
     ]);
 }
@@ -155,7 +170,7 @@ function esg(): PageData {
         eyebrow: 'Training programmes · ESG', headline: 'Build a business that does good and', highlight: 'does well.', headlineEnd: '',
         text: 'Practical ESG training for companies on the way to sustainable growth. Environmental, social and governance skills your people can use straight away, from beginner to advanced, in-house or public.',
         button1Label: 'Ask about a programme', button1Link: '#contact', button2Label: 'See the training calendar', button2Link: '/training-calendar',
-        image: 'starter-workshop-group', imageStyle: 'frame', background: 'dark',
+        image: 'starter-workshop-group', imageStyle: 'tinted', background: 'dark',
       }),
       ...categorySections([
         { title: 'Environmental sustainability', image: 'starter-esg-environment', intro: 'Hands-on programmes that turn green intentions into daily habits, from the garden to the plant room.',
@@ -167,7 +182,7 @@ function esg(): PageData {
         { title: 'Team dynamics & engagement', image: 'starter-esg-team', intro: 'Bring people together around a shared purpose, and help HR make learning spread.',
           courses: ['Uniting for Impact: Team Building', 'Make Learning Go Viral: Marketing Skills for HR & L&D', 'Training Facilitation for HR Personnel'] },
       ]),
-      block('Calendar', { eyebrow: 'Training calendar', heading: 'Upcoming public programmes', text: 'Prefer a public class? Pick a date and book a seat.', only: 'all', count: 6, background: 'white' }),
+      block('Calendar', { eyebrow: 'Training calendar', heading: 'Upcoming public programmes', text: 'Prefer a public class? Pick a date and book a seat.', only: 'all', count: 6, background: 'white', edge: 'torn' }),
       contact('Talk to us', 'Plan an ESG programme for your team.', CONTACT_TEXT),
     ]);
 }
@@ -179,7 +194,7 @@ function skills(): PageData {
         eyebrow: 'Training programmes · Professional skills', headline: 'Skills your team will use', highlight: 'on Monday morning.', headlineEnd: '',
         text: 'Practical professional development across industries: leadership, service, business efficiency, operations and safety. Customised for your business, run in-house or as public classes.',
         button1Label: 'Ask about a programme', button1Link: '#contact', button2Label: 'See the training calendar', button2Link: '/training-calendar',
-        image: 'starter-trainer-stage', imageStyle: 'frame', background: 'dark',
+        image: 'starter-trainer-stage', imageStyle: 'tinted', background: 'dark',
       }),
       ...categorySections([
         { title: 'Business efficiency & innovation', image: 'starter-skills-business', intro: 'Work smarter with critical thinking, data and AI tools made for real Malaysian businesses.',
@@ -191,7 +206,7 @@ function skills(): PageData {
         { title: 'Operations & safety training', image: 'starter-skills-safety', intro: 'Keep people safe and operations running, with training that meets the standards your industry expects.',
           courses: ['Essential Fire Fighting and First Aid', 'Occupational Safety & Health at the Workplace', 'Emergency Response Planning (ERP)', 'Forklift and Reach Truck Safety'] },
       ]),
-      block('Calendar', { eyebrow: 'Training calendar', heading: 'Upcoming public programmes', text: 'Prefer a public class? Pick a date and book a seat.', only: 'all', count: 6, background: 'white' }),
+      block('Calendar', { eyebrow: 'Training calendar', heading: 'Upcoming public programmes', text: 'Prefer a public class? Pick a date and book a seat.', only: 'all', count: 6, background: 'white', edge: 'torn' }),
       contact('Talk to us', 'Plan a programme for your team.', CONTACT_TEXT),
     ]);
 }
@@ -203,10 +218,10 @@ function contactPage(): PageData {
         eyebrow: 'Contact us', headline: "Let's plan your team's", highlight: 'next training.', headlineEnd: '',
         text: "Tell us who you'd like to train and what you want to change. We'll recommend a programme, a trainer and a date, and help you with the HRD Corp claim.",
         button1Label: 'Send us a message', button1Link: '#contact', button2Label: 'See the training calendar', button2Link: '/training-calendar',
-        image: 'starter-office', imageStyle: 'torn', background: 'light',
+        image: 'starter-office', imageStyle: 'tinted', background: 'dark',
       }),
       block('Points', {
-        eyebrow: 'How it works', heading: 'From first message to', highlight: 'trained team.', background: 'white',
+        eyebrow: 'How it works', heading: 'From first message to', highlight: 'trained team.', look: 'numbers', background: 'white', edge: 'torn',
         items: [
           { title: 'Tell us what you need', text: 'Send the form below or WhatsApp us. Tell us about your team, your goals and your timing.' },
           { title: 'We shape the programme', text: 'We pick the right trainer and tailor the content, then send you a proposal and quotation.' },

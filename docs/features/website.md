@@ -87,6 +87,19 @@ Joel: "design my website using my current website as reference; put in the copyw
 - **Footer:** a Privacy notice link (`/privacynotice`). The notice is a PDPA draft for Joel to check (PDPA wants it in Bahasa Malaysia too).
 - Tested (test copy): loader made 5 pages and put the design in the existing Home's draft; published, every page drew on computer and phone (no sideways scroll), videos, calendar, trainers, contact form and the footer link; the editor opens the designed pages.
 
+## Facebook look (2026-10-30)
+
+Joel: "study my photos (Facebook), come up with a nicer layout and design". The site now follows the look of Next Academy's Facebook posts. Mock-up: https://claude.ai/artifact/XQcDB6wDP65V5jBPzz6KDY
+
+- **Style** (`SITE_CSS`): black header with the white logo and a mint Talk to us button; highlighted words are white on a mint block; black bands have the grid and mint eyebrows; the footer is black.
+- **Torn paper:** every ready-made section and Empty section has **Top edge: Straight / Torn paper** (the band rips into the one above). Photos (Hero, Photo block) have a new look **Torn paper, mint tint** (black-and-white photo, mint wash, ripped top).
+- **Hero:** an optional **review card** on the photo (name, who they are, what they said, where from).
+- **Points:** **Look: Numbered / Mint squares** (the Facebook checklist: heading left, mint squares with a bold line and a smaller one).
+- **New blocks:** **Photo tiles** (programme tracks: photo, torn black panel, tags, link), **Reviews on photos** (up to 4 black-and-white photos with up to 3 white review cards), **HR insights** (the Facebook posts as square cards: headline with words highlighted in mint, separated by `|`; topic, small note, optional tinted photo; opens the Facebook post or a page; optional button).
+- **Designed pages:** Home rebuilt as the mock-up (hero with Rakumaran's review, calendar, Why Next Academy as mint squares, two track tiles, reviews wall with Suzanna Yip's and Rakumaran Pannirselvam's Google reviews as already shown on Facebook, client videos, HR insights linking to the Facebook page, trainers, Talk to us on black). Other pages: dark heroes with tinted photos, torn edges, HEART values as mint squares, Talk to us on black. To use it: Website → Pages → **Load the designed pages** again (drafts only), check, then Publish.
+- HR insights link to Facebook for now; the website has no article pages of its own yet.
+- Nothing to publish (no rules change).
+
 ## Still to do
 
 - **Domain switch:** list the WordPress addresses (`/training-calendar/`, `/training-courses/`, `/training-courses-esg/`, `/our-trainers/`, `/contact-us/`, `/privacynotice`) and make pages or forwards for each; add the domain in Firebase App Hosting; copy the WordPress content (text, logos, testimonials, privacy notice); keep WordPress hosting a month.
