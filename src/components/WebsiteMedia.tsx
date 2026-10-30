@@ -37,7 +37,7 @@ const imageSize = (blob: Blob) => new Promise<{ width: number; height: number }>
 });
 
 /** Uploads one photo or clip to the website's media; returns the new record's fields (not saved yet). */
-async function uploadFile(file: File, id: string, me: Viewer, onProgress: (pct: number) => void): Promise<Omit<SiteMedia, 'id' | 'name' | 'folder'>> {
+export async function uploadFile(file: File, id: string, me: Viewer, onProgress: (pct: number) => void): Promise<Omit<SiteMedia, 'id' | 'name' | 'folder'>> {
   let blob: Blob = file;
   let ext = (file.name.split('.').pop() || 'bin').toLowerCase();
   let kind: SiteMedia['kind'] = 'image';

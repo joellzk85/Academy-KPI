@@ -2,13 +2,14 @@
 // Pages (edit, approve, history), Media (photos and videos), Menu and Settings. The owner creates pages, sets the
 // menu and settings and publishes; everyone else allowed to edit changes pages' content, which waits for approval.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore';
-import { ArrowDown, ArrowUp, ExternalLink, History, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore';
+import { ArrowDown, ArrowUp, ExternalLink, History, Loader2, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
-import { MENU_DOC, MenuItem, PAGES, PageData, RESERVED_SLUGS, SETTINGS_DOC, SiteMenu, SitePage, SiteSettings, emptyPage, slugify, starterHome } from '../lib/website';
+import { MEDIA, MENU_DOC, MenuItem, PAGES, PageData, RESERVED_SLUGS, SETTINGS_DOC, SiteMenu, SitePage, SiteSettings, emptyPage, slugify, starterHome } from '../lib/website';
 import { ListSort, sortList, usePaged } from '../lib/listPaging';
 import ListPager, { SortSelect } from './ListPager';
-import { MediaLibrary, useSiteMedia } from './WebsiteMedia';
+import { MediaLibrary, uploadFile, useSiteMedia } from './WebsiteMedia';
+import { STARTER_MENU, STARTER_PHOTOS, STARTER_VIDEOS, starterPages } from '../lib/websiteStarter';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
 import { refreshSite, useSiteSettings } from '../lib/useWebsite';
@@ -55,7 +56,47 @@ function HistoryPanel({ page, onClose, onRestore }: { page: SitePage; onClose: (
   );
 }
 
-function PagesTab({ pages, me, owner, onEdit }: { pages: SitePage[]; me: Viewer; owner: boolean; onEdit: (id: string) => void }) {
+/** Website → Pages → "Load the designed pages" (owner): copies the designed photos into Media (once), makes each
+ *  designed page or puts the design in an existing page's draft (what's live stays until Publish), and sets the menu
+ *  when it is still empty. Safe to run again: photos already in Media are kept. */
+async function loadDesignedPages(pages: SitePage[], menu: SiteMenu, me: Viewer, step: (s: string) => void): Promise<string> {
+  const now = () => new Date().toISOString();
+  for (const [i, ph] of STARTER_PHOTOS.entries()) {
+    if ((await getDoc(doc(db, MEDIA, ph.id))).exists()) continue;
+    step(`Copying photos into Media… ${i + 1} of ${STARTER_PHOTOS.length}`);
+    const blob = await (await fetch(`/site-assets/starter/${ph.file}`)).blob();
+    const rec = await uploadFile(new File([blob], ph.file, { type: 'image/jpeg' }), ph.id, me, () => {});
+    await setDoc(doc(db, MEDIA, ph.id), { ...rec, name: ph.name, folder: ph.folder, alt: ph.alt, tags: ph.tags, ...(ph.focusX !== undefined ? { focusX: ph.focusX } : {}) });
+  }
+  for (const v of STARTER_VIDEOS) {
+    if ((await getDoc(doc(db, MEDIA, v.id))).exists()) continue;
+    await setDoc(doc(db, MEDIA, v.id), { kind: 'youtube', youtubeId: v.youtubeId, url: `https://www.youtube.com/watch?v=${v.youtubeId}`, name: v.name, folder: 'Videos', alt: `Client testimonial: ${v.name}`, tags: ['testimonial'], createdBy: me.id, createdByName: me.name, createdAt: now() });
+  }
+  step('Making the pages…');
+  const ids: Record<string, string> = {};
+  let made = 0, updated = 0;
+  for (const sp of starterPages()) {
+    const found = pages.find(p => p.slug === sp.slug && !(p as any).deleted);
+    if (found) {
+      await updateDoc(doc(db, PAGES, found.id), { draft: sp.data, status: 'draft', note: '', draftBy: me.id, draftByName: me.name, draftAt: now() });
+      ids[sp.slug] = found.id; updated++;
+    } else {
+      const id = newPageId();
+      await setDoc(doc(db, PAGES, id), { title: sp.title, slug: sp.slug, draft: sp.data, published: null, status: 'draft', createdAt: now(), draftBy: me.id, draftByName: me.name, draftAt: now() });
+      ids[sp.slug] = id; made++;
+    }
+  }
+  let menuNote = ' The menu was left as it is.';
+  if (!(menu.items || []).length) {
+    await setDoc(doc(db, 'config', MENU_DOC), { items: STARTER_MENU.map(({ slug, ...it }) => slug !== undefined ? { label: it.label, pageId: ids[slug], button: !!it.button } : { label: it.label, url: it.url, button: !!it.button }) });
+    menuNote = ' The menu is set.';
+  }
+  return `Done: ${made} new page${made === 1 ? '' : 's'}, ${updated} page${updated === 1 ? '' : 's'} with the design in the draft.${menuNote} Check each page, then Publish.`;
+}
+
+function PagesTab({ pages, menu, me, owner, onEdit }: { pages: SitePage[]; menu: SiteMenu; me: Viewer; owner: boolean; onEdit: (id: string) => void }) {
+  const [loading, setLoading] = useState('');
+  const [loaded, setLoaded] = useState('');
   const [sort, setSort] = useState<ListSort>('az');
   const [adding, setAdding] = useState(false);
   const [f, setF] = useState({ title: '', slug: '' });
@@ -101,6 +142,14 @@ function PagesTab({ pages, me, owner, onEdit }: { pages: SitePage[]; me: Viewer;
     try { await updateDoc(doc(db, PAGES, p.id), { deleted: on }); } catch (e) { setError(friendlyError(e)); }
   };
 
+  const loadDesign = async () => {
+    const existing = live.filter(p => starterPages().some(sp => sp.slug === p.slug));
+    if (!window.confirm(`Load the designed website? ${existing.length ? `${existing.map(p => p.title).join(', ')} already exist: their draft is replaced by the design (what's live stays until you Publish; History keeps every published version). ` : ''}New pages are made for the rest, and the photos are copied into Media.`)) return;
+    setError(''); setLoaded('');
+    try { setLoaded(await loadDesignedPages(pages, menu, me, setLoading)); } catch (e) { setError(e instanceof Error && !(e as any).code ? e.message : friendlyError(e)); }
+    setLoading('');
+  };
+
   const restore = async (p: SitePage, d: PageData) => {
     try { await updateDoc(doc(db, PAGES, p.id), { draft: d, status: 'draft' }); setHistoryOf(''); onEdit(p.id); } catch (e) { setError(friendlyError(e)); }
   };
@@ -111,6 +160,7 @@ function PagesTab({ pages, me, owner, onEdit }: { pages: SitePage[]; me: Viewer;
         <SortSelect value={sort} onChange={setSort} />
         <div className="ml-auto flex flex-wrap gap-2">
           <a href="/site" target="_blank" rel="noopener" className={btn}><ExternalLink className="h-4 w-4" /> Open the test site</a>
+          {owner && <button type="button" onClick={loadDesign} disabled={!!loading} className={btn}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} {loading || 'Load the designed pages'}</button>}
           {owner && <button type="button" onClick={() => setAdding(v => !v)} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-accent px-4 text-sm font-semibold text-white hover:opacity-90"><Plus className="h-4 w-4" /> New page</button>}
         </div>
       </div>
@@ -118,7 +168,7 @@ function PagesTab({ pages, me, owner, onEdit }: { pages: SitePage[]; me: Viewer;
       {owner && live.length === 0 && (
         <div className="rounded-xl border border-line bg-white p-5">
           <p className="font-semibold text-ink">No pages yet.</p>
-          <p className="mt-1 text-sm text-ink-soft">Start with the homepage from the mock-up (your brand, ready to edit), or make an empty page.</p>
+          <p className="mt-1 text-sm text-ink-soft">Load the designed website above (homepage, About us, both programme pages, Contact us and the privacy notice, with copy and photos), start with the homepage from the mock-up, or make an empty page.</p>
           <button type="button" onClick={() => create('Home', '', starterHome())} className="mt-3 min-h-10 rounded-lg bg-accent px-4 text-sm font-semibold text-white">Start with the homepage</button>
         </div>
       )}
@@ -139,6 +189,7 @@ function PagesTab({ pages, me, owner, onEdit }: { pages: SitePage[]; me: Viewer;
         </div>
       )}
       {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {loaded && <p role="status" className="rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent">{loaded}</p>}
 
       <div className="overflow-hidden rounded-xl border border-line bg-white">
         {paged.pageItems.map(p => (
@@ -337,7 +388,7 @@ export default function WebsiteStudio({ me, owner, people, onClose }: { me: View
           <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
             {error && <p role="alert" className="mb-3 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
             {pages === null || settings === null ? <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
-              : tab === 'pages' ? <PagesTab pages={pages} me={me} owner={owner} onEdit={setEditId} />
+              : tab === 'pages' ? <PagesTab pages={pages} menu={menu} me={me} owner={owner} onEdit={setEditId} />
               : tab === 'media' ? <div className="flex min-h-[70vh] flex-col"><MediaLibrary me={me} owner={owner} pages={pages} /></div>
               : tab === 'menu' ? <MenuTab menu={menu} pages={pages} owner={owner} me={me} />
               : tab === 'visitors' && me.role === 'management' ? <React.Suspense fallback={<p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}><WebsiteVisitors settings={settings} pages={pages} /></React.Suspense>

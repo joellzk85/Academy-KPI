@@ -77,6 +77,16 @@ Joel: **Management only**. `src/lib/websiteStats.ts`, `serverWebsite.ts` (`/api/
 - Rules: `site_stats` and `site_stats_test` read by Management only, written by the server only. 63 website rule checks pass, plus the 122 older ones.
 - Tested (test copy): a visit from a Facebook tracked link (campaign dec-promo) → programme page → Register: counted as Facebook / dec-promo, 3 pages, the form counted and the enquiry saved "came from Facebook, dec-promo"; two visits from Google on a phone; a robot and /wp-admin not counted. Visitors as Joel: tiles, the day's bar, the lists, and From visit to money "Facebook: 2 visits, 1 enquiry, 1 deal, 1 won, RM 4,500.00"; Admin has no Visitors tab.
 
+## The designed website (2026-10-30)
+
+Joel: "design my website using my current website as reference; put in the copywriting; capture the photos; AI-generate the rest". `src/lib/websiteStarter.ts`, photos in `public/site-assets/starter/`.
+
+- **Website → Pages → Load the designed pages** (owner): copies 13 photos into Media (folders Homepage, Programmes, Training days, Other; described for Google; ids `starter-…`, kept if already there) and 3 client video testimonials (YouTube, from the old site: J&J HLA Garment, Bell Impiana Hotel KLCC, Han Trinitium); makes Home, About us (`/about-us`), Training programmes ESG (`/training-courses-esg`), Professional skills (`/training-courses`), Contact us (`/contact-us`) and Privacy notice (`/privacynotice`), keeping the old WordPress addresses. A page that already exists gets the design in its **draft** only (live stays until Publish). The menu is set only when empty. Nothing goes live until the owner publishes.
+- **Copy:** the old site's messages (tagline "Behind every great employee is a trainer who didn't use 100 slides", vision, mission, HEART values, Personalised / Purpose-driven / Holistic, the 8 categories and their courses) rewritten shorter; no client quotes were invented (the videos speak for clients). Company details still come only from `lib/company.ts`.
+- **Photos:** 4 real ones from the old site (trainer on stage, team at work, workshop circle, office front); 9 made with AI in Canva (hero, 4 ESG and 4 professional categories), tagged `ai` in Media. The old site's stock photo was not reused.
+- **Footer:** a Privacy notice link (`/privacynotice`). The notice is a PDPA draft for Joel to check (PDPA wants it in Bahasa Malaysia too).
+- Tested (test copy): loader made 5 pages and put the design in the existing Home's draft; published, every page drew on computer and phone (no sideways scroll), videos, calendar, trainers, contact form and the footer link; the editor opens the designed pages.
+
 ## Still to do
 
 - **Domain switch:** list the WordPress addresses (`/training-calendar/`, `/training-courses/`, `/training-courses-esg/`, `/our-trainers/`, `/contact-us/`, `/privacynotice`) and make pages or forwards for each; add the domain in Firebase App Hosting; copy the WordPress content (text, logos, testimonials, privacy notice); keep WordPress hosting a month.

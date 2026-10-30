@@ -650,6 +650,7 @@ function SiteFooter() {
         </div>
         <div className="nw-foot-bottom">
           <span>© {new Date().getFullYear()} {COMPANY.name.replace('NEXT ACADEMY SDN BHD', 'Next Academy Sdn. Bhd.')} {COMPANY.regNo}. All rights reserved.</span>
+          <a href="/privacynotice">Privacy notice</a>
         </div>
       </div>
     </footer>
