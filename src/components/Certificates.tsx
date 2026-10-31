@@ -18,6 +18,7 @@ import {
 import { certFileName, drawSignature, loadFonts, makeCertificatesPdf, makeCertificatesZip, personFileName, previewImage, saveBlob } from '../lib/certificatePdf';
 import { useT3 } from './T3Maker';
 import { uploadPhoto } from './PhotoPicker';
+import { usePaste } from './PaymentReceipts';
 import { storageError } from './ProposalFiles';
 import PanelResizer from './PanelResizer';
 import ListPager, { SortSelect, listSelect } from './ListPager';
@@ -169,7 +170,8 @@ export function CertificatePanel({ deal, viewer, onClose }: { deal: any; viewer:
   const [adding, setAdding] = useState(false);
   const [pasted, setPasted] = useState('');
   const [uploadPct, setUploadPct] = useState<number | null>(null);
-  const [alsoClient, setAlsoClient] = useState(false);
+  const [alsoClient, setAlsoClient] = useState(true);
+  const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -254,20 +256,28 @@ export function CertificatePanel({ deal, viewer, onClose }: { deal: any; viewer:
     setNote(`${fresh.length} name${fresh.length === 1 ? '' : 's'} added.`);
   };
 
+  // The client's logo from a file, a dropped image or a pasted screenshot (Joel, 2026-11-01).
   const pickLogo = async (f?: File | null) => {
     if (!f) return;
-    setError(''); setUploadPct(0);
+    if (!/^image\/(png|jpeg|webp)$/.test(f.type)) { setLogoError('The logo must be a picture (PNG, JPG or WebP) or a screenshot.'); return; }
+    setLogoError(''); setUploadPct(0);
     try {
       const url = await uploadPhoto(f, 'logos', viewer, setUploadPct);
       set({ logoUrl: url });
-      if (alsoClient && deal.clientId) await updateDoc(doc(db, 'clients', deal.clientId), { logoUrl: url });
+      if (alsoClient && deal.clientId) {
+        await updateDoc(doc(db, 'clients', deal.clientId), { logoUrl: url });
+        setClient(c => ({ ...c, logoUrl: url }));
+      }
     } catch (e: any) {
-      setError(e?.code ? storageError(e) : String(e?.message || e));
+      setLogoError(e?.code ? storageError(e) : String(e?.message || e));
     } finally {
       setUploadPct(null);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
+  // Ctrl+V anywhere in the panel puts a copied screenshot in as the logo.
+  const paste = usePaste(files => pickLogo(files[0]), true);
+  const [logoError, setLogoError] = useState('');
 
   const problem = !form ? '' : !settings.signerName ? `Management: type who signs in Admin work → Certificates → Settings first.`
     : !form.title.trim() ? 'Type the training title.' : !form.dateText.trim() ? 'Type the training date.' : !chosen.length ? 'Tick at least one name.' : '';
@@ -376,15 +386,24 @@ export function CertificatePanel({ deal, viewer, onClose }: { deal: any; viewer:
                 </label>
 
                 <div>
-                  <span className={small}>Client logo</span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {logo ? <img src={logo} alt="Client logo" className="h-12 w-auto max-w-[9rem] rounded-lg border border-line bg-white object-contain p-1" />
-                      : <span className="flex h-12 w-24 items-center justify-center rounded-lg border border-dashed border-line text-xs text-ink-soft">No logo</span>}
-                    <button type="button" className={btnSecondary} disabled={uploadPct !== null} onClick={() => fileRef.current?.click()}>
-                      {uploadPct !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
-                      {uploadPct !== null ? `Uploading ${uploadPct}%` : 'Change logo'}
-                    </button>
-                    {form.logoUrl && form.logoUrl !== 'none' && client.logoUrl && (
+                  <span className={small}>Client company logo</span>
+                  <div {...paste} tabIndex={-1}
+                    onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
+                    onDrop={e => { e.preventDefault(); setDragging(false); pickLogo(e.dataTransfer.files?.[0]); }}
+                    className={`flex flex-wrap items-center gap-3 rounded-xl border-2 border-dashed p-3 outline-none ${dragging ? 'border-accent bg-accent-soft' : 'border-line bg-surface/50'}`}>
+                    {logo && form.logoUrl !== 'none'
+                      ? <img src={logo} alt="Client logo" className="h-14 w-auto max-w-[10rem] rounded-lg border border-line bg-white object-contain p-1.5" />
+                      : <span className="flex h-14 w-28 items-center justify-center rounded-lg border border-dashed border-line bg-white px-2 text-center text-xs text-ink-soft">{form.logoUrl === 'none' ? 'Hidden' : 'No logo yet'}</span>}
+                    <div className="min-w-0 flex-1">
+                      <button type="button" className={btnPrimary} disabled={uploadPct !== null} onClick={() => fileRef.current?.click()}>
+                        {uploadPct !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                        {uploadPct !== null ? `Uploading ${uploadPct}%` : logo ? 'Upload a different logo' : 'Upload client logo'}
+                      </button>
+                      <p className="mt-1 text-sm text-ink-soft">Choose a file, drop it here, or paste a screenshot (Ctrl+V). A PNG with a see-through background looks best.</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {form.logoUrl && form.logoUrl !== 'none' && client.logoUrl && form.logoUrl !== client.logoUrl && (
                       <button type="button" className={btnSecondary} onClick={() => set({ logoUrl: '' })}>Use the client's logo</button>
                     )}
                     {form.logoUrl !== 'none'
@@ -395,9 +414,10 @@ export function CertificatePanel({ deal, viewer, onClose }: { deal: any; viewer:
                   {deal.clientId && (
                     <label className="mt-1 flex items-center gap-2 text-sm text-ink-soft">
                       <input type="checkbox" checked={alsoClient} onChange={e => setAlsoClient(e.target.checked)} className="h-4 w-4 accent-[#0E6E62]" />
-                      Also save a new logo on the client's record
+                      Save an uploaded logo on the client's record too (used next time)
                     </label>
                   )}
+                  {logoError && <p className="mt-1 text-sm text-danger">{logoError}</p>}
                 </div>
                 <p className="text-sm text-ink-soft">Signed by <strong className="text-ink">{settings.signerName || 'nobody yet'}</strong>{settings.signerTitle ? `, ${settings.signerTitle}` : ''}. Wording, signer and signature are in Certificates → Settings (Management).</p>
               </section>
