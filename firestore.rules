@@ -94,16 +94,17 @@ service cloud.firestore {
       // one_to_one (2026-10-25): see below.
       // training_report (2026-10-27): the training report questions and HR's / the HOD's copies; Management only.
       // claim_settings (2026-10-28): staff claim categories, limits and who may raise for others; Management only.
-      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings', 'site_settings', 'site_menu', 'site_rotation']))
+      // certificate_settings (2026-10-31): who signs certificates, the signature style, numbers, wording; Management only.
+      allow create, update: if (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings', 'certificate_settings', 'site_settings', 'site_menu', 'site_rotation']))
                             || (docId in ['checklist_tasks'] && isStaff())
-                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings'] && isManagement())
+                            || (docId in ['money_settings', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings', 'certificate_settings'] && isManagement())
                             // one_to_one (2026-10-25): who runs the 1-to-1s and the questions. The owner sets it (owner
                             // override rule); the person who runs them changes the questions, never who runs them.
                             || (docId == 'one_to_one' && isMember() && resource != null
                                 && resource.data.get('coachId', '') == request.auth.uid
                                 && request.resource.data.get('coachId', '') == request.auth.uid);
-      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings'] && isManagement())
-                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings', 'site_settings', 'site_menu', 'site_rotation']));
+      allow delete: if (docId in ['passwords', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'training_report', 'discovery_settings', 'claim_settings', 'certificate_settings'] && isManagement())
+                    || (isMember() && !(docId in ['passwords', 'setup', 'checklist_tasks', 'money_settings', 'google_calendar', 'backup_settings', 'outlook', 'sales_target', 'follow_up_rules', 'client_contact_colours', 'proposal_settings', 'link_settings', 'trainer_overview', 'forecast_settings', 'login_rules', 'kpi_library', 'month_locks', 'rating_items', 'reliability', 'scorecard', 'screens', 'one_to_one', 'training_report', 'discovery_settings', 'claim_settings', 'certificate_settings', 'site_settings', 'site_menu', 'site_rotation']));
     }
 
     // Deals: reps change only their own; anyone asked to help may tick "done".
@@ -693,6 +694,23 @@ service cloud.firestore {
     // 2026-10-22: PDPA). They used to sit on deal_checklists, which everyone can read.
     match /deal_t3/{dealId} {
       allow read, write: if isStaff();
+    }
+
+    // Certificates (2026-10-31, src/lib/certificates.ts): names and IC numbers, so Admin and Management only.
+    match /deal_certificates/{dealId} {
+      allow read, write: if isStaff();
+    }
+    // The running certificate number per year: only ever goes up, so a number is never given twice.
+    match /cert_counters/{year} {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.last is int && request.resource.data.last >= 1;
+      allow update: if isStaff() && request.resource.data.last is int && request.resource.data.last > resource.data.last;
+      allow delete: if false;
+    }
+    // HR's certificate links (/cert/<token>): made, stopped and opened only through the server (serverCertificates.ts).
+    match /cert_links/{token} {
+      allow read: if isStaff();
+      allow write: if false;
     }
 
     // Files on admin checklist steps (JD14, T3, Output assessment; 2026-10-19). The files are in Storage.

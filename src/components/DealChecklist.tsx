@@ -16,6 +16,7 @@ import PickOrType, { nameOptions, trainerOptions } from './PickOrType';
 import StepFiles, { StepLinks } from './ChecklistFiles';
 import SaveVenueButton from './SaveVenueButton';
 import T3Maker, { useT3 } from './T3Maker';
+import { CertificateBox } from './Certificates';
 import StepCosts, { CostPrefill, VendorHint } from './StepCosts';
 import { AddDealTask, DealTaskList, prefillFrom, useDealTasks } from './DealTasks';
 import { useVendors } from './VendorsPage';
@@ -260,7 +261,7 @@ export default function DealChecklist({
   // Uploading a file on a step with a drop box ticks it (Joel, 2026-10-19); deleting its last file reopens it.
   // Training report (Joel, 2026-10-30): uploaded files also tick it, with or without the trainer's written report;
   // deleting the last file leaves it ticked while the written report is checked.
-  const ticksByFile = (t: ChecklistTask) => hasFiles(t) || t.id === 'training_report';
+  const ticksByFile = (t: ChecklistTask) => hasFiles(t) || t.id === 'training_report' || t.id === 'certificates';
   const fileUploaded = (t: ChecklistTask, list: ChecklistFile[]) => {
     const what = list.length === 1 ? `"${list[0].name}" uploaded` : `${list.length} files uploaded`;
     const now = allTasks.find(x => x.id === t.id);
@@ -269,7 +270,8 @@ export default function DealChecklist({
     return patch(t.id, doneBy(), `${t.label}: ${what}, done`);
   };
   const reportChecked = async (t: ChecklistTask) =>
-    t.id === 'training_report' && (await getDoc(doc(db, 'training_reports', deal.id)).catch(() => null))?.data()?.status === 'checked';
+    (t.id === 'training_report' && (await getDoc(doc(db, 'training_reports', deal.id)).catch(() => null))?.data()?.status === 'checked')
+    || (t.id === 'certificates' && !!(await getDoc(doc(db, 'deal_certificates', deal.id)).catch(() => null))?.data()?.generatedAt);
   const lastFileRemoved = async (t: ChecklistTask) => {
     const now = allTasks.find(x => x.id === t.id);
     if (now?.done && ticksByFile(t) && !now.links?.length && !(await reportChecked(t))) return patch(t.id, openAgain, `${t.label}: last file deleted, reopened`);
@@ -536,6 +538,18 @@ export default function DealChecklist({
                   <div className="mt-3">
                     <p className="text-sm font-semibold">Training report files and links</p>
                     <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable} what="training report or screenshots"
+                      onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)} />
+                    <StepLinks links={t.links || []} viewer={viewer} editable={editable} busy={busy}
+                      onAdd={link => addLink(t, link)} onRemove={link => removeLink(t, link)} />
+                  </div>
+                )}
+                {/* Certificates (Joel, 2026-10-31): generated from the T3 names (Certificates.tsx), or made elsewhere and
+                    uploaded / linked here; any of them ticks the step */}
+                {t.id === 'certificates' && editable && <CertificateBox deal={deal} viewer={viewer} />}
+                {t.id === 'certificates' && !hasFiles(t) && (
+                  <div className="mt-3">
+                    <p className="text-sm font-semibold">Made elsewhere? Upload them or paste the link</p>
+                    <StepFiles dealId={deal.id} task={t} files={filesOf(t)} viewer={viewer} editable={editable} what="certificates"
                       onUploaded={list => fileUploaded(t, list)} onLastRemoved={() => lastFileRemoved(t)} />
                     <StepLinks links={t.links || []} viewer={viewer} editable={editable} busy={busy}
                       onAdd={link => addLink(t, link)} onRemove={link => removeLink(t, link)} />

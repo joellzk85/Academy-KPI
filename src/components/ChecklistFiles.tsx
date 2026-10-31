@@ -215,7 +215,7 @@ export function StepLinks({ links, viewer, editable, busy, onAdd, onRemove }: {
         <div className="space-y-2 rounded-lg border border-line bg-white p-3">
           <input autoFocus value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="Paste the link"
             className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15" />
-          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="Name (optional), e.g. Training report on Google Drive"
+          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="Name (optional), e.g. Files on Google Drive"
             className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[15px] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15" />
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <div className="flex gap-2">

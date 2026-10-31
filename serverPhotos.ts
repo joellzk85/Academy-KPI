@@ -21,6 +21,20 @@ export function photoPath(url: string): string {
     || /^trainer_portal\/[A-Za-z0-9_-]+\/photo_[0-9]+\.jpg$/.test(path) ? path : '';
 }
 
+// One of our photos as a data: URL ('' when it isn't ours or can't be read). Certificates' client logo (2026-10-31).
+export async function photoDataUrl(url: string): Promise<string> {
+  const path = photoPath(url);
+  if (!path) return '';
+  admin();
+  try {
+    const [buf] = await getStorage(getApps()[0]).bucket(BUCKET).file(path).download();
+    if (buf.length > 8 * 1024 * 1024) return '';
+    return `data:image/${/\.png$/i.test(path) ? 'png' : /\.webp$/i.test(path) ? 'webp' : 'jpeg'};base64,${buf.toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
 export function registerPhotoRoutes(app: Express) {
   app.post('/api/photos/get', route(async req => {
     await callerFrom(req);

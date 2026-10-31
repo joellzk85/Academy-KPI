@@ -12,6 +12,7 @@ import { registerTrainerPortalRoutes } from "./serverTrainerPortal";
 import { registerTrainerDocRoutes } from "./serverTrainerDocs";
 import { registerDocLinkRoutes } from "./serverDocLinks";
 import { registerReportCheckinRoutes } from "./serverReportCheckin";
+import { registerCertificateRoutes } from "./serverCertificates";
 import { registerPhotoRoutes } from "./serverPhotos";
 import { registerProposalLinkRoutes } from "./serverProposalLinks";
 import { registerLinkVisitRoutes } from "./serverLinkVisits";
@@ -74,6 +75,8 @@ async function startServer() {
   registerDocLinkRoutes(app);
   // The HOD's 30-day check-in on a training report (/c/<token>, 2026-10-27).
   registerReportCheckinRoutes(app);
+  // Certificates for HR (/cert/<token>, 2026-10-31): HR downloads the training's certificates as PDFs.
+  registerCertificateRoutes(app);
 
   // Trainer portal (/trainer): trainers with access log in by email; Admin and Management give access
   registerTrainerPortalRoutes(app);
