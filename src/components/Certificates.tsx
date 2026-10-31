@@ -12,7 +12,7 @@ import { formatIc } from '../lib/t3Names';
 import { useAutoSave } from '../lib/useAutoSave';
 import { usePaged, sortList, ListSort } from '../lib/listPaging';
 import {
-  CERT_KINDS, CertKind, CertPerson, CertPrint, CertSettings, DEFAULT_CERT_SETTINGS, DEFAULT_WORDING, DealCertificates, KIND_HEADING, SIGNATURE_STYLES,
+  CERT_KINDS, CERT_TEMPLATES, CertKind, isTemplate, CertPerson, CertPrint, CertSettings, DEFAULT_CERT_SETTINGS, DEFAULT_WORDING, DealCertificates, KIND_HEADING, SIGNATURE_STYLES,
   certNumber, cleanPrefix, included, mergePeople, personKey, printOf, readCertSettings,
 } from '../lib/certificates';
 import { certFileName, drawSignature, loadFonts, makeCertificatesPdf, makeCertificatesZip, personFileName, previewImage, saveBlob } from '../lib/certificatePdf';
@@ -152,7 +152,7 @@ export function CertificateBox({ deal, viewer }: { deal: any; viewer: Viewer }) 
 // ---------- the generator ----------
 
 type Form = Omit<DealCertificates, 'generatedAt' | 'generatedById' | 'generatedByName' | 'count'>;
-const formOf = (c: DealCertificates): Form => ({ template: 'A', kind: c.kind, title: c.title, dateText: c.dateText, venue: c.venue, logoUrl: c.logoUrl || '', showIc: c.showIc !== false, people: c.people || [] });
+const formOf = (c: DealCertificates): Form => ({ template: isTemplate(c.template) ? c.template : 'A', kind: c.kind, title: c.title, dateText: c.dateText, venue: c.venue, logoUrl: c.logoUrl || '', showIc: c.showIc !== false, people: c.people || [] });
 
 export function CertificatePanel({ deal, viewer, onClose }: { deal: any; viewer: Viewer; onClose: () => void }) {
   const settings = useCertSettings();
@@ -189,7 +189,7 @@ export function CertificatePanel({ deal, viewer, onClose }: { deal: any; viewer:
     started.current = true;
     (async () => {
       const start: Form = saved ? formOf(saved) : {
-        template: 'A', kind: 'participation', title: titleCaps(deal.courseName || ''),
+        template: settings.defaultTemplate, kind: 'participation', title: titleCaps(deal.courseName || ''),
         dateText: longDateRange(deal.trainingDate, trainingEndDate(deal)), venue: await dealVenue(deal),
         logoUrl: '', showIc: settings.showIc, people: [],
       };
@@ -359,8 +359,18 @@ export function CertificatePanel({ deal, viewer, onClose }: { deal: any; viewer:
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {!form ? <p className="flex items-center gap-2 text-ink-soft"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p> : (
             <>
-              {preview && <img src={preview} alt="Certificate preview" className="w-full rounded-xl border border-line shadow-sm" />}
-              <p className="-mt-2 text-xs text-ink-soft">Template A. Preview of the first name ticked.</p>
+              {/* Template A or B (2026-11-01) */}
+              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Template">
+                {CERT_TEMPLATES.map(t => (
+                  <button key={t.id} type="button" role="radio" aria-checked={form.template === t.id} onClick={() => set({ template: t.id })}
+                    className={`rounded-xl border p-3 text-left ${form.template === t.id ? 'border-accent bg-accent-soft' : 'border-line bg-white hover:bg-surface'}`}>
+                    <span className={`block text-sm font-bold ${form.template === t.id ? 'text-accent' : ''}`}>{t.label}</span>
+                    <span className="block text-sm text-ink-soft">{t.hint}</span>
+                  </button>
+                ))}
+              </div>
+              {preview && <img src={preview} alt="Certificate preview" className={`rounded-xl border border-line shadow-sm ${form.template === 'B' ? 'mx-auto w-full max-w-sm' : 'w-full'}`} />}
+              <p className="-mt-2 text-xs text-ink-soft">{form.template === 'B' ? 'Template B' : 'Template A'}. Preview of the first name ticked.</p>
 
               <section className="space-y-3 rounded-2xl border border-line bg-white p-4">
                 <h4 className="text-base font-bold">On the certificate</h4>
@@ -666,11 +676,11 @@ function CertSettingsPage({ onBack }: { onBack: () => void }) {
         const ctx = c.getContext('2d')!;
         ctx.clearRect(0, 0, c.width, c.height);
         ctx.save(); ctx.scale(2, 2);
-        drawSignature(ctx, s.signerName || 'Your name', st.font, 10, 52, '#1B2421', 220);
+        drawSignature(ctx, s.signatureName || s.signerName || 'Your name', st.font, 10, 52, '#1B2421', 220);
         ctx.restore();
       }
     });
-  }, [s?.signerName]);
+  }, [s?.signerName, s?.signatureName]);
 
   return (
     <div className="space-y-4">
@@ -686,6 +696,10 @@ function CertSettingsPage({ onBack }: { onBack: () => void }) {
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block"><span className={small}>Name</span><input className={input} value={s.signerName} onChange={e => set({ signerName: e.target.value })} placeholder="Name printed under the signature" /></label>
               <label className="block"><span className={small}>Title</span><input className={input} value={s.signerTitle} onChange={e => set({ signerTitle: e.target.value })} placeholder="Director" /></label>
+              <label className="block sm:col-span-2"><span className={small}>Name in the signature (optional)</span>
+                <input className={input} value={s.signatureName} onChange={e => set({ signatureName: e.target.value })} placeholder={s.signerName || 'A shorter name, e.g. first and last name'} />
+                <span className="mt-1 block text-sm text-ink-soft">Leave empty to sign with the name above. Use it to print the full name under a shorter signature.</span>
+              </label>
             </div>
             <div>
               <span className={small}>Signature (drawn from the name, not a real signature)</span>
@@ -698,6 +712,20 @@ function CertSettingsPage({ onBack }: { onBack: () => void }) {
                   </button>
                 ))}
               </div>
+            </div>
+          </section>
+
+          <section className="space-y-3 rounded-2xl border border-line bg-white p-4">
+            <h4 className="text-base font-bold">Template</h4>
+            <p className="text-sm text-ink-soft">New trainings start with this one. It can be changed on each training.</p>
+            <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Template new trainings start with">
+              {CERT_TEMPLATES.map(t => (
+                <button key={t.id} type="button" role="radio" aria-checked={s.defaultTemplate === t.id} onClick={() => set({ defaultTemplate: t.id })}
+                  className={`rounded-xl border p-3 text-left ${s.defaultTemplate === t.id ? 'border-accent bg-accent-soft' : 'border-line bg-white hover:bg-surface'}`}>
+                  <span className={`block text-sm font-bold ${s.defaultTemplate === t.id ? 'text-accent' : ''}`}>{t.label}</span>
+                  <span className="block text-sm text-ink-soft">{t.hint}</span>
+                </button>
+              ))}
             </div>
           </section>
 

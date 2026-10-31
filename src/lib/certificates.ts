@@ -15,6 +15,22 @@ export type CertKind = 'participation' | 'completion' | 'appreciation';
 export const CERT_KINDS: CertKind[] = ['participation', 'completion', 'appreciation'];
 export const KIND_HEADING: Record<CertKind, string> = { participation: 'Of participation', completion: 'Of completion', appreciation: 'Of appreciation' };
 
+// Template A: Joel's Canva design (landscape, dark). Template B (2026-11-01): his "HASHIM BIN KUDER" sample (portrait,
+// white with navy, grey and mint waves). Picked per training; Management picks which one new trainings start with.
+export type CertTemplate = 'A' | 'B';
+export const CERT_TEMPLATES: { id: CertTemplate; label: string; hint: string }[] = [
+  { id: 'A', label: 'Template A', hint: 'Landscape, dark with a mint glow' },
+  { id: 'B', label: 'Template B', hint: 'Portrait, white with navy and mint waves' },
+];
+export const isTemplate = (v: any): v is CertTemplate => v === 'A' || v === 'B';
+
+// Template B's line under the name, before the training's title.
+export const B_LINE: Record<CertKind, string> = {
+  participation: 'has successfully completed the course of',
+  completion: 'has successfully completed the course of',
+  appreciation: 'in appreciation of their contribution to',
+};
+
 export type SignatureStyle = 'great_vibes' | 'allura' | 'mrs_saint_delafield';
 export const SIGNATURE_STYLES: { id: SignatureStyle; label: string; font: string }[] = [
   { id: 'great_vibes', label: 'Flowing', font: 'Great Vibes' },
@@ -26,6 +42,8 @@ export interface CertSettings {
   prefix: string;              // NA/CERT → NA/CERT/2026/0001
   signerName: string;
   signerTitle: string;
+  signatureName: string;       // written in the signature (e.g. "Steven Chiew" for "STEVEN CHIEW CHOON MENG"); '' = signerName
+  defaultTemplate: CertTemplate;
   signatureStyle: SignatureStyle;
   wording: Record<CertKind, string>;   // {date}, {venue} and {title} are filled in
   showIc: boolean;             // starting tick for new runs
@@ -39,7 +57,7 @@ export const DEFAULT_WORDING: Record<CertKind, string> = {
 };
 
 export const DEFAULT_CERT_SETTINGS: CertSettings = {
-  prefix: 'NA/CERT', signerName: '', signerTitle: 'Director', signatureStyle: 'great_vibes',
+  prefix: 'NA/CERT', signerName: '', signerTitle: 'Director', signatureName: '', defaultTemplate: 'A', signatureStyle: 'great_vibes',
   wording: DEFAULT_WORDING, showIc: true, linkDays: 60,
 };
 
@@ -53,6 +71,8 @@ export function readCertSettings(d: any): CertSettings {
     prefix: cleanPrefix(d?.prefix ?? DEFAULT_CERT_SETTINGS.prefix) || DEFAULT_CERT_SETTINGS.prefix,
     signerName: str(d?.signerName, 60),
     signerTitle: str(d?.signerTitle ?? DEFAULT_CERT_SETTINGS.signerTitle, 60),
+    signatureName: str(d?.signatureName, 60),
+    defaultTemplate: isTemplate(d?.defaultTemplate) ? d.defaultTemplate : 'A',
     signatureStyle: style,
     wording: Object.fromEntries(CERT_KINDS.map(k => [k, str(w[k], 600) || DEFAULT_WORDING[k]])) as Record<CertKind, string>,
     showIc: d?.showIc !== false,
@@ -77,7 +97,7 @@ export interface CertPerson {
 }
 
 export interface DealCertificates {
-  template: 'A';
+  template: CertTemplate;
   kind: CertKind;
   title: string;
   dateText: string;
@@ -136,6 +156,7 @@ export const safeFileName = (s: string) => s.replace(/[\\/:*?"<>|]+/g, '-').repl
 
 // What HR's link page receives (serverCertificates.ts) and what the generator draws from: everything printed, no ids.
 export interface CertPrint {
+  template: CertTemplate;
   kind: CertKind;
   title: string;
   dateText: string;
@@ -143,6 +164,7 @@ export interface CertPrint {
   paragraph: string;
   signerName: string;
   signerTitle: string;
+  signatureName: string;
   signatureStyle: SignatureStyle;
   clientLogo: string;   // a data: URL, or '' for none
   company: string;
@@ -151,9 +173,9 @@ export interface CertPrint {
 
 export function printOf(c: DealCertificates, s: CertSettings, clientLogo: string, company: string): CertPrint {
   return {
-    kind: c.kind, title: c.title, dateText: c.dateText, venue: c.venue,
+    template: isTemplate(c.template) ? c.template : 'A', kind: c.kind, title: c.title, dateText: c.dateText, venue: c.venue,
     paragraph: fillWording(s.wording[c.kind], { date: c.dateText, venue: c.venue, title: c.title }),
-    signerName: s.signerName, signerTitle: s.signerTitle, signatureStyle: s.signatureStyle,
+    signerName: s.signerName, signerTitle: s.signerTitle, signatureName: s.signatureName || s.signerName, signatureStyle: s.signatureStyle,
     clientLogo, company,
     people: included(c.people).filter(p => p.number).map(p => ({ name: p.name, ic: c.showIc ? p.ic : '', number: p.number })),
   };
