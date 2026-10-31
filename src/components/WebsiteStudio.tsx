@@ -287,7 +287,7 @@ function MenuTab({ menu, pages, owner, me }: { menu: SiteMenu; pages: SitePage[]
 }
 
 function SettingsTab({ settings, people, me }: { settings: SiteSettings; people: Person[]; me: Viewer }) {
-  const blank = { editors: [] as string[], tagline: '', facebook: '', instagram: '', linkedin: '', whatsapp: '', domains: '' };
+  const blank = { editors: [] as string[], tagline: '', facebook: '', instagram: '', linkedin: '', whatsapp: '', domains: '', googleRating: '', googleReviews: '', companiesTrained: '' };
   const fromSettings = () => ({ ...blank, ...settings, editors: settings.editors || [], domains: (settings.domains || []).join('\n') });
   const [f, setF] = useState(fromSettings);
   const draft = useFormDraft(me.id, 'site-settings', f, setF);
@@ -300,12 +300,13 @@ function SettingsTab({ settings, people, me }: { settings: SiteSettings; people:
       await setDoc(doc(db, 'config', SETTINGS_DOC), {
         editors: f.editors, tagline: f.tagline.trim(), facebook: f.facebook.trim(), instagram: f.instagram.trim(), linkedin: f.linkedin.trim(),
         whatsapp: f.whatsapp.replace(/[^0-9]/g, ''),
+        googleRating: f.googleRating.trim(), googleReviews: f.googleReviews.trim(), companiesTrained: f.companiesTrained.trim(),
         domains: f.domains.split(/[\s,]+/).map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean),
       });
       draft.discard(); setState('saved'); refreshSite();
     } catch (e) { setError(friendlyError(e)); setState('idle'); }
   };
-  const field = (key: 'tagline' | 'facebook' | 'instagram' | 'linkedin' | 'whatsapp', label: string, ph = '') => (
+  const field = (key: 'tagline' | 'facebook' | 'instagram' | 'linkedin' | 'whatsapp' | 'googleRating' | 'googleReviews' | 'companiesTrained', label: string, ph = '') => (
     <label className="flex flex-col gap-1 text-sm font-semibold text-ink">{label}<input className={input} value={f[key]} placeholder={ph} onChange={e => setF(v => ({ ...v, [key]: e.target.value }))} /></label>
   );
   return (
@@ -331,6 +332,15 @@ function SettingsTab({ settings, people, me }: { settings: SiteSettings; people:
         {field('facebook', 'Facebook page', 'https://facebook.com/…')}
         {field('instagram', 'Instagram', 'https://instagram.com/…')}
         {field('linkedin', 'LinkedIn', 'https://linkedin.com/company/…')}
+      </section>
+      <section className="flex flex-col gap-3 rounded-xl border border-line bg-white p-4">
+        <h3 className="font-semibold text-ink">Numbers on the website</h3>
+        <p className="text-sm text-ink-soft">Shown under the homepage's buttons and in the "Numbers" block. Each stays hidden until it is filled in.</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {field('googleRating', 'Google rating', '4.9')}
+          {field('googleReviews', 'Number of Google reviews', '120')}
+          {field('companiesTrained', 'Companies trained', '150+')}
+        </div>
       </section>
       <section className="flex flex-col gap-2 rounded-xl border border-line bg-white p-4">
         <h3 className="font-semibold text-ink">The website's own addresses</h3>

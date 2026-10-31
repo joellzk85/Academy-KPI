@@ -25,7 +25,8 @@ export const STARTER_PHOTOS: StarterPhoto[] = [
   { id: 'starter-skills-safety', file: 'skills-safety.jpg', name: 'Skills: operations and safety', folder: 'Programmes', alt: 'Workers in safety vests practising with a fire extinguisher', tags: ['ai', 'skills', 'safety'] },
 ];
 
-// Client testimonials already on Next Academy's YouTube channel.
+// Client testimonials already on Next Academy's YouTube channel: copied into Media to pick from; no page uses them
+// until the owner fills a video slot (2026-10-31).
 export const STARTER_VIDEOS: StarterVideo[] = [
   { id: 'starter-video-hla', youtubeId: 'XOTmos8ohPw', name: 'Julie and Jonathan, HLA Garment' },
   { id: 'starter-video-impiana', youtubeId: 'tHxRjyMqC9k', name: 'Bell, Impiana Hotel KLCC' },
@@ -38,7 +39,6 @@ const heading = (eyebrow: string, heading: string, highlight = '', size = 'mediu
 const text = (body: string) => block('TextBlock', { body });
 const photo = (image: string, look = 'plain', height = 'medium', caption = '') => block('ImageBlock', { image, caption, look, height });
 const button = (label: string, link: string, look = 'blue') => block('ButtonBlock', { label, link, look, align: 'left' });
-const video = (v: StarterVideo) => block('VideoBlock', { video: v.id, caption: v.name });
 const columns = (split: number, col1: any[], col2: any[], col3: any[] = []) => block('Columns', { count: col3.length ? '3' : '2', split, col1, col2, col3 });
 const section = (background: string, content: any[], width = 'normal', edge = 'straight') => block('Section', { background, spacing: 'l', width, texture: background === 'white' ? 'no' : 'yes', edge, content });
 const page = (pageTitle: string, description: string, content: any[]): PageData => ({ root: { props: { pageTitle, description } }, content });
@@ -63,8 +63,6 @@ function categorySections(cats: Category[]) {
   });
 }
 
-// Next Academy's Facebook page: the HR insight cards link to it until the website has its own articles.
-const FACEBOOK = 'https://www.facebook.com/profile.php?id=61571126980855';
 
 // Real Google reviews, as Next Academy already shows them on its Facebook posts.
 const REVIEWS = [
@@ -72,29 +70,62 @@ const REVIEWS = [
   { name: 'Rakumaran Pannirselvam', role: 'Participant', text: 'The activities was fun and very engaging. Had good understanding of the training content.', source: 'Google review' },
 ];
 
-// Home follows the look of the Facebook posts (Joel, 2026-10-30): black grid bands with mint highlights for the
-// statements, white bands for the facts, torn paper where they meet, review cards on training photos.
+// Home tells the StoryBrand story (Joel, 2026-10-31): the client is the hero and Next Academy the guide. Their goal
+// (hero), the problem, two doorways (HR / business owners), the guide (tagline, vision, numbers, reviews, logos), the
+// plan, programmes and dates, success vs failure, then the call to action. Same look as the Facebook posts. Video
+// slots start empty: the owner picks each video in the editor, and empty ones never show on the website.
+const BOOK = 'Book a free consult';
+const videoSlots = (count: number) => Array.from({ length: count }, () => ({ video: '', caption: '' }));
+const videos = (eyebrow: string, heading: string, highlight: string, count: number, background = 'white', edge = 'torn') =>
+  block('VideoRow', { eyebrow, heading, highlight, text: '', videos: videoSlots(count), buttonLabel: '', buttonLink: '#contact', background, edge });
+const compare = (rows: [string, string][]) => block('Compare', {
+  eyebrow: 'Six months from now', heading: "Imagine a team that's inspired to come to work", highlight: 'every day.', text: '',
+  withoutTitle: 'Without a plan', withTitle: 'With Next Academy', rows: rows.map(([without, w]) => ({ without, with: w })),
+  buttonLabel: BOOK, buttonLink: '#contact', background: 'white', edge: 'torn',
+});
+const plan = (items: { title: string; text: string }[]) => block('Points', { eyebrow: 'How it works', heading: 'Three steps.', highlight: 'No guesswork.', look: 'numbers', background: 'white', edge: 'torn', items });
+const problem = (heading: string, highlight: string, items: { title: string; text: string }[]) => block('Points', { eyebrow: 'Sound familiar?', heading, highlight, look: 'squares', background: 'dark', edge: 'torn', items });
+const BOOK_TEXT = "One short chat about your team and what you'd like to change. No slides, no obligation.";
+
 function home(): PageData {
-  const [hla, impiana, trinitium] = STARTER_VIDEOS;
-  return page('Next Academy | HRD Corp claimable training and coaching in Malaysia',
-    'Practical, personalised training and coaching for Malaysian teams. ESG and professional skills programmes, in-house or public, HRD Corp claimable.', [
+  return page('Next Academy | HRD Corp claimable training in Malaysia',
+    'Practical, HRD Corp claimable training for Malaysian companies. Programmes shaped around your people, in-house or public.', [
       block('Hero', {
         eyebrow: 'HRD Corp registered training provider',
-        headline: "Behind every great employee is a trainer who didn't use", highlight: '100 slides.', headlineEnd: '',
-        text: 'Practical, HRD Corp claimable training for Malaysian teams. Leadership, service, ESG and safety, shaped around your people and run by trainers who have done the work.',
-        button1Label: 'See training dates', button1Link: '/training-calendar', button2Label: 'Plan in-house training', button2Link: '#contact',
-        image: 'starter-trainer-stage', imageStyle: 'tinted', ...reviewOnHero(REVIEWS[1]), background: 'dark',
+        headline: 'Training your team will actually', highlight: 'use.', headlineEnd: '',
+        text: 'Practical, HRD Corp claimable training for Malaysian companies. Better people, and your levy put to real use.',
+        button1Label: BOOK, button1Link: '#contact', button2Label: 'See training dates', button2Link: '/training-calendar',
+        image: 'starter-trainer-stage', imageStyle: 'tinted', ...reviewOnHero(REVIEWS[1]), showRating: 'yes', background: 'dark',
       }),
-      block('Calendar', { eyebrow: 'Training calendar', heading: 'Public classes, open for seats.', text: 'Join a public class with people from other companies. Most programmes are HRD Corp claimable.', only: 'all', count: 4, background: 'white', edge: 'torn' }),
-      block('Points', {
-        eyebrow: 'Why Next Academy', heading: "Training that sticks, because it's", highlight: 'built around you.', look: 'squares', background: 'dark', edge: 'torn',
+      problem('Most training is forgotten by', 'Monday.', [
+        { title: 'Slides, not skills', text: 'A full day in a hotel room, and nothing changes back at work.' },
+        { title: 'Levy sitting idle', text: "Your HRD Corp levy is your company's money, yet it often goes unused." },
+        { title: 'Training picked on price, not on need', text: 'A generic course that fits nobody, and the same problems a month later.' },
+      ]),
+      videos('In their words', 'Hear it from', 'a client.', 1, 'dark', 'straight'),
+      block('Tiles', {
+        eyebrow: 'Find your path', heading: 'Which one', highlight: 'sounds like you?', background: 'light', edge: 'torn',
         items: [
-          { title: 'Personalised', text: 'Shaped around your goals, your industry and your people.' },
-          { title: 'Purpose-driven', text: 'Anchored in integrity and real impact, not slide counts.' },
-          { title: 'Holistic', text: 'Ethical leadership, fresh thinking and a habit of learning.' },
-          { title: 'Claims made simple', text: 'We run the training and handle the HRD Corp paperwork with you.' },
+          { image: 'starter-workshop-group', eyebrow: "I'm in HR / L&D", title: 'I need training sorted without the headache.', tags: '', linkLabel: 'See how we help HR', link: '/for-hr' },
+          { image: 'starter-skills-business', eyebrow: 'I run the business', title: 'I need my people to perform, and my levy to pay off.', tags: '', linkLabel: 'See how we help owners', link: '/for-business-owners' },
         ],
       }),
+      section('white', [
+        heading('Why Next Academy', "Behind every great employee is a trainer who didn't use", '100 slides.'),
+        text("<p>We've sat on your side of the table. We know training is judged by what changes at work, not by whether it happened. So every programme is shaped around your people, and we stay with you from the first chat to the final report.</p><p><strong>Our vision: to create a world where people are inspired to go to work every day.</strong></p>"),
+        block('ProofBlock', { items: [] }),
+      ], 'normal', 'torn'),
+      block('ReviewWall', {
+        eyebrow: 'What participants say', heading: 'Real rooms.', highlight: 'Real reviews.', background: 'light',
+        photos: [{ image: 'starter-workshop-group' }, { image: 'starter-team-work' }, { image: 'starter-trainer-stage' }, { image: 'starter-hero' }],
+        reviews: REVIEWS,
+      }),
+      block('LogoStrip', { label: 'Trusted by teams at', items: [] }),
+      plan([
+        { title: 'Tell us your goal', text: 'A free 30-minute chat about your team and what needs to change.' },
+        { title: 'We shape the programme', text: 'Built around your people, your industry and your goals.' },
+        { title: 'We train and report back', text: 'Engaging training days, and a clear report on how your team did.' },
+      ]),
       block('Tiles', {
         eyebrow: 'Programmes', heading: 'Two tracks. One goal:', highlight: 'people who perform.', background: 'light', edge: 'torn',
         items: [
@@ -102,26 +133,76 @@ function home(): PageData {
           { image: 'starter-skills-leadership', eyebrow: 'Track 02', title: 'Professional skills', tags: 'Leadership, Customer service, Business & AI, Operations & safety', linkLabel: 'See professional skills', link: '/training-courses' },
         ],
       }),
-      block('ReviewWall', {
-        eyebrow: 'What participants say', heading: 'Real rooms.', highlight: 'Real reviews.', background: 'light',
-        photos: [{ image: 'starter-workshop-group' }, { image: 'starter-team-work' }, { image: 'starter-trainer-stage' }, { image: 'starter-hero' }],
-        reviews: REVIEWS,
+      block('Calendar', { eyebrow: 'Training calendar', heading: 'Public classes, open for seats.', text: 'Join a public class with people from other companies. Most programmes are HRD Corp claimable.', only: 'all', count: 4, background: 'white', edge: 'torn' }),
+      compare([
+        ['Same problems, new excuses', 'A team that works better together, and shows it'],
+        ['Levy left on the table', 'Levy turned into real skills'],
+        ['People leave to grow elsewhere', 'People grow with you, and stay'],
+        ['Training seen as a cost', 'Training seen as a result'],
+      ]),
+      videos('Client stories', 'Hear it from', 'our clients.', 1, 'black', 'torn'),
+      contact(BOOK, "Let's plan your team's next win.", BOOK_TEXT, 'black', 'straight'),
+    ]);
+}
+
+// The two doorways from the homepage (Joel, 2026-10-31): the same story told to HR / L&D and to business owners.
+function forHr(): PageData {
+  return page('Training for HR and L&D teams | Next Academy',
+    'For HR and L&D: training that fits your people, delivered and reported back so management can see it worked. HRD Corp claimable.', [
+      block('Hero', {
+        eyebrow: 'For HR and L&D', headline: 'Training your people need. Results your management can', highlight: 'see.', headlineEnd: '',
+        text: 'You plan the training and still get asked "did it work?". We make sure the answer is yes.',
+        button1Label: BOOK, button1Link: '#contact', button2Label: 'See training dates', button2Link: '/training-calendar',
+        image: 'starter-workshop-group', imageStyle: 'tinted', showRating: 'yes', background: 'dark',
       }),
-      section('white', [
-        heading('Client stories', 'Hear it from the teams we', 'trained.'),
-        columns(50, [video(hla)], [video(impiana)], [video(trinitium)]),
-      ], 'normal', 'torn'),
-      block('Insights', {
-        eyebrow: 'HR insights', heading: 'Spot the', highlight: 'signs early.', text: 'Short reads for HR and managers, from our Facebook page.',
-        moreLabel: 'Follow us on Facebook', moreLink: FACEBOOK, background: 'black', edge: 'torn',
-        items: [
-          { title: 'Resignations rarely come from nowhere. They signal.', highlight: 'Resignations|They signal.', topic: 'Retention', note: 'Read on Facebook', image: '', link: FACEBOOK },
-          { title: '4 Signs your team is about to resign.', highlight: '4 Signs', topic: 'Retention', note: 'Read on Facebook', image: 'starter-team-work', link: FACEBOOK },
-          { title: 'Top performers rarely quit overnight. They drift.', highlight: 'Top performers|They drift.', topic: 'Engagement', note: 'Read on Facebook', image: '', link: FACEBOOK },
-        ],
+      problem('The training happened. Did anything', 'change?', [
+        { title: 'Finding training that fits', text: 'Plenty of courses out there. Few are built for your people and your industry.' },
+        { title: 'Sit through it, forget it', text: 'Staff enjoy the day, then go back to doing things the old way.' },
+        { title: 'Proving it was worth it', text: 'Management wants to know what the company got for it.' },
+      ]),
+      plan([
+        { title: 'Tell us what your team needs', text: 'A free chat about your people, your goals and your timing.' },
+        { title: 'We shape it around them', text: 'Your industry, your people, your goals. No generic slides.' },
+        { title: 'We deliver and report back', text: 'Engaging training days, and a report you can forward to management as it is.' },
+      ]),
+      videos('From HR teams like yours', 'Hear it from', 'HR.', 2, 'light', 'torn'),
+      compare([
+        ['Training picked in a rush', 'Training that fits the need'],
+        ['Staff forget it by Monday', 'Skills they use at work'],
+        ['"Did it work?" with no answer', 'A clear report for management'],
+        ['Levy left on the table', 'Levy put to real use'],
+      ]),
+      contact(BOOK, "Let's plan your team's next win.", BOOK_TEXT, 'black', 'torn'),
+    ]);
+}
+
+function forOwners(): PageData {
+  return page('Training for business owners | Next Academy',
+    'For business owners and directors: turn your HRD Corp levy into a team that performs. Training agreed on outcomes, built around your business.', [
+      block('Hero', {
+        eyebrow: 'For business owners and directors', headline: 'Your levy, turned into', highlight: 'results.', headlineEnd: '',
+        text: 'You already pay the HRD Corp levy. The question is whether it comes back as a better team.',
+        button1Label: BOOK, button1Link: '#contact', button2Label: 'See training dates', button2Link: '/training-calendar',
+        image: 'starter-skills-business', imageStyle: 'tinted', showRating: 'yes', background: 'dark',
       }),
-      block('Trainers', { eyebrow: 'Our trainers', heading: 'Learn from people who have', highlight: 'done the work.', count: 4, background: 'white', edge: 'torn' }),
-      contact('Talk to us', "Let's plan your team's next training.", CONTACT_TEXT, 'black', 'torn'),
+      problem('Training was paid for. Nothing', 'changed.', [
+        { title: 'Paying for training that changes nothing', text: 'The course ends, the bill is paid, and work goes on as before.' },
+        { title: 'Good people leaving', text: 'They stop growing, so they grow somewhere else.' },
+        { title: 'No clear answer', text: 'When you ask "what did we get for it?", nobody can say.' },
+      ]),
+      plan([
+        { title: 'Agree the outcome first', text: 'What should your people do differently after the training?' },
+        { title: 'Build around your business', text: 'Your industry, your people. No generic slides.' },
+        { title: 'Report back', text: 'What was covered, how the team did, and what to do next.' },
+      ]),
+      videos('From owners like you', 'Hear it from', 'business owners.', 2, 'light', 'torn'),
+      compare([
+        ['Same problems, new excuses', 'A team that works better together, and shows it'],
+        ['Levy left on the table', 'Levy turned into real skills'],
+        ['People leave to grow elsewhere', 'People grow with you, and stay'],
+        ['Training seen as a cost', 'Training seen as a result'],
+      ]),
+      contact(BOOK, "Let's plan your team's next win.", BOOK_TEXT, 'black', 'torn'),
     ]);
 }
 
@@ -294,6 +375,8 @@ export function starterPages(): { title: string; slug: string; data: PageData }[
   n = 0;
   return [
     { title: 'Home', slug: '', data: home() },
+    { title: 'For HR and L&D', slug: 'for-hr', data: forHr() },
+    { title: 'For business owners', slug: 'for-business-owners', data: forOwners() },
     { title: 'About us', slug: 'about-us', data: about() },
     { title: 'Training programmes (ESG)', slug: 'training-courses-esg', data: esg() },
     { title: 'Training programmes (Professional skills)', slug: 'training-courses', data: skills() },

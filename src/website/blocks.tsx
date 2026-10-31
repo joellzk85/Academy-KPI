@@ -85,7 +85,8 @@ function MediaImage({ id, className, style, fallbackAlt }: { id?: string; classN
 function MediaVideo({ id }: { id?: string }) {
   const { media, editing } = useSite();
   const m = media[id || ''];
-  if (!m) return <div className="nw-placeholder">Pick a video or YouTube link</div>;
+  // An empty video slot shows only while editing; visitors never see a blank box (Joel, 2026-10-31).
+  if (!m) return editing ? <div className="nw-placeholder">Pick a video or YouTube link</div> : null;
   if (m.kind === 'youtube' && m.youtubeId) {
     return (
       <div className="nw-video">
@@ -112,7 +113,8 @@ const LOOK_OPTIONS = [{ label: 'Plain', value: 'plain' }, { label: 'Frame', valu
 // ---------- Ready-made sections ----------
 
 const Hero = (p: any) => {
-  const { editing } = useSite();
+  const { editing, settings } = useSite();
+  const rating = p.showRating === 'yes' && has(settings.googleRating);
   return (
   <section className={bandClass(p.background, 'l')}>
     <div className="nw-wrap nw-split">
@@ -123,6 +125,7 @@ const Hero = (p: any) => {
           {has(p.button1Label) && <a className="nw-btn nw-btn-teal" href={safeHref(p.button1Link)}>{p.button1Label}</a>}
           {has(p.button2Label) && <a className="nw-btn nw-btn-outline" href={safeHref(p.button2Link)}>{p.button2Label}</a>}
         </div>
+        {rating && <p className="nw-rating"><b aria-hidden="true">★★★★★</b> {settings.googleRating} on Google{has(settings.googleReviews) ? ` · ${settings.googleReviews} reviews` : ''}</p>}
       </div>
       {(p.image || editing) && (
         <div className="nw-hero-pic">
@@ -172,14 +175,19 @@ const Points = (p: any) => p.look === 'squares' ? (
   </section>
 );
 
-const LogoStrip = (p: any) => (
+const LogoStrip = (p: any) => {
+  const { editing } = useSite();
+  if (!(p.items || []).length && !editing) return null;
+  return (
   <section className="nw-band nw-bg-white" style={{ borderBottom: '1px solid #E4E4E1' }}>
     <div className="nw-wrap nw-logos" style={{ paddingTop: 28, paddingBottom: 28 }}>
       {has(p.label) && <strong style={{ color: '#0B0F0E' }}>{p.label}</strong>}
       {(p.items || []).map((it: any, i: number) => it.image ? <MediaImage key={i} id={it.image} fallbackAlt={it.name} /> : <span key={i}>{it.name}</span>)}
+      {!(p.items || []).length && <span className="nw-placeholder" style={{ padding: '8px 16px' }}>Add client logos here (hidden on the website until you do)</span>}
     </div>
   </section>
-);
+  );
+};
 
 const ValuesBand = (p: any) => (
   <section className={bandClass(p.background || 'blue', 's', false, p.edge)}>
@@ -264,6 +272,52 @@ const Quote = (p: any) => {
       {(p.media || editing) && <div><MediaVideo id={p.media} /></div>}
     </div>
   </section>
+  );
+};
+
+/** Client videos: up to three slots. Empty slots are left out, and with none filled the whole band is hidden. */
+const VideoRow = (p: any) => {
+  const { media, editing } = useSite();
+  const vids = (p.videos || []).slice(0, 3).filter((v: any) => editing || media[v.video || '']);
+  if (!vids.length && !editing) return null;
+  return (
+    <section className={bandClass(p.background, 'm', true, p.edge)}>
+      <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
+        {(has(p.eyebrow) || has(p.heading) || has(p.highlight)) && <div className="nw-stack" style={{ gap: 14, maxWidth: 760 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} text={p.text} /></div>}
+        <div className="nw-vids" style={{ gridTemplateColumns: `repeat(${Math.max(1, vids.length)}, minmax(0, 1fr))` }}>
+          {vids.map((v: any, i: number) => (
+            <figure key={i} style={{ margin: 0 }}>
+              <MediaVideo id={v.video} />
+              {has(v.caption) && <figcaption className="nw-caption">{v.caption}</figcaption>}
+            </figure>
+          ))}
+        </div>
+        {has(p.buttonLabel) && <div className="nw-btns"><a className="nw-btn nw-btn-teal" href={safeHref(p.buttonLink)}>{p.buttonLabel}</a></div>}
+      </div>
+    </section>
+  );
+};
+
+/** Without / With: the StoryBrand failure and success side by side (2026-10-31). */
+const Compare = (p: any) => {
+  const rows = (p.rows || []).filter((r: any) => has(r.without) || has(r.with));
+  return (
+    <section className={bandClass(p.background, 'm', true, p.edge)}>
+      <div className="nw-wrap nw-stack" style={{ gap: 36 }}>
+        <div className="nw-stack" style={{ gap: 14, maxWidth: 760 }}><Heading eyebrow={p.eyebrow} heading={p.heading} highlight={p.highlight} text={p.text} /></div>
+        <div className="nw-compare">
+          <div className="nw-compare-col nw-compare-without">
+            <h3>{p.withoutTitle}</h3>
+            <ul>{rows.map((r: any, i: number) => has(r.without) && <li key={i}>{r.without}</li>)}</ul>
+          </div>
+          <div className="nw-compare-col nw-compare-with">
+            <h3>{p.withTitle}</h3>
+            <ul>{rows.map((r: any, i: number) => has(r.with) && <li key={i}>{r.with}</li>)}</ul>
+          </div>
+        </div>
+        {has(p.buttonLabel) && <div className="nw-btns"><a className="nw-btn nw-btn-teal" href={safeHref(p.buttonLink)}>{p.buttonLabel}</a></div>}
+      </div>
+    </section>
   );
 };
 
@@ -651,12 +705,35 @@ const ImageBlock = (p: any) => (
   </figure>
 );
 
-const VideoBlock = (p: any) => (
-  <figure style={{ margin: 0 }}>
-    <MediaVideo id={p.video} />
-    {has(p.caption) && <figcaption className="nw-caption">{p.caption}</figcaption>}
-  </figure>
-);
+const VideoBlock = (p: any) => {
+  const { media, editing } = useSite();
+  if (!editing && !media[p.video || '']) return null;
+  return (
+    <figure style={{ margin: 0 }}>
+      <MediaVideo id={p.video} />
+      {has(p.caption) && <figcaption className="nw-caption">{p.caption}</figcaption>}
+    </figure>
+  );
+};
+
+/** The Google rating and companies trained, typed once in Website → Settings; each hidden while empty. */
+function proofItems(s: SiteSettings): { big: string; small: string }[] {
+  const out: { big: string; small: string }[] = [];
+  if (has(s.companiesTrained)) out.push({ big: String(s.companiesTrained), small: 'companies trained' });
+  if (has(s.googleRating)) out.push({ big: `★ ${s.googleRating}`, small: has(s.googleReviews) ? `from ${s.googleReviews} Google reviews` : 'on Google' });
+  return out;
+}
+
+const ProofBlock = (p: any) => {
+  const { settings, editing } = useSite();
+  const items = [...proofItems(settings), ...(p.items || []).filter((it: any) => has(it.big))];
+  if (!items.length) return editing ? <div className="nw-placeholder">Numbers appear here once they're filled in Website → Settings</div> : null;
+  return (
+    <div className="nw-proof">
+      {items.map((it, i) => <div key={i}><strong>{it.big}</strong><span>{it.small}</span></div>)}
+    </div>
+  );
+};
 
 const ButtonBlock = (p: any) => (
   <div className="nw-btns" style={{ justifyContent: p.align === 'center' ? 'center' : 'flex-start' }}>
@@ -794,8 +871,8 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
   const photo: MediaFieldMaker = mediaField || ((label) => ({ type: 'text', label }));
   return {
     categories: {
-      sections: { title: 'Ready-made sections', components: ['Hero', 'Section', 'Points', 'Calendar', 'Programmes', 'Trainers', 'Tiles', 'ReviewWall', 'Insights', 'Quote', 'LogoStrip', 'ValuesBand', 'Contact'] },
-      blocks: { title: 'Blocks', components: ['HeadingBlock', 'TextBlock', 'ImageBlock', 'VideoBlock', 'ButtonBlock', 'Columns', 'SpacerBlock'] },
+      sections: { title: 'Ready-made sections', components: ['Hero', 'Section', 'Points', 'Compare', 'VideoRow', 'Calendar', 'Programmes', 'Trainers', 'Tiles', 'ReviewWall', 'Insights', 'Quote', 'LogoStrip', 'ValuesBand', 'Contact'] },
+      blocks: { title: 'Blocks', components: ['HeadingBlock', 'TextBlock', 'ImageBlock', 'VideoBlock', 'ProofBlock', 'ButtonBlock', 'Columns', 'SpacerBlock'] },
     },
     root: {
       fields: {
@@ -814,9 +891,10 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
           imageStyle: { type: 'radio', label: 'Photo look', options: LOOK_OPTIONS },
           reviewName: text('Review card on the photo: name (empty = no card)', false), reviewRole: text('Review card: who they are', false),
           reviewText: { type: 'textarea', label: 'Review card: what they said' }, reviewSource: text('Review card: where it is from (e.g. Google review)', false),
+          showRating: { type: 'radio', label: 'Google rating under the buttons (from Website → Settings)', options: [{ label: 'Show', value: 'yes' }, { label: 'Hide', value: 'no' }] },
           background: bg(),
         },
-        defaultProps: { eyebrow: 'HRD Corp registered training provider', headline: 'Your headline', highlight: 'highlight.', headlineEnd: '', text: '', button1Label: 'See the training calendar', button1Link: '/training-calendar', button2Label: '', button2Link: '', image: '', imageStyle: 'tinted', reviewName: '', reviewRole: '', reviewText: '', reviewSource: 'Google review', background: 'dark' },
+        defaultProps: { eyebrow: 'HRD Corp registered training provider', headline: 'Your headline', highlight: 'highlight.', headlineEnd: '', text: '', button1Label: 'See the training calendar', button1Link: '/training-calendar', button2Label: '', button2Link: '', image: '', imageStyle: 'tinted', reviewName: '', reviewRole: '', reviewText: '', reviewSource: 'Google review', showRating: 'no', background: 'dark' },
         render: Hero,
       },
       Section: {
@@ -827,7 +905,7 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
           width: { type: 'radio', label: 'Width', options: [{ label: 'Normal', value: 'normal' }, { label: 'Narrow', value: 'narrow' }] },
           texture: { type: 'radio', label: 'Grid texture', options: [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }] },
           edge,
-          content: { type: 'slot', disallow: ['Hero', 'Section', 'Points', 'Calendar', 'Programmes', 'Trainers', 'Tiles', 'ReviewWall', 'Insights', 'Quote', 'LogoStrip', 'ValuesBand', 'Contact'] },
+          content: { type: 'slot', disallow: ['Hero', 'Section', 'Points', 'Compare', 'VideoRow', 'Calendar','Programmes', 'Trainers', 'Tiles', 'ReviewWall', 'Insights', 'Quote', 'LogoStrip', 'ValuesBand', 'Contact'] },
         },
         defaultProps: { background: 'white', spacing: 'm', width: 'normal', texture: 'yes', content: [] },
         render: Section,
@@ -842,6 +920,29 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
         },
         defaultProps: { eyebrow: '', heading: 'Why Next Academy', highlight: '', look: 'squares', items: [{ title: 'Point one', text: '' }, { title: 'Point two', text: '' }, { title: 'Point three', text: '' }], background: 'dark', edge: 'straight' },
         render: Points,
+      },
+      Compare: {
+        label: 'Without / With (two lists)',
+        fields: {
+          eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'), text: area('Text'),
+          withoutTitle: text('Left title'), withTitle: text('Right title'),
+          rows: { type: 'array', label: 'Lines', arrayFields: { without: { type: 'text', label: 'Without (left)' }, with: { type: 'text', label: 'With (right)' } }, defaultItemProps: { without: '', with: '' }, getItemSummary: (it: any) => it.with || it.without || 'Line' } as Field,
+          buttonLabel: text('Button words (empty = no button)', false), buttonLink: link('Button goes to'),
+          background: bg(), edge,
+        },
+        defaultProps: { eyebrow: '', heading: 'Where will your team be', highlight: 'in six months?', text: '', withoutTitle: 'Without a plan', withTitle: 'With Next Academy', rows: [{ without: '', with: '' }], buttonLabel: '', buttonLink: '#contact', background: 'white', edge: 'straight' },
+        render: Compare,
+      },
+      VideoRow: {
+        label: 'Client videos (up to 3)',
+        fields: {
+          eyebrow: text('Small line above'), heading: area('Heading'), highlight: text('Highlighted words (teal)'), text: area('Text'),
+          videos: { type: 'array', label: 'Videos (empty ones are hidden on the website)', max: 3, arrayFields: { video: photo('Video (clip or YouTube)', 'video'), caption: { type: 'text', label: 'Who is speaking' } }, defaultItemProps: { video: '', caption: '' }, getItemSummary: (it: any, i?: number) => it.caption || `Video ${(i ?? 0) + 1}` } as Field,
+          buttonLabel: text('Button words (empty = no button)', false), buttonLink: link('Button goes to'),
+          background: bg(), edge,
+        },
+        defaultProps: { eyebrow: 'Client stories', heading: 'Hear it from', highlight: 'them.', text: '', videos: [{ video: '', caption: '' }], buttonLabel: '', buttonLink: '#contact', background: 'white', edge: 'straight' },
+        render: VideoRow,
       },
       Calendar: {
         label: 'Training calendar',
@@ -973,6 +1074,14 @@ export function makeSiteConfig(mediaField?: MediaFieldMaker): Config {
         fields: { video: photo('Video (clip or YouTube)', 'video'), caption: text('Caption') },
         defaultProps: { video: '', caption: '' },
         render: VideoBlock,
+      },
+      ProofBlock: {
+        label: 'Numbers (rating, companies trained)',
+        fields: {
+          items: { type: 'array', label: 'More numbers (the Google rating and companies trained come from Website → Settings)', arrayFields: { big: { type: 'text', label: 'Number' }, small: { type: 'text', label: 'Words under it' } }, defaultItemProps: { big: '', small: '' }, getItemSummary: (it: any) => it.big || 'Number' } as Field,
+        },
+        defaultProps: { items: [] },
+        render: ProofBlock,
       },
       ButtonBlock: {
         label: 'Button',

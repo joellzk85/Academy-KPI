@@ -59,6 +59,10 @@ export type SiteSettings = {
   linkedin?: string;
   whatsapp?: string;           // number, e.g. 60183634888
   domains?: string[];          // the website's own addresses, e.g. nextacademy.my, www.nextacademy.my
+  // Proof on the website (StoryBrand homepage, 2026-10-31): typed by the owner, each hidden on the site while empty.
+  googleRating?: string;       // e.g. 4.9
+  googleReviews?: string;      // how many Google reviews, e.g. 120
+  companiesTrained?: string;   // e.g. 150+
 };
 
 export const MEDIA_FOLDERS = ['Homepage', 'Programmes', 'Trainers', 'Training days', 'Client logos', 'Videos', 'Other'];
@@ -270,6 +274,28 @@ export const SITE_CSS = `
 .nw-video{position:relative;width:100%;aspect-ratio:16/9;background:#000}
 .nw-video iframe,.nw-video video{position:absolute;inset:0;width:100%;height:100%;border:0}
 .nw-caption{font-size:14px;color:${BRAND.body};margin-top:8px}
+.nw-bg-dark .nw-caption,.nw-bg-black .nw-caption{color:${BRAND.grey}}
+/* StoryBrand homepage (2026-10-31): rating line, numbers, client videos, Without / With */
+.nw-rating{font-size:15px;color:inherit;opacity:.9}
+.nw-rating b{color:#E8A317;letter-spacing:1px;font-weight:400;margin-right:4px}
+.nw-proof{display:flex;flex-wrap:wrap;gap:20px 56px}
+.nw-proof>div{display:flex;flex-direction:column;gap:2px}
+.nw-proof strong{font-size:clamp(36px,4vw,52px);line-height:1;font-weight:700;color:${BRAND.blue}}
+.nw-bg-dark .nw-proof strong,.nw-bg-black .nw-proof strong{color:${BRAND.teal}}
+.nw-proof span{font-size:15px;color:${BRAND.body}}
+.nw-bg-dark .nw-proof span,.nw-bg-black .nw-proof span{color:${BRAND.grey}}
+.nw-vids{display:grid;gap:24px}
+.nw-compare{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}
+.nw-compare-col{padding:32px;display:flex;flex-direction:column;gap:18px}
+.nw-compare-col h3{font-size:22px;font-weight:700}
+.nw-compare-col ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
+.nw-compare-col li{display:flex;gap:12px;align-items:flex-start;font-size:17px;line-height:1.4}
+.nw-compare-col li::before{flex:0 0 24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;margin-top:1px}
+.nw-compare-without{background:${BRAND.paper};color:${BRAND.body};border:1px solid #E4E4E1}
+.nw-compare-without li::before{content:"✕";background:#D9DEDC;color:${BRAND.black}}
+.nw-compare-with{background:${BRAND.black};color:#fff}
+.nw-compare-with h3{color:${BRAND.teal}}
+.nw-compare-with li::before{content:"✓";background:${BRAND.teal};color:${BRAND.black}}
 .nw-rich p+p,.nw-rich p+ul,.nw-rich ul+p{margin-top:14px}
 .nw-rich h2{font-size:30px;line-height:1.15;margin:8px 0}
 .nw-rich h3{font-size:22px;margin:6px 0}
@@ -315,6 +341,8 @@ export const SITE_CSS = `
   .nw-wall>.nw-wall-cards{position:relative;inset:auto;grid-column:1/-1;padding:14px 0 0}
   .nw-wall-cards .nw-review:nth-child(even){transform:none}
   .nw-tear::before{top:-18px;height:19px}
+  .nw-vids,.nw-compare{grid-template-columns:1fr!important}
+  .nw-compare-col{padding:22px}
 }
 `;
 

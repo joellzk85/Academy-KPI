@@ -109,6 +109,19 @@ Joel: "study my photos (Facebook), come up with a nicer layout and design". The 
 - Tested: 15 checks of the forwards and the www rule pass; the Careers page drawn on computer.
 - Steps for Joel: publish the pages; Website → Settings → both addresses; Firebase App Hosting → nextacademy2 → Settings → Domains → Add custom domain (both); send a screenshot of MSC Hosting's Zone Editor before changing anything; change only the lines Firebase gives; keep WordPress hosting a month.
 
+## StoryBrand homepage (2026-10-31)
+
+Joel: "use the StoryBrand framework to design the website flow". The client is the hero, Next Academy the guide. Heroes are both HR / L&D and business owners: a shared homepage with two doorways. Decisions: no years in business; companies trained, Google rating and review count typed by Joel in Settings (not pulled from Google Maps); no paperwork talk (grant, JD14, T3, claims) since "it goes without saying"; at most 6 videos, all slots left empty for Joel to pick; English first; vision "to create a world where people are inspired to go to work every day" used as the success.
+
+- **Home** (`websiteStarter.ts` `home()`): hero ("Training your team will actually use.", Book a free consult, Google rating line) → problem (mint squares) → video slot 1 → two doorway tiles → guide (100 slides tagline, empathy, vision, Numbers) → reviews on photos → client logos → the 3-step plan → programme tracks → calendar → Without / With ("Imagine a team that's inspired to come to work every day.") → video slot 6 → Book a free consult form. HR insights and Trainers left off the homepage (still at `/trainers` and on Facebook).
+- **For HR and L&D** (`/for-hr`) and **For business owners** (`/for-business-owners`): hero, problem, plan, two video slots each, Without / With, form. Not in the menu (the doorway tiles link to them).
+- **New blocks:** **Without / With** (`Compare`), **Client videos (up to 3)** (`VideoRow`; empty slots and an all-empty band are hidden on the website), **Numbers** (`ProofBlock`: companies trained and Google rating from Settings, plus any typed numbers). Hero: **Google rating under the buttons** (Show / Hide).
+- **Hidden while empty on the website** (shown as a dashed box in the editor): any Video block or video slot with nothing picked, Client logos with no logos, Numbers with nothing filled.
+- **Settings → Numbers on the website:** Google rating, number of Google reviews, companies trained (`config/site_settings` `googleRating`, `googleReviews`, `companiesTrained`). Nothing to publish (owner-only doc already).
+- The 3 old YouTube testimonials are still copied into Media by the loader but no page uses them until picked.
+- To use: Website → Pages → **Load the designed pages** (drafts only; the new pages are made), fill Settings → Numbers, pick the videos, upload client logos, then Publish each page.
+- Tested: build; the three pages drawn on the server code with Settings empty (no rating, numbers, video or logo boxes) and filled (rating line and numbers show); computer and phone (no sideways scroll).
+
 ## Still to do
 
 - **Domain switch:** list the WordPress addresses (`/training-calendar/`, `/training-courses/`, `/training-courses-esg/`, `/our-trainers/`, `/contact-us/`, `/privacynotice`) and make pages or forwards for each; add the domain in Firebase App Hosting; copy the WordPress content (text, logos, testimonials, privacy notice); keep WordPress hosting a month.
