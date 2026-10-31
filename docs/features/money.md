@@ -197,3 +197,7 @@ Joel: "each claim should have more details - example entertainment - customer na
 - **Files:** Storage `claims/{memberId}/{claimId}_…` (storage.rules); the Accounts portal downloads them through the server.
 - **Code:** `src/lib/claims.ts` (types, defaults, limits, checks, the payment), `src/lib/useClaims.ts` (reading, saving, approve in one batch), `src/components/MyClaims.tsx`, `ClaimsManager.tsx` (Management → Claims, Settings), `ClaimParts.tsx` (form, rows). Collection `claims`, setting `config/claim_settings`; `money_out.claimId`.
 - **Tested:** 46 rule checks (all old 312 still pass) and a walk-through in the pretend-database copy (rep sends, limits, special request, duplicate receipt, manager approves and rejects, payment in the Accounts portal with its receipt, fix and send again).
+
+## Deal P&L as a statement (Joel, 2026-10-31)
+
+The Money out & P&L section of each deal opens with a proper P&L statement (`PLStatement` in `Money.tsx`): Income (or the deal value as an estimate), less SST = Revenue after SST, less HRDC deduction (and any amount HRDC did not pay), less commission (each share when co-closed) = Net revenue, then the counted training costs by kind (approved or paid, ticked Include in P&L; a public programme company's pax share is one line) = Total costs, and **Gross profit (GP)** with GP % in the company GP colours. Figures are the same `projectRow` as Project P&L. Below it: "Not counted yet" (waiting for approval, paid on behalf of client) and received / still to come in / still to pay out. Nothing to publish.

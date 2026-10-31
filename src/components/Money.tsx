@@ -5,10 +5,11 @@ import { callServer, db, friendlyError } from '../lib/firebase';
 import { addDays, dealValue, formatDate, formatRM, todayIso } from '../lib/deals';
 import {
   COMPANY_CATEGORIES, DEFAULT_MONEY_SETTINGS, IN_SOURCE_LABELS, InSource, MoneyIn, MoneyOut, MoneySettings, OUT_STATUS_LABELS, OutStatus, TIMING_LABELS,
-  canDecide, dateTimeMY, ownApprovalOk, paidViaLink, raisedText, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
+  canDecide, dateTimeMY, inPL, ownApprovalOk, paidViaLink, raisedText, expectedFor, isCompanyPayment, isPaid, itemsTotal, readMoneySettings, shortfall,
 } from '../lib/money';
 import { daysUntil } from '../lib/checklist';
-import { projectRow } from '../lib/projectPL';
+import { ProjectRow, projectRow } from '../lib/projectPL';
+import { gpTone } from './EstimateParts';
 import { linkedOnly, withoutDeleted } from '../lib/linked';
 import { useFormDraft } from '../lib/useFormDraft';
 import DraftBar from './DraftBar';
@@ -115,25 +116,23 @@ export default function MoneyPanel({ deal, viewer, ins, outs, settings, quotes =
 
   return (
     <div className="space-y-5">
-      {/* P&L */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat label={row.estimate ? 'Income (estimate: deal value)' : 'Invoiced and claimed'} value={formatRM(row.income)} />
-        <Stat label="SST, HRDC %, commission, costs" value={formatRM(row.sst + row.hrdcFee + row.commission + row.costs)} />
-        <Stat label="Profit" value={formatRM(row.profit)} tone={row.profit < 0 ? 'danger' : 'accent'} />
-        <Stat label="Received so far" value={formatRM(row.received)} />
-      </div>
-      <p className="text-sm text-ink-soft">
-        SST {formatRM(row.sst)}{row.sstTyped ? ' (typed in Project P&L)' : ''} · HRDC {formatRM(row.hrdcFee)} · Commission {row.commissionShares.length > 1 ? '' : `${row.commissionPct}% `}{formatRM(row.commission)} ({row.commissionShares.length > 1 ? `co-closed: ${row.commissionShares.map(x => `${x.id === row.commissionTo ? (deal.ownerName || 'owner') : (deal.coCloserName || 'co-closer')} ${x.label} ${formatRM(x.amount)}`).join(', ')}` : 'sales person'}) · Costs approved or paid {formatRM(row.costs)}
-      </p>
+      {/* P&L statement (Joel, 2026-10-31): the same projectRow figures, laid out top to bottom down to GP. */}
+      <PLStatement deal={deal} row={row} shareTotal={shareTotal} sharePct={shares[0] ? (shares[0] as any).sharePct : null} />
       {deal.publicProgrammeId && (
         <p className="rounded-lg bg-surface px-3 py-2 text-sm text-ink-soft">
           Public programme: costs include this company's share of the programme's costs, {formatRM(shareTotal)}{shares[0] ? ` (${(shares[0] as any).sharePct}%, by pax)` : ''}. They are raised and paid once on the programme.
         </p>
       )}
+      {(row.pendingApproval > 0 || behalfTotal > 0) && (
+        <p className="text-sm text-ink-soft">
+          Not counted yet:
+          {row.pendingApproval > 0 && <> waiting for approval <strong className="text-ink">{formatRM(row.pendingApproval)}</strong></>}
+          {row.pendingApproval > 0 && behalfTotal > 0 && ' ·'}
+          {behalfTotal > 0 && <> paid on behalf of client (claimed back in After training, never in the P&L) <strong className="text-ink">{formatRM(behalfTotal)}</strong></>}
+        </p>
+      )}
       <p className="text-sm text-ink-soft">
-        {row.estimate ? 'Expected (nothing invoiced yet)' : 'Invoiced, not paid yet'}: <strong className="text-ink">{formatRM(row.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(row.toPayOut)}</strong>
-        {row.pendingApproval > 0 && <> · Waiting for approval (not counted yet): <strong className="text-ink">{formatRM(row.pendingApproval)}</strong></>}
-        {behalfTotal > 0 && <> · Paid on behalf of client (claimed back in After training, not in the P&L):<strong className="text-ink">{formatRM(behalfTotal)}</strong></>}
+        Received so far: <strong className="text-ink">{formatRM(row.received)}</strong> · {row.estimate ? 'Expected (nothing invoiced yet)' : 'Still to come in'}: <strong className="text-ink">{formatRM(row.toComeIn)}</strong> · Still to pay out: <strong className="text-ink">{formatRM(row.toPayOut)}</strong>
       </p>
 
       <p className="text-sm text-ink-soft">Invoices, HRDC claims and payments received are recorded in this deal's <strong className="text-ink">After training</strong> section. Costs are entered in its <strong className="text-ink">Before training</strong> checklist.</p>
@@ -219,12 +218,61 @@ export async function approveMany(list: MoneyOut[], viewer: Viewer, all: MoneyOu
   }
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'danger' | 'accent' }) {
-  return (
-    <div className="rounded-xl border border-line bg-white px-3 py-2.5">
-      <p className="text-xs font-semibold text-ink-soft">{label}</p>
-      <p className={`mt-0.5 text-lg font-bold tabular-nums ${tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-ink'}`}>{value}</p>
+// The deal's P&L as a statement: income, less SST, HRDC and commission, less the counted costs by kind, down to GP.
+// Costs counted are the same as projectRow's (approved or paid, ticked "Include in P&L"); a public programme's
+// pax share of the run's costs is one line.
+function PLStatement({ deal, row, shareTotal, sharePct }: { deal: any; row: ProjectRow; shareTotal: number; sharePct: number | null }) {
+  const counted = row.outs.filter(o => (o.status === 'approved' || o.status === 'paid') && inPL(o));
+  const byKind = Object.entries(counted.filter(o => !(o as any).shareOf).reduce((m, o) => {
+    const k = o.category || 'Other';
+    m[k] = (m[k] || 0) + (Number(o.amount) || 0);
+    return m;
+  }, {} as Record<string, number>)).sort((a, b) => b[1] - a[1]);
+  const afterSst = row.income - row.sst;
+  // HRDC's % and any amount HRDC didn't pay on a claim, shown apart when there is one.
+  const hrdcPart = row.training === 'cancelled' ? row.hrdcFee : Math.min(row.hrdcFee, Math.max(0, afterSst - row.commissionBase));
+  const unpaidByHrdc = row.hrdcFee - hrdcPart;
+  const net = afterSst - row.hrdcFee - row.commission;
+  const who = (x: { id: string }) => (x.id === row.commissionTo ? (deal.ownerName || 'owner') : (deal.coCloserName || 'co-closer'));
+  const less = (n: number) => (n ? `(${formatRM(n)})` : formatRM(0));
+
+  const line = (label: React.ReactNode, amount: string, opts: { indent?: boolean; strong?: boolean; tone?: string; key?: string } = {}) => (
+    <div key={opts.key} className={`flex items-baseline gap-3 px-3.5 py-1.5 text-[15px] ${opts.strong ? 'font-semibold' : ''}`}>
+      <span className={`${opts.indent ? 'pl-4 text-ink-soft' : 'text-ink'} min-w-0 flex-1`}>{label}</span>
+      <span className={`tabular-nums ${opts.tone || ''}`}>{amount}</span>
     </div>
+  );
+  const sub = (label: string, amount: string) => (
+    <div className="flex items-baseline gap-3 border-t border-line px-3.5 py-1.5 text-[15px] font-semibold">
+      <span className="flex-1">{label}</span><span className="tabular-nums">{amount}</span>
+    </div>
+  );
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-line bg-white">
+      <h5 className="border-b border-line bg-surface px-3.5 py-2 text-sm font-bold text-ink">Profit and loss{row.estimate ? ' (estimate: nothing invoiced yet)' : ''}</h5>
+      <div className="py-1">
+        {line(row.estimate ? 'Income (estimate: deal value)' : 'Income (invoiced and claimed)', formatRM(row.income), { strong: true })}
+        {line(`Less SST${row.sstTyped ? ' (typed in Project P&L)' : row.sstRate ? ` ${row.sstRate}%` : ''}`, less(row.sst), { indent: true })}
+        {sub('Revenue after SST', formatRM(afterSst))}
+        {line('Less HRDC deduction', less(hrdcPart), { indent: true })}
+        {unpaidByHrdc > 0.004 && line('Less amount HRDC didn\'t pay', less(unpaidByHrdc), { indent: true })}
+        {row.commissionShares.length > 1
+          ? row.commissionShares.map(x => line(`Less commission: ${who(x)} ${x.label}`, less(x.amount), { indent: true, key: x.id }))
+          : line(`Less sales commission ${row.commissionPct}%${deal.ownerName ? ` (${deal.ownerName})` : ''}`, less(row.commission), { indent: true })}
+        {sub('Net revenue', formatRM(net))}
+        <p className="px-3.5 pt-2 pb-0.5 text-sm font-semibold text-ink-soft">Training costs (approved or paid)</p>
+        {byKind.length === 0 && shareTotal === 0 && line('No costs counted yet', formatRM(0), { indent: true })}
+        {byKind.map(([k, v]) => line(k, less(v), { indent: true, key: k }))}
+        {shareTotal > 0 && line(`Share of public programme costs${sharePct != null ? ` (${sharePct}%, by pax)` : ''}`, less(shareTotal), { indent: true })}
+        {sub('Total costs', less(row.costs))}
+      </div>
+      <div className={`flex flex-wrap items-baseline gap-x-3 border-t-4 border-double border-ink/30 px-3.5 py-2.5 ${row.profit < 0 ? 'bg-danger-soft' : 'bg-accent-soft'}`}>
+        <span className="flex-1 text-base font-bold">Gross profit (GP)</span>
+        <span className={`text-lg font-bold tabular-nums ${row.profit < 0 ? 'text-danger' : 'text-ink'}`}>{formatRM(row.profit)}</span>
+        <span className={`text-sm font-bold tabular-nums ${gpTone(row.margin)}`}>GP {row.margin.toFixed(1)}%</span>
+      </div>
+    </section>
   );
 }
 
