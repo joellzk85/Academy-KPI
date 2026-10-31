@@ -134,6 +134,10 @@ export interface MoneyOut {
   // the trainer portal use a line only once feeAgreed matches its amount (older lines count as agreed). See lib/trainerPortal.ts.
   feeAgreeNeeded?: boolean;
   feeAgreed?: { byId: string; byName: string; at: string; amount: number } | null;
+  // Mileage claim on the Trainer step (Joel, 2026-10-31): km × RM per km (the km and rate are in the description) or a
+  // fixed amount; onPo false = paid and in the P&L but not on the trainer's PO (lib/trainerPortal.ts onPo).
+  mileage?: 'km' | 'fixed';
+  onPo?: boolean;
   decidedTs?: any;         // the database's own time of the approval or rejection (firestore.rules)
   lastUndo?: UndoStamp;    // Management undid "paid" (process audit, 2026-10-22)
   deleted?: boolean;       // approved or paid requests are marked deleted, never erased (process audit, 2026-10-22)
@@ -271,6 +275,7 @@ export interface MoneySettings {
   commissionPct: number;               // sales person's commission: % of the selling price after SST and HRDC's % (Joel, 2026-10-20: 3; base 2026-10-27)
   behalfReminderDays: number;          // paid on behalf of the client, not claimed back this many days after training = red
   balanceDaysBefore: number;           // a cost paid in parts: the balance is due this many days before the training (2026-10-26)
+  mileageRate: number;                 // trainer mileage claim: RM per km to start with, changeable per claim (2026-10-31)
   // Earlier HRDC % and commission % (process audit, 2026-10-22): each applied up to and including 'until', so changing
   // a rate never changes past P&Ls, commissions or HRDC amounts. Oldest first.
   rates?: RatePeriod[];
@@ -288,7 +293,7 @@ export function settingsAt(s: MoneySettings, date?: string): MoneySettings {
 }
 
 // HRD Corp allows 6 months to claim (Joel, 2026-10-16); he wants a red reminder after 14 days.
-export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14, commissionPct: 3, behalfReminderDays: 14, balanceDaysBefore: 7 };
+export const DEFAULT_MONEY_SETTINGS: MoneySettings = { hrdcDeductionPct: 4, overdueDays: 30, claimDeadlineDays: 180, claimReminderDays: 14, commissionPct: 3, behalfReminderDays: 14, balanceDaysBefore: 7, mileageRate: 0.6 };
 
 export function readMoneySettings(data: any): MoneySettings {
   const num = (v: any, d: number) => (Number.isFinite(Number(v)) && Number(v) >= 0 && v !== '' && v !== null ? Number(v) : d);
@@ -302,6 +307,7 @@ export function readMoneySettings(data: any): MoneySettings {
     commissionPct: num(data?.commissionPct, DEFAULT_MONEY_SETTINGS.commissionPct),
     behalfReminderDays: num(data?.behalfReminderDays, DEFAULT_MONEY_SETTINGS.behalfReminderDays) || DEFAULT_MONEY_SETTINGS.behalfReminderDays,
     balanceDaysBefore: num(data?.balanceDaysBefore, DEFAULT_MONEY_SETTINGS.balanceDaysBefore),
+    mileageRate: num(data?.mileageRate, DEFAULT_MONEY_SETTINGS.mileageRate),
     rates: (Array.isArray(data?.rates) ? data.rates : [])
       .filter((r: any) => isDate(r?.until))
       .map((r: any) => ({ until: String(r.until).slice(0, 10), hrdcDeductionPct: num(r.hrdcDeductionPct, DEFAULT_MONEY_SETTINGS.hrdcDeductionPct), commissionPct: num(r.commissionPct, DEFAULT_MONEY_SETTINGS.commissionPct) }))

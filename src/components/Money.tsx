@@ -816,11 +816,11 @@ export function MoneyOverview({ viewer, onOpenPayments, onOpenDeal }: { viewer: 
 }
 
 function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; viewer: Viewer }) {
-  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string; commission: string; behalf: string; balance: string } | null>(null);
+  const [f, setF] = useState<{ pct: string; overdue: string; deadline: string; reminder: string; commission: string; behalf: string; balance: string; mileage: string } | null>(null);
   const { busy, error, setError, run } = useRun();
   const [saved, setSaved] = useState(false);
-  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays), commission: String(settings.commissionPct), behalf: String(settings.behalfReminderDays), balance: String(settings.balanceDaysBefore) };
-  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder' | 'commission' | 'behalf' | 'balance', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
+  const v = f || { pct: String(settings.hrdcDeductionPct), overdue: String(settings.overdueDays), deadline: settings.claimDeadlineDays === null ? '' : String(settings.claimDeadlineDays), reminder: String(settings.claimReminderDays), commission: String(settings.commissionPct), behalf: String(settings.behalfReminderDays), balance: String(settings.balanceDaysBefore), mileage: String(settings.mileageRate) };
+  const set = (k: 'pct' | 'overdue' | 'deadline' | 'reminder' | 'commission' | 'behalf' | 'balance' | 'mileage', val: string) => { setF({ ...v, [k]: val.replace(/[^0-9.]/g, '') }); setSaved(false); };
   const save = () => {
     const pct = Number(v.pct);
     const overdue = Number(v.overdue);
@@ -835,6 +835,8 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
     if (!(behalf >= 1)) return setError('The claim-back reminder must be at least 1 day.');
     const balance = Number(v.balance);
     if (!(balance >= 0) || v.balance === '') return setError('Enter how many days before the training a balance is due, for example 7.');
+    const mileage = Math.round(Number(v.mileage) * 100) / 100;
+    if (!(mileage > 0)) return setError('Enter the trainer mileage rate in RM per km, for example 0.60.');
     // A changed HRDC % or commission % applies from today: the old rates are kept up to yesterday, so past P&Ls,
     // commissions and HRDC amounts don't change (process audit, 2026-10-22).
     const rateChanged = pct !== settings.hrdcDeductionPct || commission !== settings.commissionPct;
@@ -842,7 +844,7 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
     if (rateChanged) rates.push({ until: addDays(todayIso(), -1), hrdcDeductionPct: settings.hrdcDeductionPct, commissionPct: settings.commissionPct });
     return run(async () => {
       await setDoc(doc(db, 'config', 'money_settings'), {
-        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder, commissionPct: commission, behalfReminderDays: behalf, balanceDaysBefore: balance,
+        hrdcDeductionPct: pct, overdueDays: overdue, claimDeadlineDays: v.deadline === '' ? null : Number(v.deadline), claimReminderDays: reminder, commissionPct: commission, behalfReminderDays: behalf, balanceDaysBefore: balance, mileageRate: mileage,
         rates: rateChanged ? rates : settings.rates || [],
         updatedAt: Date.now(), updatedById: viewer.id, updatedByName: viewer.name,
       });
@@ -861,6 +863,7 @@ function MoneySettingsCard({ settings, viewer }: { settings: MoneySettings; view
         <div><label className={small} htmlFor="ms-cm">Sales commission (% of the price after SST and HRDC's %)</label><input id="ms-cm" inputMode="decimal" value={v.commission} onChange={e => set('commission', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="ms-bh">Paid on behalf of client, not claimed back: red after (days after training)</label><input id="ms-bh" inputMode="numeric" value={v.behalf} onChange={e => set('behalf', e.target.value)} className={input} /></div>
         <div><label className={small} htmlFor="ms-bal">Cost paid in parts: balance due (days before training)</label><input id="ms-bal" inputMode="numeric" value={v.balance} onChange={e => set('balance', e.target.value)} className={input} /></div>
+        <div><label className={small} htmlFor="ms-mil">Trainer mileage claim (RM per km, can be changed on each claim)</label><input id="ms-mil" inputMode="decimal" value={v.mileage} onChange={e => set('mileage', e.target.value)} className={input} /></div>
       </div>
       <p className="text-sm text-ink-soft">HRD Corp allows 6 months (180 days) after training to submit a claim. The work queue shows an amber reminder straight after training and turns it red after the reminder days, well before the deadline.</p>
       <p className="text-sm text-ink-soft">A new HRDC % or commission % applies to trainings from today; earlier trainings keep the rate of their time.</p>

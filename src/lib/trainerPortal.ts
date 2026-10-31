@@ -179,9 +179,20 @@ export function feeIsAgreed(o: { status?: string; amount?: number; feeAgreeNeede
   return !!o.feeAgreed && Math.abs(Number(o.feeAgreed.amount) - Number(o.amount)) < 0.005;
 }
 
+// Mileage claim on the Trainer step (Joel, 2026-10-31): optional, km × RM per km or a fixed amount, on the PO or not.
+// A line with onPo false is still paid and in the P&L, but never on the PO.
+export const onPo = (o: { onPo?: boolean }) => o.onPo !== false;
+export const mileageText = (km: number, rate: number) => `Mileage claim: ${km} km × RM ${rate.toFixed(2)}`;
+/** The km and rate back from a "Mileage claim: 240 km × RM 0.60" description (to fix a rejected claim). */
+export function mileageFrom(description = ''): { km: string; rate: string } {
+  const m = /([\d.]+)\s*km\s*×\s*RM\s*([\d.]+)/.exec(description);
+  return m ? { km: m[1], rate: m[2] } : { km: '', rate: '' };
+}
+export const mileageAmount = (km: number, rate: number) => Math.round(km * rate * 100) / 100;
+
 // A fee paid in parts (2026-10-26) lists each part with its label, e.g. "Trainer fee · Deposit 50%".
-export const poLines = (outs: { dealId?: string; checklistTaskId?: string; status?: string; description?: string; amount?: number; feeAgreeNeeded?: boolean; feeAgreed?: any; partGroup?: string; partLabel?: string }[], dealId: string, taskId: string) =>
-  outs.filter(o => o.dealId === dealId && o.checklistTaskId === taskId && o.status !== 'rejected' && feeIsAgreed(o))
+export const poLines = (outs: { dealId?: string; checklistTaskId?: string; status?: string; description?: string; amount?: number; feeAgreeNeeded?: boolean; feeAgreed?: any; partGroup?: string; partLabel?: string; onPo?: boolean }[], dealId: string, taskId: string) =>
+  outs.filter(o => o.dealId === dealId && o.checklistTaskId === taskId && o.status !== 'rejected' && feeIsAgreed(o) && onPo(o))
     .map(o => ({ description: [String(o.description || '').trim() || 'Trainer fee', o.partGroup ? o.partLabel || '' : ''].filter(Boolean).join(' · '), amount: Number(o.amount) || 0 }));
 
 export interface PoInput {

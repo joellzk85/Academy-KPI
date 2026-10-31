@@ -71,3 +71,13 @@ Not in 2B: training day (attendance, photos) and POs. Joel can add them as tasks
 - **Reminder** (`coTrainerShort`, `trainersNeeded`): HRDC deals (incl. HRDC + top-up) with 51+ participants need `ceil(pax / 50)` trainers (51–100: 2; 101–150: 3). Until enough co-trainers are chosen: amber box on the deal panel (sales and everyone, any stage but lost), on the checklist, and an amber flag in Admin work until the training ends. Answering No on a co-trainer step stops it (e.g. counting 100 pax to save the client money).
 - **Facilitator:** "How many facilitators (pax)", vendor and price via Add a cost (as before), and new **Which days?** for trainings of 2+ days (`facilitatorDays`; none ticked = every day; days no longer in the training after a date change are ignored).
 - No rule change. Tested with a script (pax thresholds, reminder on/off, flags, optional counting, bookings, to-dos, day list).
+
+## Trainer mileage claim (2026-10-31)
+
+Joel: "in admin work, trainer cost: add a mileage claim, 2 options (km × RM, fixed amount); optional; can be optional in the PO; reflect in the P&L."
+
+- **Mileage claim** button beside Add a cost on every Trainer step (lead and co-trainers), `MileageForm` in `StepCosts.tsx`. Optional: nothing asks for it.
+- Two ways: **By km × RM per km** (rate starts from Money settings → "Trainer mileage claim (RM per km)", default RM 0.60, `mileageRate`; changeable on each claim) or **Fixed amount**. Saved as a normal cost line (`money_out`, category Trainer, paid after the training, `mileage: 'km' | 'fixed'`); the km and rate are in the description ("Mileage claim: 240 km × RM 0.60", `mileageText` / `mileageFrom` in `lib/trainerPortal.ts`). A rejected km claim is fixed by its km and rate.
+- **Show on the PO** (ticked to start): ticked, it is a PO line and a manager agrees it before the PO goes out, like the fee (`feeAgreeNeeded`). Unticked (`onPo: false`): still approved, paid and in the P&L, never on the PO (`onPo` filter in `poLines` and in `serverTrainerPortal.ts`); the cost shows "Not on the PO".
+- **P&L:** Include in P&L starts ticked like every cost, so it counts in the deal's P&L and Project P&L as a Trainer cost.
+- No rule change. Tested with a script (km × rate, reading km and rate back, PO lines with and without the claim).

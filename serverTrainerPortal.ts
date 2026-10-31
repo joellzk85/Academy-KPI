@@ -21,7 +21,7 @@ import { cancelledTraining, lastMove } from './src/lib/trainingChange';
 import { isDeletedRecord, ownedByTeam } from './src/lib/linked';
 import {
   bankProblem, buildPo, calendarPath, claimFilesText, claimFolder, claimProblem, cleanBank, cleanEmail, cleanFiles, cleanTin, emailProblem, feeIsAgreed, feeStatusText,
-  icsCalendar, inviteLive, jobId, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
+  icsCalendar, inviteLive, jobId, onPo, passwordProblem, portalFolder, portalUid, sameBank, trainerIdFromUid,
 } from './src/lib/trainerPortal';
 import { FieldValue } from 'firebase-admin/firestore';
 import { cleanTrainerPart, dealPax, newReport, outlineTopics, reportChanges, reportDates, reportGaps, withDates, withPax } from './src/lib/trainingReport';
@@ -188,7 +188,7 @@ export async function autoPoFor(db: Firestore, dealId: string, taskId: string): 
   const job: any = jobSnap.data() || {};
   const moved = lastMove(deal);
   if (job.po && job.poAcceptedAt && !(moved && moved.at > job.poAcceptedAt)) return job.po;
-  const lines = (await feeLines(db, dealId, taskId, trainerId)).filter(o => o.status !== 'rejected' && feeIsAgreed(o));
+  const lines = (await feeLines(db, dealId, taskId, trainerId)).filter(o => o.status !== 'rejected' && feeIsAgreed(o) && onPo(o));
   if (!lines.length) return null;
   const [progs, venues, quotes, client, vendor] = await Promise.all([
     deal.programmeId ? db.collection('programmes').doc(deal.programmeId).get() : null,
@@ -246,9 +246,9 @@ async function trainingDetails(db: Firestore, trainerId: string, trainer: any, p
       coTrainer: isCoTrainer(task),
       po: files.map(f => ({ id: f.id, name: f.name, at: f.at })),
       qr: cancelled ? [] : qr.map(f => ({ id: f.id, name: f.name, type: f.type || '' })),
-      poAuto: !files.length && lines.length && !cancelled
+      poAuto: !files.length && lines.some(onPo) && !cancelled
         ? buildPo({ deal: { ...deal, courseName: deal.courseName || programme }, dates: trainingDateText(deal, true), date: today, trainer, client, venue: venueOn ? venue.name : '',
-            lines: lines.map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 })), vendor })
+            lines: lines.filter(onPo).map(o => ({ description: String(o.description || '').trim() || 'Trainer fee', amount: Number(o.amount) || 0 })), vendor })
         : null,
       poAccepted: stillAccepted ? job.po || null : null,
       poAcceptedAt: stillAccepted ? job.poAcceptedAt : '',

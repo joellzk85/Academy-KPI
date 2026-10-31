@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { doc, onSnapshot, setDoc, writeBatch, getDoc } from 'firebase/firestore';
-import { AlertTriangle, Check, FileText, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { AlertTriangle, Car, Check, FileText, Loader2, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import { db, friendlyError } from '../lib/firebase';
 import { addDays, formatDate, todayIso, trainingEndDate } from '../lib/deals';
 import {
@@ -18,7 +18,7 @@ import { ReceiptDrop, ReceiptList, ReceiptPick, receiptError, removeReceipt, upl
 import { isTrainerFee } from '../lib/feeChecks';
 import { ApproveFeeDialog } from './FeeChecks';
 import { askReason, decideCost, deleteMoney, undoPayment, withDealHistory } from '../lib/moneyActions';
-import { feeIsAgreed } from '../lib/trainerPortal';
+import { feeIsAgreed, mileageAmount, mileageFrom, mileageText, onPo } from '../lib/trainerPortal';
 import { isSuperManager, superConfirm } from '../lib/superManager';
 
 // Costs on a before-training checklist step (Joel, 2026-10-20: "able to key in amount, e.g. bus RM 5,000 + upload
@@ -73,7 +73,8 @@ export default function StepCosts({ deal, task, viewer, outs, receipts, vendors,
 }) {
   const lines = outs.filter(o => o.checklistTaskId === task.id).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
   const [adding, setAdding] = useState(false);
-  useEffect(() => { if (prefill) setAdding(true); }, [prefill?.key]);
+  const [mileage, setMileage] = useState(false);
+  useEffect(() => { if (prefill) { setAdding(true); setMileage(false); } }, [prefill?.key]);
   const counted = lines.filter(o => (o.status === 'approved' || o.status === 'paid') && inPL(o)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const waiting = lines.filter(o => o.status === 'pending' && inPL(o)).reduce((t, o) => t + (Number(o.amount) || 0), 0);
   const leftOut = lines.filter(o => !inPL(o) && !o.onBehalf && o.status !== 'rejected').reduce((t, o) => t + (Number(o.amount) || 0), 0);
@@ -98,8 +99,13 @@ export default function StepCosts({ deal, task, viewer, outs, receipts, vendors,
       )}
       {adding ? (
         <CostForm key={prefill?.key || 0} deal={deal} task={task} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} hint={hint} lines={lines} prefill={prefill} onDone={() => setAdding(false)} />
+      ) : mileage ? (
+        <MileageForm deal={deal} task={task} viewer={viewer} vendors={vendors} trainers={trainers} venues={venues} hint={hint} onDone={() => setMileage(false)} />
       ) : (
-        <button type="button" className={btnSmall} onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> Add a cost</button>
+        <span className="flex flex-wrap gap-2">
+          <button type="button" className={btnSmall} onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> Add a cost</button>
+          {task.kind === 'trainer' && <button type="button" className={btnSmall} onClick={() => setMileage(true)}><Car className="h-3.5 w-3.5" /> Mileage claim</button>}
+        </span>
       )}
     </div>
   );
@@ -271,6 +277,7 @@ function CostLine({ o, group, viewer, vendors, trainers, venues, receipts }: {
             {o.decidedByName && <span className="text-ink-soft">{o.status === 'rejected' ? 'rejected' : 'approved'} by {o.decidedByName}{o.status === 'rejected' && o.rejectReason ? `: ${o.rejectReason}` : ''}</span>}
             {o.status === 'paid' && <span className="text-ink-soft">paid {formatDate(o.paidDate || '')}{o.paidRef ? `, ref ${o.paidRef}` : ''}</span>}
             {o.status === 'approved' && o.summaryToken && <span className="text-accent">on a payment summary sent to accounts</span>}
+            {!onPo(o) && o.status !== 'rejected' && <span className="rounded border border-line px-1.5 py-0.5 font-medium text-ink-soft">Not on the PO</span>}
             {o.onBehalf && o.status !== 'rejected' && <span className="rounded bg-attention-soft px-1.5 py-0.5 font-semibold text-attention">On behalf of client: claim back after training</span>}
             {o.status === 'pending' && <span className="text-attention">{raisedText(o)}</span>}
             {o.feeAgreeNeeded && o.status === 'pending' && (toAgree
@@ -511,6 +518,119 @@ function CostForm({ deal, task, viewer, vendors, trainers, venues, hint, lines =
   );
 }
 
+/** The trainer mileage rate from Money settings, live. */
+function useMileageRate(): number {
+  const [n, setN] = useState(DEFAULT_MONEY_SETTINGS.mileageRate);
+  useEffect(() => onSnapshot(doc(db, 'config', 'money_settings'), d => setN(readMoneySettings(d.data()).mileageRate), () => {}), []);
+  return n;
+}
+
+/** Mileage claim on the Trainer step (Joel, 2026-10-31): optional; km × RM per km (rate from Money settings, changeable
+ *  here) or a fixed amount; on the PO or not. A cost line like the fee: a manager approves it, paid after the training,
+ *  in the P&L (Include in P&L ticked). On the PO it is agreed by a manager first, like the fee; off the PO it isn't. */
+function MileageForm({ deal, task, viewer, vendors, trainers, venues, hint, onDone }: {
+  deal: any; task: ChecklistTask; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint; onDone: () => void;
+}) {
+  const rate0 = useMileageRate();
+  const hinted = hint && vendors.find(v => hint.trainerId && v.trainerId === hint.trainerId);
+  const [f, setF] = useState({ mode: 'km' as 'km' | 'fixed', km: '', rate: '', amount: '', vendorId: hinted?.id || '', onPo: true, inPL: true, notInPLReason: '' });
+  const draft = useFormDraft(viewer.id, `mileage:${deal.id}:${task.id}`, f, setF);
+  const [newVendor, setNewVendor] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const rate = f.rate === '' ? rate0 : num(f.rate);
+  const total = f.mode === 'km' ? mileageAmount(num(f.km) || 0, rate || 0) : num(f.amount) || 0;
+  const vendor = vendors.find(v => v.id === f.vendorId);
+  const trainerVendors = vendors.filter(v => v.type === 'trainer').map(v => ({ v, name: vendorName(v, trainers, venues) })).sort((a, b) => a.name.localeCompare(b.name));
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (f.mode === 'km' && !(num(f.km) > 0)) return setError('Enter the km, for example 240 (there and back).');
+    if (f.mode === 'km' && !(rate > 0)) return setError('Enter the rate per km, for example 0.60.');
+    if (!(total > 0)) return setError('Enter the amount, for example 150.');
+    if (!vendor) return setError('Pick the trainer who is paid, or add them as a vendor.');
+    if (!f.inPL && f.notInPLReason.trim().length < 3) return setError('Say briefly why this cost is not in the P&L.');
+    const id = `out_${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
+    setBusy(true); setError('');
+    try {
+      await setDoc(doc(db, 'money_out', id), {
+        id, dealId: deal.id, kind: 'deal', category: costCategory(task), payee: vendorName(vendor, trainers, venues), vendorId: vendor.id,
+        description: f.mode === 'km' ? mileageText(num(f.km), rate) : 'Mileage claim', amount: total, timing: 'after' as OutTiming,
+        mileage: f.mode, onPo: f.onPo, inPL: f.inPL, onBehalf: false, notInPLReason: f.inPL ? '' : f.notInPLReason.trim(),
+        checklistTaskId: task.id, requestDate: todayIso(),
+        status: 'pending', requestedById: viewer.id, requestedByName: viewer.name, requestedByRole: viewer.role, requestedAt: new Date().toISOString(),
+        decidedById: '', decidedByName: '', decidedAt: '', rejectReason: '', paidDate: '', paidRef: '', paidById: '', paidByName: '',
+        ...(f.onPo ? { feeAgreeNeeded: true } : {}),
+      });
+      draft.clear();
+      onDone();
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (newVendor) {
+    return (
+      <VendorForm vendors={vendors} trainers={trainers} venues={venues} viewer={viewer}
+        start={{ type: 'trainer', trainerId: hint?.trainerId, venueId: undefined, name: hint?.name || '' }}
+        onSaved={v => { setF(x => ({ ...x, vendorId: v.id })); setNewVendor(false); }} onCancel={() => setNewVendor(false)} />
+    );
+  }
+
+  const pick = (on: boolean) => `rounded-lg border px-3 py-1.5 text-sm font-semibold ${on ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-white text-ink-soft hover:bg-surface'}`;
+  return (
+    <form onSubmit={save} className="space-y-3 rounded-xl border border-line bg-surface p-3">
+      <DraftBar draft={draft} what="mileage claim" />
+      <p className="font-semibold">Mileage claim</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" aria-pressed={f.mode === 'km'} className={pick(f.mode === 'km')} onClick={() => setF(x => ({ ...x, mode: 'km' }))}>By km × RM per km</button>
+        <button type="button" aria-pressed={f.mode === 'fixed'} className={pick(f.mode === 'fixed')} onClick={() => setF(x => ({ ...x, mode: 'fixed' }))}>Fixed amount</button>
+      </div>
+      {f.mode === 'km' ? (
+        <div className="grid grid-cols-2 items-end gap-3 sm:grid-cols-[9rem_9rem_minmax(0,1fr)]">
+          <div><label className={small} htmlFor={`mk-${task.id}`}>Km</label>
+            <input id={`mk-${task.id}`} inputMode="decimal" value={f.km} onChange={e => setF(x => ({ ...x, km: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} placeholder="240" /></div>
+          <div><label className={small} htmlFor={`mr-${task.id}`}>RM per km</label>
+            <input id={`mr-${task.id}`} inputMode="decimal" value={f.rate} onChange={e => setF(x => ({ ...x, rate: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} placeholder={rate0.toFixed(2)} /></div>
+          <p className="col-span-2 pb-2 text-[15px] sm:col-span-1">= <span className="font-semibold tabular-nums">{sen(total)}</span></p>
+        </div>
+      ) : (
+        <div className="max-w-[9rem]"><label className={small} htmlFor={`ma-${task.id}`}>Amount (RM)</label>
+          <input id={`ma-${task.id}`} inputMode="decimal" value={f.amount} onChange={e => setF(x => ({ ...x, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} placeholder="150" /></div>
+      )}
+      <div className="max-w-md">
+        <label className={small} htmlFor={`mv-${task.id}`}>Pay to (trainer)</label>
+        <select id={`mv-${task.id}`} value={f.vendorId} onChange={e => e.target.value === '__new' ? setNewVendor(true) : setF(x => ({ ...x, vendorId: e.target.value }))} className={input}>
+          <option value="">Pick the trainer</option>
+          {trainerVendors.map(x => <option key={x.v.id} value={x.v.id}>{x.name}</option>)}
+          <option value="__new">+ New vendor{hint?.name && !hinted ? ` (${hint.name})` : ''}…</option>
+        </select>
+        {vendor && <span className={`mt-0.5 block text-xs ${hasBank(vendor) ? 'text-ink-soft' : 'font-semibold text-attention'}`}>{hasBank(vendor) ? bankText(vendor) : 'No bank details yet: add them in Admin work → Vendors.'}</span>}
+      </div>
+      <label className="flex items-center gap-2 text-[15px]">
+        <input type="checkbox" checked={f.onPo} onChange={e => setF(x => ({ ...x, onPo: e.target.checked }))} className="h-4 w-4 accent-[#0E6E62]" />
+        Show on the PO <span className="text-sm text-ink-soft">({f.onPo ? 'a manager agrees it with the fee before the PO goes out' : 'still paid to the trainer, just not printed on the PO'})</span>
+      </label>
+      <label className="flex items-center gap-2 text-[15px]">
+        <input type="checkbox" checked={f.inPL} onChange={e => setF(x => ({ ...x, inPL: e.target.checked }))} className="h-4 w-4 accent-[#0E6E62]" />
+        Include in P&L <span className="text-sm text-ink-soft">(count it as a cost of this training)</span>
+      </label>
+      {!f.inPL && (
+        <input value={f.notInPLReason} onChange={e => setF(x => ({ ...x, notInPLReason: e.target.value }))} className={input}
+          placeholder="Why is it not a cost of this training?" aria-label="Why it is not in the P&L" />
+      )}
+      <p className="text-sm text-ink-soft">Paid after the training, with the fee. It waits for {viewer.role === 'management' ? 'the other manager' : 'a manager'} to approve it.</p>
+      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      <div className="flex gap-2">
+        <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Add mileage claim</button>
+      </div>
+    </form>
+  );
+}
+
 /** A rejected request, fixed by the person who raised it and sent for approval again (Joel, 2026-10-21), instead of
  *  deleting it and starting over. The rejection is cleared; the deal's History keeps a line. */
 export async function resubmitRequest(o: MoneyOut, patch: Partial<MoneyOut>, viewer: Viewer) {
@@ -528,10 +648,19 @@ export async function resubmitRequest(o: MoneyOut, patch: Partial<MoneyOut>, vie
 
 /** Fix a rejected training cost: what it's for and the amount. (Company payments reopen their own form.) */
 export function FixRequest({ o, viewer, onDone }: { o: MoneyOut; viewer: Viewer; onDone: () => void }) {
-  const [f, setF] = useState({ description: o.description || '', amount: String(o.amount ?? '') });
+  // A mileage claim by km is fixed by its km and rate; the description and amount follow (2026-10-31).
+  const byKm = o.mileage === 'km';
+  const [f, setF] = useState({ description: o.description || '', amount: String(o.amount ?? ''), ...mileageFrom(o.description) });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const save = async () => {
+    if (byKm) {
+      if (!(num(f.km) > 0) || !(num(f.rate) > 0)) return setError('Enter the km and the rate per km.');
+      setBusy(true); setError('');
+      try { await resubmitRequest(o, { description: mileageText(num(f.km), num(f.rate)), amount: mileageAmount(num(f.km), num(f.rate)) }, viewer); onDone(); }
+      catch (e) { setError(friendlyError(e)); } finally { setBusy(false); }
+      return;
+    }
     const amount = num(f.amount);
     if (!f.description.trim()) return setError('Say what it is for.');
     if (!(amount > 0)) return setError('Enter the amount, for example 5000.');
@@ -542,10 +671,16 @@ export function FixRequest({ o, viewer, onDone }: { o: MoneyOut; viewer: Viewer;
   return (
     <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface p-3">
       {o.rejectReason && <p className="text-sm text-danger">Rejected: {o.rejectReason}</p>}
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem]">
+      {byKm ? (
+        <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[9rem_9rem_minmax(0,1fr)]">
+          <div><label className={small} htmlFor={`fx-k-${o.id}`}>Km</label><input id={`fx-k-${o.id}`} inputMode="decimal" value={f.km} onChange={e => setF(x => ({ ...x, km: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
+          <div><label className={small} htmlFor={`fx-r-${o.id}`}>RM per km</label><input id={`fx-r-${o.id}`} inputMode="decimal" value={f.rate} onChange={e => setF(x => ({ ...x, rate: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
+          <p className="col-span-2 pb-2 sm:col-span-1">= <span className="font-semibold tabular-nums">{sen(mileageAmount(num(f.km) || 0, num(f.rate) || 0))}</span></p>
+        </div>
+      ) : <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem]">
         <div><label className={small} htmlFor={`fx-d-${o.id}`}>What for</label><input id={`fx-d-${o.id}`} value={f.description} onChange={e => setF(x => ({ ...x, description: e.target.value }))} className={input} /></div>
         <div><label className={small} htmlFor={`fx-a-${o.id}`}>Amount (RM)</label><input id={`fx-a-${o.id}`} inputMode="decimal" value={f.amount} onChange={e => setF(x => ({ ...x, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} /></div>
-      </div>
+      </div>}
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       <div className="flex gap-2">
         <button type="button" className={btnSecondary} onClick={onDone}>Cancel</button>
