@@ -532,23 +532,23 @@ function MileageForm({ deal, task, viewer, vendors, trainers, venues, hint, onDo
   deal: any; task: ChecklistTask; viewer: Viewer; vendors: Vendor[]; trainers: any[]; venues: any[]; hint?: VendorHint; onDone: () => void;
 }) {
   const rate0 = useMileageRate();
-  const hinted = hint && vendors.find(v => hint.trainerId && v.trainerId === hint.trainerId);
-  const [f, setF] = useState({ mode: 'km' as 'km' | 'fixed', km: '', rate: '', amount: '', vendorId: hinted?.id || '', onPo: true, inPL: true, notInPLReason: '' });
+  // Always paid to the trainer picked on this step (Joel, 2026-10-31): no vendor to choose.
+  const trainerId = hint?.trainerId || '';
+  const vendor = trainerId ? vendors.find(v => v.trainerId === trainerId) : undefined;
+  const [f, setF] = useState({ mode: 'km' as 'km' | 'fixed', km: '', rate: '', amount: '', onPo: true, inPL: true, notInPLReason: '' });
   const draft = useFormDraft(viewer.id, `mileage:${deal.id}:${task.id}`, f, setF);
   const [newVendor, setNewVendor] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const rate = f.rate === '' ? rate0 : num(f.rate);
   const total = f.mode === 'km' ? mileageAmount(num(f.km) || 0, rate || 0) : num(f.amount) || 0;
-  const vendor = vendors.find(v => v.id === f.vendorId);
-  const trainerVendors = vendors.filter(v => v.type === 'trainer').map(v => ({ v, name: vendorName(v, trainers, venues) })).sort((a, b) => a.name.localeCompare(b.name));
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (f.mode === 'km' && !(num(f.km) > 0)) return setError('Enter the km, for example 240 (there and back).');
     if (f.mode === 'km' && !(rate > 0)) return setError('Enter the rate per km, for example 0.60.');
     if (!(total > 0)) return setError('Enter the amount, for example 150.');
-    if (!vendor) return setError('Pick the trainer who is paid, or add them as a vendor.');
+    if (!vendor) return setError(trainerId ? "Add the trainer's bank details first." : 'Pick the trainer from the Trainers list on this step first.');
     if (!f.inPL && f.notInPLReason.trim().length < 3) return setError('Say briefly why this cost is not in the P&L.');
     const id = `out_${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
     setBusy(true); setError('');
@@ -575,7 +575,7 @@ function MileageForm({ deal, task, viewer, vendors, trainers, venues, hint, onDo
     return (
       <VendorForm vendors={vendors} trainers={trainers} venues={venues} viewer={viewer}
         start={{ type: 'trainer', trainerId: hint?.trainerId, venueId: undefined, name: hint?.name || '' }}
-        onSaved={v => { setF(x => ({ ...x, vendorId: v.id })); setNewVendor(false); }} onCancel={() => setNewVendor(false)} />
+        onSaved={() => setNewVendor(false)} onCancel={() => setNewVendor(false)} />
     );
   }
 
@@ -600,14 +600,21 @@ function MileageForm({ deal, task, viewer, vendors, trainers, venues, hint, onDo
         <div className="max-w-[9rem]"><label className={small} htmlFor={`ma-${task.id}`}>Amount (RM)</label>
           <input id={`ma-${task.id}`} inputMode="decimal" value={f.amount} onChange={e => setF(x => ({ ...x, amount: e.target.value.replace(/[^0-9.]/g, '') }))} className={input} placeholder="150" /></div>
       )}
-      <div className="max-w-md">
-        <label className={small} htmlFor={`mv-${task.id}`}>Pay to (trainer)</label>
-        <select id={`mv-${task.id}`} value={f.vendorId} onChange={e => e.target.value === '__new' ? setNewVendor(true) : setF(x => ({ ...x, vendorId: e.target.value }))} className={input}>
-          <option value="">Pick the trainer</option>
-          {trainerVendors.map(x => <option key={x.v.id} value={x.v.id}>{x.name}</option>)}
-          <option value="__new">+ New vendor{hint?.name && !hinted ? ` (${hint.name})` : ''}…</option>
-        </select>
-        {vendor && <span className={`mt-0.5 block text-xs ${hasBank(vendor) ? 'text-ink-soft' : 'font-semibold text-attention'}`}>{hasBank(vendor) ? bankText(vendor) : 'No bank details yet: add them in Admin work → Vendors.'}</span>}
+      <div>
+        <span className={small}>Paid to (the trainer on this step)</span>
+        {vendor ? (
+          <>
+            <p className="text-[15px] font-semibold">{vendorName(vendor, trainers, venues)}</p>
+            <span className={`block text-xs ${hasBank(vendor) ? 'text-ink-soft' : 'font-semibold text-attention'}`}>{hasBank(vendor) ? bankText(vendor) : 'No bank details yet: add them in Admin work → Vendors.'}</span>
+          </>
+        ) : trainerId ? (
+          <p className="flex flex-wrap items-center gap-2 text-sm text-attention">
+            <span className="font-semibold">{hint?.name || 'This trainer'} has no bank details yet.</span>
+            <button type="button" className={btnSmall} onClick={() => setNewVendor(true)}><Plus className="h-3.5 w-3.5" /> Add their bank details</button>
+          </p>
+        ) : (
+          <p className="text-sm font-semibold text-attention">Pick the trainer from the Trainers list on this step first.</p>
+        )}
       </div>
       <label className="flex items-center gap-2 text-[15px]">
         <input type="checkbox" checked={f.onPo} onChange={e => setF(x => ({ ...x, onPo: e.target.checked }))} className="h-4 w-4 accent-[#0E6E62]" />

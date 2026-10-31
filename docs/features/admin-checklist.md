@@ -76,7 +76,7 @@ Not in 2B: training day (attendance, photos) and POs. Joel can add them as tasks
 
 Joel: "in admin work, trainer cost: add a mileage claim, 2 options (km × RM, fixed amount); optional; can be optional in the PO; reflect in the P&L."
 
-- **Mileage claim** button beside Add a cost on every Trainer step (lead and co-trainers), `MileageForm` in `StepCosts.tsx`. Optional: nothing asks for it.
+- **Mileage claim** button beside Add a cost on every Trainer step (lead and co-trainers), `MileageForm` in `StepCosts.tsx`. Optional: nothing asks for it. Always paid to the trainer picked on that step (no vendor to choose; "Add their bank details" if they have no vendor yet; a trainer typed rather than picked from the list must be picked first). Not on Facilitator steps (Joel: facilitators include travel in their fee and get no PO).
 - Two ways: **By km × RM per km** (rate starts from Money settings → "Trainer mileage claim (RM per km)", default RM 0.60, `mileageRate`; changeable on each claim) or **Fixed amount**. Saved as a normal cost line (`money_out`, category Trainer, paid after the training, `mileage: 'km' | 'fixed'`); the km and rate are in the description ("Mileage claim: 240 km × RM 0.60", `mileageText` / `mileageFrom` in `lib/trainerPortal.ts`). A rejected km claim is fixed by its km and rate.
 - **Show on the PO** (ticked to start): ticked, it is a PO line and a manager agrees it before the PO goes out, like the fee (`feeAgreeNeeded`). Unticked (`onPo: false`): still approved, paid and in the P&L, never on the PO (`onPo` filter in `poLines` and in `serverTrainerPortal.ts`); the cost shows "Not on the PO".
 - **P&L:** Include in P&L starts ticked like every cost, so it counts in the deal's P&L and Project P&L as a Trainer cost.
